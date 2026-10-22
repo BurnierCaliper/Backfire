@@ -283,6 +283,9 @@ const ENEMY_INFO = {
   // —— 下水道维护（下水道；清洁和保护，和安保、警卫队、镇压队是一伙，和其他所有阵营敌对，docs/sewer-maintenance.md）——
   // 清扫机是机械，没有种族；一枚代币 3 只（照空投蜂群的 group: 3）
   sewer_sweeper: { faction: "下水道维护", regions: ["下水道"], tokens: 1, group: 3 },
+  // 两个精英固定「触灵」种族（和机甲触灵、飞碟触灵同类；触灵没有六维修正、暂时没有种族被动），阵营照旧是下水道维护
+  sewer_keeper:  { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
+  sewer_cleaner: { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
   // —— 盗匪 ——
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
@@ -300,9 +303,10 @@ const ENEMY_INFO = {
   dustbody:   { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
   sand_aggregate: { faction: "沙灵", regions: ["沙漠"], tokens: 4, boss: true },
   // —— 触灵（天网造物）——
-  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true },
+  // 种族也是「触灵」（docs/sewer-maintenance.md 第 1 节：下水道维护的触灵精英和它们分在一类；没有六维修正、暂时没有种族被动）
+  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true, race: "触灵" },
   // —— 巨人 ——
   giant: { faction: "巨人", regions: ["巨人城"], tokens: 2 },
   // —— 野生动物：只在外城区与沙漠 ——
@@ -356,7 +360,7 @@ function enemyTokens(preset) {
 }
 /** 专门区域（作者 10/22，docs/ratfolk.md 第 1 节）：隶属某个大区（parent）、有自己的敌人池的区域。
  *  只出没在专门区域里的敌人不进「敌人不分地区」的遭遇（单局休息时被偷袭的遭遇战，anyRegion），不和别的区域的敌人混用；
- *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。地图上怎么进专门区域另做 */
+ *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。单局怎么进下水道：带着下水道地图，幕间改走（rogue.js · interludeOptions） */
 const SUB_REGIONS = { "下水道": { parent: "巨人城" } };
 function regionPool(region, opt) {
   opt = opt || {};
@@ -400,7 +404,9 @@ const THREE_WAY = {
   chance: 0.15,   // 作者 10/22 定 15%（原来 50%）
   regions: {
     "第三采矿场": { name: "三方混战", sides: [["安保"], ["异星生物"]] },
-    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] }
+    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] },
+    // 下水道：狂鼠 ↔ 下水道维护（docs/sewer-maintenance.md 第 4 节）；两边照代币正常抽，清扫机、维护员、清扫员可能混着出
+    "下水道": { name: "三方混战", sides: [["狂鼠"], ["下水道维护"]] }
   }
 };
 function rollThreeWay(region, opt) {
@@ -429,7 +435,7 @@ function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
 
-  // 第三采矿场 / 外城区：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
+  // 第三采矿场 / 外城区 / 下水道：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
   // 先定下区制（和平常一样两区 / 三区各一半），三区才掷三方混战
   if (THREE_WAY.regions[region] && !opt.anyRegion && !opt.faction && opt.mixed == null) {
     const zm = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);

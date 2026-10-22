@@ -446,22 +446,10 @@ function fxAdapter() {
 /* 演出速度：HD2DFx.FX.speeds 里轮流切（1×、2×），倍率 = 1 / 速度，交给 AttackFx.setClock（HD2DPlay.setClock 一起设）；跳过 = 正在播的立刻结束 */
 let speed = HD2DFx.FX.speeds[0];
 HD2DPlay.setClock(() => 1 / speed);
-/** 出手时镜头稍微推一下（hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
- *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推 */
+/** 出手时镜头稍微推一下（hd2d-play.js · HD2DPlay.camera → hd2d-fx.js · pushPose：远景 / 中景，攻击者和目标的铭牌推过去也在画面里），播完拉回原来的镜头。
+ *  页面上的「推镜头」关了、系统开了「减少动态效果」（sc.motion 为 false）时不推；正式画面的新画面用同一份（#283） */
 let pushOn = true;
-function fxCamera() {
-  return {
-    push(actorId, targetId, secs) {
-      const v = sc.view(), a = sc.plateOf(actorId), b = sc.plateOf(targetId);
-      const plates = [a, b].filter(Boolean).map(q => Object.assign({ size: L.plateSize(v, !!q.big) }, q));
-      const p = HD2DFx.pushPose(sc.poseNow(), a, b, { enabled: pushOn, reduced: !sc.motion, view: v, plates });
-      if (!p) return false;
-      sc.posePush(p, secs);
-      return true;
-    },
-    release(secs) { sc.poseRelease(secs); }
-  };
-}
+function fxCamera() { return HD2DPlay.camera(sc, { enabled: () => pushOn }); }
 function syncFxControls() {
   $("fx-speed").textContent = "演出 " + speed + "×";
   $("push-toggle").textContent = "推镜头 " + (pushOn ? "开" : "关");

@@ -77,6 +77,7 @@ const HANDBOOK_SHOP = [
   { group: "地图与票券", key: "map_sewage",     price: 10000, give: { item: "map_sewage" } },
   { group: "地图与票券", key: "map_giant",      price: 5000,  give: { item: "map_giant" } },
   { group: "地图与票券", key: "map_giant_full", price: 15000, give: { item: "map_giant_full" } },
+  { group: "地图与票券", key: "map_sewer",      price: 3000,  give: { item: "map_sewer" } },   // 下水道地图（docs/ratfolk.md 第 6 节）：和污水处理厂地图不是同一个
   { group: "地图与票券", key: "ticket_dome",    price: 5000,  give: { item: "ticket_dome" } },
 ].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
   .map(it => ({ group: "效果道具", key: it.id, price: it.price, give: { item: it.id } })), [
@@ -115,6 +116,7 @@ const HANDBOOK_GOODS = {
   map_sewage:     { name: "污水处理厂地图", hint: "" },
   map_giant:      { name: "巨人城市地图", hint: "" },
   map_giant_full: { name: "巨人城市详尽地图", hint: "" },
+  map_sewer:      { name: "下水道地图", hint: "巨人城地底的下水道。单局：带着它，幕间可以改走下水道（进去时用掉，一局只能进一次）" },
   ticket_dome:    { name: "沙穹入场券", hint: "" },
   mat_metal:      { name: "金属",     hint: "武器升级材料", material: "metal" },
   mat_alloy:      { name: "精炼合金", hint: "武器升级材料", material: "alloy" },
