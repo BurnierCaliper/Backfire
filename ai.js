@@ -92,6 +92,7 @@ const EnemyAI = (function () {
    *   aim   打谁：
    *         local   同区优先（同区有人就打同区，手册没写明追谁的都用这个）
    *         lowest  血量最低者（手册写明的）
+   *         most    血量最多者（不分远近；暴虐猎手）
    *         nearest 最近的
    *         topAtk  ATK 最高者
    *   near / far  同区、隔区分别用哪个技能。
@@ -136,6 +137,11 @@ const EnemyAI = (function () {
     riot_molotov:   { dist: 1,    aim: "local",   special: "riot_bottle" },
     riot_flamer:    { dist: 0,    aim: "local",   near: "en_riot_spray" },
     riot_captain:   { dist: null, aim: "local",   near: "en_riot_pistol",    far: "en_riot_pistol" },
+    // 下水道狂鼠（docs/ratfolk.md）：潜藏者、撕咬者近战主动接近；疫病暴徒接近血量最低的人，场上有腐蚀的敌人就去喷（special）；暴虐猎手接近血量最多的人
+    rat_lurker:     { dist: 0,    aim: "local",   near: "en_rat_lurker_bite" },
+    rat_biter:      { dist: 0,    aim: "local",   near: "en_rat_biter_bite" },
+    rat_plague:     { dist: 0,    aim: "lowest",  near: "en_rat_plague_claw", far: "en_rat_plague_spray", special: "rat_plague" },
+    rat_tyrant:     { dist: 0,    aim: "most",    near: "en_rat_tyrant_bite" },
     ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
@@ -246,6 +252,21 @@ const EnemyAI = (function () {
   /** 已经有灼烧（免疫灼烧的自焚者也当作有，免得永远优先挑它） */
   function alreadyBurning(p) { return (Number(p.statuses && p.statuses.burn) || 0) > 0 || p.self === "burn"; }
 
+  /* ---- 下水道狂鼠（docs/ratfolk.md 第 3 节）---- */
+  const corroded = (p) => !!(p && p.statuses && p.statuses.corr);
+  /** 疫病暴徒活着、在战场上（失衡的也算在场）：潜藏者优先打还没腐蚀的敌人，尽量把所有人都打进腐蚀 */
+  function ratPlagueOnField() { return state.units.some(x => x.kit === "rat_plague" && unitAlive(x)); }
+  /** 疫病暴徒：场上有已经腐蚀的敌人时，用感染喷洒打其中一个，把腐蚀扩散到那一区——挑同区还没腐蚀的敌人最多的；
+   *  一样多的先挑现在就喷得到的（距离 1、不隔墙），再挑血少的。没有腐蚀的敌人返回 null（照常接近血量最低的人） */
+  function plagueSprayPick(u, prey) {
+    const sick = prey.filter(corroded);
+    if (!sick.length) return null;
+    const foes = typeof ratFoesOf === "function" ? ratFoesOf(u) : prey;
+    const fresh = (p) => foes.filter(x => x !== p && Number(x.zone) === Number(p.zone) && !corroded(x)).length;
+    const now = (p) => zdist(u.zone, p.zone) === 1 && !(typeof lineBlocked === "function" && lineBlocked(u.zone, p.zone)) ? 1 : 0;
+    return sick.slice().sort((a, b) => (fresh(b) - fresh(a)) || (now(b) - now(a)) || (hpOf(a) - hpOf(b)))[0];
+  }
+
   /** 选目标。强制目标（决一死战 / 嘲讽）优先，其次手册写明的追击规则，最后才是同区优先。 */
   function aiTarget(u, spec, prey) {
     const pick = aiTargetBase(u, spec, prey);
@@ -274,6 +295,16 @@ const EnemyAI = (function () {
       const fresh = prey.filter(p => !alreadyBurning(p));
       if (fresh.length) prey = fresh;
     }
+    // 下水道狂鼠：疫病暴徒在场时，潜藏者优先打还没腐蚀的敌人（配合暴徒的扩散和「所有敌人都腐蚀时狂暴」）
+    if (u.kit === "rat_lurker" && ratPlagueOnField()) {
+      const fresh = prey.filter(p => !corroded(p));
+      if (fresh.length) prey = fresh;
+    }
+    // 疫病暴徒：场上有已经腐蚀的敌人时，主动去喷有腐蚀的那个（站位交给 aiDistOverride：保持距离 1）
+    if (u.kit === "rat_plague") {
+      const sp = plagueSprayPick(u, prey);
+      if (sp) return { unit: sp };
+    }
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
@@ -286,6 +317,7 @@ const EnemyAI = (function () {
       return { unit: lowest(prey) };
     }
     if (aim === "nearest") return { unit: nearestFirst(u, prey)[0] };
+    if (aim === "most") return { unit: highest(prey) };
     if (aim === "topAtk") {
       const s = prey.slice().sort((a, b) =>
         (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0));
@@ -338,6 +370,12 @@ const EnemyAI = (function () {
     if (spec.special === "gl") {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
+    }
+    if (spec.special === "rat_plague") {
+      // 有腐蚀的敌人：目标就是要喷的那个（aiTargetBase），距离 1 就喷；够不着交给移动（aiDistOverride 把距离改成 1）。
+      // 没有腐蚀的敌人：照常接近血量最低的人，同区撕扯、隔区喷洒（near / far）
+      if (target && corroded(target) && zdist(u.zone, target.zone) === 1 && has("en_rat_plague_spray")) return "en_rat_plague_spray";
+      return null;
     }
     if (spec.special === "riot_bottle") {
       // 和榴弹一样：标定过、轮到落地就落地，否则标定一个区
@@ -431,8 +469,9 @@ const EnemyAI = (function () {
     return null;
   }
 
-  /** 三阶段的聚合体主动逃离，二阶段主动接近：覆盖表里的 dist */
-  function aiDistOverride(u, spec) {
+  /** 三阶段的聚合体主动逃离，二阶段主动接近；疫病暴徒有腐蚀的敌人可喷时保持距离 1（感染喷洒是远距离）：覆盖表里的 dist */
+  function aiDistOverride(u, spec, prey) {
+    if (u.kit === "rat_plague") return prey && plagueSprayPick(u, prey) ? Object.assign({}, spec, { dist: 1 }) : spec;
     if (u.kit !== "sand_aggregate") return spec;
     const ph = (u.resources && u.resources.phase) || 1;
     if (ph === 2) return Object.assign({}, spec, { dist: 0 });
@@ -513,7 +552,7 @@ const EnemyAI = (function () {
       }
     }
 
-    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" });
+    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" }, prey);
     const pick = aiTarget(u, spec, prey);
     let target = pick.unit;
     if (!target) return null;
@@ -730,7 +769,9 @@ const EnemyAI = (function () {
     const t = target || (state.assistQueue && state.assistQueue[0] ? unitById(state.assistQueue[0].targetId) : null);
     const ok = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
     if (!ok.length) return null;
-    return ok.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
+    // 暴虐猎手的协助优先权（下水道狂鼠，enemies.js · ratTyrantHasPriority）：其他狂鼠都没狂暴、它又打得到时，一定由它来协助
+    const first = typeof ratTyrantHasPriority === "function" ? ok.filter(u => ratTyrantHasPriority(u)) : [];
+    return (first.length ? first : ok).slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
   }
 
   /** 敌人回合的出手顺序：杂兵 → 精英 → BOSS */

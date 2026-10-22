@@ -237,7 +237,8 @@ const ENEMY_RACE_TABLES = {
  *  种族（有机体的敌人才写，没写 = 无种族；规则见 docs/enemy-race.md，换算在 enemies.js · applyEnemyRace）：
  *    race: "兽人·牛"                      固定种族（大支·小分支），不受个体值开关影响，不套六维
  *    races: ENEMY_RACE_TABLES.bandit      随机种族：[{ race: "人类", w: 60 }, …] 权重表，生成时抽
- *    raceAttrs: true                      随机种族的敌人再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值
+ *    raceAttrs: true                      再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值。
+ *                                         随机种族的写这个；固定种族一般不写（数值设计时已经算进去了），下水道的狂鼠是特意套六维的固定种族（docs/ratfolk.md）
  *  新增兵种照这个格式加。 */
 const ENEMY_INFO = {
   // —— 天网安保（机械）——
@@ -274,6 +275,11 @@ const ENEMY_INFO = {
   riot_molotov:  { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·蜥蜴" },
   riot_flamer:   { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·熊" },
   riot_captain:  { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·狼" },
+  // —— 狂鼠（下水道；鼠类人接触实验废料变异而成，和所有阵营敌对，不和任何阵营混编；固定「鼠类人·鼠」并且套六维，docs/ratfolk.md）——
+  rat_lurker: { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_biter:  { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_plague: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  rat_tyrant: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
   // —— 盗匪 ——
   thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
@@ -343,13 +349,18 @@ function enemyTokens(preset) {
   const i = enemyInfo(preset);
   return i ? (i.tokens || 1) : 1;
 }
+/** 专门区域（作者 10/22，docs/ratfolk.md 第 1 节）：隶属某个大区（parent）、有自己的敌人池的区域。
+ *  只出没在专门区域里的敌人不进「敌人不分地区」的遭遇（单局休息时被偷袭的遭遇战，anyRegion），不和别的区域的敌人混用；
+ *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。地图上怎么进专门区域另做 */
+const SUB_REGIONS = { "下水道": { parent: "巨人城" } };
 function regionPool(region, opt) {
   opt = opt || {};
   return Object.keys(ENEMY_INFO).filter(k => {
     const i = ENEMY_INFO[k];
     if (i.boss && !opt.boss) return false;
     if (i.neutral) return false;   // 中立生物不当敌人抽
-    return !region || i.regions.indexOf(region) >= 0;
+    if (!region) return !i.regions.every(r => SUB_REGIONS[r]);   // 不分地区：只出没在专门区域里的不算
+    return i.regions.indexOf(region) >= 0;
   });
 }
 function regionFactions(region) {
