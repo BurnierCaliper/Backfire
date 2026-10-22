@@ -7891,7 +7891,24 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
   return extra;
 }
 
+/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush） */
 function dealTo(attacker, target, opt) {
+  if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
+  RAGE_HOLD.depth++;
+  let out;
+  try { out = dealToInner(attacker, target, opt); }
+  finally { RAGE_HOLD.depth--; }
+  if (RAGE_HOLD.depth === 0) {
+    const notes = raceRageFlush();
+    if (notes.length) {
+      if (out && Array.isArray(out.extra)) out.extra.push(...notes);
+      else appendLog(notes.join("\n"));
+    }
+  }
+  return out;
+}
+
+function dealToInner(attacker, target, opt) {
   if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算

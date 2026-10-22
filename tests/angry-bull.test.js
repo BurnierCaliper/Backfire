@@ -7,7 +7,7 @@ const H = require("./headless");
 function setup(opt) {
   opt = opt || {};
   const c = H.load();
-  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "captain_ox", lv: 10, zone: 1, race: "兽人·牛" }], seed: opt.seed || "BULL" });
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "captain_ox", lv: opt.lv || 10, zone: 1, race: "兽人·牛" }], seed: opt.seed || "BULL" });
   c.startCombat();
   const S = c.S.state;
   S.zoneMode = 2;
@@ -53,21 +53,71 @@ test("晕眩时不冲撞；不占用这回合的次数", () => {
   assert.ok(!foe.raceNoBonus);
 });
 
-test("失衡（架势 0）时不冲撞", () => {
+test("失衡（架势 0）时不冲撞（只测 def <= 0 这条分支：游戏里除了千钧，失衡一般同时是晕眩）", () => {
   const { c, foe, kolt } = setup();
   foe.def = 0;
   const r = hit(c, kolt, foe);
   assert.equal(rages(r), 0);
   assert.equal(charges(r), 0);
+  assert.ok(!foe.raceRageUsed);
 });
 
-test("这一击本身把它打进失衡 / 晕眩：按结算后的状态判，不冲撞", () => {
-  const { c, foe, kolt } = setup();
+test("这一击本身把普通规则的牛（lv 5）打进晕眩：结算后晕眩，不冲撞、不占次数", () => {
+  const { c, foe, kolt } = setup({ lv: 5 });
   const z = foe.zone;
-  const r = hit(c, kolt, foe, { flat: 5, baseBreak: 99 });
-  assert.ok(r.res.broke || foe.stunned || foe.def <= 0, "这一击打出了失衡");
+  const r = hit(c, kolt, foe, { baseBreak: 99 });
+  assert.equal(foe.stunned, true, "这一击后晕眩");
   assert.equal(rages(r), 0);
   assert.equal(foe.zone, z);
+  assert.ok(!foe.raceRageUsed);
+});
+
+test("这一击把首领规则的精英牛（lv 10）打进失衡、立刻恢复架势：靠 result.broke 判，不冲撞、不占次数", () => {
+  const { c, foe, kolt } = setup({ lv: 10 });
+  const z = foe.zone;
+  const r = hit(c, kolt, foe, { baseBreak: 99 });
+  assert.equal(r.res.broke, true);
+  assert.equal(foe.stunned, false, "首领规则：失衡立刻结束");
+  assert.equal(foe.def, foe.defMax, "架势回满");
+  assert.equal(rages(r), 0);
+  assert.equal(foe.zone, z);
+  assert.ok(!foe.raceRageUsed);
+});
+
+for (const lv of [10, 5]) {
+  test(`高压场地 + 本击打出失衡（lv ${lv}）：同一击的场地连带伤害也不触发，整击不发作、不占次数`, () => {
+    const { c, S, foe, kolt } = setup({ lv });
+    S.fields[1] = Object.assign(S.fields[1] || {}, { electric: true });
+    S.fields[2] = Object.assign(S.fields[2] || {}, { electric: true });
+    const z = foe.zone;
+    const r = hit(c, kolt, foe, { baseBreak: 99 });
+    assert.equal(r.res.broke, true);
+    assert.match(r.extra.join("\n"), /高压场地/, "场地连带伤害确实结算了");
+    assert.equal(rages(r), 0);
+    assert.equal(foe.zone, z);
+    assert.ok(!foe.raceRageUsed);
+    assert.ok(!foe.raceNoBonus);
+  });
+}
+
+test("一击结算完才冲：只有原区是高压场地时，连带伤害按原区照吃，之后再冲走", () => {
+  const { c, S, foe, kolt } = setup();
+  S.fields[1] = Object.assign(S.fields[1] || {}, { electric: true });
+  S.fields[2] = Object.assign(S.fields[2] || {}, { electric: false });
+  const r = hit(c, kolt, foe);
+  const txt = r.extra.join("\n");
+  assert.match(txt, /高压场地/, "原区的场地伤害吃到了");
+  assert.equal(rages(r), 1);
+  assert.ok(txt.indexOf("高压场地") < txt.indexOf("受伤后失控"), "日志里先写触发的伤害，再写发作");
+  assert.equal(foe.zone, 2);
+});
+
+test("dealTo 外的伤害（状态 / 场地单独结算）照旧立刻判", () => {
+  const { c, foe } = setup();
+  const notes = [];
+  c.applyTypedDot(foe, 3, "fire", notes, "测试灼烧");
+  assert.match(notes.join("\n"), /受伤后失控/);
+  assert.equal(foe.raceRageUsed, true);
 });
 
 test("高压场地：主伤害 + 场地连带伤害只发作一次，只移动一次、只撞一个人（以前 1 区 → 2 区 → 1 区来回冲）", () => {

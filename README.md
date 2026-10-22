@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **易怒蛮牛：每回合最多一次、晕眩 / 失衡不发作、一击结算完再冲（不再来回冲）**（enemies.js · `raceAfterHurt` / `raceRageFlush` / `raceRageGo` / `RAGE_HOLD`、`RACE_PERKS["兽人·牛"]` 说明文字；app.js · `beginRound`（重置 `raceRageUsed`）、`dealTo`（包一层，原来的主体改名 `dealToInner`）；docs/enemy-race.md；新测试 tests/angry-bull.test.js；改了 tests/enemy-race-perks.test.js、tests/growth-mode.test.js）
+  - **以前**：没有次数限制，主伤害的 `applyCombat` 末尾就立刻发作。一次攻击的主伤害触发一次，同一个 `dealTo` 接着结算的高压场地连带伤害又触发一次，于是日志里一次发作「冲撞 A、冲撞 B」、「1 区 → 2 区 → 1 区」来回冲；牛先冲走，原区的高压连带伤害反而按新区算（新区没场地就没吃到）。晕眩、失衡的牛照样冲撞；10 级起用首领架势规则的精英牛，被主伤害打进失衡、立刻恢复架势后，同一击的场地连带伤害还会让它发作。
+  - **现在**：一次 `dealTo`（主伤害 + 它自己结算的高压场地、共振、反弹等连带伤害）算「一击」，这期间受伤只记下来，整击结算完再判：这一击里任何一段把它打进失衡 / 晕眩（`stunned`、架势 0、`result.broke`，含首领立刻恢复架势），整击不发作，也不占这回合的次数；否则发作一次。每回合（一整轮，`beginRound` 时重置 `raceRageUsed`，单局 / 跑团 / 联机共用这个回合入口）最多发作一次，所以一次发作只移动一次、只撞一人（移动规则本身不变：随机冲到相邻一区、撞那个区里随机一人）。连带伤害按原区结算，日志里也先写触发它的伤害、再写发作。`dealTo` 之外的伤害（状态、场地单独结算）照旧立刻判。
+  - **测试**：tests/angry-bull.test.js（每回合一次与回合重置、晕眩、架势 0、lv 5 本击打进晕眩、lv 10 本击打进失衡后立刻恢复、高压场地 + 本击打出失衡（lv 10 / lv 5）整击不发作不占次数、高压场地不再二次触发 / 只移动一次、只有原区高压时先吃连带伤害再冲、dealTo 外的伤害立刻判），在没改的代码上失败；tests/enemy-race-perks.test.js 原用例同一回合连打多次，每段之间清标记当作新回合；tests/growth-mode.test.js 自动跑 40 步的种子 G7b 因战况变化恰好全灭，换成 G7d。
 - **新画面直接双击 game.html 就能开**（主人要的「简单的点击就可以进入」；只是画面，规则一条没变。新文件 tools/build-hd2d.js、tools/hd2d-fingerprint.js、hd2d/hd2d-scene.bundle.js；改了 hd2d/hd2d-field.js（`FIELD.scene` / `sceneGlobal`、loadModules、fail、onFieldWheel）、game.html、package.json；测试 tests/hd2d-bundle.test.js，改了 tests/hd2d-field.test.js、tests/hd2d-mist.test.js）
   - **以前**：新画面的场景（hd2d/hd2d-scene.js）是 ES 模块，靠 game.html 的 importmap 找 three.js。浏览器不让直接双击打开的页面（`file://`）加载 ES 模块，所以新画面要先在仓库目录起本地服务（`python3 -m http.server 8000`）再打开；双击打开时点开关会退回旧画面、提示「要用本地服务打开」，旧战场上的滚轮也不去开新画面。
   - **现在**：`npm run build:hd2d`（tools/build-hd2d.js，用 package.json 里写死版本的 esbuild）把场景和用到的 three.js 打成一个普通脚本 `hd2d/hd2d-scene.bundle.js`，加载后挂出 `window.HD2DSceneBundle.createHd2dScene`。hd2d-field.js 开新画面时用 `<script>` 加载它（不再 `import()`），game.html 去掉了 importmap，`file://` 不再特殊对待：双击打开照样能点开关、用滚轮转到新画面。打不开只剩没有 WebGL 一种，提示改成「这个浏览器用不了 WebGL」。原型页（prototypes/hd2d/index.html）照旧直接用 ES 模块。
@@ -660,10 +664,6 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **牛类人·马·千里马**：敌人回合开始时第一次（`startEnemyPhase`）+1 附赠；不稳照样把它清掉。
   - **兽人·狼·追猎本能**：附赠技能 `race_hunt`，对一个敌人施加紧追（和柯尔特共用 `chase` / `chasers` / `chaseFollow`）。
   - **兽人·牛·易怒蛮牛**：血量低于 50% 时受到任何伤害（攻击、状态、场地都算，0 伤不算）：失去附赠（当前的，和下个敌人回合的）、移到相邻的另一个区、对新所在区的随机一个目标造成 1 击破。
-  - **修正（易怒蛮牛：每回合一次 / 晕眩失衡不发作 / 不再来回冲）**：
-    - **以前**：没有次数限制。一次攻击的主伤害触发一次，紧跟着的高压场地连带伤害（同样是「受到伤害」）又触发一次，于是一次发作日志里出现「冲撞 A、冲撞 B」和「1 区 → 2 区 → 1 区」来回冲；晕眩、失衡的牛也照样冲撞，包括这一击刚把它打进失衡的情况。
-    - **现在**：每回合（一整轮，`beginRound` 时重置 `raceRageUsed`，单局 / 跑团 / 联机共用同一个回合入口）最多发作一次，所以一次发作只移动一次、只撞一个人；这一击结算完之后如果它晕眩、架势为 0 或这一击打出了失衡（`result.broke`，含首领立刻恢复架势的情况），不发作，也不占这回合的次数。移动规则不变：仍是随机冲到一个相邻区、撞那个区的随机一人。
-    - **测试**：`tests/angry-bull.test.js`（每回合一次与回合重置、晕眩、失衡、本击打进失衡、高压场地不再二次触发 / 来回冲）。
   - **兽人·蜥蜴**：吐酸（附赠技能 `race_spit`，同区 1×atk 酸、0 击破，每场一次）；鳞片（受能量伤害 +25%）。角色龙哥的鳞片和敌人共用 `RACE_PERK.energyUp`。
   - **兽人·猫**：灵巧（一回合最多失去 2 架势，和原来的 `raceTrait: "catFocus"` 共用 `applyResultToUnit` 里同一行）；注意力涣散（不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%，和别的百分比加算）。
   - **兽人·熊**：重装操作、嗜睡战斗里不生效，只写在资料里。
