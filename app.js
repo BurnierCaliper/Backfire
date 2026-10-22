@@ -7981,6 +7981,20 @@ function dealTo(attacker, target, opt) {
       target = vg.unit;
     }
   }
+  // 操控清扫机（下水道维护，enemies.js · sweeperGuardFor）：触灵清扫员在场时，维护员 / 清扫员挨打（范围攻击每人各挡一次），
+  // 同区血量最多的清扫机 100% 代为承受；这一下结算完它剩下的血量 < 25% 还没死就立刻自爆（最后 return 之前，sweeperGuardAfter）
+  let guardSweeper = null;
+  if (target && attacker && typeof sweeperGuardFor === "function") {
+    const sw = sweeperGuardFor(attacker, target, opt);
+    if (sw) {
+      appendLog(`${sw.name} 挡在 ${target.name} 身前，替它承受这次攻击（触灵清扫员操控）。`);
+      target = guardSweeper = sw;
+      target._brokeNow = false;
+      // 击杀记在代挡的清扫机身上（开头记的是原来的目标）
+      if (attacker.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
+      else if (attacker.envSrc) creditPlayerHit(target, (envOwnerUnit(attacker) || {}).id);
+    }
+  }
   // 飞行：近程攻击飞行单位要额外付一个附赠行动；付不起就打不到。
   // 范围攻击、杂兵、飞行打飞行、柯尔特切刀附带的那一击（flyFree）不受此限。
   if (attacker && target && target.flying && opt.flags.action && !opt.flags.aoe && !opt.flags.flyFree && !isReaction) {
@@ -8424,6 +8438,8 @@ function dealTo(attacker, target, opt) {
       if (helper && helper.kit !== "bili") popBreak(helper, res.helperBreak, ele);   // 哔哩哩格挡不掉架势
     }
   }
+  // 代挡的清扫机剩下的血量 < 25%、还没死：立刻自爆（enemies.js · sweeperGuardAfter）
+  if (guardSweeper && typeof sweeperGuardAfter === "function") sweeperGuardAfter(guardSweeper, attacker, extra);
   return { res, extra };
 }
 

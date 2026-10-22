@@ -435,6 +435,17 @@ function enemySkillListBase(u) {
       { id: "en_sweeper_shot", label: "谐波射击（所有敌人都有共振时）" },
       { id: "en_sweeper_assist", label: "协助：自爆（冲到目标所在区，同区所有敌对单位 1×ATK 火，然后自己死亡）" }
     ],
+    // 两个触灵精英：远程；身上有负面状态时 AI 先花附赠清除状态（ai.js）
+    sewer_keeper: [
+      { id: "en_keeper_shot", label: "普通攻击（远距 1×ATK + 1d4 电击）" },
+      { id: "en_sewer_cleanse", label: "清除状态（附赠，只清负面的一种）" },
+      { id: "en_keeper_assist", label: "协助：同普通攻击，并施加感电" }
+    ],
+    sewer_cleaner: [
+      { id: "en_cleaner_wave", label: "普通攻击（远距：敌人最多的一区，每人 0.5×ATK 谐波）" },
+      { id: "en_sewer_cleanse", label: "清除状态（附赠，只清负面的一种）" },
+      { id: "en_cleaner_assist", label: "协助：同普通攻击（打目标所在的区）" }
+    ],
     ant_hunter: [
       { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
       { id: "en_hunter_heat", label: "把天气变为酷暑" },
@@ -741,6 +752,8 @@ const ENEMY_SKILL_RANGE = {
   en_rat_tyrant_bite: "melee", en_rat_tyrant_assist: "melee",
   // 下水道清扫机：上共振、谐波射击都是一般远程（距离 1）；自爆是冲到目标所在区炸那一区（ENEMY_ASSIST_RUSH）
   en_sweeper_reso: "ranged", en_sweeper_shot: "ranged", en_sweeper_assist: "melee",
+  // 触灵维护员 / 清扫员：普通攻击、协助都是一般远程（清扫员的范围谐波打距离 1 的一区）
+  en_keeper_shot: "ranged", en_keeper_assist: "ranged", en_cleaner_wave: "ranged", en_cleaner_assist: "ranged",
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
   en_spider_bite: "melee",
@@ -789,11 +802,12 @@ const ENEMY_SKILL_RANGE = {
 };
 
 /* 敌人技能的花费：默认 1 行动点（协助、借机这类反应不花）。
- * 赤牙照第九章：霰弹枪射击、躲入掩体 2 行动点，追猎 1 附赠。 */
+ * 赤牙照第九章：霰弹枪射击、躲入掩体 2 行动点，追猎 1 附赠。下水道维护的触灵精英：清除状态 1 附赠。 */
 const ENEMY_SKILL_COST = {
   en_chi_shot: { ap: 2, bonus: 0 },
   en_chi_cover: { ap: 2, bonus: 0 },
-  en_chi_hunt: { ap: 0, bonus: 1 }
+  en_chi_hunt: { ap: 0, bonus: 1 },
+  en_sewer_cleanse: { ap: 0, bonus: 1 }
 };
 function enemySkillCost(u, id) {
   if (/^veh_/.test(String(id)) && typeof vehicleSkillCost === "function") return Object.assign({ ap: 0, bonus: 0 }, vehicleSkillCost(id));   // 载具（vehicle.js）
@@ -1334,11 +1348,32 @@ function ratfolkSweep() {
  * 下水道清扫机：血量 / 架势 / atk / 伤害骰在 engine.js · SEWER_STATS，这里是招式的数：
  *   shotMult / shotBreak   所有敌人都有共振时的远程谐波攻击（伤害骰是单位卡上的 1d4）
  *   blastMult / blastBreak 协助「自爆」：冲到目标所在区，对那一区所有和它敌对的单位各 blastMult×atk 火、blastBreak 击破，然后自己死亡
- * 还有敌人没有共振时花行动点给一个没有共振的敌人施加共振（只上状态、不造成伤害，sweeperApplyReso）；挑谁、什么时候开火在 ai.js */
+ * 还有敌人没有共振时花行动点给一个没有共振的敌人施加共振（只上状态、不造成伤害，sweeperApplyReso）；挑谁、什么时候开火在 ai.js
+ * 两个触灵精英（第 2 节；血量 / 架势 / atk 在 engine.js · SEWER_STATS.elite）：
+ *   keeper  触灵维护员：普通攻击 shotMult×atk + 1d4 电击、shotBreak 击破；协助同普通攻击，另外施加感电
+ *   cleaner 触灵清扫员：普通攻击选远程射程内敌人最多的一区，那一区所有敌人各 waveMult×atk 谐波、waveBreak 击破；协助同普通攻击（打目标所在的区）；
+ *           场上有别人能协助时不主动协助（sewerAssistPool）
+ *   cleanse 附赠·清除状态（两个精英都有，en_sewer_cleanse）：只清负面的状态，一次清一种（sewerCleansePick 的先后）：
+ *           first 先清（高能：血量低于高能值就自爆）；dot 按这一回合结束预计扣的血（期望值）比，扣得多的先清（感电按同区同阵营的人数乘）；
+ *           then 照写的先后。inspireKits：清掉一种就给自己永续的振奋（振奋 + inspireStay，只有一层）——维护员的特点
+ *   guard   操控清扫机（清扫员的特点，sweeperGuardFor）：清扫员在场时，protect 里的单位挨打，同区血量最多的清扫机 100% 代为承受；
+ *           代挡后那只清扫机剩下的血量 < boomBelow（还没死）立刻自爆（sweeperGuardAfter → sweeperSelfDestruct） */
 const SEWER_FACTION = "下水道维护";
 const SEWER_CFG = {
-  sweeper: { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 }
+  sweeper: { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 },
+  keeper: { shotMult: 1, shotBreak: 1 },
+  cleaner: { waveMult: 0.5, waveBreak: 1 },
+  cleanse: {
+    first: ["high"],
+    dot: ["burn", "corr", "shock"],
+    then: ["frostbite", "shockwave", "unstable", "weak", "reso", "chase"],
+    inspireKits: ["sewer_keeper"]
+  },
+  guard: { protect: ["sewer_keeper", "sewer_cleaner"], boomBelow: 0.25 }
 };
+/** 清除状态的日志用名字 */
+const SEWER_STATUS_NAME = { high: "高能", burn: "灼烧", corr: "腐蚀", shock: "感电", frostbite: "冻伤", shockwave: "震荡",
+  unstable: "不稳", weak: "虚弱", reso: "共振", chase: "紧追" };
 const sweeperResonated = u => !!(u && u.statuses && u.statuses.reso);
 /** 清扫机眼里的敌人：和它敌对、在场上、选得中的单位——倒地没起身的、配置物不算；躲藏 / 下潜 / 本来就选不中的
  *  （飞碟本体、单局图纸「安全的迷彩」）看不见。「所有敌人都有共振」、上共振挑目标都按它 */
@@ -1406,6 +1441,132 @@ function sweeperSelfDestruct(a, t, notes, hit) {
   notes.push(`${a.name} 在自爆中损毁。`);
   if (typeof sweepDeadEnemies === "function") notes.push(...sweepDeadEnemies());
   return true;
+}
+
+/* ---- 触灵精英：附赠·清除状态（SEWER_CFG.cleanse）---- */
+/** u 身上现有的负面状态（SEWER_CFG.cleanse 里列的属性状态 / 通用状态；振奋、坚挺、躲藏、优势这些好的不算，熔融这类一回合的即时效果也不算） */
+function sewerBadStatuses(u) {
+  const st = (u && u.statuses) || {}, C = SEWER_CFG.cleanse;
+  return C.first.concat(C.dot, C.then).filter(k => k === "burn" ? (Number(st.burn) || 0) > 0 : !!st[k]);
+}
+/** 持续扣血的状态这一回合结束预计扣多少血（期望值，和 app.js · turnEnd 用同一套骰子）；感电按同区同阵营的人数乘（每个人都挨一下） */
+function sewerDotThreat(u, k) {
+  const w = typeof currentWeatherFor === "function" ? currentWeatherFor(u) : (state.weather || "none");
+  const sm = typeof statusMult === "function" ? statusMult(u) : 1;
+  const avg = d => d.n * (d.s + 1) / 2;
+  if (k === "burn") return Math.max(1, Math.floor(Number(u.statuses.burn) || 0)) * avg(statusDotDice("burn", u.level, w)) * sm;
+  if (k === "corr") {
+    const armor = (u.layers || []).some(l => l.type === "armor" && l.current > 0);
+    return avg(statusDotDice("corr", u.level, w, armor, typeof envMult === "function" ? envMult(u) : 1)) * sm;
+  }
+  if (k === "shock") {
+    const d = statusDotDice("shock", u.level, w);
+    const mates = (state.units || []).filter(x => x && !x.dead && !x.hidden && !x._removed && Number(x.zone) === Number(u.zone) && !!x.isPlayer === !!u.isPlayer).length;
+    return Math.max(d.min || 1, (d.s + 1) / 2 + (d.bonus || 0)) * sm * Math.max(1, mates);
+  }
+  return 0;
+}
+/** 先清哪一种：first 里的先清；再清 dot 里预计扣血最多的（一样多照写的先后）；最后照 then 的先后。没有负面状态返回 null */
+function sewerCleansePick(u) {
+  const bad = sewerBadStatuses(u), C = SEWER_CFG.cleanse;
+  if (!bad.length) return null;
+  const first = C.first.find(k => bad.includes(k));
+  if (first) return first;
+  const dots = C.dot.filter(k => bad.includes(k));
+  if (dots.length) return dots.slice().sort((a, b) => sewerDotThreat(u, b) - sewerDotThreat(u, a))[0];
+  return C.then.find(k => bad.includes(k)) || null;
+}
+/** 清除状态（en_sewer_cleanse）：清掉一种负面状态；维护员（inspireKits）清完给自己永续的振奋（振奋 + inspireStay，只有一层）。
+ *  返回清掉的状态，没有可清的返回 null */
+function sewerCleanse(a, lines) {
+  const k = sewerCleansePick(a);
+  if (!k) { lines.push(`${a.name} 身上没有负面状态，不用清除。`); return null; }
+  const st = a.statuses;
+  if (k === "burn") st.burn = 0; else st[k] = false;
+  if (k === "high") a.highEnergy = 0;            // 高能值跟着高能状态一起清掉
+  if (k === "weak") st.weakFear = false;
+  if (k === "chase") a.chasers = [];
+  if (k === "shockwave" && typeof syncShockwave === "function") syncShockwave(a, lines);   // 震荡压下去的架势上限还回去
+  lines.push(`${a.name} 清除了身上的${SEWER_STATUS_NAME[k] || k}。`);
+  if (SEWER_CFG.cleanse.inspireKits.includes(a.kit)) {
+    if (st.inspire && st.inspireStay) lines.push(`${a.name} 已经有永续的振奋（振奋只有一层）。`);
+    else {
+      st.inspire = true;
+      st.inspireStay = true;
+      if (typeof popStatus === "function") popStatus(a, "inspire");
+      lines.push(`${a.name} 获得永续的振奋（ATK +25%，不会自动消失）。`);
+    }
+  }
+  return k;
+}
+/** AI：这一步要不要先花附赠清除状态（身上有负面状态、还有附赠；决一死战里只能攻击灯，不清） */
+function sewerCleanseChoice(u) {
+  if (!u || u.isPlayer || u.stunned || (u.bonus || 0) < 1 || !sewerCleansePick(u)) return false;
+  if (typeof touDuelVictim === "function" && touDuelVictim(u)) return false;
+  return (enemySkillList(u) || []).some(s => s.id === "en_sewer_cleanse");
+}
+
+/* ---- 触灵清扫员：普通攻击（范围谐波）、操控清扫机、不主动协助（SEWER_CFG.cleaner / guard）---- */
+/** 清扫员的普通攻击打哪一区：远程射程内（距离 1、不隔危墙 / 关着的门）看得见的敌人（sweeperFoesOf）最多的区；
+ *  一样多的挑那一区敌人血量合计多的，再一样挑编号小的。被嘲讽 / 决一死战牵制时只打牵制者所在的区（够得着才打；同区可以抵近）。打不到返回 null */
+function cleanerWaveZone(a) {
+  const forced = enemyForcedTarget(a);
+  if (forced) return enemyZoneInRange(a, "en_cleaner_wave", forced.zone) ? Number(forced.zone) : null;
+  const foes = sweeperFoesOf(a);
+  const zones = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => i + 1);
+  let best = null;
+  zones.forEach(z => {
+    if (!enemyZoneInRange(a, "en_cleaner_wave", z)) return;
+    const here = foes.filter(u => Number(u.zone) === Number(z));
+    if (!here.length) return;
+    const hp = here.reduce((s, u) => s + totalHp(u), 0);
+    if (!best || here.length > best.n || (here.length === best.n && hp > best.hp)) best = { z: Number(z), n: here.length, hp };
+  });
+  return best ? best.z : null;
+}
+/** 清扫员打一区：那一区所有和它敌对的单位（倒地没起身的不算）各 waveMult×atk 谐波、waveBreak 击破（范围攻击，不能协助格挡）。
+ *  被牵制而牵制者就在同区：抵近打自己所在的区，倍率 ×0.6（和电弧扫射、喷洒一致） */
+function cleanerWave(a, zone, aa, lines) {
+  const C = SEWER_CFG.cleaner;
+  const pb = zoneDist(a.zone, zone, state.zoneMode) === 0 && enemyForcedPointBlank(a, enemyForcedTarget(a));
+  const victims = hostilesOf(a).filter(u => Number(u.zone) === Number(zone) && !(typeof isDownProtected === "function" && isDownProtected(u)));
+  lines.push(`${a.name} 对 ${zone} 区所有敌人发出谐波：各 ${C.waveMult}×ATK${pb ? "（抵近 ×0.6）" : ""}、${C.waveBreak} 击破${victims.length ? "" : "（那一区没有敌人）"}。`);
+  victims.forEach(u => {
+    if (u.dead || u._removed || Number(u.zone) !== Number(zone)) return;   // 前面的一击连带打死 / 推走的
+    aa(u, { element: "harmonic", mult: C.waveMult * (pb ? 0.6 : 1), baseBreak: C.waveBreak, flags: { action: true, aoe: true } });
+  });
+}
+/** 清扫员在场（活着、在战场上；失衡的也算） */
+function cleanerOnField() {
+  return (state.units || []).some(u => u && u.kit === "sewer_cleaner" && !u.dead && !u._removed && !u.hidden && !u.fused);
+}
+/** 操控清扫机（app.js · dealTo 每打一个人问一次）：这一下打在 target 身上时由哪只清扫机代为承受——同区血量最多的那只；不代挡返回 null。
+ *  清扫员在场、target 是维护员 / 清扫员（SEWER_CFG.guard.protect）、这一下是攻击行动或范围攻击（范围攻击每人各挡一次）；100%，不掷骰。
+ *  灼烧 / 场地这类环境伤害、衍射 / 锁定这类绕过代挡的不挡；自己那一伙打的不挡（和载具代挡一样） */
+function sweeperGuardFor(attacker, target, opt) {
+  if (!attacker || !target || target.isPlayer || !SEWER_CFG.guard.protect.includes(target.kit)) return null;
+  const f = (opt && opt.flags) || {};
+  if (f.environment || f.diffract || f.locked || !(f.action || f.aoe)) return null;
+  if (!attacker.isPlayer && factionOf(attacker) && !hostileTo(attacker, target)) return null;
+  if (!cleanerOnField()) return null;
+  const list = (state.units || []).filter(u => u && u.kit === "sewer_sweeper" && !u.dead && !u._removed && !u.hidden && !u.fused && !u._sweeperBoom &&
+    Number(u.zone) === Number(target.zone) && totalHp(u) > 0);
+  return list.length ? list.slice().sort((a, b) => totalHp(b) - totalHp(a))[0] : null;
+}
+/** 代挡的那一下结算完（dealTo 最后调）：清扫机剩下的血量 < boomBelow 但还没死，立刻发动它的协助（自爆）——冲到打它的那个人所在的区炸那一区；
+ *  打的人不在场上（配置物、残骸……）或者和它不敌对就在原地炸。返回 true = 炸了 */
+function sweeperGuardAfter(sw, attacker, notes) {
+  if (!sw || sw.dead || sw._removed || sw._sweeperBoom) return false;
+  const max = totalMaxHp(sw), hp = totalHp(sw);
+  if (!(max > 0) || !(hp > 0) || hp >= max * SEWER_CFG.guard.boomBelow) return false;
+  notes.push(`${sw.name} 代挡后只剩不到 ${Math.round(SEWER_CFG.guard.boomBelow * 100)}% 的血量：立刻发动协助（自爆）。`);
+  const t = attacker && (state.units || []).includes(attacker) && !attacker.dead && !attacker._removed && hostileTo(sw, attacker) ? attacker : null;
+  return sweeperSelfDestruct(sw, t, notes);
+}
+/** 触灵清扫员不主动协助：能协助的名单里还有别的单位时把清扫员拿掉；只剩清扫员能协助时照常协助（ai.js · aiPickAssister 调） */
+function sewerAssistPool(list) {
+  const others = (list || []).filter(u => u && u.kit !== "sewer_cleaner");
+  return others.length ? others : (list || []);
 }
 
 /* ===== 阵营敌对 =====
@@ -2048,6 +2209,35 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     // 协助：自爆——冲到目标所在区，同区所有和它敌对的单位 1×atk 火、1 击破，然后自己死亡（sweeperSelfDestruct）
     if (!needT()) return true;
     sweeperSelfDestruct(a, t, lines, aa);
+    return true;
+  }
+  if (id === "en_keeper_shot" || id === "en_keeper_assist") {
+    // 触灵维护员：远程 1×atk + 1d4 电击、1 击破；协助一样，打中再施加感电
+    if (!needT()) return true;
+    const C = SEWER_CFG.keeper;
+    aa(t, { element: "electric", mult: C.shotMult, diceN: baseDice[0] || 1, diceS: baseDice[1] || 4, baseBreak: C.shotBreak,
+      onConnect: id === "en_keeper_assist" ? { status: "shock" } : undefined });
+    return true;
+  }
+  if (id === "en_cleaner_wave" || id === "en_cleaner_assist") {
+    // 触灵清扫员：普通攻击打远程射程内敌人最多的一区（AI 在 picks.dest 里选好；主持人选了目标就打目标所在区；都没有就自己挑）；
+    // 协助和普通攻击一样，打失衡的人所在的区
+    const fl = state.skillFlow;
+    const assist = id === "en_cleaner_assist";
+    let zone = assist ? Number(t && t.zone) : Number((fl && fl.picks && fl.picks.dest) || (t && t.zone) || cleanerWaveZone(a));
+    if (!(zone >= 1)) { lines.push(assist ? "先在「技能目标」里选对象。" : `${a.name} 的远程射程内没有敌人。`); return true; }
+    if (!assist) zone = forcedZonePick(a, zone, lines);
+    if (!enemyZoneInRange(a, id, zone)) {
+      const why = typeof lineBlocked === "function" && lineBlocked(a.zone, zone);
+      lines.push(why ? `${a.name} 打不到 ${zone} 区：${why}` : `${a.name} 的谐波是远距离，打不到距离 ${zoneDist(a.zone, zone, state.zoneMode)} 的 ${zone} 区。`);
+      return true;
+    }
+    cleanerWave(a, zone, aa, lines);
+    return true;
+  }
+  if (id === "en_sewer_cleanse") {
+    // 附赠·清除状态：清掉一种负面状态（维护员清完给自己永续的振奋）
+    sewerCleanse(a, lines);
     return true;
   }
   if (id === "en_hunter_shot") {
@@ -2956,12 +3146,17 @@ const ENEMY_RACES = {
   "牛类人": { mods: {}, branches: ["牛", "马", "羊"], branchMods: {
     "牛": { str: 2, sta: 1 }, "马": { str: 1, dex: 1, sta: 1 }, "羊": { str: 1, wil: 1, int: 1 } } },
   // 兽人五支的六维修正完全一样
-  "兽人":   { mods: { con: 1, sta: 1, int: 1 }, branches: ["狼", "牛", "蜥蜴", "猫", "熊"] }
+  "兽人":   { mods: { con: 1, sta: 1, int: 1 }, branches: ["狼", "牛", "蜥蜴", "猫", "熊"] },
+  // 触灵（docs/sewer-maintenance.md 第 1 节）：机甲触灵、飞碟触灵、下水道维护的两个触灵精英；没有六维修正，暂时没有种族被动（RACE_PERKS 里不写）
+  "触灵":   { mods: {} }
 };
 /** 「类人」是四个大支的统称（主持人指定 / 权重表里可以只写「类人」，大支各占一份） */
 const ENEMY_RACE_GROUPS = { "类人": ["犬类人", "猫类人", "鼠类人", "牛类人"] };
 /** 不在 ENEMY_INFO 里（不进随机遭遇）的敌人的种族 */
-const ENEMY_RACE_EXTRA = { chixia: { race: "犬类人·狼" } };   // 赤牙：手册第九章「狼类人」
+const ENEMY_RACE_EXTRA = {
+  chixia: { race: "犬类人·狼" },   // 赤牙：手册第九章「狼类人」
+  ufo_body: { race: "触灵" }       // 飞碟触灵本体（ENEMY_INFO 里登记的是 ufo_boss；机械足是部件，不挂种族）
+};
 
 /** "兽人·牛" / { race, branch } → { race, branch? }；认不得的返回 null */
 function raceParse(x) {
@@ -3374,6 +3569,7 @@ function spawnUfoBoss(lv) {
   body.bossPack = pack;
   body.untargetable = true;
   body.zone = Number(state.zoneMode) === 3 ? 2 : 2;
+  applyEnemyRace(body);   // 种族「触灵」（ENEMY_RACE_EXTRA.ufo_body）
   const names = ["机械足甲", "机械足乙", "机械足丙", "机械足丁", "机械足戊"];
   const zones = [2, 2, 2, 1, 1];
   const legs = names.map((name, i) => {

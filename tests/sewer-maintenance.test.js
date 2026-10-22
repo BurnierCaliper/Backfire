@@ -1,5 +1,5 @@
 // 下水道的第二个阵营「下水道维护」和杂兵「下水道清扫机」（docs/sewer-maintenance.md 第 1、2、3 节，issue #279）
-// 两个触灵精英（维护员、清扫员）和「狂鼠 ↔ 下水道维护」的三方混战是下一步（下水道维护（二）），这里不测
+// 两个触灵精英（维护员、清扫员）和「狂鼠 ↔ 下水道维护」的三方混战（下水道维护（二），#281）在 tests/sewer-elites.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -11,6 +11,8 @@ const plain = x => JSON.parse(JSON.stringify(x));
 const noBlock = { pickBlocker: () => null, pickAssister: l => l[0].id };
 const layers = (u, ls) => { u.layers = ls.map((l, i) => ({ type: l[0], current: l[1], max: l[2] != null ? l[2] : l[1], inner: i === ls.length - 1 })); };
 const RAT_KITS = ["rat_lurker", "rat_biter", "rat_plague", "rat_tyrant"];
+/** 下水道维护的兵种（两个触灵精英是 #281 加的，测试在 tests/sewer-elites.test.js） */
+const SEWER_KITS = ["sewer_sweeper", "sewer_keeper", "sewer_cleaner"];
 /** 和下水道维护是一伙的（巨人方 + 自己） */
 const FRIENDS = ["安保", "警卫队", "镇压队", "下水道维护"];
 
@@ -75,8 +77,10 @@ test("登记：杂兵、1 枚代币 3 只（照空投蜂群的 group: 3）、不
   assert.equal(get(c, "ENEMY_RANK").sewer_sweeper, "minion");
   assert.equal(get(c, "SEWER_FACTION"), "下水道维护");
   // 抽遭遇：一枚代币 3 只；摆上场是 3 只各自独立的清扫机，都不会飞
+  // （#281 起下水道维护的池子里还有两个触灵精英：这里照 rollEncounter 的做法只从清扫机里按代币抽，精英混着出的在 tests/sewer-elites.test.js）
   c.S.RNG.install("SWEEPER-ENC");
-  const enc = c.rollEncounter({ region: "下水道", faction: "下水道维护", tokens: 4, mixed: false, zoneMode: 2 });
+  const enc = c.finishEncounter({ name: "下水道·下水道维护", region: "下水道", faction: "下水道维护", tier: "normal", tokens: 4, mixed: false,
+    enemies: c.pickByTokens(["sewer_sweeper"], 4) }, { zoneMode: 2 });
   assert.equal(enc.name, "下水道·下水道维护");
   assert.deepEqual(plain(enc.enemies.map(e => [e.preset, e.count])), [["sewer_sweeper", 3], ["sewer_sweeper", 3], ["sewer_sweeper", 3], ["sewer_sweeper", 3]]);
   assert.equal(enc.tier, "normal", "杂兵的遭遇");
@@ -166,14 +170,15 @@ test("下水道：rollEncounter({ region: \"下水道\" }) 能抽到狂鼠或者
   for (let i = 0; i < 400; i++) {
     const enc = c.rollEncounter({ region: "下水道" });
     seen[enc.name] = (seen[enc.name] || 0) + 1;
-    if (enc.name === "下水道·下水道维护") assert.ok(enc.enemies.every(e => e.preset === "sewer_sweeper"), JSON.stringify(enc.enemies));
+    // #281 起下水道维护还有两个触灵精英，三区制的遭遇有 15% 变成「狂鼠 ↔ 下水道维护」的三方混战（tests/sewer-elites.test.js）
+    if (enc.name === "下水道·下水道维护") assert.ok(enc.enemies.every(e => SEWER_KITS.includes(e.preset)), JSON.stringify(enc.enemies));
     if (enc.name === "下水道·狂鼠") assert.ok(enc.enemies.every(e => RAT_KITS.includes(e.preset)), JSON.stringify(enc.enemies));
-    assert.ok(/^下水道·(狂鼠|下水道维护|混战)$/.test(enc.name), enc.name);
+    assert.ok(/^下水道·(狂鼠|下水道维护|混战|三方混战)$/.test(enc.name), enc.name);
   }
   assert.ok(seen["下水道·下水道维护"] > 100 && seen["下水道·狂鼠"] > 100, JSON.stringify(seen));
-  // 混编掷中了也只有清扫机：下水道里没有安保 / 警卫队 / 镇压队
+  // 混编掷中了也只有下水道维护自己：下水道里没有安保 / 警卫队 / 镇压队
   const info = get(c, "ENEMY_INFO");
-  assert.deepEqual(plain(c.regionPool("下水道").filter(k => FRIENDS.includes(info[k].faction))), ["sewer_sweeper"]);
+  assert.deepEqual(plain(c.regionPool("下水道").filter(k => FRIENDS.includes(info[k].faction))), SEWER_KITS);
   ["外城区", "巨人城", "第一采矿场", "第二采矿场", "第三采矿场", "沙漠", "天网设施"].forEach(r => {
     assert.ok(!c.regionPool(r).includes("sewer_sweeper"), r);
     assert.ok(!c.regionFactions(r).includes("下水道维护"), r);
