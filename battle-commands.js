@@ -39,6 +39,14 @@
     if (!u) throw new Error("Unknown battle actor: " + id);
     return u;
   }
+  /** 首领机制：挂上时带上主持人填的技能名（去掉首尾空格；空着就不带，用机制原名 BOSS_MECH_DEFAULTS，boss-mechanics.js） */
+  function named(m, c) {
+    const name = typeof c.name === "string" ? c.name.trim() : "";
+    if (name) m.name = name;
+    return m;
+  }
+  /** 这个敌人身上这种机制现在叫什么（填过的技能名 / 机制原名）：去掉之前先记下来写提示 */
+  function mechLabel(u, type) { return mechConfig(bossMechList(u, type)[0] || { type }).name; }
   function validate(cmd) {
     if (types.indexOf(cmd.type) < 0) throw new Error("Unknown battle command: " + cmd.type);
     if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
@@ -46,6 +54,15 @@
     if (cmd.type === "move" && !Number.isFinite(cmd.dest)) throw new Error("dest must be a number");
     if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
     const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
+    // 首领机制的技能名（选填）：字符串，去掉首尾空格后最多 BOSS_MECH_NAME_MAX 个字（boss-mechanics.js）；空着 = 用机制原名。
+    // 联机时玩家收到的要和主持人填的一样：玩家数据的白名单（online-view.js · safeText）会整段丢掉的字样不收
+    const mechName = (c, kind) => {
+      if (c.name == null) return;
+      if (typeof c.name !== "string") throw new Error(kind + " name must be a string");
+      const name = c.name.trim();
+      if (Array.from(name).length > BOSS_MECH_NAME_MAX) throw new Error(kind + " name must be at most " + BOSS_MECH_NAME_MAX + " characters");
+      if (name && root.OnlineView && typeof root.OnlineView.safeText === "function" && root.OnlineView.safeText(name) === null) throw new Error(kind + " name can't be shown to players: " + name);
+    };
     if (cmd.type === "openingChoice" && cmd.mood == null) oneOf(cmd.bit, ["acid", "drill"], "opening bit");
     if (cmd.type === "openingChoice" && cmd.mood != null) oneOf(cmd.mood, ["gentle", "cruel"], "opening mood");
     if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge"], "reaction queue");
@@ -74,6 +91,7 @@
         oneOf(c.then, ["repeat", "once"], "execution then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("execution turns must be 1-20");
         if (!Array.isArray(c.hits) || !c.hits.length || c.hits.length > 10 || !c.hits.every(h => h && isFinite(Number(h.mult)) && Number(h.mult) > 0 && Number(h.mult) <= 20)) throw new Error("execution hits must be 1-10 multipliers");
+        mechName(c, "execution");
       }
       if (cmd.action === "setShare" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -83,6 +101,7 @@
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("share turns must be 1-20");
         if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 50) throw new Error("share pool multiplier must be 0-50");
         if (c.element != null) oneOf(c.element, ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"], "share element");
+        mechName(c, "share");
       }
       if (cmd.action === "setSpread" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -91,6 +110,7 @@
         oneOf(c.then, ["repeat", "once"], "spread then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("spread turns must be 1-20");
         if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 20) throw new Error("spread blast multiplier must be 0-20");
+        mechName(c, "spread");
       }
       if (cmd.action === "setTower" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -102,6 +122,7 @@
         if (!Number.isInteger(c.need) || c.need < 1 || c.need > 4) throw new Error("tower need must be 1-4");
         if (!isFinite(Number(c.soak)) || Number(c.soak) < 0 || Number(c.soak) > 20) throw new Error("tower soak multiplier must be 0-20");
         if (!isFinite(Number(c.fail)) || Number(c.fail) <= 0 || Number(c.fail) > 50) throw new Error("tower fail multiplier must be 0-50");
+        mechName(c, "tower");
       }
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
@@ -246,51 +267,55 @@
       case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;
       case "addProp": { const p = makeProp(cmd.kind, cmd.zone, cmd.level); p.faction = cmd.faction || "player"; state.props = state.props || []; state.props.push(p); if (cmd.kind === "battery" && typeof syncBatteryShields === "function") syncBatteryShields(); value = p.id; break; }
       case "setExecution": {
-        // 首领机制·死刑（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·死刑（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「死刑」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "execution");
         removeBossMechanics(u, "execution");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "execution", phase: c.phase, turns: c.turns, then: c.then, hits: c.hits.map(h => ({ mult: Number(h.mult), element: h.element || undefined })) });
+          const m = addBossMechanic(u, named({ type: "execution", phase: c.phase, turns: c.turns, then: c.then, hits: c.hits.map(h => ({ mult: Number(h.mult), element: h.element || undefined })) }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「死刑」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「死刑」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setShare": {
-        // 首领机制·分担（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·分担（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「分担」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "share");
         removeBossMechanics(u, "share");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "share", phase: c.phase, turns: c.turns, then: c.then, pool: { mult: Number(c.mult) }, element: c.element || null });
+          const m = addBossMechanic(u, named({ type: "share", phase: c.phase, turns: c.turns, then: c.then, pool: { mult: Number(c.mult) }, element: c.element || null }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「分担」：随机标记一人，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，伤害池 ${c.mult} × atk 由他所在区的友方平均分担，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「分担」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：随机标记一人，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，伤害池 ${c.mult} × atk 由他所在区的友方平均分担，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setSpread": {
-        // 首领机制·远离（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·远离（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「远离」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "spread");
         removeBossMechanics(u, "spread");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "spread", phase: c.phase, turns: c.turns, then: c.then, blast: { mult: Number(c.mult) } });
+          const m = addBossMechanic(u, named({ type: "spread", phase: c.phase, turns: c.turns, then: c.then, blast: { mult: Number(c.mult) } }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「远离」：标记我方全员，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时每人在自己的区爆炸一次（每次对同区每个友方 ${c.mult} × atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「远离」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：标记我方全员，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时每人在自己的区爆炸一次（每次对同区每个友方 ${c.mult} × atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setTower": {
-        // 首领机制·踩塔（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·踩塔（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「踩塔」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "tower");
         removeBossMechanics(u, "tower");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "tower", phase: c.phase, turns: c.turns, then: c.then, count: c.count, need: c.need, soak: { mult: Number(c.soak) }, fail: { kind: "raid", mult: Number(c.fail) } });
+          const m = addBossMechanic(u, named({ type: "tower", phase: c.phase, turns: c.turns, then: c.then, count: c.count, need: c.need, soak: { mult: Number(c.soak) }, fail: { kind: "raid", mult: Number(c.fail) } }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「踩塔」：随机标记 ${c.count} 个区，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，每座塔至少 ${c.need} 人踩住（每人挨 ${c.soak} × atk），没人踩则全员各挨 ${c.fail} × atk，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「踩塔」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：随机标记 ${c.count} 个区，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，每座塔至少 ${c.need} 人踩住（每人挨 ${c.soak} × atk），没人踩则全员各挨 ${c.fail} × atk，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;

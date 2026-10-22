@@ -106,6 +106,9 @@ const BOSS_MECH_DEFAULTS = {
     hook: null
   }
 };
+/** 主持人后台给敌人加机制时填的技能名（选填；battle-commands.js · setExecution / setShare / setSpread / setTower 校验，
+ *  game.js 战场配置的输入框）：去掉首尾空格后最多几个字。不填就用上面的机制原名 */
+const BOSS_MECH_NAME_MAX = 12;
 
 /** 选标记目标的规则（以后的首领可以加别的选法） */
 const BOSS_MECH_PICKS = {

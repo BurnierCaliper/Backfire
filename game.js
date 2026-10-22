@@ -4670,6 +4670,9 @@
     elist.innerHTML = "";
     const foesNow = state.units.filter(u => !u.isPlayer && !u.hidden && u.kit !== "ufo_leg");
     if (!foesNow.length) elist.innerHTML = '<p class="sheet-empty">场上没有敌人。</p>';
+    // 首领机制的技能名（选填，下面四个面板共用）：填了，横幅、头顶图标、悬停说明、战斗记录都写这个名字（和内置首领的「公开处刑」「沙尘爆裂」一样）；
+    // 不填就叫机制原名 dflt。最多 BOSS_MECH_NAME_MAX 个字（boss-mechanics.js），规则层（battle-commands.js）再校验一次
+    const mechNameBox = (dflt) => `<label title="选填：填了，横幅、头顶图标、悬停说明和战斗记录里都写这个名字；不填就叫「${dflt}」">技能名<input data-x="name" type="text" maxlength="${BOSS_MECH_NAME_MAX}" placeholder="${dflt}"></label>`;
     foesNow.forEach(u => {
       const row = el("div", "sheet-slot");
       row.innerHTML = `<div><b>${esc(u.name)}</b><div class="sub">${u.kit || ""} · Lv${u.level} · ${u.zone} 区</div></div>`;
@@ -4689,7 +4692,8 @@
       elist.appendChild(row);
       const ed = el("div", "exec-edit");
       ed.hidden = true;
-      ed.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      ed.innerHTML = `${mechNameBox("死刑")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="每一段的倍率（× 这个敌人的 atk），用逗号隔开：3 = 一段 3 倍；2,1,1 = 三段">每段倍率<input data-x="hits" type="text" value="3"></label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4697,6 +4701,7 @@
       elist.appendChild(ed);
       const f = (k) => ed.querySelector(`[data-x="${k}"]`);
       if (cur) {
+        f("name").value = cur.name || "";
         f("phase").value = cur.phase || "enemy"; f("turns").value = cur.turns || 3;
         f("hits").value = (cur.hits || []).map(h => h.mult).join(","); f("then").value = cur.then || "repeat";
       }
@@ -4710,7 +4715,7 @@
         renderFieldSheet();
       };
       f("go").onclick = () => apply({
-        phase: f("phase").value, then: f("then").value,
+        name: f("name").value, phase: f("phase").value, then: f("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(f("turns").value) || 3))),
         hits: String(f("hits").value).split(/[,，\s]+/).filter(Boolean).map(x => ({ mult: Number(x) }))
       });
@@ -4722,7 +4727,8 @@
       row.insertBefore(sb, rm);
       const se = el("div", "exec-edit");
       se.hidden = true;
-      se.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      se.innerHTML = `${mechNameBox("分担")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="伤害池 = 这个倍率 × 这个敌人的 atk，同区的友方平均分担">伤害池<input data-x="mult" type="number" min="0.5" max="50" step="0.5" value="4"> × atk</label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4730,6 +4736,7 @@
       elist.appendChild(se);
       const g = (k) => se.querySelector(`[data-x="${k}"]`);
       if (curS) {
+        g("name").value = curS.name || "";
         g("phase").value = curS.phase || "enemy"; g("turns").value = curS.turns || 3;
         g("mult").value = (curS.pool && curS.pool.mult) || 4; g("then").value = curS.then || "repeat";
       }
@@ -4743,7 +4750,7 @@
         renderFieldSheet();
       };
       g("go").onclick = () => applyS({
-        phase: g("phase").value, then: g("then").value,
+        name: g("name").value, phase: g("phase").value, then: g("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(g("turns").value) || 3))),
         mult: Math.max(0.5, Math.min(50, Number(g("mult").value) || 4))
       });
@@ -4755,7 +4762,8 @@
       row.insertBefore(pb, rm);
       const pe = el("div", "exec-edit");
       pe.hidden = true;
-      pe.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      pe.innerHTML = `${mechNameBox("远离")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label title="每一次爆炸对同区每个友方的伤害 = 这个倍率 × 这个敌人的 atk">每次爆炸<input data-x="mult" type="number" min="0.5" max="20" step="0.5" value="1"> × atk</label>
         <label>落下后<select data-x="then"><option value="repeat">重新标记</option><option value="once">只放一次</option></select></label>
@@ -4763,6 +4771,7 @@
       elist.appendChild(pe);
       const q2 = (k) => pe.querySelector(`[data-x="${k}"]`);
       if (curP) {
+        q2("name").value = curP.name || "";
         q2("phase").value = curP.phase || "enemy"; q2("turns").value = curP.turns || 3;
         q2("mult").value = (curP.blast && curP.blast.mult) || 1; q2("then").value = curP.then || "repeat";
       }
@@ -4776,7 +4785,7 @@
         renderFieldSheet();
       };
       q2("go").onclick = () => applyP({
-        phase: q2("phase").value, then: q2("then").value,
+        name: q2("name").value, phase: q2("phase").value, then: q2("then").value,
         turns: Math.max(1, Math.min(20, Math.floor(Number(q2("turns").value) || 3))),
         mult: Math.max(0.5, Math.min(20, Number(q2("mult").value) || 1))
       });
@@ -4788,7 +4797,8 @@
       row.insertBefore(tbn, rm);
       const te = el("div", "exec-edit");
       te.hidden = true;
-      te.innerHTML = `<label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
+      te.innerHTML = `${mechNameBox("踩塔")}
+        <label>落下<select data-x="phase"><option value="enemy">敌人回合开始</option><option value="player">我方回合开始</option></select></label>
         <label>标记后<input data-x="turns" type="number" min="1" max="20" value="3"> 回合</label>
         <label>塔数<input data-x="count" type="number" min="1" max="5" value="1"></label>
         <label>每座至少<input data-x="need" type="number" min="1" max="4" value="1"> 人</label>
@@ -4799,6 +4809,7 @@
       elist.appendChild(te);
       const q3 = (k) => te.querySelector(`[data-x="${k}"]`);
       if (curT) {
+        q3("name").value = curT.name || "";
         q3("phase").value = curT.phase || "enemy"; q3("turns").value = curT.turns || 3; q3("count").value = curT.count || 1; q3("need").value = curT.need || 1;
         q3("soak").value = (curT.soak && curT.soak.mult) != null ? curT.soak.mult : 0.5; q3("fail").value = (curT.fail && curT.fail.mult) || 4; q3("then").value = curT.then || "repeat";
       }
@@ -4813,7 +4824,7 @@
       };
       const int = (k, lo, hi, d) => Math.max(lo, Math.min(hi, Math.floor(Number(q3(k).value) || d)));
       q3("go").onclick = () => applyT({
-        phase: q3("phase").value, then: q3("then").value,
+        name: q3("name").value, phase: q3("phase").value, then: q3("then").value,
         turns: int("turns", 1, 20, 3), count: int("count", 1, 5, 1), need: int("need", 1, 4, 1),
         soak: Math.max(0, Math.min(20, Number(q3("soak").value) || 0)),
         fail: Math.max(0.5, Math.min(50, Number(q3("fail").value) || 4))
