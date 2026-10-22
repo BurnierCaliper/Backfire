@@ -99,7 +99,7 @@ test("登记：杂兵、1 枚代币 3 只（照空投蜂群的 group: 3）、不
 
 /* ================= 阵营、区域 ================= */
 
-test("阵营：和巨人方（安保、警卫队、镇压队，还有「巨人」）友好——不互相敌对、同一组 ALLIED_FACTIONS；和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营都敌对", () => {
+test("阵营：和巨人方（安保、警卫队、镇压队，还有「巨人」「触灵」）友好——不互相敌对、同一组 ALLIED_FACTIONS；和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营都敌对", () => {
   const c = H.load();
   const info = get(c, "ENEMY_INFO");
   const sw = { kit: "sewer_sweeper", isPlayer: false };
@@ -109,9 +109,13 @@ test("阵营：和巨人方（安保、警卫队、镇压队，还有「巨人�
     assert.equal(c.hostileTo(sw, u), false, f); assert.equal(c.hostileTo(u, sw), false, f);
   });
   // 「巨人」阵营也是巨人方：友好，但不在同伙组里（HOSTILE_EXCEPT_FRIENDS，作者 10/22「一切巨人方友好」）
-  const giant = { kit: kitOf("巨人"), isPlayer: false };
-  assert.equal(c.hostileTo(sw, giant), false, "巨人"); assert.equal(c.hostileTo(giant, sw), false, "巨人");
-  const others = [...new Set(Object.values(info).map(i => i.faction))].filter(f => !FRIENDS.includes(f) && f !== "中立生物" && f !== "巨人");
+  // 「触灵」阵营也友好（作者 10/22）；野生、古代造物等照旧敌对
+  ["巨人", "触灵"].forEach(f => {
+    const u = { kit: kitOf(f), isPlayer: false };
+    assert.equal(c.hostileTo(sw, u), false, f); assert.equal(c.hostileTo(u, sw), false, f);
+  });
+  const others = [...new Set(Object.values(info).map(i => i.faction))].filter(f => !FRIENDS.includes(f) && !["中立生物", "巨人", "触灵"].includes(f));
+  ["野生", "古代造物"].forEach(f => assert.ok(others.includes(f), f));
   ["狂鼠", "盗匪", "沙灵", "沙漠生物", "异星生物"].forEach(f => assert.ok(others.includes(f), f));
   others.forEach(f => {
     const u = { kit: kitOf(f), isPlayer: false };

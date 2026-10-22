@@ -99,7 +99,7 @@ test("出血：最少 1 点；只打那一层，打空了也不溢出到下一�
   assert.ok(!over.extra.some(s => /^出血/.test(s)), "没扣到血就不写出血");
 });
 
-test("出血：只在打中肉体 / 星灵层、并对它造成伤害时触发", () => {
+test("出血：扣到肉体 / 星灵层的血时触发（直接打中、打穿外层溢进去都算）", () => {
   const { c, foe, kit } = field();
   const k = kit("kolt");
   // 星灵：照样出血，打的是星灵这一层
@@ -113,11 +113,11 @@ test("出血：只在打中肉体 / 星灵层、并对它造成伤害时触发",
     assert.equal(out.res.bleed || 0, 0, type);
     assert.equal(cur(foe, "flesh"), 100, type);
   }
-  // 打中的是装甲、溢出进肉体：打中的那一层不是肉体，不出血
+  // 打穿装甲、溢出进肉体：扣到了肉体的血，也出血（作者 10/22 定），打在肉体这一层
   layers(foe, [["armor", 5], ["flesh", 100]]);
   const spill = hit(c, k, foe, { element: "ice", bleed: true });
-  assert.equal(spill.res.bleed || 0, 0);
-  assert.equal(cur(foe, "flesh"), 95);
+  assert.equal(spill.res.bleed, 10);
+  assert.equal(cur(foe, "flesh"), 85, "溢进来 5，出血再 10");
   // 没造成伤害：0 伤、屹立不倒（免疫）都不出血
   layers(foe, [["flesh", 100]]);
   assert.equal(hit(c, k, foe, { atk: 0, bleed: true }).res.bleed || 0, 0);

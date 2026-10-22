@@ -1576,8 +1576,8 @@ function sewerAssistPool(list) {
  * 盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。其余敌人阵营之间照旧是一伙的。 */
 const HOSTILE_FACTIONS = ["异星生物", "狂鼠"];
 const HOSTILE_EXCEPT_ALLIES = [SEWER_FACTION];
-/** HOSTILE_EXCEPT_ALLIES 的阵营另外友好的阵营（不在同伙组里、但同属巨人方）：下水道维护和「巨人」阵营友好（作者 10/22：「一切巨人方友好」） */
-const HOSTILE_EXCEPT_FRIENDS = { [SEWER_FACTION]: ["巨人"] };
+/** HOSTILE_EXCEPT_ALLIES 的阵营另外友好的阵营（不在同伙组里、但同属巨人方）：下水道维护和「巨人」阵营友好（作者 10/22：「一切巨人方友好」），和「触灵」阵营也友好（作者 10/22；野生、古代造物等照旧敌对） */
+const HOSTILE_EXCEPT_FRIENDS = { [SEWER_FACTION]: ["巨人", "触灵"] };
 const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["盗匪", "镇压队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
