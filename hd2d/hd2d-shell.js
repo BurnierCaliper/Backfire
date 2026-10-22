@@ -82,15 +82,16 @@
     o = o || {};
     const target = o.target || panel, cls = o.cls || "collapsed";
     const labels = o.labels || SHELL.labels[o.name] || null;
+    const storage = o.storage !== undefined ? o.storage : storageOf();
     const set = (open, save) => {
       target.classList.toggle(cls, !open);
       btn.setAttribute("aria-expanded", String(!!open));
       if (labels) btn.textContent = open ? labels.open : labels.closed;
-      if (save && o.name) setOpen(o.name, open, o.storage);
+      if (save && o.name) setOpen(o.name, open, storage);
       if (o.onChange) o.onChange(!!open);
     };
     btn.addEventListener("click", () => set(target.classList.contains(cls), true));
-    set(o.name ? isOpen(o.name, o.storage, o.open) : !!o.open, false);
+    set(o.name ? isOpen(o.name, storage, o.open) : !!o.open, false);
     return (open) => set(open, false);
   }
 
@@ -160,6 +161,19 @@
     return { b, back: b.back, color, html: U.summonInner(b, { cost, key: o.key }), label: `${b.name}，${cost}` };
   }
   /**
+   * 技能里挑出唤出 / 收回武器人的那一个（单独做成大按钮），照单机 game.js · refreshHud 的挑法：武器人倒下后先放「取回武器」，
+   * 这时倒下那把的唤出（本场不能再唤出、灰掉的）不再占技能栏。rows = [{ id, disabled }]（联机：主机给的选项换成这个样子）。
+   * 返回 { summon: 那一个或 null, rest: 剩下的普通技能（顺序不变）}
+   */
+  function pickSummon(rows) {
+    const U = UIX(), first = U.UI.skill.first;
+    const list = (rows || []).filter(r => r && r.id != null);
+    const bio = (id) => String(id) !== first && U.isSummon(id);   // 唤出武器人 / 收回为武器（game.js · isSummonSkill）
+    const retrieve = list.find(r => String(r.id) === first) || null;
+    const summon = retrieve || list.find(r => bio(r.id)) || null;
+    return { summon, rest: list.filter(r => r !== summon && !(retrieve && bio(r.id) && r.disabled)) };
+  }
+  /**
    * 联机：主机给的技能选项只有名字、消耗（online-view.js · projectActionMenu），属性 / 攻击还是技能要看技能的提示——
    * 按本机的技能表（party.js · skillList：静态的规则文字，图鉴里也写着）拿投影过的这个人（复制一份，不改收到的包）查一遍：{ 技能 id: 提示 }。
    * 读不到就是空的（按钮照样画，属性写无属性）。不碰房主的 state
@@ -172,6 +186,13 @@
       (root.skillList(copy) || []).forEach(s => { if (s && s.id && s.hint) out[s.id] = String(s.hint); });
     } catch (e) { /* 规则表认不得这个人：没有提示 */ }
     return out;
+  }
+  /* ---------- 队伍栏（正式画面的队伍按钮换成新样子）---------- */
+  /** 队伍栏一个人里面的东西（hd2d-ui.js · partyInner）：u = 投影过的单位，头像按 lookOf(u)；o = { tag 名字后面的小字, icons（默认 hud-icons.js）, looks }。
+   *  正式画面一个人是一个按钮，效果的小标记不让键盘停上去（focus: false），悬停照样展开 */
+  function member(u, o) {
+    o = o || {};
+    return UIX().partyInner(u, lookOf(u, o.looks), { icons: o.icons !== undefined ? o.icons : root.HudIcons, tag: o.tag || "", focus: false });
   }
   /** 技能栏上面那一行：谁在行动（名字、等级、行动中）。u = 投影过的单位；没有人就空着 */
   function whoHtml(u, acting) {
@@ -266,6 +287,6 @@
 
   return {
     SHELL, isOpen, setOpen, labelOf, phoneNow, wirePanel, looks, lookOf, effectElements,
-    skillButton, summonButton, hintsOf, whoHtml, attach, detach, on, who
+    skillButton, summonButton, pickSummon, hintsOf, member, whoHtml, attach, detach, on, who
   };
 });
