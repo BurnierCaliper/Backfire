@@ -505,7 +505,42 @@ test("旧 → 新打不开（没有 WebGL / 本地文件打不开 ES 模块）�
   assert.equal(q.log.loads, 0);
 });
 
-/* ---------- 11. 场景：转场占着镜头 ---------- */
+/* ---------- 11. 旧 → 新：画出来了云雾才散 ---------- */
+test("旧 → 新：新画面建好以后，等浏览器画完 MIST.frames 帧云雾才散（第一次画要编译着色器，不露出还没画出来的空画布）；新 → 旧不用等", async () => {
+  const p = await page({ on: false });
+  const { F, T, ctx } = p, M = F.MIST;
+  assert.ok(Number.isInteger(M.frames) && M.frames >= 1, "等几帧在 MIST 里");
+  const raf = [];
+  ctx.requestAnimationFrame = (fn) => { raf.push(fn); return raf.length; };
+  T.advance(1);
+  p.wheel(wheelEv(-200));
+  T.tick();                                  // 云雾盖满：切到新画面
+  await settle(); await settle();
+  assert.equal(F.on(), true);
+  T.tick();                                  // hold 到了
+  assert.equal(F.transition().step, "swap", "还没画完：云雾先不散");
+  for (let i = 0; i < M.frames; i++) {
+    assert.equal(F.transition().step, "swap", "画到第 " + i + " 帧：还盖着");
+    assert.equal(raf.length, 1, "一帧一帧等");
+    raf.shift()();
+  }
+  assert.equal(F.transition().step, "clear", "画完了：云雾散开、镜头降回远景");
+  assert.ok(p.log.calls.some(c => c[0] === "descend"));
+  T.tick();
+  assert.equal(F.transition().busy, false);
+  // 新 → 旧：3D 拆掉就是旧画面（DOM，早就排好了），不用等
+  p.scene().options.onZoomOut();
+  T.tick(); T.tick();
+  await settle();
+  assert.equal(F.on(), false);
+  T.tick();
+  assert.equal(F.transition().step, "clear", "新 → 旧：停够 hold 就散");
+  assert.equal(raf.length, 0);
+  const src = code(read("hd2d/hd2d-field.js"));
+  assert.match(src, /afterFrames\(M\.frames, both\);/);
+});
+
+/* ---------- 12. 场景：转场占着镜头 ---------- */
 test("场景：转场占着镜头（state.lock）——升到正上方用 hd2d-camera.js · overheadPose，到了停在那里；重排 / 换行动的人只换铭牌不动镜头；推镜头、滚轮、双指、拖动都不接；从正上方降回远景到了才交还", () => {
   const src = code(read("hd2d/hd2d-scene.js"));
   const body = (name) => src.slice(src.indexOf(name), src.indexOf("\n    },", src.indexOf(name)));

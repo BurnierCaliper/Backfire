@@ -60,7 +60,8 @@
    *   rise      镜头升到战场正上方往下看：elevation 俯角（度，接近 90；正 90 度镜头朝向算不出来）、dist 离看的那一点多远（× 远景的距离）、secs 升多久、ease 缓动（hd2d-camera.js 的 EASE）
    *   descend   旧 → 新：镜头从正上方（rise 的俯角、距离）降回远景要多久、缓动；和云雾散开同时开始
    *   cover     云雾从四边涌进来、合拢盖满要多久（秒）；overlap = 镜头离升到顶还有多少秒时云雾就开始涌（升和涌接得上，不是升完了停一下再来）
-   *   hold      盖满以后至少停多久（秒；这时切画面。旧 → 新还要等新画面建好，第一次打开要加载）
+   *   hold      盖满以后至少停多久（秒；这时切画面。旧 → 新还要等新画面建好，第一次打开要加载）；frames = 旧 → 新建好以后至少等浏览器画完几帧云雾才散
+   *             （第一次画要编译着色器，慢；不等的话云雾散开时可能露出还没画出来的空画布）
    *   clear     云雾散开要多久（秒）
    *   color / opacity   云雾的颜色（r, g, b）、最浓时的不透明度（柔边、半透明叠上去，不是一块纯白硬切）
    *   puffs / size / spread / push / stagger   几团云；每团多大（× 战场的宽 / 高）；盖满时各团离中心多远（× 战场的半宽 / 半高）；
@@ -71,7 +72,7 @@
   const MIST = {
     rise: { elevation: 88, dist: 1.15, secs: 0.75, ease: "inOutCubic" },
     descend: { secs: 0.9, ease: "inOutCubic" },
-    cover: 0.55, overlap: 0.25, hold: 0.15, clear: 0.7,
+    cover: 0.55, overlap: 0.25, hold: 0.15, frames: 2, clear: 0.7,
     color: [255, 255, 255], opacity: 0.97,
     puffs: 9, size: 1.1, spread: 0.38, push: 0.8, stagger: 0.03,
     wheel: { step: 40, idle: 0.22, line: 40, page: 800 }
@@ -365,14 +366,21 @@
       const pre = T.pre;
       T.pre = null;
       swapNow(T.to, pre).then(() => {
-        if (gen === T.gen && T.to === "new") camMove("overhead", { elevation: M.rise.elevation, dist: M.rise.dist, secs: 0 });   // 新画面从正上方开始
-        both();
+        if (gen !== T.gen || T.to !== "new" || !S.sc) { both(); return; }
+        camMove("overhead", { elevation: M.rise.elevation, dist: M.rise.dist, secs: 0 });   // 新画面从正上方开始
+        afterFrames(M.frames, both);   // 画出来了云雾才散
       });
     } else if (s.step === "clear") {
       mistTo("out");
       if (T.to === "new") camMove("descend", { secs: M.descend.secs, ease: M.descend.ease });
       env.wait(s.secs, go);
     } else go();
+  }
+  /** 等浏览器画完 n 帧再接着走（新画面第一次画要编译着色器）；没有 requestAnimationFrame（Node 里）就直接接着走 */
+  function afterFrames(n, fn) {
+    const raf = root.requestAnimationFrame;
+    if (!(n > 0) || typeof raf !== "function") { fn(); return; }
+    raf.call(root, () => afterFrames(n - 1, fn));
   }
   /** 叫场景挪转场的镜头（overhead 升到 / 摆到正上方、descend 降回远景）；没有场景、场景没有这一招（浏览器缓存里还是旧的场景模块）就算了，云雾照走 */
   function camMove(name, o) { if (S.sc && typeof S.sc[name] === "function") S.sc[name](o); }
