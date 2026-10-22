@@ -648,11 +648,11 @@ test("手机竖屏：抽屉收着时顶栏、吊牌、队伍头像、竖标签�
     assert.ok(Object.values(bx).every(b => b.l >= -1 && b.r <= 391 && b.b <= 845), why + "：都在屏幕里：" + JSON.stringify(bx));
   };
   check(await boxes(), "平时");
-  // 技能栏展开、换行变高了（字多、技能多）：竖标签跟着往上挪，还是不压
-  const before = await rect(page, ".ol-battle > .g-hud");
+  // 技能栏展开、变高了（提示栏字多）：竖标签跟着往上挪，还是不压（技能栏最高只到屏幕高度的 35%，#311：在这以内长高）
   if (await page.evaluate(() => document.querySelector(".ol-battle > .g-hud").classList.contains("dock-closed"))) await page.click(".ol-battle .hd2d-dock-toggle");
-  await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.style.display = "block"; h.style.minHeight = "160px"; });
-  await page.waitForFunction(h0 => document.querySelector(".ol-battle > .g-hud").getBoundingClientRect().height > h0 + 150, before.height);
+  const before = await rect(page, ".ol-battle > .g-hud");
+  await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.style.display = "block"; h.style.minHeight = "100px"; });
+  await page.waitForFunction(h0 => document.querySelector(".ol-battle > .g-hud").getBoundingClientRect().height > h0 + 60, before.height);
   await page.waitForFunction(() => { const h = document.querySelector(".ol-battle > .g-hud").getBoundingClientRect(), s = document.getElementById("online-side").getBoundingClientRect(); return s.bottom <= h.top; }, null, { timeout: 3000 });
   check(await boxes(), "技能栏变高以后");
   await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.style.display = ""; h.style.minHeight = ""; });
