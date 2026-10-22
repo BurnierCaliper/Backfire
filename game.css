@@ -2364,6 +2364,7 @@ html.mech-tip-on .unit-tip { visibility: hidden; }   /* 鼠标停在图标上：
 .exec-edit label { display: inline-flex; align-items: center; gap: 4px; }
 .exec-edit input[type=number] { width: 48px; }
 .exec-edit input[type=text] { width: 72px; }
+.exec-edit input[data-x="name"] { width: 8em; }   /* 首领机制的技能名（选填） */
 .exec-edit input, .exec-edit select { font: inherit; padding: 2px 4px; }
 
 /* 属性克制：预览里要打掉的血条变浅金、写「克制」；命中时整个战场震一下 */
