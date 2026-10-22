@@ -48,7 +48,7 @@ function worldPlaceOf(regionOrId) {
  *   地图上别的地点（星际港口、极北禁区、太阳能板群……）不是区域，认不得。
  *   HD-2D 战场的地面主题表（hd2d/hd2d-layout.js 的 REGIONS / REGION_ALIAS）和这里一一对上（tests/region-light.test.js 核对）。 */
 const BATTLE_REGIONS = ["外城区", "沙漠", "巨人城", "天网设施", "第一采矿场", "第二采矿场", "第三采矿场",
-  "下水道"];   // 下水道：游戏里还没有这张图（ROADMAP 里的「下水道」），HD-2D 原型先放了地面主题；主持人可以在战场配置里选
+  "下水道"];   // 下水道：隶属巨人城的专门区域（run.js · SUB_REGIONS），狂鼠的遭遇带着这个区域名；地图上怎么进去另做，主持人也可以在战场配置里选
 /** 区域名 / 地图地点 id / 地点名 → 区域名（BATTLE_REGIONS 里的）；认不得的返回 null */
 function battleRegionName(x) {
   if (typeof x !== "string") return null;

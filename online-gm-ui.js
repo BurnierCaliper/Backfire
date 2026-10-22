@@ -93,7 +93,7 @@
       else if (unitField === "iv") editor = `<div class="ogm-grid">${number("ogm-iv-hp", "血量水平 %（−10～10）", (u.iv || {}).hp || 0, -10, 10, 1)}${number("ogm-iv-atk", "ATK 水平 %（−10～10）", (u.iv || {}).atk || 0, -10, 10, 1)}</div><p class="ogm-muted">按生成时的原始数值重算：血量上限 ×(1 + 血量%)（已受的伤按比例保留），ATK ×(1 + ATK%)。</p>`;
       else if (unitField === "race") {
         const o = raceNames(); delete o[""];
-        editor = `${select("ogm-unit-value", "种族", options(o, typeof raceLabel === "function" ? raceLabel(u.race) : ""))}<p class="ogm-muted">按生成时的原始数值重算六维（先去掉旧种族加的，再加新种族的；只有随机种族的盗匪、燃气收集机才改数值），个体值跟着重算。</p>`;
+        editor = `${select("ogm-unit-value", "种族", options(o, typeof raceLabel === "function" ? raceLabel(u.race) : ""))}<p class="ogm-muted">按生成时的原始数值重算六维（先去掉旧种族加的，再加新种族的；只有随机种族的盗匪、燃气收集机和下水道的狂鼠才改数值），个体值跟着重算。</p>`;
       }
       else if (unitField === "enriched") editor = `${select("ogm-unit-value", "富集", options({ on: "富集", off: "普通（不富集）" }, u.enriched ? "on" : "off"))}<p class="ogm-muted">富集：装甲层 ×1.5、名字加「富集」、打倒奎支 ×5 并掉武器升级材料、第 3 回合起会下潜逃走。改成普通则反过来（已受的伤按比例保留）。定了以后开战不再随机。</p>`;
       else if (unitField === "self") editor = select("ogm-unit-value", "自身状态", options({ none: "无", burn: "焚身", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "锚定", store: "储能", doppler: "多普勒" }, u.self));

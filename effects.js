@@ -450,7 +450,7 @@ function afterMove(u, notes) {
 }
 
 /* ---------- 狂鼠的阵营共用被动：狂潮（docs/ratfolk.md 2.2） ---------- */
-/** 狂鼠的阵营名（run.js · ENEMY_INFO 的 faction；兵种和阵营在下水道那一步登记） */
+/** 狂鼠的阵营名（run.js · ENEMY_INFO 的 faction；四个兵种见 enemies.js · RAT_CFG，和所有阵营敌对：enemies.js · HOSTILE_FACTIONS） */
 const RATFOLK_FACTION = "狂鼠";
 function isRatfolk(u) {
   return !!u && !u.isPlayer && typeof factionOf === "function" && factionOf(u) === RATFOLK_FACTION;

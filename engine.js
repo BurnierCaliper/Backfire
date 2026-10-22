@@ -1465,6 +1465,8 @@ function healUnit(unit, amount, opt) {
   if (typeof bpHealBonus === "function") raw += bpHealBonus(unit);   // 单局图纸：愿你无恙
   // 事故幸存+：拉斯缪尔不稳态下受到的治疗 ×3
   if (unit.kit === "ras" && unit.resources && unit.resources.unstable && typeof passivePlus === "function" && passivePlus(unit, 2)) raw *= 3;
+  // 疫病暴徒（下水道狂鼠）：狂暴时受到的治疗 +50%（enemies.js · ratHealMult）
+  if (typeof ratHealMult === "function") raw *= ratHealMult(unit);
   opt = opt || {};
   // 起身中（靠坚毅生命战斗）：普通治疗不回坚毅生命，只有自焚吸血回（这场战斗里临时有效，见 ledgerCapture）
   if (unit.upOnShp && !opt.selfBurn) return 0;
@@ -1684,6 +1686,18 @@ const RIOT_STATS = {
   captain: { shield: [15, 6],  flesh: [20, 5], def: 4, atk: 7 }    // 狼队长 atk 8 + … → 7 + …
 };
 
+/** 下水道狂鼠的数值（docs/ratfolk.md 第 3 节）：血量全部是纯肉体（模板原来的护盾 + 肉体合成一层，总量不变），flesh = [1 级血量, 每级增量]；
+ *  fleshPer5：每 5 级再加的血量（牛队长的护盾每 5 级 +4）；def = 1 级架势（杂兵每 10 级 +1，精英照队长每 5 级 +1，精英已经比模板 −1）；
+ *  atk = 1 级 atk（成长项照模板，写在 enemyPresets 里）；atkMult：ATK 是模板的几成（四舍五入）；dice：普通攻击的伤害骰（固定，不随等级升档）。
+ *  种族「鼠类人·鼠」的六维修正（体质 −1：最内层肉体 −(1 + 等级)，不随人数缩放；耐力 −1：架势不变）在生成时按 run.js · ENEMY_INFO 的
+ *  raceAttrs 换算（enemies.js · setEnemyRace），这里不算 */
+const RAT_STATS = {
+  lurker: { flesh: [17, 4], def: 3, atk: 5, atkMult: 0.75, dice: 6 },   // 潜藏者：狂徒（匕首），ATK × 0.75
+  biter:  { flesh: [17, 4], def: 3, atk: 5, dice: 6 },                  // 撕咬者：狂徒（匕首）
+  plague: { flesh: [42, 12], fleshPer5: 4, def: 4, atk: 6, dice: 8 },   // 疫病暴徒：警卫队队长（牛）护盾 16 + 肉体 26（每级 5 + 7）合成，架势 5 → 4
+  tyrant: { flesh: [35, 11], def: 3, atk: 8, dice: 8 }                  // 暴虐猎手：警卫队队长（狼）护盾 15 + 肉体 20（每级 6 + 5）合成，架势 4 → 3
+};
+
 function enemyPresets() {
   return [
     { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
@@ -1842,6 +1856,33 @@ function enemyPresets() {
         { type: "shield", hp: scaleHp(RIOT_STATS.captain.shield[0] + (lv - 1) * RIOT_STATS.captain.shield[1], p) },
         { type: "flesh", hp: scaleHp(RIOT_STATS.captain.flesh[0] + (lv - 1) * RIOT_STATS.captain.flesh[1], p) }
       ], RIOT_STATS.captain.def + milestone(lv, 5), RIOT_STATS.captain.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "riot_captain", range: "any", dice: [1, 6], element: "fire" });
+    }},
+    // —— 下水道狂鼠（docs/ratfolk.md）：纯肉体；种族「鼠类人·鼠」的六维修正生成时再换算（ENEMY_INFO.raceAttrs）——
+    // 潜藏者：狂徒（匕首）的血量 / 架势，ATK × 0.75 四舍五入；开战时躲藏
+    { id: "rat_lurker", name: "潜藏者", build(lv, p) {
+      const S = RAT_STATS.lurker;
+      const u = unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10),
+        Math.round((S.atk + (lv - 1)) * S.atkMult), { kit: "rat_lurker", range: "melee", dice: [1, S.dice], element: "physical" });
+      u.statuses.hide = true;
+      return u;
+    }},
+    // 撕咬者：数值同狂徒（匕首）
+    { id: "rat_biter", name: "撕咬者", build(lv, p) {
+      const S = RAT_STATS.biter;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10), S.atk + (lv - 1),
+        { kit: "rat_biter", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // 疫病暴徒：照警卫队队长（牛）的写法（血量合成纯肉体、架势 −1），骰子固定 1d8
+    { id: "rat_plague", name: "疫病暴徒", build(lv, p) {
+      const S = RAT_STATS.plague;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1] + milestone(lv, 5) * S.fleshPer5, p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 5) * 2, { kit: "rat_plague", range: "any", dice: [1, S.dice], element: "physical" });
+    }},
+    // 暴虐猎手：照警卫队队长（狼）的写法（血量合成纯肉体、架势 −1），骰子 1d8
+    { id: "rat_tyrant", name: "暴虐猎手", build(lv, p) {
+      const S = RAT_STATS.tyrant;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "rat_tyrant", range: "melee", dice: [1, S.dice], element: "physical" });
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
