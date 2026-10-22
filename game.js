@@ -3661,6 +3661,11 @@
       const p = row && (hsView.players || []).find(x => x.id === row.owner);
       return p ? p.name : "";
     };
+    // 新画面开着（#297）：技能栏、队伍栏换成原型那一套（hd2d/hd2d-shell.js 给 .g-hud 换上了新外壳）——按钮照旧在这里建、在这里接点击 / 悬停，
+    // 只是里面画成新样子；画的东西只用投影过的单位（OnlineView.projectUnit，和新画面的铭牌同一份白名单），坚毅生命一个字都不碰
+    const hudEl = document.querySelector("#g-app > .g-hud");
+    const shell = window.HD2DShell && HD2DShell.on(hudEl) && window.OnlineView ? HD2DShell : null;
+    const shellView = (u) => { try { return u ? OnlineView.projectUnit(u) : null; } catch (e) { return null; } };
     ordered.forEach((u, i) => {
       const s = snapUnit(u);
       const op = operatorOf(u);
@@ -3673,6 +3678,12 @@
       b.innerHTML = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
         <div class="mini"><i style="width:${pct}%"></i></div>
         <div class="u-econ">${s.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ}${!s.dead && s.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!s.dead && s.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`;
+      // 新画面：主职责头像 + 名字 / 等级 / 操控者（倒下也写上）+ 身上的效果 + 分层血条
+      if (shell) {
+        const pu = shellView(u);
+        b.classList.add("pm");
+        if (pu) b.innerHTML = shell.member(pu, { tag: [op, s.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
+      }
       b.dataset.id = u.id;
       b.onclick = () => { if (G.depth === 0 && !choiceResolve && !u.dead) selectActor(u.id); };
       party.appendChild(b);
@@ -3746,6 +3757,7 @@
       }
     }
     G.summonShown = summonSk;
+    const actorView = shell ? shellView(actor) : null;   // 新画面：绯秋的刀、夕夏的引擎跟着变属性，读投影里的
     list.forEach((sk, i) => {
       const why = blockReason(actor, sk);
       const b = el("button", "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : ""));
@@ -3756,11 +3768,21 @@
       if (!cost.length) cost.push("不耗行动");
       b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
       if (why) { b.disabled = true; b.setAttribute("aria-label", `${sk.name}：${why}`); }
+      // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、点击、悬停说明照旧（下面 wireSkill 接的还是这个按钮）
+      if (shell) {
+        const nb = shell.skillButton({ id: sk.id, name: sk.name, hint: sk.hint, cost: sk.cost }, i, actorView, { key: i < 9 ? i + 1 : "" });
+        nb.cls.split(" ").forEach(c => b.classList.add(c));
+        b.innerHTML = nb.html;
+        b.setAttribute("aria-label", nb.label + (why ? "：" + why : ""));
+      }
       // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）；停一会儿就按当前数值预演
       wireSkill(b, sk, why);
       box.appendChild(b);
     });
     G.skillsShown = list;
+    // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
+    const acting = !!state.combatStarted && state.combatPhase === "player";
+    if (shell) shell.who(hudEl, !state.combatStarted || acting ? shell.whoHtml(actorView, acting) : "");
     // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
     const gauge = $("g-gauge");
     if (gauge) {

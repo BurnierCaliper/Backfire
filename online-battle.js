@@ -3,7 +3,9 @@
  * 选了技能以后在战场上直接点目标（单位卡 / 区域），分步里的其他选项排在提示栏里。
  * 规则和预演都在主机上：这里只画主机发来的展示数据（online-view.js 的投影），点选通过回调交给 online-ui.js 去问主机。
  *   const b = OnlineBattle.create({ onUnit, onZone, onSkill, onOption, onCancel, onEnd })
- *   b.el → 挂到页面上；b.update(data, ui)：data 是展示用的战场，ui 是 { mine, current, acting, menu, skills, armed, hint, busy } */
+ *   b.el → 挂到页面上；b.update(data, ui)：data 是展示用的战场，ui 是 { mine, current, acting, menu, skills, armed, hint, busy }
+ * 新画面开着时（#297，hd2d/hd2d-shell.js 给这里的 .g-hud 换上了新外壳）：技能按钮、队伍栏画成原型那一套，唤出 / 收回武器人单独做成大按钮（Q）；
+ * 按钮、点击、悬停、快捷键还是这里的那一份，关着时一点没变 */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -111,6 +113,8 @@
     el.append(field, hud);
     const cards = new Map();
     let layoutKey = "", last = { ui: {} };
+    // 新画面开着时（#297）技能栏上排出来的：普通技能（数字键按这个排）、单独的唤出 / 收回武器人（Q）；关着是 null，快捷键照旧按主机给的整张技能表
+    let shown = null;
 
     /** 战场骨架：两区 / 三区直排，或者主机发来的特殊棋盘（和 game.js · syncFieldDom 同一套摆法） */
     function layout(data) {
@@ -243,12 +247,17 @@
     function paintHud(data, ui) {
       const units = data.units || [], mine = new Set(ui.mine || []);
       const allies = units.filter(u => u.isPlayer && !u.hidden);
+      // 新画面开着（#297）：技能栏、队伍栏换成原型那一套（hd2d/hd2d-shell.js 给这块 .g-hud 换上了新外壳）——按钮还是这里画、点击 / 悬停 / 快捷键还是这里接，
+      // 画的东西只用收到的包（data 的单位、主机给的技能选项）；技能的属性 / 攻击还是技能按本机的技能表读提示（静态的规则文字）
+      const SH = root.HD2DShell && root.HD2DShell.on(hud) ? root.HD2DShell : null;
       const pct = (u) => { const L = u.layers || [], m = L.reduce((a, l) => a + (Number(l.max) || 0), 0); return m ? L.reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0) / m * 100 : 0; };
       const econ = (u) => Array.from({ length: Math.max(u.apMax || 0, u.ap || 0) }, (_, k) => `<i class="econ-ap${k < (u.ap || 0) ? " on" : ""}"></i>`).join("") +
         Array.from({ length: Math.max(u.bonusMax || 0, u.bonus || 0) }, (_, k) => `<i class="econ-bonus${k < (u.bonus || 0) ? " on" : ""}"></i>`).join("");
-      hud.querySelector(".party").innerHTML = allies.map(u => `<button type="button" class="pc${u.weaponOf ? " weapon" : ""}${u.dead ? " downed" : ""}${u.id === ui.current ? " on" : ""}${mine.has(u.id) ? " mine" : " off"}" data-ob-unit="${esc(u.id)}" title="${esc(mine.has(u.id) ? "你的角色" : "队友")}">
+      // 新画面：主职责头像 + 名字 / 等级 /「你」（倒下也写上）+ 身上的效果 + 分层血条
+      const member = (u) => SH.member(u, { tag: [mine.has(u.id) ? "你" : "", u.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
+      hud.querySelector(".party").innerHTML = allies.map(u => `<button type="button" class="pc${SH ? " pm" : ""}${u.weaponOf ? " weapon" : ""}${u.dead ? " downed" : ""}${u.id === ui.current ? " on" : ""}${mine.has(u.id) ? " mine" : " off"}" data-ob-unit="${esc(u.id)}" title="${esc(mine.has(u.id) ? "你的角色" : "队友")}">${SH ? member(u) : `
         <span class="n"><span>${esc(u.name || u.id)}</span><span class="k">${mine.has(u.id) ? "你" : ""}</span></span><div class="mini"><i style="width:${pct(u)}%"></i></div>
-        <div class="u-econ">${u.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ(u)}${!u.dead && u.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!u.dead && u.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div></button>`).join("");
+        <div class="u-econ">${u.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ(u)}${!u.dead && u.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!u.dead && u.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`}</button>`).join("");
       const cur = units.find(u => u.id === ui.current);
       const gauge = hud.querySelector(".hi-gauge");
       const gh = cur && mine.has(cur.id) && cur.hud && root.HudIcons ? HudIcons.gauge(cur.hud) : "";
@@ -256,13 +265,25 @@
       // 技能栏：主机给的技能选项（不能用的灰掉，写原因）。选了某个技能后它高亮，点别的技能就换
       const skills = (ui.skills || []);
       const costText = (id) => root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(id) : "";
-      hud.querySelector(".skills").innerHTML = skills.map((o, i) => {
+      // 新画面：唤出 / 收回武器人单独做成大按钮（和结束行动放在一起，快捷键 Q，同单机），数字键按剩下的普通技能排
+      const pick = SH ? SH.pickSummon(skills.map(o => ({ id: o.value, disabled: !!o.disabled, o }))) : null;
+      const listed = pick ? pick.rest.map(r => r.o) : skills;
+      shown = pick ? { skills: listed, summon: pick.summon ? pick.summon.o : null } : null;
+      const hints = SH ? SH.hintsOf(cur) : null;
+      hud.querySelector(".skills").innerHTML = listed.map((o, i) => {
         const cost = o.cost || costText(o.value);   // 房主算好的消耗优先（online-actions.js · costLabel）
         // 灰掉的技能写明原因（行动点不足 / 没有能用的道具…），鼠标悬停和读屏都能看到
         const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
+        if (SH) {
+          // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、原因、点击、悬停说明照旧
+          const nb = SH.skillButton({ id: o.value, name: o.label, hint: hints[o.value] || "" }, i, cur, { key: i < 9 ? i + 1 : "", cost: o.disabled ? why : cost });
+          return `<button type="button" class="sk ${nb.cls}${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(nb.label + (why && !o.disabled ? "：" + why : ""))}">${nb.html}</button>`;
+        }
         return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
           <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(o.disabled ? why : cost)}</span></button>`;
       }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : "");
+      paintSummon(shown && shown.summon, cur, ui);
+      if (SH) SH.who(hud, ui.acting ? SH.whoHtml(cur, true) : "");   // 技能栏上面那一行：谁在行动（敌人回合空着）
       const end = hud.querySelector(".endturn");
       end.disabled = !(ui.acting && mine.has(ui.current)) || !!ui.busy;
       // 提示栏：现在要做什么；分步里的「选项」类选择、可以不选的步骤、取消，放成按钮
@@ -279,6 +300,30 @@
       if (Number(ui.deadline) > 0) hint += `　<span class="ol-countdown" role="timer" aria-live="off" data-ol-deadline="${Number(ui.deadline)}"></span>`;
       const h = hud.querySelector(".hint");
       if (h.dataset.html !== hint) { h.innerHTML = hint; h.dataset.html = hint; tickCountdowns(h); }
+    }
+
+    /** 新画面开着（#297）：唤出 / 收回武器人的大按钮（照单机 game.js 的 #g-summon：图标、名字、消耗、快捷键，颜色跟着这个人（武器人跟着主人）的主属性），
+     *  放在结束行动左边。点下去和点技能一样（data-ob-skill → cb.onSkill），悬停照旧弹技能说明，用不了照旧灰掉写原因。
+     *  o = 主机给的那个技能选项；没有（关着新画面、这个人没有）就把按钮拿掉——旧画面里它还在技能栏里 */
+    let summonBox = null, summonHtml = "";
+    function paintSummon(o, cur, ui) {
+      const SH = root.HD2DShell;
+      if (!o || !SH) { if (summonBox) { summonBox.remove(); summonBox = null; summonHtml = ""; } return; }
+      if (!summonBox) { summonBox = make("div", "hud-summon"); summonBox.appendChild(make("button", "summonbtn")); }
+      const side = hud.querySelector(".hud-side");
+      if (side && side.parentNode && summonBox.nextSibling !== side) side.parentNode.insertBefore(summonBox, side);
+      const b = summonBox.firstChild;
+      const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
+      const cost = o.cost || (root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(o.value) : "");
+      const sb = SH.summonButton({ id: o.value, name: o.label }, cur, { cost: o.disabled ? why : cost, key: isTouch() ? "" : SH.SHELL.summonKey });
+      b.type = "button";
+      b.className = "summonbtn" + (sb.back ? " back" : "") + (ui.armed === o.value ? " armed" : "") + (o.disabled ? " blocked" : "");
+      b.dataset.obSkill = o.value;
+      b.disabled = !!(o.disabled || ui.busy);
+      b.style.setProperty("--el", sb.color || "var(--sk-hazard, #f2c230)");
+      if (summonHtml !== sb.html) { b.innerHTML = sb.html; summonHtml = sb.html; }
+      b.setAttribute("aria-label", sb.label + (why && !o.disabled ? "：" + why : ""));
+      if (why) b.title = why; else b.removeAttribute("title");
     }
 
     function update(data, ui) {
@@ -364,8 +409,14 @@
       const ui = last.ui || {};
       if (e.key === "Escape" && ui.armed && cb.onCancel) { cb.onCancel(); e.preventDefault(); return; }
       if (/^[1-9]$/.test(e.key)) {
-        const o = (ui.skills || [])[Number(e.key) - 1];
+        const o = ((shown ? shown.skills : ui.skills) || [])[Number(e.key) - 1];
         if (o && !o.disabled && !ui.busy && cb.onSkill) { cb.onSkill(o.value); e.preventDefault(); }
+        return;
+      }
+      // 新画面开着：唤出 / 收回武器人是单独的大按钮，快捷键 Q（同单机 game.js），走的还是点技能那一条（cb.onSkill）
+      if ((e.key === "q" || e.key === "Q") && shown && shown.summon && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const o = shown.summon;
+        if (!o.disabled && !ui.busy && cb.onSkill) { cb.onSkill(o.value); e.preventDefault(); }
         return;
       }
       if (e.key === " " && !ui.busy && ui.acting && (ui.mine || []).includes(ui.current) && cb.onEnd) { cb.onEnd(); e.preventDefault(); }
