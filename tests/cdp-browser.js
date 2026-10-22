@@ -51,7 +51,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 class Page {
   constructor(conn, sessionId) {
     this.conn = conn; this.sessionId = sessionId; this.handlers = {}; this.onLoad = null;
-    this.keyboard = { press: key => this.press(key) };
+    this.keyboard = { press: key => this.pressKey(key), type: text => this.send("Input.insertText", { text: String(text) }) };
     this.off = conn.on(msg => {
       if (msg.sessionId !== sessionId) return;
       if (msg.method === "Runtime.exceptionThrown") {
@@ -65,7 +65,7 @@ class Page {
   send(method, params) { return this.conn.send(method, params, this.sessionId); }
   async init(opt) {
     await this.send("Page.enable"); await this.send("Runtime.enable");
-    const vp = opt.viewport || { width: 1280, height: 720 };
+    const vp = this.viewport = opt.viewport || { width: 1280, height: 720 };
     await this.send("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: !!opt.isMobile });
     if (opt.hasTouch) await this.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   }
@@ -119,13 +119,18 @@ class Page {
     await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1 });
     await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount: 1 });
   }
-  async press(key) {
+  /** page.press(selector, key)：先把焦点放到这个元素上再按 */
+  async press(selector, key) { await this.focus(selector); return this.pressKey(key); }
+  async pressKey(combo) {
+    // 「Shift+Enter」这种：前面的是修饰键（Alt 1 / Control 2 / Meta 4 / Shift 8）
+    const parts = String(combo).split("+"), key = parts.length > 1 && parts[parts.length - 1] === "" ? "+" : parts.pop();
+    const modifiers = parts.reduce((m, p) => m | ({ Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Shift: 8 }[p] || 0), 0);
     let k = KEYS[key];
     if (!k && /^[0-9]$/.test(key)) k = ["Digit" + key, key.charCodeAt(0), key];
     else if (!k && /^[a-z]$/i.test(key)) k = ["Key" + key.toUpperCase(), key.toUpperCase().charCodeAt(0), key];
     if (!k) throw new Error("不支持的按键：" + key);
     const [code, keyCode, text, name] = k;
-    const base = { key: name || key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode };
+    const base = { key: name || key, code, windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers };
     await this.send("Input.dispatchKeyEvent", Object.assign({ type: text ? "keyDown" : "rawKeyDown" }, text ? { text } : {}, base));
     await this.send("Input.dispatchKeyEvent", Object.assign({ type: "keyUp" }, base));
   }
@@ -141,7 +146,7 @@ class Page {
     const end = Date.now() + (opt && opt.timeout || 5000);
     for (;;) {
       const v = await this.evaluate(fn, arg === null ? undefined : arg);
-      if (v) return v;
+      if (v) return { jsonValue: async () => v };   // 和 Playwright 一样返回句柄（只做了 jsonValue）
       if (Date.now() > end) throw new Error("waitForFunction 超时：" + String(fn).slice(0, 120));
       await sleep(30);
     }
@@ -156,19 +161,61 @@ class Page {
     }
   }
   waitForTimeout(ms) { return sleep(ms); }
-  locator(selector) {
-    const page = this;
-    return {
-      count: () => page.evaluate(sel => document.querySelectorAll(sel).length, selector),
-      isVisible: () => page.isVisible(selector),
-      click: opt => page.click(selector, opt),
-      async innerText() { await page.waitForSelector(selector, { state: "attached" }); return page.evaluate(sel => document.querySelector(sel).innerText, selector); },
-      async evaluate(fn, arg) {
-        await page.waitForSelector(selector, { state: "attached" });
-        return page.evaluate(`(${fn})(document.querySelector(${JSON.stringify(selector)}), ${arg === undefined ? "undefined" : JSON.stringify(arg)})`);
-      }
-    };
+  async selectOption(selector, value) {
+    await this.waitForSelector(selector, { state: "attached" });
+    await this.evaluate(([sel, v]) => { const el = document.querySelector(sel); el.value = v; el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); }, [selector, String(value)]);
   }
+  async check(selector, on = true) { if (await this.evaluate(sel => !!(document.querySelector(sel) || {}).checked, selector) !== on) await this.click(selector); }
+  uncheck(selector) { return this.check(selector, false); }
+  textContent(selector) { return this.locator(selector).evaluate(el => el.textContent); }
+  inputValue(selector) { return this.locator(selector).inputValue(); }
+  emulateMedia(opt = {}) { return this.send("Emulation.setEmulatedMedia", { features: opt.reducedMotion ? [{ name: "prefers-reduced-motion", value: opt.reducedMotion }] : [] }); }
+  setViewportSize({ width, height }) { this.viewport = { width, height }; return this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }); }
+  viewportSize() { return this.viewport || null; }
+  async screenshot(opt = {}) { const { data } = await this.send("Page.captureScreenshot", { format: "png" }); if (opt.path) fs.writeFileSync(opt.path, Buffer.from(data, "base64")); return Buffer.from(data, "base64"); }
+  locator(selector) { return new Locator(this, `() => [...document.querySelectorAll(${JSON.stringify(selector)})]`, selector); }
+  /** 只认按钮：名字是字符串时按包含（不分大小写）找，正则就按正则 */
+  getByRole(role, opt = {}) {
+    const name = opt.name instanceof RegExp ? { source: opt.name.source, flags: opt.name.flags } : opt.name == null ? null : { text: String(opt.name), exact: !!opt.exact };
+    const sel = role === "button" ? "button, [role=button], input[type=button], input[type=submit]" : `[role=${role}]`;
+    return new Locator(this, `() => [...document.querySelectorAll(${JSON.stringify(sel)})].filter(el => {
+      const r = el.getBoundingClientRect(); if (!r.width || !r.height) return false;
+      const n = ${JSON.stringify(name)}; if (!n) return true;
+      const label = (el.getAttribute("aria-label") || el.innerText || el.value || "").replace(/\\s+/g, " ").trim();
+      if (n.source != null) return new RegExp(n.source, n.flags).test(label);
+      return n.exact ? label === n.text : label.toLowerCase().includes(n.text.toLowerCase());
+    })`, role + " " + JSON.stringify(name));
+  }
+}
+
+/** 定位器：find 是在页面里跑的函数源码（返回元素数组）；要动手时给第一个元素打个记号，用 CSS 选中它 */
+class Locator {
+  constructor(page, find, desc) { this.page = page; this.find = find; this.desc = desc; }
+  async pick(timeout) {
+    const end = Date.now() + (timeout || 5000);
+    for (;;) {
+      const sel = await this.page.evaluate(`(() => { const el = (${this.find})()[0]; if (!el) return null; if (!el.dataset.cdpPick) el.dataset.cdpPick = Math.random().toString(36).slice(2); return '[data-cdp-pick="' + el.dataset.cdpPick + '"]'; })()`);
+      if (sel) return sel;
+      if (Date.now() > end) throw new Error("找不到：" + this.desc);
+      await sleep(30);
+    }
+  }
+  first() { return this; }
+  count() { return this.page.evaluate(`(${this.find})().length`); }
+  async isVisible() { const n = await this.count(); return n ? this.page.isVisible(await this.pick()) : false; }
+  async click(opt) { return this.page.click(await this.pick(opt && opt.timeout), opt); }
+  async fill(v) { return this.page.fill(await this.pick(), v); }
+  async innerText() { return this.evaluate(el => el.innerText); }
+  async inputValue() { return this.evaluate(el => el.value); }
+  async isDisabled() { return this.evaluate(el => !!el.disabled); }
+  async getAttribute(name) { return this.evaluate((el, n) => el.getAttribute(n), name); }
+  async boundingBox() { return this.evaluate(el => { const r = el.getBoundingClientRect(); return r.width || r.height ? { x: r.x, y: r.y, width: r.width, height: r.height } : null; }); }
+  async waitFor(opt = {}) { return this.page.waitForSelector(await (opt.state === "detached" || opt.state === "hidden" ? Promise.resolve(this.desc) : this.pick(opt.timeout)), opt); }
+  async evaluate(fn, arg) {
+    const sel = await this.pick();
+    return this.page.evaluate(`(${fn})(document.querySelector(${JSON.stringify(sel)}), ${arg === undefined ? "undefined" : JSON.stringify(arg)})`);
+  }
+  evaluateAll(fn, arg) { return this.page.evaluate(`(${fn})((${this.find})(), ${arg === undefined ? "undefined" : JSON.stringify(arg)})`); }
 }
 
 class Context {
