@@ -411,6 +411,9 @@ test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是�
   // 纸纹那一层铺满整块面板（比面板四边多出撕边外的影子），不是一条细线
   const sheet = await page.evaluate(() => { const el = document.querySelector(".ol-battle > .g-hud"), cs = getComputedStyle(el, "::before"); return { h: parseFloat(cs.height), panel: el.offsetHeight }; });
   assert.ok(sheet.h >= sheet.panel, "技能栏后面那张纸铺满：" + JSON.stringify(sheet));
+  // 「结束行动」是纸板 + 喷漆字：不再垫 skin.css 的那块喷漆色块（字和底不能是一个颜色）
+  const end = await page.evaluate(() => { const el = document.querySelector(".ol-battle .endturn"); return { tex: el.dataset.olpTex, before: getComputedStyle(el, "::before").display }; });
+  assert.deepEqual(end, { tex: "board", before: "none" });
   // 同一个尺寸、同一套配色只画一次（第二次从缓存拿，一模一样）
   const same = await page.evaluate(() => { const th = { time: "day", weather: "none" }, a = OnlinePaper.texture(document, "card", 123, 45, th), t0 = performance.now(), b = OnlinePaper.texture(document, "card", 123, 45, th); return { same: a === b, fast: performance.now() - t0 < 2, png: a.startsWith("data:image/png") }; });
   assert.deepEqual(same, { same: true, fast: true, png: true });
