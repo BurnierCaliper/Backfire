@@ -30,18 +30,20 @@
     elements: { fire: "#ff5b2e", acid: "#9be03a", electric: "#ffd32e", ice: "#7ccfe8", energy: "#35e0c0", physical: "#ff9a3c", harmonic: "#c07cf0" },
     elementNames: { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" },
     /* 主职责 → 头像图标（职责名用游戏里现成的 growth.js · ROLE_LIST 九种，角色卡上的 roles.primary）。
+     * 主人亲自定稿（10/22）：FF14 职业图标那种简单图形、不直白——先从职责的四个技能提炼精髓，再用几块形状暗示它。
      * 画法照美术定稿的贴纸图标（art/style-guide.html）：48×48 的格子里一层白边（.rim），上面一层墨线（.ink）；
-     * class="thin" 细一点、"bold" 粗一点、"solid" 实心 */
+     * class="thin" 细一点、"bold" 粗一点、"solid" 实心、"frag" 碎片（白边细，碎片之间露出缝）、"ghost" 虚线影子、
+     * "hole" 实心块上挖出的洞、"cut" 实心块上的白缝（样式在 hd2d.css 的 .stk） */
     roles: {
-      "直伤": `<circle cx="24" cy="24" r="13"/><path d="M24 5 V15 M24 33 V43 M5 24 H15 M33 24 H43"/><circle class="solid" cx="24" cy="24" r="3.4"/>`,   // 准星
-      "异常": `<path d="M18 6 H30 M20 6 V18 L9 37 A4 4 0 0 0 12.5 43 H35.5 A4 4 0 0 0 39 37 L28 18 V6"/><path class="thin" d="M14 31 H34"/><circle class="solid" cx="21" cy="37" r="2.4"/><circle class="solid" cx="28.5" cy="35.5" r="1.7"/>`,   // 冒泡的药瓶
-      "击破": `<path d="M24 4 L42 24 L24 44 L6 24 Z"/><path d="M27 9 L20.5 21 L28 26 L21.5 39"/>`,   // 裂开的架势菱形
-      "坦克": `<path d="M24 4 L40 9.5 V22 C40 33 33 40 24 44 C15 40 8 33 8 22 V9.5 Z"/><path class="thin" d="M24 11 L34 14.5 V22.5 C34 29.5 30 34 24 37 C18 34 14 29.5 14 22.5 V14.5 Z"/>`,   // 厚盾
-      "护卫": `<circle cx="15" cy="13" r="5.5"/><path d="M5 36 C5 27 9 22.5 15 22.5 C17.5 22.5 19.5 23.3 21 24.6"/><path d="M33 17 L44 21 V28.5 C44 35.5 39.5 39.5 33 43 C26.5 39.5 22 35.5 22 28.5 V21 Z"/>`,   // 盾挡在人前面
-      "生存": `<path d="M24 42 C11 33.5 5 26.5 5 18 A9.5 9.5 0 0 1 24 13.5 A9.5 9.5 0 0 1 43 18 C43 26.5 37 33.5 24 42 Z"/><path class="bold" d="M24 19 V33 M17 26 H31"/>`,   // 心 + 十字
-      "环境手": `<path d="M12 29 A7 7 0 0 1 12.5 15 A10.5 10.5 0 0 1 32 12.5 A8.5 8.5 0 0 1 36 29 Z"/><path class="thin" d="M7 36 H29 M14 42 H39 M33 36 H40"/>`,   // 云 + 风
-      "控场": `<path d="M24 6 V42 M6 24 H42"/><path d="M18 12 L24 6 L30 12 M18 36 L24 42 L30 36 M12 18 L6 24 L12 30 M36 18 L42 24 L36 30"/>`,   // 四向箭头（挪动单位）
-      "辅助": `<path d="M7 19 V29 H13 L30 38 V10 L13 19 Z"/><path d="M14 29 L17 39 H22.5 L20.5 30.5"/><path class="thin" d="M35 18.5 Q38.5 24 35 29.5 M39.5 14 Q45.5 24 39.5 34"/>`   // 喇叭（助威）
+      "直伤": `<path class="solid" d="M43 5 L22 21 L15 33 L27 26 Z"/><circle class="solid" cx="9.5" cy="38.5" r="3.6"/><path class="thin" d="M6 26 L13 29 M22 42 L19 35"/>`,   // 锋芒：一枚往前刺出的细长锋尖，尾部收成一点
+      "异常": `<path d="M24 9 L37 16.5 V31.5 L24 39 L11 31.5 V16.5 Z"/><circle class="solid" cx="37" cy="16.5" r="5"/><circle class="solid" cx="24" cy="24" r="2.6"/>`,   // 催化：一个分子环，其中一个节点被点亮
+      "击破": `<path class="solid" d="M30 10 A14 14 0 0 1 30 38 L29 34 L26 30 L28 26 L25 22 L29 18 L27 14 Z"/><path class="ghost" d="M30 10 A14 14 0 0 0 30 38"/><path class="solid frag" transform="translate(-4 -4) rotate(-12 26 10.5)" d="M26 10.5 L18 13.5 L24 19.5 Z"/><path class="solid frag" transform="translate(-7 0) rotate(6 23 21)" d="M23 21 L15 23.5 L22.5 27.5 Z"/><path class="solid frag" transform="translate(-4 4) rotate(14 25.5 29.5)" d="M25.5 29.5 L18.5 34 L27 37.5 Z"/><path class="solid frag" transform="translate(0 0) rotate(0 6 10)" d="M6 10 L9.5 9 L8.5 12.5 Z"/><path class="solid frag" transform="translate(0 0) rotate(0 5 36)" d="M5 36 L9 37.5 L5.5 40 Z"/>`,   // 半碎：冲击从左边打进来：右半边还保持原来的圆，左半边已经碎开飞溅（原轮廓留一道虚影）
+      "坦克": `<path class="solid" d="M12 16 V7 H17.5 V11 H21.5 V7 H26.5 V11 H30.5 V7 H36 V16 L32 19.5 L34.5 44 H13.5 L16 19.5 Z"/><path class="hole" d="M21.5 31 V26 A2.5 2.5 0 0 1 26.5 26 V31 Z"/><path class="cut" d="M15.5 19.5 H32.5"/>`,   // 城塔：一座收腰的高塔，塔顶垛口往外挑，中间一扇拱窗
+      "护卫": `<path class="solid" d="M22 5 L7 24 L22 43 L27 38 L15 24 L27 10 Z"/><circle class="solid" cx="34" cy="24" r="6.5"/>`,   // 前锋：一枚楔形挡在一个点的前面
+      "生存": `<circle class="thin" cx="24" cy="24" r="18"/><path class="bold" d="M5 25 H14 L18.5 14 L25 35 L29.5 20 L32.5 25 H43"/>`,   // 脉动：一圈里穿过一道心跳的折线
+      "环境手": `<path d="M24 41 L43 31 L24 21 L5 31 Z"/><path class="thin" d="M14.5 36 L33.5 26 M14.5 26 L33.5 36"/><circle class="solid" cx="24" cy="10" r="5"/><path class="thin" d="M24 17 V21"/>`,   // 场域：一块被俯看的场地，上空悬着一个光点
+      "控场": `<path class="ghost" d="M11 31.5 L20 37 L11 42.5 L2 37 Z"/><path class="thin" d="M24 21.5 L33 27 L24 32.5 L15 27 Z"/><path class="solid" d="M37 11.5 L46 17 L37 22.5 L28 17 Z"/><path d="M11 31 Q12 8 30 10.5"/><path class="solid frag" d="M28.5 6.5 L35 11 L28 14 Z"/>`,   // 跃区：三块斜排的菱形地台（区）：一个单位被提起来，沿弧线落到另一块
+      "辅助": `<path class="solid" d="M24 11 L27.5 20.5 L37 24 L27.5 27.5 L24 37 L20.5 27.5 L11 24 L20.5 20.5 Z"/><path d="M8 14 A20 20 0 0 0 8 34 M40 14 A20 20 0 0 1 40 34"/>`   // 共鸣：一颗星芒向两边荡开回声
     },
     /* 头像：渐变从左上到右下（主属性 → 副属性，只有一种属性就是纯色）；认不得的角色（没有角色卡 / 职责）用人形图标 + 灰色底 */
     avatar: {
