@@ -165,8 +165,9 @@ node --test tests/hd2d-weather-fx.test.js # 天气（#240 / #251）：正式画�
 - **联机**：唤出 / 收回武器人从技能栏里拿出来做成大按钮（结束行动旁边，`data-ob-skill`，点下去和点技能一样走 `cb.onSkill` → online-ui.js 的 `menu`），数字键按剩下的普通技能排、Q 放唤出（同单机）。只用收到的包；技能的属性 / 攻击还是技能按本机的技能表（`party.js · skillList`，静态的规则文字）查提示，拿收到的单位的副本查
 - **头像**：主职责图标（主人定稿的九个）+ 主属性 → 副属性的渐变；武器人没有自己的角色卡就用主人的
 - **坚毅生命**：队伍栏、技能按钮只用投影过的单位（单机也先过 `OnlineView.projectUnit`），没有坚毅生命的数字
+- **排版（审查后补）**：技能按钮一样宽（132px），名字一行、消耗一行，太长就截成「…」，完整的悬停看。按钮之间横 14px、竖 12px，右上角探出去的角标碰不到旁边的按钮（原型页同样）。online.css 给旧画面排的技能按钮 / 队伍栏（桌面一行排开、队伍条右边给提示栏留 44%、窄屏的网格）只对 `.g-hud:not(.hd2d-shell)` 生效，联机的新外壳和单机用同一份样式。队伍栏的名字按原长显示，一行放不下时「你」和效果换到下一行
 
-测试：`node --test tests/hd2d-shell.test.js`（小 DOM `tests/mini-dom.js` 真的解析 game.html、跑 game.js 抠出来的技能栏 / 快捷键、跑整个 online-battle.js）。WebGL 画面、手机上的样子由仓库主人看。
+测试：`node --test tests/hd2d-shell.test.js`（小 DOM `tests/mini-dom.js` 真的解析 game.html、跑 game.js 抠出来的技能栏 / 快捷键、跑整个 online-battle.js；小 CSS 层叠 `tests/mini-css.js` 按视口算 game.html 加载的全部样式表，核对联机和单机的尺寸规则一样）。WebGL 画面、手机上的样子由仓库主人看。
 
 ## 已知的限制
 

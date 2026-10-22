@@ -14,6 +14,7 @@ const vm = require("vm");
 const H = require("./headless");
 const HP = require("./hd2d-paths");
 const MD = require("./mini-dom");
+const MC = require("./mini-css");
 
 const shell = () => require("../hd2d/hd2d-shell.js");
 const read = (f) => fs.readFileSync(path.join(HP.ROOT, f), "utf8");
@@ -124,8 +125,10 @@ function soloHud(R, page, opts) {
   return Object.assign(api, { V, log, hud: page.doc.querySelector("#g-app > .g-hud") });
 }
 
-/** 联机玩家：online-battle.js 整个跑；点选回调记下来（online-ui.js 的 battleCb 就是接在这几个上）。悬停说明（HeroSheet）记下来 */
+/** 联机玩家：online-battle.js 整个跑；点选回调记下来（online-ui.js 的 battleCb 就是接在这几个上）。悬停说明（HeroSheet）记下来。
+ *  opts.more = 主机多给的技能选项（接在后面） */
 function onlineHud(R, opts) {
+  opts = opts || {};
   const page = uiPage(R, Object.assign({}, opts, { scripts: ["online-battle.js"] }));
   const log = { skills: [], ends: 0, units: [], tips: [] };
   page.w.HeroSheet = { tip: (el, h) => log.tips.push([el, h]), hideTip() {}, skillTipHtml: (sk, why) => "技能说明 " + sk.id + (why ? "：" + why : "") };
@@ -139,7 +142,7 @@ function onlineHud(R, opts) {
     { value: "kolt_short", label: "直流短接", cost: "行动 1", disabled: true, reason: "行动点不足" },
     { value: "kolt_summon", label: "唤出武器人", cost: "附赠 1" },
     { value: "__move", label: "移动", cost: "附赠 1" }
-  ];
+  ].concat(opts.more || []);
   const ui = { mine: [kolt.id], current: kolt.id, acting: true, menu: { kind: "skill", options: skills }, skills, armed: "", hint: "选择技能", busy: false };
   return { page, b, log, pv, ui, skills, kolt, hud: b.el.querySelector(".g-hud"), paint: () => b.update(pv, ui) };
 }
@@ -568,4 +571,168 @@ test("只用该看的数据：头像、效果、技能按钮里没有坚毅生�
   // 代码里（去掉注释）不出现 shp
   assert.doesNotMatch(code(read("hd2d/hd2d-shell.js")), /shp|坚毅/i, "hd2d-shell.js 不读坚毅生命");
   assert.doesNotMatch(code(fnSrc(read("hd2d/hd2d-ui.js"), "partyInner")), /shp/i);
+});
+
+/* ---------- 7. 排版：联机玩家的新外壳和单机同一份（#297 审查：联机的队伍栏右半边空着、名字被挤成「瑞..」，技能按钮挤在一起、角标压到旁边、长原因撑出按钮）---------- */
+/** game.html 加载的样式表（按页面里的顺序）解析成规则；tests/mini-css.js 照 CSS 的规矩算每个属性最后用哪一条 */
+function pageRules() {
+  const html = read("game.html");
+  const files = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map(m => m[1]);
+  assert.ok(files.includes("online.css") && files.includes("hd2d/hd2d.css"), "game.html 加载 online.css、hd2d.css");
+  return MC.load(files.map(f => [f, read(f)]));
+}
+/** 尺寸、排法相关的属性（颜色、底色、透明度不算：联机的队友照旧半透明、用不了的原因照旧换个颜色） */
+const LAYOUT = /^(display|position|top|right|bottom|left|inset|float|box-sizing|(min-|max-)?(width|height)|margin(-(top|right|bottom|left))?|padding(-(top|right|bottom|left))?|gap|row-gap|column-gap|flex(-[\w-]+)?|order|align-[\w-]+|justify-[\w-]+|place-[\w-]+|grid(-[\w-]+)?|white-space|overflow(-[xy])?|text-overflow|font|font-size|line-height|letter-spacing|transform|border(-(top|right|bottom|left))?(-width)?)$/;
+/** 主人看的桌面 1440×900；online.css 窄屏那一档（≤ 820）、game.css 手机那一档（≤ 720） */
+const VIEWS = [{ width: 1440, height: 900 }, { width: 800, height: 900 }, { width: 390, height: 844, touch: true }];
+/** 主机给的很长的原因（「使用道具」用不了的时候） */
+const LONG_WHY = "没有能在战斗中使用的道具";
+
+/** 单机、联机各画一份开着新画面的技能栏 / 队伍栏：同一场战斗、同一个人行动，各有一个用不了的技能；联机还有一个原因很长的「使用道具」 */
+function bothHuds(R) {
+  const kolt = R.unit("kolt");
+  const page = uiPage(R);
+  const second = R.ctx.skillList(kolt).filter(s => !/_summon$|_return$/.test(s.id))[1].id;
+  const solo = soloHud(R, page, { blocked: { [second]: "行动点不足" } });
+  page.w.HD2DShell.attach(solo.hud, { phone: false });
+  solo.refreshHud();
+  const O = onlineHud(R, { more: [{ value: "__item", label: "使用道具", cost: "行动 1", disabled: true, reason: LONG_WHY }] });
+  O.page.doc.body.className = "online-player ol-in-battle";   // 联机玩家的战斗画面（online-ui.js 挂在 body 上的）
+  O.page.w.HD2DShell.attach(O.hud, { phone: false });
+  O.paint();
+  const s = (sel) => solo.hud.querySelector(sel), o = (sel) => O.hud.querySelector(sel);
+  return { kolt, second, solo, O, s, o, soloRow: s(`.party > .pm[data-id="${kolt.id}"]`), olRow: o(`.party > .pm[data-ob-unit="${kolt.id}"]`) };
+}
+test("测试工具 tests/mini-css.js：优先级、!important、先后、@media、:is / :not、简写和分开写的谁强、伪类 / 伪元素", () => {
+  assert.deepEqual(MC.specificity("body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk"), [0, 6, 1]);
+  assert.deepEqual(MC.specificity(":is(.g-app, #x) > .g-hud.hd2d-shell"), [1, 2, 0], ":is 按里面最高的一条");
+  assert.deepEqual(MC.specificity(".sk::before"), [0, 1, 1]);
+  assert.deepEqual(MC.expand(":is(.a, .b) > .c"), [".a > .c", ".b > .c"]);
+  const P = MD.create('<div class="hud x"><div class="party"><button class="sk" id="k"><span class="nm">甲</span></button></div></div>');
+  const el = P.document.getElementById("k");
+  const css = MC.load([["a.css", `
+    .sk { width: 10px; padding: 1px; display: block; }
+    .hud .sk { width: 20px; padding-left: 5px; }
+    .sk { width: 30px !important; flex: none; }
+    .hud:not(.x) .sk { display: flex; }
+    @media (max-width: 720px) { .hud .sk { padding: 9px; } }
+    @media (prefers-reduced-motion: reduce) { .sk { display: none; } }
+    .sk:hover, .sk::after { display: grid; }
+    .party > :is(.sk, .pc) { gap: 3px 4px; }
+    .party > .sk:first-child { margin: 7px; }
+  `]]);
+  const wide = MC.computed(el, css, { width: 1440, height: 900 }), narrow = MC.computed(el, css, { width: 390, height: 844 });
+  assert.equal(wide.get("width"), "30px", "!important 赢");
+  assert.equal(wide.get("display"), "block", ":not(.x) 对不上；悬停、伪元素、减少动态效果不套");
+  assert.equal(wide.get("padding-left"), "5px", "优先级高的分开写压过简写");
+  assert.equal(wide.get("padding-top"), "1px");
+  assert.equal(narrow.get("padding-left"), "9px", "窄屏：后写、优先级一样高的简写压过分开写");
+  assert.equal(wide.get("flex-shrink"), "0");
+  assert.deepEqual([wide.get("row-gap"), wide.get("column-gap")], ["3px", "4px"], ":is 展开");
+  assert.equal(wide.get("margin-top"), undefined, ":first-child 小 DOM 认不得：不当成套上了");
+  assert.deepEqual(wide.unknown.map(u => u.sel), [".party > .sk:first-child"], "……记在 unknown 里");
+});
+
+/** 两个元素在视口 vp 下尺寸、排法相关的属性，最后用的值一样（不一样的列出来：哪个属性、两边各是哪个文件的哪一条） */
+function sameLayout(css, a, b, vp, tag) {
+  assert.ok(a && b, tag + "：两边都有");
+  const A = MC.computed(a, css, vp), B = MC.computed(b, css, vp);
+  const props = [...new Set([...A.map.keys(), ...B.map.keys()])].filter(p => LAYOUT.test(p));
+  const from = (C, p) => { const w = C.map.get(p); return w ? `${w.file} · ${w.sel}` : "没写"; };
+  const diff = props.filter(p => A.get(p) !== B.get(p)).map(p => `  ${p}：单机 ${A.get(p)}（${from(A, p)}）/ 联机 ${B.get(p)}（${from(B, p)}）`);
+  assert.deepEqual(diff, [], `${tag}（${vp.width}×${vp.height}）：联机和单机的尺寸规则不一样\n${diff.join("\n")}`);
+  assert.deepEqual(A.unknown.concat(B.unknown), [], tag + "：有小 DOM 判断不了、可能套上的规则（要在 tests/mini-css.js 里补上）");
+}
+
+test("排版：开着新画面时联机玩家的技能按钮、队伍栏和单机用同一份类名、同一份尺寸规则（桌面 1440×900、800 宽、手机）——online.css 给旧画面排的（技能按钮一行排开、队伍条右边让 44% 给提示栏、窄屏的网格）不套到新外壳上", () => {
+  const R = rules(), css = pageRules();
+  const { second, s, o, soloRow, olRow } = bothHuds(R);
+  // 类名：技能按钮、队伍栏一个人，外面一样的类、里面一样的几样
+  const shape = (el) => ({
+    base: [...el.classList].filter(c => /^(sk|hd-sk|pc|pm)$/.test(c)).sort().join(" "),
+    tint: [...el.classList].some(c => /^t-/.test(c)), kind: [...el.classList].some(c => /^k-/.test(c)),
+    kids: [...el.children].map(c => c.className.replace(/ none$/, "")).join(" | ")
+  });
+  assert.deepEqual(shape(o(".skills .sk")), shape(s("#g-skills .sk")), "技能按钮：属性、攻击 / 技能、数字键、名字、消耗");
+  assert.deepEqual(shape(o(".skills .sk")), { base: "hd-sk sk", tint: true, kind: true, kids: "sk-el | sk-kind | key | nm | cost" });
+  assert.deepEqual(shape(olRow), shape(soloRow), "队伍栏一个人");
+  assert.equal(olRow.querySelector(".meta").innerHTML.replace(/<span class="pm-tag">你<\/span>/, ""), soloRow.querySelector(".meta").innerHTML, "队伍栏一个人里面一样（联机多一个「你」）");
+  assert.equal(olRow.querySelector(".face.av").outerHTML, soloRow.querySelector(".face.av").outerHTML, "头像一样");
+  // 尺寸规则：一对一对地比
+  const pairs = [
+    ["技能栏", s("#g-skills"), o(".skills")],
+    ["能用的技能按钮", s("#g-skills .sk:not([disabled])"), o(".skills .sk:not([disabled])")],
+    ["用不了的技能按钮", s(`#g-skills .sk[data-skill="${second}"]`), o('.skills .sk[data-ob-skill="kolt_short"]')],
+    ["原因很长的技能按钮", s(`#g-skills .sk[data-skill="${second}"]`), o('.skills .sk[data-ob-skill="__item"]')]
+  ].concat([".sk-el", ".sk-kind", ".key", ".nm", ".cost"].map(c => ["技能按钮里的 " + c, s("#g-skills .sk " + c), o(".skills .sk " + c)]))
+    .concat([["队伍栏面板", s(".hd2d-party"), o(".hd2d-party")], ["队伍栏", s(".hd2d-party > .party"), o(".hd2d-party > .party")], ["队伍栏一个人", soloRow, olRow]])
+    .concat([".face.av", ".meta", ".nm", ".nm-t", ".lv", ".pm-fx", ".bar"].map(c => ["队伍栏一个人里的 " + c, soloRow.querySelector(c), olRow.querySelector(c)]));
+  VIEWS.forEach(vp => pairs.forEach(([tag, a, b]) => sameLayout(css, a, b, vp, tag)));
+});
+
+test("排版：开着新画面时技能按钮一样宽、名字一行消耗一行，长的原因截成「…」撑不出按钮（完整的悬停看）；右上角的角标探出去的那一截比按钮之间的缝窄；队伍栏不给提示栏留空、名字不被「你」和效果挤掉", () => {
+  const R = rules(), css = pageRules();
+  const { s, o, olRow } = bothHuds(R);
+  const at = (el) => MC.computed(el, css, VIEWS[0]);   // 主人看的 1440×900
+  // 技能按钮：单机、联机所有的按钮一个宽度（固定的 px），排不下换行，不挤窄
+  const buttons = [...o(".skills").querySelectorAll(".sk")].concat([...s("#g-skills").querySelectorAll(".sk")]);
+  assert.ok(buttons.length >= 7);
+  const widths = new Set(buttons.map(b => at(b).get("width")));
+  assert.equal(widths.size, 1, "按钮一样宽：" + [...widths].join(" / "));
+  assert.match([...widths][0], /^\d+px$/, "固定的宽度");
+  buttons.forEach(b => {
+    assert.equal(at(b).get("flex-shrink"), "0", "排不下时换行，不挤窄");
+    assert.equal(at(b).get("display"), "block", "两行字：名字一行、消耗一行（不是一行排开）");
+  });
+  // 名字、消耗 / 原因各一行，太长截成「…」；完整的原因悬停看（title；悬停的技能说明照旧带原因）
+  const item = o('.skills .sk[data-ob-skill="__item"]');
+  assert.equal(item.querySelector(".cost").textContent, LONG_WHY, "用不了的原因照旧写在按钮上");
+  assert.equal(item.getAttribute("title"), LONG_WHY, "完整的原因悬停看");
+  assert.ok(item.disabled, "照旧灰掉");
+  buttons.forEach(b => [".nm", ".cost"].forEach(c => {
+    const cs = at(b.querySelector(c));
+    assert.deepEqual([cs.get("display"), cs.get("white-space"), cs.get("overflow"), cs.get("text-overflow")], ["block", "nowrap", "hidden", "ellipsis"], c + "：自己一行、不折行、多出来的截成「…」");
+  }));
+  // 右上角的攻击 / 技能角标：探出按钮的那一截（加上白边）比左右、上下的缝都窄，不压到旁边的按钮
+  const kind = at(o(".skills .sk .sk-kind")), gap = at(o(".skills"));
+  const ring = Number(/0 0 0 ([\d.]+)px/.exec(kind.get("box-shadow"))[1]);
+  const outX = -parseFloat(kind.get("right")) + ring, outY = -parseFloat(kind.get("top")) + ring;
+  assert.ok(outX > 0 && outY > 0, "角标照原型探出去一点");
+  assert.ok(parseFloat(gap.get("column-gap")) > outX, `左右的缝 ${gap.get("column-gap")} 比角标探出去的 ${outX}px 宽`);
+  assert.ok(parseFloat(gap.get("row-gap")) > outY, `上下的缝 ${gap.get("row-gap")} 比角标探出去的 ${outY}px 宽`);
+  assert.deepEqual([gap.get("column-gap"), gap.get("row-gap")], [at(s("#g-skills")).get("column-gap"), at(s("#g-skills")).get("row-gap")], "和单机一样的缝");
+  // 队伍栏：面板里的队伍栏两边不留空（旧画面给提示栏让的 44% 不套），一个人占满一行；面板和单机一样宽
+  const party = at(o(".hd2d-party > .party"));
+  assert.deepEqual([party.get("margin-left"), party.get("margin-right")], ["0", "0"], "队伍栏右边不空着");
+  assert.equal(at(olRow).get("flex-basis"), "100%", "一个人占满一行");
+  assert.equal(at(o(".hd2d-party")).get("width"), at(s(".hd2d-party")).get("width"), "面板和单机一样宽");
+  // 名字：照原样宽，不被后面的「你」、效果挤成「瑞..」；一行放不下时后面的换到下一行
+  assert.equal(olRow.querySelector(".pm-tag").textContent, "你");
+  assert.equal(at(olRow.querySelector(".nm-t")).get("flex-shrink"), "0", "名字不被挤窄");
+  assert.equal(at(olRow.querySelector(".nm")).get("flex-wrap"), "wrap", "放不下时「你」、效果换到下一行");
+});
+
+test("排版：关着新画面时联机玩家的旧画面照旧——online.css 给旧画面排的技能按钮（桌面一行排开）、队伍条（右边让给提示栏）、窄屏的网格和按钮宽度都还套得上，新外壳的样子一条都不套", () => {
+  const R = rules(), css = pageRules();
+  const O = onlineHud(R);
+  O.page.doc.body.className = "online-player ol-in-battle";
+  O.paint();
+  const [desk, narrow, phone] = VIEWS;
+  const at = (sel, vp) => MC.computed(O.hud.querySelector(sel), css, vp);
+  assert.equal(at(".skills .sk", desk).get("display"), "inline-flex", "桌面：名字和消耗一行排开");
+  assert.equal(at(".skills .sk", desk).get("padding-left"), "26px");
+  assert.equal(at(".skills .sk .key", desk).get("top"), "6px");
+  assert.equal(at(".party", desk).get("margin-right"), "44%", "桌面：队伍条右边让给提示栏");
+  assert.equal(at(".party", desk).get("margin-bottom"), "4px");
+  [narrow, phone].forEach(vp => {
+    assert.equal(at(".skills", vp).get("display"), "grid", "窄屏：技能排成网格");
+    assert.equal(at(".skills", vp).get("grid-template-columns"), "repeat(3, minmax(0, 1fr))");
+    assert.equal(at(".skills .sk", vp).get("padding-left"), "20px");
+    assert.equal(at(".skills .sk .nm", vp).get("text-overflow"), "ellipsis");
+    assert.equal(at(".party .pc", vp).get("width"), "78px");
+  });
+  [".skills", ".skills .sk", ".skills .sk .nm", ".skills .sk .cost", ".party", ".party .pc"].forEach(sel => VIEWS.forEach(vp => {
+    const used = [...MC.computed(O.hud.querySelector(sel), css, vp).map.values()].filter(w => w.file === "hd2d/hd2d.css" || /hd2d-shell|\.hd2d-party/.test(w.sel.replace(/:not\(\.hd2d-shell\)/g, "")));
+    assert.deepEqual(used.map(w => w.sel), [], sel + "：旧画面不套新外壳的规则");
+  }));
 });
