@@ -1,5 +1,6 @@
 // 义体：单体伤害型模板 .vol1–.vol4（#262，夕夏定）——正式目录、诊所（改造率 / 拆除 / 以新换旧 / 负担警告）、
-// 战斗里发动（每次短休 1 次、坚毅最少留 1、不吃 atk）、图鉴第六本「义体」（不露任何人现在的坚毅生命）、
+// 战斗里发动（每次短休 1 次、坚毅最少留 1、不吃 atk、打不出去的目标在扣点前拦下；预演不把发动消耗算成效果）、
+// 同屏校验和房主的行动菜单、图鉴第六本「义体」（不露任何人现在的坚毅生命）、
 // 种类表能直接加新种类、和专长（推搡、勾索、跃迁、挑衅、震慑、地震）不冲突
 "use strict";
 const test = require("node:test");
@@ -184,6 +185,17 @@ function fire(c, S, a, id, t) {
   S.attackerId = a.id; S.targetId = t ? t.id : null;
   c.runSkill(id);
 }
+/** 再加载战斗画面（预演、候选目标）、同屏校验和房主的行动菜单（和 tests/online-actions.test.js 一样，无界面也能跑） */
+function withGame(c) {
+  c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; } };
+  for (const f of ["game.js", "hotseat-validation.js", "online-view.js", "online-actions.js"]) vm.runInContext(read(f), c, { filename: f });
+  return c;
+}
+/** 起身中：血量打空、受伤改打坚毅生命 */
+function upOnShp(a, shp) {
+  a.layers.forEach(l => { l.current = 0; });
+  a.dying = false; a.upOnShp = true; a.shp = shp;
+}
 
 test("战斗：装着的义体出现在技能列表（空手也能用），1 行动点、只打敌人，近战打同区、远程打距离 1", () => {
   const { c, a } = field();
@@ -281,11 +293,59 @@ test("战斗：游戏版日志不写坚毅扣了多少（扣到 1 就扣不动�
 test("战斗：起身后（受伤改打坚毅生命）发动义体也不会把人扣死", () => {
   const { c, S, a, near } = field("CWVB-UP");
   equip(c, a, ["strike_v1"]);
-  a.layers.forEach(l => { l.current = 0; });
-  a.dying = false; a.upOnShp = true; a.shp = 2;
+  upOnShp(a, 2);
   fire(c, S, a, "cw_strike_v1", near);
   assert.equal(a.shp, 1);
   assert.ok(!a.dead && !a.dying);
+});
+
+test("战斗：躲藏中的、下潜中的（义体不是谐波属性）敌人打不出去，在扣行动点之前拦下：不花行动点、次数、坚毅；谐波属性的打得到下潜的", () => {
+  const { c, S, a, near } = field("CWVB-HIDE");
+  equip(c, a, ["strike_v1"]);
+  a.shp = 10;
+  near.statuses.hide = true;
+  fire(c, S, a, "cw_strike_v1", near);
+  assert.match(logText(S), /躲藏中，不能被选作攻击目标/);
+  near.statuses.hide = false; near.submerged = true;
+  fire(c, S, a, "cw_strike_v1", near);
+  assert.match(logText(S), /下潜中，只有谐波攻击打得到/);
+  assert.equal(a.ap, 2); assert.equal(a.shp, 10);
+  assert.equal(c.cyberwareUsesLeft(a, "strike_v1"), 1);
+  // 谐波属性的义体（以后在 CYBERWARE_LINES 加一行就有）：下潜的照样能打，打到就被迫浮上来
+  run(c, `cyberwareRegister({ id: "reso_v1", name: "测试谐波.vol1", tier: 5, kind: "attack", element: "harmonic", line: "reso" })`);
+  equip(c, a, ["reso_v1"]);
+  assert.equal(c.skillTargetError(a, "cw_reso_v1", near), null);
+  const hp0 = c.totalHp(near);
+  fire(c, S, a, "cw_reso_v1", near);
+  assert.ok(c.totalHp(near) < hp0);
+  assert.ok(!near.submerged);
+});
+
+test("预演：起身中发动义体，自己扣的坚毅不算这次行动的效果——坚毅 1 和 5 预演出来完全一样（不露出是不是只剩 1），躲藏的目标照样不能选", () => {
+  const seen = [];
+  for (const shp of [1, 5]) {
+    const { c, S, a, near } = field("CWVB-PV");
+    c.GAME_MODE = true;
+    withGame(c);
+    equip(c, a, ["strike_v1"]);
+    upOnShp(a, shp);
+    // 预演跑完把 state 整个还原成备份（单位换成了新对象）：每次都按 id 重新取
+    const unit = id => S.units.find(u => u.id === id);
+    const pv = t => c.GAME.previewOf(c.GAME.skillThunk(a.id, "cw_strike_v1", t ? t.id : null, {}));
+    assert.equal(pv(null).needsTarget, true, "没选目标：先选");
+    const hit = pv(near), self = hit.units.get(a.id);
+    assert.equal(hit.meaningful, true);
+    assert.ok(hit.units.get(near.id).dmgHi > 0, "目标照常预览伤害");
+    assert.equal(self.shpLoss, 0, "自己的卡片上不写「伤到坚毅」");
+    assert.equal(self.changed, false);
+    unit(near.id).statuses.hide = true;
+    const hidden = pv(near);
+    assert.equal(hidden.meaningful, false, "躲藏的目标：没有效果，不能选");
+    assert.match(hidden.reason, /躲藏中/);
+    assert.equal(unit(a.id).shp, shp, "预演不改任何东西");
+    seen.push(JSON.stringify({ self: J(self), lines: J(hit.lines), hidden: hidden.meaningful }));
+  }
+  assert.equal(seen[0], seen[1], "坚毅 1 和 5 的预演完全一样");
 });
 
 /* ---------- 和专长不冲突 ---------- */
@@ -377,6 +437,44 @@ test("联机：诊所包里有种类名、效果、以新换旧的字段（过�
   assert.doesNotMatch(s, /4321|9876|shp|Shp|坚毅/);
 });
 
+test("同屏 / 联机：校验接受义体技能打敌人，拒绝友方、射程外、躲藏中的目标；房主的行动菜单列出义体和能打的目标（起身中坚毅 1 和 5 一样）", () => {
+  const { Hotseat } = require("../hotseat");
+  const lists = [];
+  for (const shp of [1, 5]) {
+    const { c, S, a, b, near, far } = field("CWVB-NET");
+    c.GAME_MODE = true;
+    withGame(c);
+    equip(c, a, ["strike_v1"]);
+    const hs = { session: { assertAction() { return true; } }, sender: "p1" };
+    const validate = target => c.HotseatValidation.validateBattle(J({ type: "skill", actor: a.id, skill: "cw_strike_v1", target, picks: {} }), hs);
+    assert.equal(validate(near.id), true);
+    assert.throws(() => validate(b.id), /只能对敌人使用/);
+    assert.throws(() => validate(far.id), /射程/);
+    near.statuses.hide = true;
+    assert.throws(() => validate(near.id), /躲藏中/);
+    near.statuses.hide = false;
+    // 房主的行动菜单（online-actions.js）：技能里有义体；选了义体以后列出能打的目标
+    const session = Hotseat.create({ operators: ["p1", "p2"], gmId: "p1", assignments: { [a.id]: "p1", [b.id]: "p2" }, getUnits: () => S.units, canStand: u => !c.standUpBlocked(u) });
+    session.beginRound(1); session.pick("p1", a.id, 0); session.pick("p2", b.id, 1); session.forceStart("p1");
+    const service = c.OnlineActions.create({ game: c.GAME, validation: c.HotseatValidation, inspect: c.HotseatValidation.inspect,
+      assertAction: (sender, id) => session.assertAction(sender, id), getState: () => S });
+    const menu = req => J(service.menu(Object.assign({ requestId: 1, actor: a.id }, req), "p1")).choices;
+    assert.ok(menu({}).options.some(o => o.value === "cw_strike_v1" && !o.disabled), "技能菜单里有义体");
+    upOnShp(a, shp);
+    const targets = () => menu({ skill: "cw_strike_v1" }).options.map(o => o.value);
+    const open = targets();
+    assert.ok(open.includes(near.id));
+    assert.ok(!open.includes(b.id) && !open.includes(far.id), "友方、射程外的不列");
+    near.statuses.hide = true;
+    const hidden = targets();
+    near.statuses.hide = false;
+    assert.ok(!hidden.includes(near.id), "躲藏的不列");
+    assert.equal(a.shp, shp, "列菜单不改任何东西");
+    lists.push(JSON.stringify([open.includes(near.id), hidden.includes(near.id)]));
+  }
+  assert.equal(lists[0], lists[1], "起身中坚毅 1 和 5 能选的目标一样");
+});
+
 /* ---------- 诊所浮层 ---------- */
 test("诊所浮层：同系列写「以新换旧」，确认框列出先拆哪件、拆除费 + 新价格；不出现坚毅", () => {
   const c = H.load();
@@ -451,6 +549,9 @@ test("可扩展：在 CYBERWARE_KINDS 里加一种（例：主动位移），诊
   assert.equal(c.cyberwareUsesLeft(a, "dash_v1"), 0);
   // 不在 CYBERWARE_KINDS 里的种类直接报错，不会悄悄当成伤害型
   assert.throws(() => run(c, `cyberwareRegister({ id: "x", tier: 5, kind: "nope" })`), /没有这种义体/);
+  // 种类自己的字段写错（单体伤害型的射程拼错）也是注册时就报错（validate），不会悄悄按近战算
+  assert.throws(() => run(c, `cyberwareRegister({ id: "typo_v1", tier: 5, kind: "attack", range: "ranges" })`), /单体伤害型的射程只能是 melee \/ ranged：ranges/);
+  assert.equal(c.cyberwareCatalog().some(d => d.id === "typo_v1"), false);
 });
 
 /* ---------- 画面：图鉴里的「义体」（没装 Playwright 时跳过） ---------- */
@@ -488,14 +589,12 @@ test("画面：图鉴里有「义体」这一本，按种类筛、能搜 .vol2�
   assert.deepEqual(errors, []);
 });
 
-/* ---------- 接线 ---------- */
-test("接线：party.js / app.js 的技能入口都认义体技能（cw_），和专长（feat_）分开；README 记了这次改动", () => {
-  const party = read("party.js"), app = read("app.js");
-  assert.match(party, /cyberwareSkills\(unit\)\.forEach\(add\)/);
-  assert.match(party, /cyberwareSkillCost\(id\)/);
-  for (const fn of ["cyberwareSkillSteps", "cyberwareSkillWhy", "cyberwareSkillTargetWhy", "runCyberwareSkill"]) assert.match(app, new RegExp(fn + "\\("), fn);
+/* ---------- README ---------- */
+test("README：规则改动记录里有这次改动（在整节里找，不按字数截：上面别的记录再长也不影响）", () => {
   const readme = read("README.md");
-  const top = readme.slice(readme.indexOf("## 规则改动记录"), readme.indexOf("## 规则改动记录") + 4000);
-  assert.match(top, /单体伤害型/);
-  assert.match(top, /\.vol1/);
+  const start = readme.indexOf("## 规则改动记录");
+  assert.ok(start >= 0, "README 有「规则改动记录」");
+  const next = readme.indexOf("\n## ", start + 1);
+  const entries = readme.slice(start, next < 0 ? readme.length : next).split(/\n(?=- \*\*)/);
+  assert.ok(entries.some(s => /issue #262/.test(s) && /单体伤害型/.test(s) && /\.vol1/.test(s)), "有 #262 这一条");
 });

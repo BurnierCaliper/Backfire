@@ -51,6 +51,7 @@ const CYBERWARE_CODEX_HP = [30, 60, 90];     // 图鉴举例用的原生命上�
  * 每种一项（除了 name 都可以省）：
  *   name                 种类名（诊所、图鉴、技能说明）
  *   defaults             这一种的默认字段（def 里写了的优先）
+ *   validate(d)          注册时检查这一种自己的字段，写错直接报错（不然会悄悄按默认值算）
  *   target               战斗里选谁：engine.js · SKILL_TARGET_SIDE 的写法（enemy / ally / allySelf / any / anySelf）；不写 = 不选单位
  *   range(d)             射程 { min, max }（engine.js · SKILL_RANGE）；不写 = 按提示文字推断
  *   facts(d)             诊所 / 已装列表多给的展示字段（联机要在 online-view.js · projectCyberware 的白名单里放行才发得出去）
@@ -71,8 +72,19 @@ const CYBERWARE_KINDS = {
   attack: {
     name: "单体伤害型",
     defaults: { range: "melee", element: "physical", break: CYBERWARE_ATTACK.break, fireShp: CYBERWARE_ATTACK.fireShp, dailyShp: CYBERWARE_ATTACK.dailyShp },
+    validate: d => {
+      if (!Object.prototype.hasOwnProperty.call(CYBERWARE_RANGE_NAME, d.range)) throw new Error(`单体伤害型的射程只能是 ${Object.keys(CYBERWARE_RANGE_NAME).join(" / ")}：${d.range}`);
+    },
     target: "enemy",
     range: d => (d.range === "ranged" ? { min: 1, max: 1 } : { min: 0, max: 0 }),
+    // 打不出去的目标在扣行动点之前拦下（和 app.js · dealTo 的判定一致）：躲藏中的不能被选作攻击目标，下潜中的只有谐波攻击打得到。
+    // 到 dealTo 才拦的话，行动点、短休前的次数、坚毅生命都白扣了
+    targetWhy: (u, d, t) => {
+      if (!t || !t.id || t.isPlayer || t.isStructure || t.kind) return null;
+      if (t.statuses && t.statuses.hide) return `${t.name} 躲藏中，不能被选作攻击目标`;
+      if (t.submerged && d.element !== "harmonic") return `${t.name} 下潜中，只有谐波攻击打得到`;
+      return null;
+    },
     facts: d => ({ range: d.range, element: d.element, damageText: cyberwareDamageSpec(d.tier, d.range).text, break: d.break }),
     summary: d => `${cwRangeName(d)} · 打${cwReach(d)}一名敌人 · ${cyberwareDamageSpec(d.tier, d.range).text} ${cwEleName(d.element)} · ${d.break} 击破（不吃 atk）`,
     short: d => `${cwRangeName(d)} · ${cyberwareDamageSpec(d.tier, d.range).text} ${cwEleName(d.element)}`,
@@ -123,10 +135,12 @@ function cyberwareNormalize(def) {
   if (!Object.prototype.hasOwnProperty.call(CYBERWARE_KINDS, kind)) throw new Error("没有这种义体：" + kind);
   if (def.element && CYBERWARE_ELEMENTS.indexOf(def.element) < 0) throw new Error("未知属性：" + def.element);
   const t = CYBERWARE_TIER[tier];
-  return Object.assign({ line: null, conflict: null,
+  const d = Object.assign({ line: null, conflict: null,
     hpCut: t.hpCut, shpCut: t.shpCut, occupancy: t.occupancy, price: t.price, removePrice: t.removePrice,
     dailyShp: 0, fireShp: 0, usesPerShortRest: CYBERWARE_ACTIVE.usesPerShortRest, cost: cwClone(CYBERWARE_ACTIVE.cost) },
     cwClone(CYBERWARE_KINDS[kind].defaults || {}), def, { tier, kind, vol: CYBERWARE_VOL[tier] });
+  if (typeof CYBERWARE_KINDS[kind].validate === "function") CYBERWARE_KINDS[kind].validate(d);
+  return d;
 }
 function cyberwareRegister(def) { const d = cyberwareNormalize(def); CYBERWARE[d.id] = d; cwRegisterSkill(d); return d; }
 function cyberwareLoadExamples() { Object.keys(CYBERWARE_EXAMPLES).forEach(k => cyberwareRegister(CYBERWARE_EXAMPLES[k])); return Object.keys(CYBERWARE_EXAMPLES); }
@@ -326,12 +340,19 @@ function cwShpLossText(u, d, lost) {
   if (typeof shpHidden === "function" && shpHidden()) return `${u.name} 的义体消耗了一些坚毅生命（不会致死）。`;
   return `${u.name} 坚毅 −${lost}（义体发动消耗 ${d.fireShp}，最少留 ${CYBERWARE_SHP_FLOOR}，不会致死）。`;
 }
+/** 发动消耗是技能说明里写好的固定规则，不算这次行动的效果：在战斗画面的事件带上记一笔 selfCost，
+ *  预演（game.js · previewOf）把它加回来——起身中的人坚毅扣到 1 就扣不动，按前后差写「伤到坚毅」会露出是不是只剩 1，
+ *  打不出去的目标也会被当成有效果。只在本机：不进日志，联机发给玩家的事件带（online-view.js · projectTape）只放行弹字 */
+function cwTapeSelfCost(u, lost) {
+  if (lost > 0 && typeof window !== "undefined" && window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "selfCost", unitId: u.id, shp: lost });
+}
 /** 结算一次发动（行动点已经由 app.js · runSkillInner 扣过）。run 返回 false = 没选好对象：不记次数、不扣坚毅 */
 function runCyberwareSkill(u, skillId, ctx) {
   const d = cyberwareOfSkill(skillId);
   if (!d) return;
   if (cwKind(d).run(u, d, ctx) === false) return;
   const lost = cwSpend(u, d);
+  cwTapeSelfCost(u, lost);
   if (d.fireShp) ctx.lines.push(cwShpLossText(u, d, lost));
 }
 
