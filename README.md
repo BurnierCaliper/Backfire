@@ -368,6 +368,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **后台加首领机制时可以填技能名（选填，不填用机制原名）**（issue #291；作者定：机制名直接写明太直白，敌人的技能就写技能名，和沙尘爆裂一样；「可填可不填」。battle-commands.js · `validate` 的 `mechName`、`named`、`mechLabel`、`panel` 的 `setExecution` / `setShare` / `setSpread` / `setTower`；boss-mechanics.js · `BOSS_MECH_NAME_MAX`；game.js · `renderFieldSheet` 的 `mechNameBox` 和四个面板；game.css · `.exec-edit input[data-x="name"]`；测试：新增 tests/boss-mech-name.test.js）
+  - **以前**：内置首领的机制有自己的技能名（亡命之王的「公开处刑」「齐射」、沙灵聚合体的「沙尘爆裂」「电能炮」，`addBossMechanic` 传了 `name`）；主持人在战场配置里给敌人加死刑 / 分担 / 远离 / 踩塔时没地方填名字，画面上只能写机制原名。
+  - **现在**：
+    - **面板**：四个面板第一项都是「技能名」输入框（选填，灰字写着机制原名，最多 `BOSS_MECH_NAME_MAX` 个字 = 12）；改已经挂着的机制时，框里填回现在的名字（内置首领自己带的名字也填回去）。主持人的面板只在主持人那边。
+    - **填了**：机制的 `name` 就是它（去掉首尾空格）。规则给画面的标记 / 读条 / 塔（`bossMarksOn` / `bossCastsBy` / `bossZoneMarks`）都叫这个名字，所以横幅、头顶图标、悬停说明、踩塔牌子、落下时的战斗记录、协助格挡的标题、加上 / 去掉机制的提示都写它，和内置首领一样。机制怎么结算一点不变。
+    - **不填**（空着、全是空格、全角空格）：跟以前一样，机制上不记名字，叫机制原名（死刑 / 分担 / 远离 / 踩塔）；填过的改成空着也变回原名。
+    - **校验**（指令层）：名字不是字符串、去掉首尾空格后超过 12 个字的报错（照旁边几项的写法，例如 `execution name must be at most 12 characters`），不偷偷截短；联机时玩家数据的白名单（online-view.js · `safeText`）会整段丢掉的字样（「坚毅」「后台」这类）也报错，不然玩家那边会没有名字。报错的指令什么都不改。
+    - **联机**：名字跟其他机制字段一样走 online-view.js 的白名单（`display.marks / casts`、`zoneView.towers`、`mechanics` 本来就带 `name`，这次没改投影），玩家端画出来和房主一样。
+    - **存档 / 撤销**：名字记在机制对象上，跟着单位一起存：存成战斗模板再开战、联机房主的存档读回来、撤销以后都还在。
+  - 测试：新增 tests/boss-mech-name.test.js（12 条；11 条在没改的代码上全部失败，1 条浏览器测试没装 Playwright 时跳过）：填了技能名（四种机制的 `bossMarksOn` / `bossCastsBy` / `bossZoneMarks`、`UnitCard.mechLines`、头顶图标、踩塔牌子、横幅、加上的提示）；落下时的战斗记录和格挡标题；联机投影后玩家收到的名字和玩家端画法、不带坚毅生命；不填 / 只填空格 / 全角空格用机制原名、填过的清空变回原名；去首尾空格、正好 12 个字可以、不是字符串 / 太长报错且什么都不改；联机发不出去的名字报错；去掉机制的提示；战斗模板存进本机再开战、联机房主存档读回来、撤销（game.js 自己的 `saveState` + `battle.undo`）以后名字不变；四个面板都有技能名输入框；浏览器里真的点面板。`npm test`：2557 条，0 失败（204 条浏览器测试没装 Playwright，跳过）。
 - **新画面接入（二）：3D 战场上的攻击演出、伤害数字和首领机制**（issue #283，只是画面，不改规则结算；第一步 #261 是单机 game.html 能开新画面；第三步再把同一套画面给联机玩家用，这次不做。game.js · `G.fxClock`、`paperPop`、`playTape` / `playBeats` / `strikeImpact` 里弹字、格挡、打中、出手、红叉的那几处；hd2d/hd2d-fx.js · `numberOf`、`parryOf`、`placeNumbers`（`view.x / view.y`、`view.taken`）、`cues` 改用 `numberOf`；hd2d/hd2d-play.js · `numbers`、`paperHit`、`unpaper`、`camera`、`shadeIn`、`clock`；prototypes/hd2d/index.html 的推镜头改用 `HD2DPlay.camera`；hd2d/hd2d-field.js · `FIELD.scripts` 加 hd2d-play.js、`mount` / `teardown`、`numbers` / `paper` / `unpaper` / `push` / `release`；hd2d/hd2d-layout.js · `mechsOf`、`towersOf`、`plateData` 的 `mechs`、地台的 `towers`；hd2d/hd2d-ui.js · `mechsHtml`、`towersHtml`；hd2d/hd2d-scene.js · `MECH`、`TOWER`、`plateHtml`、`syncPlates`、`syncTowers`；unit-card.js · `alertNew` 的 `quiet`；hd2d/hd2d.css；测试：新增 tests/hd2d-field-fx.test.js，tests/hd2d-fx.test.js 的推镜头接线跟着改）
   - **以前**：新画面开着时，game.js 的攻击演出只是把位置换成 3D 铭牌在屏幕上的矩形，伤害数字还是旧画面的 `.pop`（字号固定，不跟镜头远近变）；原型做好的纸片风数字、纸片感、出手推镜头没接进来（hd2d-play.js 没加载）。首领机制在 3D 战场上看不到：铭牌上方没有机制图标和倒计时，地台上没有踩塔的标记。
   - **现在**：
