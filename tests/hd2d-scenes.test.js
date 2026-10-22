@@ -9,16 +9,17 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
-const C = require("../prototypes/hd2d/hd2d-camera.js");
+const HP = require("./hd2d-paths");
+const L = require("../hd2d/hd2d-layout.js");
+const C = require("../hd2d/hd2d-camera.js");
 
-const DIR = path.join(__dirname, "..", "prototypes", "hd2d");
-const read = (f) => fs.readFileSync(path.join(DIR, f), "utf8");
+const DIR = HP.MOD;   // 战场的模块（#261 起在正式目录 hd2d/）；原型页在 HP.PAGE
+const read = (f) => (f === "index.html" ? HP.readPage(f) : fs.readFileSync(path.join(DIR, f), "utf8"));
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");   // 去掉注释，只看代码
 // 缺这几个文件时只是这几条失败（每条测试里各自 require）
-const art = () => require("../prototypes/hd2d/hd2d-scene-art.js");
-const mine = () => require("../prototypes/hd2d/hd2d-scenes-mine.js");
-const desert = () => require("../prototypes/hd2d/hd2d-scenes-desert.js");
+const art = () => require("../hd2d/hd2d-scene-art.js");
+const mine = () => require("../hd2d/hd2d-scenes-mine.js");
+const desert = () => require("../hd2d/hd2d-scenes-desert.js");
 const packs = () => { mine(); desert(); return art(); };
 /** 这个场景是哪个美术包画的（环境动画的频率在它的 AMBIENT 里） */
 const packOf = (d) => (d.region === "沙漠" ? desert() : mine());
@@ -96,7 +97,7 @@ async function protoEnv(t) {
     mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
       if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
       const r = await n(s, c);
-      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
     }`));
   }
   const A = packs();
@@ -680,7 +681,7 @@ test("环境动画（#242）：每个场景配置里列的环境动画都在（�
 /* ---------- 5. 接线 ---------- */
 test("接线（#242）：页面在布局后面加载登记处和美术包；hd2d-world.js / hd2d-backdrop.js 只有挂钩；布局文件一行没动（美术包登记时把自己的地面主题并进 GROUNDS / SCENES）；假网页加载不报错，页面环境里的布局就用场景自己的那一套", () => {
   const html = read("index.html");
-  const at = (f) => html.indexOf(`<script src="${f}"></script>`);
+  const at = (f) => html.indexOf(`<script src="${HP.pageSrc(f)}"></script>`);   // 战场的模块从原型页指到正式目录 hd2d/（#261）
   assert.ok(at("hd2d-layout.js") > 0 && at("hd2d-layout.js") < at("hd2d-scene-art.js") && at("hd2d-scene-art.js") < at("hd2d-scenes-mine.js") && at("hd2d-scenes-mine.js") < html.indexOf('<script type="module">'), "布局 → 登记处 → 美术包 → 页面主脚本");
   assert.ok(at("hd2d-scene-art.js") < at("hd2d-scenes-desert.js") && at("hd2d-scenes-desert.js") < html.indexOf('<script type="module">'), "沙漠的美术包也在登记处后面、页面主脚本前面");
   const world = code(read("hd2d-world.js")), backdrop = code(read("hd2d-backdrop.js"));

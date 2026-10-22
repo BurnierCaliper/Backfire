@@ -10,15 +10,16 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
+const HP = require("./hd2d-paths");
+const L = require("../hd2d/hd2d-layout.js");
 const OV = require("../online-view.js");
 
 // 缺这几个文件 / 函数时只是这几条失败（每条测试里各自 require）
-const wfxm = () => require("../prototypes/hd2d/hd2d-wfx.js");
-const cams = () => require("../prototypes/hd2d/hd2d-camera.js");
+const wfxm = () => require("../hd2d/hd2d-wfx.js");
+const cams = () => require("../hd2d/hd2d-camera.js");
 
 const ROOT = path.join(__dirname, "..");
-const DIR = path.join(ROOT, "prototypes", "hd2d");
+const DIR = HP.MOD;   // 战场的模块（#261 起在正式目录 hd2d/）；原型页在 HP.PAGE，hd2d.css 读原型页加载的那两份（HP.protoCss）
 const read = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
@@ -119,7 +120,7 @@ function wfxPage(opts) {
   };
   sandbox.window = sandbox; sandbox.self = sandbox; sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
-  const files = opts.only ? ["weather-fx.js"] : ["prototypes/hd2d/hd2d-layout.js", "prototypes/hd2d/hd2d-camera.js", "weather-fx.js", "prototypes/hd2d/hd2d-wfx.js"];
+  const files = opts.only ? ["weather-fx.js"] : ["hd2d/hd2d-layout.js", "hd2d/hd2d-camera.js", "weather-fx.js", "hd2d/hd2d-wfx.js"];
   for (const f of files) vm.runInContext(read(f), ctx, { filename: f });
   const stage = doc.createElement("div");
   doc.body.appendChild(stage);
@@ -140,7 +141,7 @@ async function protoEnv(t) {
     mod.register("data:text/javascript," + encodeURIComponent(`export async function resolve(s, c, n) {
       if (s === "three") return { url: ${JSON.stringify(threeUrl)}, format: "module", shortCircuit: true };
       const r = await n(s, c);
-      return /\\/(prototypes\\/hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
+      return /\\/(hd2d|vendor\\/three)\\//.test(r.url) ? Object.assign({}, r, { format: "module" }) : r;
     }`));
   }
   const any = () => new Proxy(function () {}, { get: (o, k) => (k === Symbol.toPrimitive ? () => 0 : any()), set: () => true, apply: () => any() });
@@ -194,7 +195,7 @@ test("2D 天气层（#240）：沙暴时在 #stage 里放正式画面 weather-fx
   const css = read("weather-fx.css");
   assert.ok(/\.g-app\.is-night \.wfx-sand \{/.test(css) && /\.wfx-sand\[data-sand-dir="21"\], \.wfx-sand\[data-sand-dir="W"\]/.test(css), "夜晚样子 / 风向都是 weather-fx.css 的");
   // #251 起原型给这一层换了颜色（行内变量）、减少动态效果时把它停住（见下面 #251 那几条），但不另画：背景、动画还是 weather-fx.css 的
-  const sandRules = [...fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.wfx-sand[^{]*\{([^}]*)\}/g)].map(m => m[1]);
+  const sandRules = [...HP.protoCss().replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.wfx-sand[^{]*\{([^}]*)\}/g)].map(m => m[1]);
   assert.ok(sandRules.every(r => !/background/.test(r) && (!/animation/.test(r) || /animation: none/.test(r))), "原型的 hd2d.css 不另画正式画面的沙雾（只在减少动态效果时停住它）");
   wfx.sync({ weather: "none", theme: "day", tier: "far" });
   assert.equal(host.querySelectorAll("wfx").length, 0, "晴天拿掉");
@@ -383,24 +384,26 @@ test("三段镜头（#240）：2D 天气层远景淡一点，中景、近景、�
   assert.equal(W.plan({ weather: "sand", tier: "?" }).tier, "far", "认不得的段按远景");
   assert.equal(W.plan({ weather: "sand", tier: "near", close: true }).tier, "close", "特写");
   assert.ok(W.plan({ weather: "sand", tier: "far" }).fade > 0 && W.plan({ weather: "sand", tier: "far", reduced: true }).fade === 0, "减少动态效果：换段不渐变");
-  const css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const css = HP.protoCss();
   assert.ok(/\.hd2d-wfx > \.wfx \{[^}]*opacity: var\(--wfx-o, 1\)[^}]*transform: scale\(var\(--wfx-s, 1\)\)/.test(css), "整层的不透明度 / 放大读 hd2d-wfx.js 写的变量");
   assert.ok(/@media \(prefers-reduced-motion: reduce\) \{ \.hd2d-wfx > \.wfx \{ transition: none; \} \}/.test(css), "减少动态效果：不渐变");
   // 原型给 2D 层加的动画只有沙暴自己的那层沙雾（#251 的 .hd2d-sand）和停住它们的规则；别的天气减少动态效果照 weather-fx.css 的处理
   const anim = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]*)\{[^}]*animation[^}]*\}/g)].map(m => m[1].trim()).filter(sel => /hd2d-wfx|hd2d-sand|\.wfx/.test(sel));
   assert.ok(anim.every(sel => /hd2d-sand|wfx-sand/.test(sel)), "原型只给沙暴的 2D 沙雾加 / 停动画：" + anim.join(" | "));
   // 页面：换段 / 特写时跟着换
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
+  const html = HP.readPage("index.html");
   assert.ok(/syncUrl\(\);\s*syncWeather\(\);/.test(html), "镜头变了（syncCamera）就重排一次 2D 层");
   assert.ok(/tier: camInfo \? camInfo\.tier : sc\.tier, close: !!\(camInfo && camInfo\.close != null\), zone: camInfo \? camInfo\.zone : sc\.zone, reduced: !sc\.motion/.test(html), "段、特写、看的那个区、减少动态效果交给 2D 层");
 });
 
 /* ---------- 6. 原型页接线 ---------- */
 test("原型页（#240）：原样加载 weather-fx.css / weather-fx.js（正式画面一行没改），2D 层在 #stage 里：3D 画布之上、铭牌之下，界面面板在上面，不挡鼠标；只读投影里的天气 / 风向 / 相位 / 光影，3D 沙粒按同一个风飞；假网页里加载不报错", () => {
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const html = HP.readPage("index.html"), css = HP.protoCss();
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
-  assert.ok(html.indexOf('href="../../weather-fx.css"') > 0 && html.indexOf('href="../../weather-fx.css"') < html.indexOf('href="hd2d.css"'), "weather-fx.css 在 hd2d.css 前面（原型的样式能盖过它）");
-  assert.ok(html.indexOf('src="../../weather-fx.js"') > 0 && html.indexOf('src="hd2d-wfx.js"') > html.indexOf('src="../../weather-fx.js"') && html.indexOf('src="hd2d-wfx.js"') < html.indexOf('<script type="module">'), "加载 weather-fx.js 和 hd2d-wfx.js");
+  // 战场的样子和模块 #261 起在正式目录 hd2d/（原型页用 ../../hd2d/… 引）
+  const ownCss = `href="${HP.pageSrc("hd2d.css")}"`, ownWfx = `src="${HP.pageSrc("hd2d-wfx.js")}"`;
+  assert.ok(html.indexOf('href="../../weather-fx.css"') > 0 && html.indexOf('href="../../weather-fx.css"') < html.indexOf(ownCss), "weather-fx.css 在 hd2d.css 前面（原型的样式能盖过它）");
+  assert.ok(html.indexOf('src="../../weather-fx.js"') > 0 && html.indexOf(ownWfx) > html.indexOf('src="../../weather-fx.js"') && html.indexOf(ownWfx) < html.indexOf('<script type="module">'), "加载 weather-fx.js 和 hd2d-wfx.js");
   assert.ok(/wfx = WX\.create\(\$\("stage"\)/.test(mod), "2D 层放在 #stage 里");
   assert.ok(/sc\.setWind\(WX\.windOf\(pv\.sandDir, portrait\)\)/.test(mod), "3D 沙粒按投影里的风向飞");
   assert.ok(/weather: pv\.weather, theme: themeNow\(\), sandDir: pv\.sandDir, phaseStep: pv\.phaseStep/.test(mod), "2D 层只读投影（天气、风向、相位、光影）");
@@ -472,7 +475,7 @@ test("weather-fx.js 只加了两个可选参数（#240），不给就是正式�
 
 /* ---------- 8. 其他天气逐个接上 ---------- */
 test("其他天气逐个接上（#240）：雪、酸雨、雷鸣、酷暑、微光、相位都叠正式画面的那一层（.wfx-…，相位的阶段跟着投影里的 phaseStep），原型不另画；跟不跟三段镜头放大按配置（酷暑贴着底边、微光贴着四角、酸雨的涟漪要落在地台上，不放大）", () => {
-  const P = wfxPage(), W = P.W, wfx = W.create(P.stage), css = read("weather-fx.css"), mine = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const P = wfxPage(), W = P.W, wfx = W.create(P.stage), css = read("weather-fx.css"), mine = HP.protoCss();
   const all = ["sand", "snow", "acid", "thunder", "heat", "glow", "phase"];
   assert.deepEqual(Object.keys(W.WFX.weather).sort(), all.slice().sort(), "七种天气都接上了");
   for (const w of all) {
@@ -528,7 +531,7 @@ test("雷鸣（#240）：2D 层只留正式画面的暗色云影和紫调——�
   assert.equal(host.style.getPropertyValue("--wfx-flash"), "0.000", "沙暴不跟着闪");
   assert.equal(P.frames.size, 0, "不在雷鸣时不占动画帧");
   // CSS：整层的不透明度跟着 --wfx-flash；场景把这一帧的闪光给出来；3D 的雷鸣照旧不下雨（hd2d-weather.js 的 WEATHER.thunder 没有粒子）
-  assert.ok(/\.hd2d-wfx \{[^}]*opacity: calc\(1 - var\(--wfx-flash, 0\)\)/.test(fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8")), "2D 层跟着闪光淡掉");
+  assert.ok(/\.hd2d-wfx \{[^}]*opacity: calc\(1 - var\(--wfx-flash, 0\)\)/.test(HP.protoCss()), "2D 层跟着闪光淡掉");
   assert.ok(/get flash\(\) \{ return weather\.flash; \}/.test(fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8")), "场景给出这一帧的闪光");
   assert.ok(!/thunder: \{[^}]*kind:/.test(fs.readFileSync(path.join(DIR, "hd2d-weather.js"), "utf8")), "3D 的雷鸣照旧没有雨粒子");
 });
@@ -563,7 +566,7 @@ function splitTop(s) {
   return out;
 }
 test("酸雨的涟漪（#240）：落在地台顶面上（三个演示 × 远 / 中 / 近，按这一刻的镜头投到屏幕上，都在某个区的地台轮廓里、深渊的洞口外、顶栏和技能栏之间），不在天上；近景只落在看的那个区（别的区被景深糊掉了）；按镜头俯角压扁、越近越大，压扁 / 放大以后中心还在落点；涟漪的画法、动画照旧是 weather-fx.css 的", () => {
-  const W = wfxm(), C = cams(), FXM = require("../prototypes/hd2d/hd2d-fx.js"), css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const W = wfxm(), C = cams(), FXM = require("../hd2d/hd2d-fx.js"), css = HP.protoCss();
   for (const id of Object.keys(DEMOS)) {
     const { layout } = demoLayout(id);
     for (const tier of ["far", "mid", "near"]) {
@@ -631,7 +634,7 @@ test("酸雨的涟漪（#240）：落在地台顶面上（三个演示 × 远 / 
 
 /* ---------- 10. 原型页接线（其他天气）---------- */
 test("原型页（#240）：2D 层拿到这一刻的镜头（酸雨的涟漪落在地台上）、画面大小（让开顶栏和技能栏）、雷击的闪光（雷鸣闪白时淡掉）和布局；网址 ?weather= 换天气（截图用）是往战斗状态里写，画面照样只读投影", () => {
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  const html = HP.readPage("index.html"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(/wfx = WX\.create\(\$\("stage"\), \{ lens: \(\) => HD2DFx\.lens\(sc\.lensNow\(\)\), view: \(\) => sc\.view\(\), flash: \(\) => sc\.flash \}\)/.test(mod), "镜头、画面、闪光交给 2D 层");
   assert.ok(/reduced: !sc\.motion, layout: wfxLayout/.test(mod), "布局交给 2D 层");
   assert.ok(/params\.get\("weather"\)/.test(mod) && /st\.weather = weatherPick\.weather/.test(mod) && /st = demo\.make\(pageRegion\(\)\);\s*(?:placeLook\(\);\s*)?pickWeather\(\);/.test(mod), "?weather= 写进战斗状态（换演示也带着）");
@@ -744,10 +747,10 @@ function cssCalc(expr, vars, view, size) {
   assert.ok(/^[\d.\s()+\-*/]+$/.test(e), "认得的写法：" + expr);
   return Function("return " + e)();
 }
-const flatCss = (f) => fs.readFileSync(path.join(DIR, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");   // 去掉注释
+const flatCss = (f) => (f === "hd2d.css" ? HP.protoCss() : fs.readFileSync(path.join(DIR, f), "utf8")).replace(/\/\*[\s\S]*?\*\//g, "");   // 去掉注释
 
 test("沙暴的 2D 沙雾团（#251）：数量、大小、浓淡都达到配置的下限（WFX.sand.min）——三个演示 × 桌面 / 手机 × 远 / 中 / 近，每一团看得出是雾的那一块都盖得住半个地台以上；颜色比沙地更深、更浑（偏棕灰），不再和沙地一个颜色；沙雾在铭牌底下，铭牌照样看得清", () => {
-  const P = wfxPage({ seed: 21 }), W = P.W, C = cams(), FXM = require("../prototypes/hd2d/hd2d-fx.js");
+  const P = wfxPage({ seed: 21 }), W = P.W, C = cams(), FXM = require("../hd2d/hd2d-fx.js");
   assert.ok(W.WFX.sand && W.WFX.sand.min, "沙雾的数值在配置里（WFX.sand）");
   const S = W.WFX.sand, M = S.min;
   // 下限本身要够（不然调成 0 也能过）：至少 6 团、盖住半个地台、远处那层挡得住远处（≥ 0.45）、近处那层半透明但看得见（≥ 0.3）
@@ -1006,7 +1009,7 @@ test("3D 的雾和 2D 层配合（#251）：沙暴的 3D 雾比晴天浓、越�
 test("横飞的沙粒 / 沙线更多、更粗（#251）：沙粒更多更大、拖影更多、大团沙尘更大更多；再加一层粗的沙线（两片交叉的长条，世界里有宽度——越近越粗，近景时更明显），顺着风横飞、尾巴淡掉；别的天气不加", async (t) => {
   const P = await protoEnv(t);
   if (!P) return;
-  const { THREE, WX } = P, W = wfxm(), C = cams(), FXM = require("../prototypes/hd2d/hd2d-fx.js");
+  const { THREE, WX } = P, W = wfxm(), C = cams(), FXM = require("../hd2d/hd2d-fx.js");
   try {
     const S = WX.WEATHER.sand, A = WX.AMBIENT.sand;
     assert.ok(S.count >= OLD_GRAINS.count * 1.3 && S.size >= OLD_GRAINS.size * 1.2, `沙粒更多更大（${S.count} 颗 / ${S.size}）`);

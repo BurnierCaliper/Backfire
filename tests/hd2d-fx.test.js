@@ -7,16 +7,17 @@ const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const H = require("./headless");
-const L = require("../prototypes/hd2d/hd2d-layout.js");
+const HP = require("./hd2d-paths");
+const L = require("../hd2d/hd2d-layout.js");
 const OV = require("../online-view.js");
 const AF = require("../attack-fx.js");
 
 // 缺这几个文件时只是这几条失败（每条测试里各自 require）
-const fxm = () => require("../prototypes/hd2d/hd2d-fx.js");
-const host = () => require("../prototypes/hd2d/hd2d-host.js");
-const cams = () => require("../prototypes/hd2d/hd2d-camera.js");
+const fxm = () => require("../hd2d/hd2d-fx.js");
+const host = () => require("../prototypes/hd2d/hd2d-host.js");   // 演示出招的房主那边只有原型用，留在原型目录
+const cams = () => require("../hd2d/hd2d-camera.js");
 
-const DIR = path.join(__dirname, "..", "prototypes", "hd2d");
+const DIR = HP.MOD;   // 战场的模块（#261 起在正式目录 hd2d/）；原型页在 HP.PAGE
 const PARTY = ["kolt", "helu", "ruby", "yuito"];
 const DESKTOP = { width: 1440, height: 900, top: 46, bottom: 160 };   // 桌面 1440×900：顶栏 + 展开的技能栏
 const SHP = 7771, SHP_MAX = 7772;
@@ -255,12 +256,13 @@ test("演出只读投影数据：cues 只看包（fx / tape / state），数字�
 
 /* ---------- 页面接线 ---------- */
 test("原型页：「演示出招」按钮、加载 attack-fx / hit-fx / hd2d-fx / hd2d-host / hd2d-play；房主结算出包，画面只拿包播（打中时铭牌换成包里的 state）；播放模块不碰房主的 state；假网页里也打得出来", () => {
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(HP.PAGE, "index.html"), "utf8");
   const mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(html.includes('id="demo-strike"'), "页面上有「演示出招」按钮");
   const pos = (f) => html.indexOf(`<script src="${f}"></script>`);
-  ["../../attack-fx.js", "../../hit-fx.js", "hd2d-fx.js", "hd2d-host.js", "hd2d-play.js"].forEach(f => assert.ok(pos(f) > 0, "加载 " + f));
-  assert.ok(pos("../../online-view.js") < pos("../../attack-fx.js") && pos("hd2d-camera.js") < pos("hd2d-fx.js") && pos("hd2d-fx.js") < pos("hd2d-play.js"), "加载顺序");
+  const M = HP.pageSrc;   // 战场的模块从原型页指到正式目录 hd2d/（#261）；演示出招的 hd2d-host.js 还在原型目录
+  ["../../attack-fx.js", "../../hit-fx.js", M("hd2d-fx.js"), "hd2d-host.js", M("hd2d-play.js")].forEach(f => assert.ok(pos(f) > 0, "加载 " + f));
+  assert.ok(pos("../../online-view.js") < pos("../../attack-fx.js") && pos(M("hd2d-camera.js")) < pos(M("hd2d-fx.js")) && pos(M("hd2d-fx.js")) < pos(M("hd2d-play.js")), "加载顺序");
   assert.ok(/HD2DHost\.strike\(env,/.test(mod), "房主那边用规则结算（HD2DHost.strike）");
   assert.ok(/HD2DPlay\.play\(packet, fxAdapter\(\),/.test(mod), "画面只把包交给 HD2DPlay.play");
   assert.ok(/function showPacket\(packet\) \{\s*pv = packet\.state;/.test(mod) && /onImpact: \(\) => showPacket\(packet\)/.test(mod), "打中的那一刻画面换成包里的 state");
@@ -273,7 +275,7 @@ test("原型页：「演示出招」按钮、加载 attack-fx / hit-fx / hd2d-fx
   assert.ok(/HitFx\.burst\(/.test(play), "复用 hit-fx 的受击粒子");
   const scene = fs.readFileSync(path.join(DIR, "hd2d-scene.js"), "utf8");
   assert.ok(/lensNow\(\) \{/.test(scene) && /plateOf\(id\) \{/.test(scene) && /zoneOf\(id\) \{/.test(scene), "场景给适配器的接口");
-  const css = fs.readFileSync(path.join(DIR, "hd2d.css"), "utf8");
+  const css = HP.protoCss();
   assert.ok(/\.hd2d-num \{[^}]*-webkit-text-stroke: var\(--ink\)/.test(css) && /prefers-reduced-motion: reduce\) \{\s*\.hd2d-num/.test(css), "纸片风数字：墨线描边；减少动态效果时不弹不飘");
   // 假网页：照 index.html 的顺序加载普通脚本，不报错；页面环境里（G = window）打得出来，包里没有 shp
   const page = require("./hd2d-fake-page").load();
@@ -353,7 +355,7 @@ test("出手时镜头稍微推一下：远景 / 中景推向攻击者和目标�
   assert.ok(/if \(!state\.pushBack\) state\.pushBack =/.test(scene) && /to: back/.test(scene), "拉回到推之前的位置（玩家原来的镜头）");
   assert.ok(/opts\.keep && state\.tween && !state\.tween\.push/.test(scene) && /if \(!opts\.keep\) state\.pushBack = null/.test(scene), "重排不打断推镜头；玩家换镜头就不拉回");
   assert.ok(/if \(!pushed\) arrive\(\)/.test(scene), "推着的时候不交还拖动");
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  const html = fs.readFileSync(path.join(HP.PAGE, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(/HD2DFx\.pushPose\(sc\.poseNow\(\), a, b, \{ enabled: pushOn, reduced: !sc\.motion,/.test(mod), "页面：开关和「减少动态效果」交给 pushPose");
   assert.ok(html.includes('id="push-toggle"') && /params\.get\("push"\) !== "0"/.test(mod), "页面上能关（按钮、?push=0）");
 });
@@ -419,7 +421,7 @@ test("演出速度跟着 AttackFx.setClock、跳过立刻结束：假网页里�
   assert.ok(!calls.includes("windup") && !calls.includes("burst") && cam.pushes.length === 0 && numbers().length === 0, "倍率 0：什么都不演");
   assert.equal(r.hits(), 1, "画面照样换成包里的 state");
   // 页面：速度按钮、跳过按钮 / Esc 接上
-  const html = fs.readFileSync(path.join(DIR, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
+  const html = fs.readFileSync(path.join(HP.PAGE, "index.html"), "utf8"), mod = /<script type="module">([\s\S]*?)<\/script>/.exec(html)[1];
   assert.ok(html.includes('id="fx-speed"') && html.includes('id="fx-skip"') && /HD2DPlay\.setClock\(\(\) => 1 \/ speed\)/.test(mod) && /HD2DFx\.FX\.speeds/.test(mod), "演出速度按钮（倍率交给 HD2DPlay / AttackFx.setClock）");
   assert.ok(/addEventListener\("click", \(\) => HD2DPlay\.skip\(\)\)/.test(mod) && /e\.key === "Escape" && striking/.test(mod), "跳过按钮、Esc");
   assert.deepEqual(page.errors, []);
