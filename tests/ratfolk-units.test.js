@@ -150,18 +150,22 @@ test("阵营：狂鼠和所有阵营敌对（安保、警卫队、镇压队、�
   assert.ok(f.c.hostilesOf(b).includes(g) && f.c.hostilesOf(g).includes(b));
 });
 
-test("下水道：隶属巨人城的专门区域，敌人池里只有狂鼠；巨人城和别的区域抽不到狂鼠，「不分地区」的遭遇战也抽不到", () => {
+test("下水道：隶属巨人城的专门区域，敌人池里只有狂鼠和下水道维护（#279）；巨人城和别的区域抽不到狂鼠，「不分地区」的遭遇战也抽不到", () => {
   const c = H.load();
   c.S.RNG.install("SEWER");
-  assert.deepEqual([...c.regionPool("下水道")].sort(), [...KITS].sort());
-  assert.deepEqual(plain(c.regionFactions("下水道")), ["狂鼠"]);
+  // 下水道的第二个阵营「下水道维护」（docs/sewer-maintenance.md，#279）也只出没在下水道；它的测试在 tests/sewer-maintenance.test.js
+  const SEWER_KITS = ["sewer_sweeper"];
+  assert.deepEqual([...c.regionPool("下水道")].sort(), [...KITS, ...SEWER_KITS].sort());
+  assert.deepEqual(plain(c.regionFactions("下水道")), ["狂鼠", "下水道维护"]);
   assert.equal(get(c, "SUB_REGIONS")["下水道"].parent, "巨人城");
   for (let i = 0; i < 300; i++) {
     const enc = c.rollEncounter({ region: "下水道" });
     assert.equal(enc.region, "下水道");
-    assert.ok(enc.enemies.length && enc.enemies.every(e => KITS.includes(e.preset)), JSON.stringify(enc.enemies));
-    assert.ok(/^下水道·(狂鼠|混战)$/.test(enc.name), enc.name);
-    const tokens = enc.enemies.reduce((s, e) => s + c.enemyTokens(e.preset) * (e.count || 1), 0);
+    assert.ok(enc.enemies.length && enc.enemies.every(e => KITS.includes(e.preset) || SEWER_KITS.includes(e.preset)), JSON.stringify(enc.enemies));
+    assert.ok(/^下水道·(狂鼠|下水道维护|混战)$/.test(enc.name), enc.name);
+    if (enc.name === "下水道·狂鼠") assert.ok(enc.enemies.every(e => KITS.includes(e.preset)), "狂鼠不和任何阵营混编：" + JSON.stringify(enc.enemies));
+    // 成组的（清扫机 3 只一组）整组记 1 枚
+    const tokens = enc.enemies.reduce((s, e) => { const g = Number(c.enemyInfo(e.preset).group) || 1; return s + c.enemyTokens(e.preset) * (e.count || 1) / g; }, 0);
     assert.ok(tokens >= 4 && tokens <= 5, "代币：杂兵 1 枚，精英 2 枚，一场 4–5 枚：" + tokens);
   }
   ["外城区", "巨人城", "第一采矿场", "第二采矿场", "第三采矿场", "沙漠", "天网设施"].forEach(r => {

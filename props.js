@@ -102,7 +102,8 @@ function makeProp(kind, zone, level) {
 const MECHANICAL_KITS = {
   guard_sword: true, guard_gun: true, boomcar: true, buoy: true,
   dumpdrone: true, swarm: true, patrolboat: true, spreader: true, patrol_car: true,
-  mine_guard: true, flint_sweeper: true, gas_collector: true, alarm_bot: true, meteor_miner: true
+  mine_guard: true, flint_sweeper: true, gas_collector: true, alarm_bot: true, meteor_miner: true,
+  sewer_sweeper: true   // 下水道清扫机（docs/sewer-maintenance.md：机械，没有种族）
 };
 
 function isMechanicalUnit(u) {

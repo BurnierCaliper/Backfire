@@ -95,7 +95,8 @@ function enemyMayAssist(u) {
 const ENEMY_ASSIST_RUSH = ["en_thug_hammer_assist", "en_wolf_assist", "en_chi_exec", "en_overseer_assist", "en_gas_assist",
   "en_fish_lead_assist", "en_fish_drive_assist", "en_fish_ambush_assist",   // 沙鱼群起：冲到失衡的人那一区
   "en_riot_baton_assist", "en_riot_spray_assist",   // 镇压队：警棍盾、火焰喷射兵冲进目标所在区
-  "en_rat_plague_assist", "en_rat_tyrant_assist"];   // 下水道狂鼠：疫病暴徒、暴虐猎手冲到目标所在区
+  "en_rat_plague_assist", "en_rat_tyrant_assist",   // 下水道狂鼠：疫病暴徒、暴虐猎手冲到目标所在区
+  "en_sweeper_assist"];   // 下水道维护：清扫机冲到目标所在区自爆
 const ENEMY_ASSIST_ANYWHERE = ["en_patrol_assist", "ufo_assist", "en_alarm_assist"];
 function enemyAssistReach(u, t) {
   if (!u || !t) return false;
@@ -428,6 +429,12 @@ function enemySkillListBase(u) {
       { id: "en_rat_tyrant_bite", label: "普通攻击（出血）" },
       { id: "en_rat_tyrant_assist", label: "协助：冲近连打三次，所有狂鼠进入狂暴（出血）" }
     ],
+    // 下水道维护（docs/sewer-maintenance.md）：清扫机还有敌人没有共振时上共振，所有敌人都有共振了才开火（AI 照这个挑，ai.js）
+    sewer_sweeper: [
+      { id: "en_sweeper_reso", label: "施加共振（远距，只上状态、不造成伤害）" },
+      { id: "en_sweeper_shot", label: "谐波射击（所有敌人都有共振时）" },
+      { id: "en_sweeper_assist", label: "协助：自爆（冲到目标所在区，同区所有敌对单位 1×ATK 火，然后自己死亡）" }
+    ],
     ant_hunter: [
       { id: "en_hunter_shot", label: "灼热子弹（穿刺）" },
       { id: "en_hunter_heat", label: "把天气变为酷暑" },
@@ -732,6 +739,8 @@ const ENEMY_SKILL_RANGE = {
   en_rat_biter_bite: "melee", en_rat_biter_assist: "melee",
   en_rat_plague_claw: "melee", en_rat_plague_spray: "ranged", en_rat_plague_assist: "melee",
   en_rat_tyrant_bite: "melee", en_rat_tyrant_assist: "melee",
+  // 下水道清扫机：上共振、谐波射击都是一般远程（距离 1）；自爆是冲到目标所在区炸那一区（ENEMY_ASSIST_RUSH）
+  en_sweeper_reso: "ranged", en_sweeper_shot: "ranged", en_sweeper_assist: "melee",
   en_hunter_shot: "ranged",
   en_miner_shot: "ranged",
   en_spider_bite: "melee",
@@ -1319,10 +1328,93 @@ function ratfolkSweep() {
   } finally { RAT_SWEEPING = false; }
 }
 
+/* ===== 下水道维护（docs/sewer-maintenance.md 第 1、2 节）=====
+ * 阵营「下水道维护」：和安保、警卫队、镇压队是一伙（run.js · ALLIED_FACTIONS，混编概率 FACTION_MIX_CHANCE 15%），
+ * 和其他所有阵营敌对（HOSTILE_EXCEPT_ALLIES）；只出没在下水道。
+ * 下水道清扫机：血量 / 架势 / atk / 伤害骰在 engine.js · SEWER_STATS，这里是招式的数：
+ *   shotMult / shotBreak   所有敌人都有共振时的远程谐波攻击（伤害骰是单位卡上的 1d4）
+ *   blastMult / blastBreak 协助「自爆」：冲到目标所在区，对那一区所有和它敌对的单位各 blastMult×atk 火、blastBreak 击破，然后自己死亡
+ * 还有敌人没有共振时花行动点给一个没有共振的敌人施加共振（只上状态、不造成伤害，sweeperApplyReso）；挑谁、什么时候开火在 ai.js */
+const SEWER_FACTION = "下水道维护";
+const SEWER_CFG = {
+  sweeper: { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 }
+};
+const sweeperResonated = u => !!(u && u.statuses && u.statuses.reso);
+/** 清扫机眼里的敌人：和它敌对、在场上、选得中的单位——倒地没起身的、配置物不算；躲藏 / 下潜 / 本来就选不中的
+ *  （飞碟本体、单局图纸「安全的迷彩」）看不见。「所有敌人都有共振」、上共振挑目标都按它 */
+function sweeperFoesOf(a) {
+  return hostilesOf(a).filter(u => !u.kind && !u.isProp && !u.isStructure && !u.untargetable && !u.submerged &&
+    !(u.statuses && u.statuses.hide) && !(typeof isDownProtected === "function" && isDownProtected(u)) &&
+    !(typeof bpUntargetable === "function" && bpUntargetable(u)));
+}
+/** 看得见的敌人都有共振了（一个都看不见也算）：清扫机改用谐波射击 */
+function sweeperAllResonated(a) {
+  return sweeperFoesOf(a).every(sweeperResonated);
+}
+/** t 能不能被 a 施加共振：看得见的敌人、还没有共振（不看距离；射程在 sweeperApplyReso / ai.js 里看） */
+function sweeperResoTargetOk(a, t) {
+  return !!t && !sweeperResonated(t) && sweeperFoesOf(a).includes(t);
+}
+/** 施加共振：只上状态、不造成伤害（不是攻击——不能协助格挡，也不触发受击 / 出手的效果）。射程照一般远程：距离 1，
+ *  隔着危墙 / 关着的门够不到（被牵制而牵制者就在同区、自己又没有近身攻击时可以抵近，照 enemyZoneInRange）。返回 true = 上上了 */
+function sweeperApplyReso(a, t, lines) {
+  if (sweeperResonated(t)) { lines.push(`${t.name} 已经有共振。`); return false; }
+  if (!hostileTo(a, t)) { lines.push(`${t.name} 不是敌对的单位，没法施加共振。`); return false; }
+  if (!sweeperResoTargetOk(a, t)) { lines.push(`${a.name} 选不中 ${t.name}（躲藏 / 下潜 / 倒地），没法施加共振。`); return false; }
+  if (!enemyZoneInRange(a, "en_sweeper_reso", t.zone)) {
+    const why = typeof lineBlocked === "function" && lineBlocked(a.zone, t.zone);
+    lines.push(why ? `${a.name} 够不到 ${t.name}：${why}` : `施加共振是远距离，够不到距离 ${zoneDist(a.zone, t.zone, state.zoneMode)} 的 ${t.name}。`);
+    return false;
+  }
+  t.statuses = t.statuses || {};
+  t.statuses.reso = true;
+  t.statuses.latestElement = "harmonic";   // 最新的状态属性（扩散按它结算），和道具上共振一样
+  if (typeof popStatus === "function") popStatus(t, "reso");
+  lines.push(`${a.name} 给 ${t.name} 施加共振。`);
+  return true;
+}
+/** 下水道清扫机的自爆（它的协助；下一步的触灵清扫员代挡后剩余血量 < 25% 时也直接调它）：
+ *  冲到 t 所在区（免费移动、不花行动点，一次一个区；过不去就停在半路；t 不给就在原地），对它所在那一区所有和它敌对的单位
+ *  （狂鼠也算；倒地没起身的不算）各 blastMult×atk 火、blastBreak 击破——范围攻击，不能协助格挡；然后自己死亡，
+ *  照常结算击杀（经验、奎支、评分：app.js · settleEnemyKill；材料战后照 items.js · ENEMY_DROPS 掉）。
+ *  hit：打一下的函数（技能里传 runSkill 的 hitOne 包装，不传用 hitOne2 写进 notes）。返回 true = 炸了 */
+function sweeperSelfDestruct(a, t, notes, hit) {
+  if (!a || a.kit !== "sewer_sweeper" || a.dead || a._removed || a._sweeperBoom) return false;
+  notes = notes || [];
+  const C = SEWER_CFG.sweeper;
+  for (let i = 0; t && Number(a.zone) !== Number(t.zone) && i < 8; i++) {
+    const before = Number(a.zone);
+    stepTowardZone(a, t.zone, { free: true });
+    if (Number(a.zone) === before || a.dead) break;   // 过不去（危墙、关着的门、禁足……）或者路上被打死
+  }
+  if (a.dead || a._removed) return false;
+  a._sweeperBoom = true;
+  const z = Number(a.zone);
+  if (t && Number(t.zone) !== z) notes.push(`${a.name} 没能冲到 ${t.name} 所在的 ${t.zone} 区，就地自爆。`);
+  const victims = hostilesOf(a).filter(u => Number(u.zone) === z && !(typeof isDownProtected === "function" && isDownProtected(u)));
+  notes.push(`${a.name} 自爆：${z} 区所有和它敌对的单位受到 ${C.blastMult}×ATK 火焰伤害、${C.blastBreak} 击破${victims.length ? "" : "（那一区没有敌对的单位）"}。`);
+  const atk = effectiveAtk(a, state.units);
+  const strike = hit || ((u, opt) => hitOne2(a, u, opt, notes));
+  victims.forEach(u => {
+    if (u.dead || u._removed || Number(u.zone) !== z) return;   // 前面的爆炸连带打死 / 推走的
+    strike(u, { atk, mult: C.blastMult, element: "fire", baseBreak: C.blastBreak, atkRange: "melee", flags: { action: true, aoe: true } });
+  });
+  // 自己死亡：和被打死一样结算（经验、奎支、击杀分只结算一次），然后清出场
+  (a.layers || []).forEach(l => { l.current = 0; });
+  if (typeof settleEnemyKill === "function") settleEnemyKill(a, notes);
+  a.dead = true;
+  notes.push(`${a.name} 在自爆中损毁。`);
+  if (typeof sweepDeadEnemies === "function") notes.push(...sweepDeadEnemies());
+  return true;
+}
+
 /* ===== 阵营敌对 =====
  * HOSTILE_FACTIONS 里的阵营和其他所有阵营的敌人互相视为敌人：异星生物、下水道的狂鼠（docs/ratfolk.md，和 effects.js · RATFOLK_FACTION 同名）；
+ * HOSTILE_EXCEPT_ALLIES 里的阵营和自己那一伙（run.js · ALLIED_FACTIONS）以外的所有阵营互相视为敌人：下水道维护（SEWER_FACTION，
+ * docs/sewer-maintenance.md：和安保、警卫队、镇压队友好，和狂鼠、盗匪、沙灵、沙漠生物、异星生物等其他阵营敌对）；
  * 盗匪和安保、警卫队互相视为敌人（会互相攻击、不互相协助）。其余敌人阵营之间照旧是一伙的。 */
 const HOSTILE_FACTIONS = ["异星生物", "狂鼠"];
+const HOSTILE_EXCEPT_ALLIES = [SEWER_FACTION];
 const HOSTILE_PAIRS = [["盗匪", "安保"], ["盗匪", "警卫队"], ["盗匪", "镇压队"], ["沙漠生物", "沙灵"]];
 function factionOf(u) {
   if (!u) return null;
@@ -1346,6 +1438,7 @@ function hostileTo(a, b) {
   const fa = factionOf(a), fb = factionOf(b);
   if (!fa || !fb || fa === fb) return false;
   if (HOSTILE_FACTIONS.includes(fa) || HOSTILE_FACTIONS.includes(fb)) return true;
+  if (HOSTILE_EXCEPT_ALLIES.includes(fa) || HOSTILE_EXCEPT_ALLIES.includes(fb)) return !(typeof alliesOf === "function" && alliesOf(fa).includes(fb));
   return HOSTILE_PAIRS.some(([x, y]) => (fa === x && fb === y) || (fa === y && fb === x));
 }
 /** 场上和 a 敌对、还活着的单位 */
@@ -1930,6 +2023,26 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     const T = RAT_CFG.tyrant;
     aa(t, { element: "physical", mult: T.assistMult, hits: T.assistHits, baseBreak: 1, breakOnce: true, bleed: true });
     ratFrenzyAll(a, lines, `${a.name}协助`);
+    return true;
+  }
+  // —— 下水道维护（docs/sewer-maintenance.md 第 2 节；SEWER_CFG）——
+  if (id === "en_sweeper_reso") {
+    // 下水道清扫机：给一个没有共振的敌人施加共振，只上状态、不造成伤害（射程照一般远程）
+    if (!needT()) return true;
+    sweeperApplyReso(a, t, lines);
+    return true;
+  }
+  if (id === "en_sweeper_shot") {
+    // 所有敌人都有共振时：远程 1×atk + 1d4 谐波，1 击破
+    if (!needT()) return true;
+    const C = SEWER_CFG.sweeper;
+    aa(t, { element: "harmonic", mult: C.shotMult, diceN: baseDice[0] || 1, diceS: baseDice[1] || 4, baseBreak: C.shotBreak });
+    return true;
+  }
+  if (id === "en_sweeper_assist") {
+    // 协助：自爆——冲到目标所在区，同区所有和它敌对的单位 1×atk 火、1 击破，然后自己死亡（sweeperSelfDestruct）
+    if (!needT()) return true;
+    sweeperSelfDestruct(a, t, lines, aa);
     return true;
   }
   if (id === "en_hunter_shot") {

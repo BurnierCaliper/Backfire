@@ -1698,6 +1698,14 @@ const RAT_STATS = {
   tyrant: { flesh: [35, 11], def: 3, atk: 8, dice: 8 }                  // 暴虐猎手：警卫队队长（狼）护盾 15 + 肉体 20（每级 6 + 5）合成，架势 4 → 3
 };
 
+/** 下水道维护的数值（docs/sewer-maintenance.md 第 2 节；表是 2 人队，3、4 人队的血量按 scaleHp 放大）。
+ *  sweeper 下水道清扫机：血量照空投蜂群——外层护盾 shield = [1 级血量, 每级增量]、内层装甲 armor（不随等级），两层原样保留；
+ *    架势 def + ⌊等级/2⌋，最多 defCap；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
+ *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG */
+const SEWER_STATS = {
+  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 }
+};
+
 function enemyPresets() {
   return [
     { id: "guard_sword", name: "机器人看守（剑）", build(lv, p) {
@@ -1883,6 +1891,19 @@ function enemyPresets() {
       const S = RAT_STATS.tyrant;
       return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }],
         S.def + milestone(lv, 5), S.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "rat_tyrant", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // —— 下水道维护（docs/sewer-maintenance.md）——
+    // 下水道清扫机：血量照空投蜂群（护盾 + 装甲，不会飞），ATK 照机器人看守（剑）；远程，机械、没有种族
+    { id: "sewer_sweeper", name: "下水道清扫机", build(lv, p) {
+      const S = SEWER_STATS.sweeper;
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1], p) },
+        { type: "armor", hp: scaleHp(S.armor, p) }
+      ], S.def + milestone(lv, 2), S.atk + milestone(lv, 2), { kit: "sewer_sweeper", range: "ranged", dice: [1, S.dice], element: "harmonic" });
+      // 架势照空投蜂群：无论几级、几人队都不超过 defCap
+      u.defMax = Math.min(S.defCap, u.defMax);
+      u.def = Math.min(u.def, u.defMax);
+      return u;
     }},
     // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
     { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
