@@ -16,7 +16,7 @@ async function open(t, mobile = false) {
   t.after(() => context.close());
   const page = await context.newPage(), errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.setContent('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body><section id="scr-title"><div class="t-menu"></div></section><main class="g-app">Original host battlefield</main></body>');
-  for (const file of ["game.css", "skin.css", "online.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["game.css", "skin.css", "online.css", "pause-menu.css"]) await page.addStyleTag({ path: path.resolve(__dirname, "..", file) });
   await page.evaluate(() => {
     const players = [{ id: "gm", name: "主持人", gm: true, online: true }, { id: "p1", name: "甲", online: true }, { id: "p2", name: "乙", online: true }];
     const unit = (id, name, isPlayer, zone) => ({ id, name, isPlayer, zone, level: 1, ap: 2, apMax: 2, bonus: 1, bonusMax: 1, def: 6, defMax: 6, layers: [{ type: "flesh", current: 30, max: 35 }], statuses: {}, resources: { nano: 2 } });
@@ -52,11 +52,14 @@ async function open(t, mobile = false) {
     // when no rules state or battle engine exists in its environment.
     for (const name of ["GAME", "state", "BattleCommands", "dispatch", "skillFlowSteps", "previewOf", "Screens"]) Object.defineProperty(window, name, { configurable: true, get() { throw new Error("Display touched rules: " + name); } });
   });
-  for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
+  for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "pause-menu.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
   return { page, errors };
 }
 async function player(page, patch = {}) { await page.evaluate(patch => fixture.set({ active: true, isHost: false, identity: { id: "p1" }, screen: "battle", ...patch }), patch); }
 const calls = page => page.evaluate(() => fixture.calls);
+// 暂停页面（#298）：「消息与成员」「大厅」「角色分配」都在「房间码 · 菜单」按钮打开的菜单里
+async function menuItem(page, id) { await page.click("#ol-menu-open"); await page.click(`#pm-overlay [data-pause-item="${id}"]`); }
+const openRoom = page => menuItem(page, "room");
 
 test("D3 display: title create/join forms send explicit room options and preserve original host screen", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
@@ -132,7 +135,7 @@ test("D3 display: 390px cards and private message history render as text; player
   await page.evaluate(() => fixture.set({ messages: [{ id: "m1", from: "gm", to: "p1", text: "只给你的线索 <b>文本</b>" }] }));
   assert.equal(await page.isVisible("#online-toast"), true);
   assert.match(await page.locator("#online-toast").innerText(), /仅你可见/);
-  await page.click('[data-online="openRoom"]');
+  await openRoom(page);
   assert.equal(await page.locator("#ol-to").count(), 0);
   await page.fill("#ol-message", "收到线索"); await page.locator('#ol-message-form button[type="submit"]').click();
   assert.deepEqual((await calls(page)).find(c => c.kind === "submit").args, { type: "gmReply", text: "收到线索" });
@@ -232,13 +235,13 @@ test("D3 display: paused connection disables action and reconnect leaves the dis
   const o = await open(t); if (!o) return; const { page } = o; await player(page, { status: { connected: true, hostOnline: false, paused: true, roster: [] } });
   assert.equal(await page.locator(".ol-battle .endturn").isDisabled(), true);
   assert.equal(await page.locator(".ol-battle [data-ob-skill]").count(), 0);
-  await page.click('[data-online="openRoom"]'); await page.click('[data-online="reconnect"]');
+  await openRoom(page); await page.click('[data-online="reconnect"]');
   assert.equal((await calls(page)).filter(c => c.kind === "reconnect").length, 1);
   assert.equal((await calls(page)).filter(c => c.kind === "submit" || c.kind === "menu").length, 0);
   assert.deepEqual(o.errors, []);
 });
 
-test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有「角色分配」入口；战斗中说明不能改", async t => {
+test("联机跑团主持人：大厅里勾选队员换人；探索时菜单里有「角色分配」入口（#298）；战斗中说明不能改", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
   await page.evaluate(() => {
     OnlineGame.partyChoices = () => [{ kit: "ruby", name: "瑞比", on: true }, { kit: "hiaki", name: "绯秋", on: true }, { kit: "kolt", name: "柯尔特", on: false }];
@@ -253,11 +256,11 @@ test("联机跑团主持人：大厅里勾选队员换人；探索时顶栏有�
   await page.click('[data-online="setParty"]');
   assert.deepEqual((await calls(page)).find(c => c.kind === "setParty").args, ["hiaki", "kolt"]);
   await page.evaluate(() => fixture.set({ screen: "exploration" }));
-  await page.click('[data-online="openAssign"]');
+  await menuItem(page, "assign");
   assert.equal(await page.isVisible("#ol-assign-head"), true);
   assert.equal(await page.locator("[data-assign]").count(), 2);
   await page.evaluate(() => fixture.set({ screen: "battle" }));
-  assert.equal(await page.locator('[data-online="openAssign"]').count(), 0);
+  assert.equal(await page.evaluate(() => PauseMenu.list().some(r => r.id === "assign")), false, "战斗中菜单里没有「角色分配」");
   // 面板还开着（刚才点开的）：战斗中只写说明，没有分配下拉框
   assert.match(await page.locator("#online-panel").innerText(), /战斗中转交角色/);
   assert.equal(await page.locator("[data-assign]").count(), 0);
@@ -370,7 +373,7 @@ test("D3 display: earlier private history is paginated, merged by ID and never t
       ] : [] };
     }; fixture.emit();
   });
-  await page.click('[data-online="openRoom"]'); await page.click('[data-online="messageHistory"]');
+  await openRoom(page); await page.click('[data-online="messageHistory"]');
   assert.deepEqual((await calls(page)).find(c => c.kind === "history").args, { beforeId: "msg-101" });
   assert.deepEqual(await page.locator("[data-message-id]").evaluateAll(rows => rows.map(r => r.dataset.messageId)), ["msg-1", "msg-101"]);
   assert.equal(await page.isVisible("#online-toast"), false);
@@ -388,7 +391,7 @@ test("D3 display: a late history page cannot enter another room", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
   await player(page, { messages: [{ id: "msg-2", from: "gm", to: "p1", text: "原房间" }] });
   await page.evaluate(() => { OnlineGame.messageHistory = () => new Promise(resolve => { fixture.resolveHistory = resolve; }); fixture.emit(); });
-  await page.click('[data-online="openRoom"]'); await page.click('[data-online="messageHistory"]');
+  await openRoom(page); await page.click('[data-online="messageHistory"]');
   await page.evaluate(() => {
     fixture.set({ roomCode: "NEXT23", messages: [] });
     fixture.resolveHistory({ type: "messageHistory", displayOnly: true, hasMore: false, messages: [{ id: "msg-1", from: "gm", to: "p1", text: "过期私信" }] });
@@ -410,7 +413,7 @@ test("D3 display: resync restarts pagination at the new window after a long disc
     Object.assign(fixture.view, { packet, state: packet.state, messages: packet.messages }); fixture.emit();
   });
   assert.equal(await page.isVisible("#online-toast"), false);
-  await page.click('[data-online="openRoom"]'); await page.click('[data-online="messageHistory"]');
+  await openRoom(page); await page.click('[data-online="messageHistory"]');
   assert.deepEqual((await calls(page)).find(c => c.kind === "history").args, { beforeId: "msg-400" });
   assert.deepEqual(await page.locator("[data-message-id]").evaluateAll(rows => rows.map(r => r.dataset.messageId)), ["msg-399", "msg-400"]);
   assert.deepEqual(o.errors, []);
@@ -643,7 +646,8 @@ const say = (page, id, from, text) => page.evaluate(([id, from, text]) => {
   const v = fixture.view.packet.view; v.chat = [...(v.chat || []), { id, operatorId: from, name: from, text }]; fixture.emit();
 }, [id, from, text]);
 const letter = (page, id, from, to, text) => page.evaluate(m => fixture.set({ messages: [...fixture.view.messages, m] }), { id, from, to, text });
-const dockDot = page => page.locator('#online-dock [data-online="openRoom"] .ol-dot');
+// #298 起按钮是「房间码 · 菜单」（打开暂停页面），红点由 pause-menu.js 画（.pm-dot，和 .ol-dot 一个样子）
+const dockDot = page => page.locator("#online-dock [data-pause-open] .pm-dot");
 const animationOf = (page, selector) => page.locator(selector).evaluate(e => getComputedStyle(e).animationName);
 
 test("#207 联机单局房主：面板收着时别人在大厅交流发一条，「消息与成员」右上角红点 1；自己发的不算；打开面板看到后消失；超过 9 条写 9+", async t => {
@@ -656,15 +660,19 @@ test("#207 联机单局房主：面板收着时别人在大厅交流发一条，
   assert.equal(await dockDot(page).innerText(), "1");
   await say(page, "chat-2", "gm", "好，等我选完队伍");
   assert.equal(await dockDot(page).innerText(), "1", "自己发的不算");
-  assert.equal(await page.locator("#online-dock .ol-dock-label").innerText(), "ABCD23 · 消息与成员", "按钮文字保持简短，不再写「· N 条新消息」");
-  // 红点压在按钮右上角，白色描边
-  const spot = await dockDot(page).evaluate(e => ({ on: e.offsetParent.dataset.online, top: e.offsetTop, right: e.offsetParent.clientWidth - e.offsetLeft - e.offsetWidth, position: getComputedStyle(e).position, border: getComputedStyle(e).borderTopColor }));
-  assert.equal(spot.on, "openRoom"); assert.equal(spot.position, "absolute"); assert.equal(spot.border, "rgb(255, 255, 255)");
+  assert.equal(await page.locator("#online-dock .ol-dock-label").innerText(), "ABCD23 · 菜单", "按钮文字保持简短，不再写「· N 条新消息」");
+  // 红点压在按钮右上角，白色描边（挂在 .pm-badge 里，.pm-badge 绝对定位在按钮上）
+  const spot = await dockDot(page).evaluate(e => { const badge = e.parentElement, btn = badge.offsetParent; return { on: btn.id, top: badge.offsetTop + e.offsetTop, right: btn.clientWidth - badge.offsetLeft - e.offsetLeft - e.offsetWidth, position: getComputedStyle(badge).position, border: getComputedStyle(e).borderTopColor }; });
+  assert.equal(spot.on, "ol-menu-open"); assert.equal(spot.position, "absolute"); assert.equal(spot.border, "rgb(255, 255, 255)");
   assert.ok(spot.top < 0 && spot.right < 0, "红点压在按钮右上角：" + JSON.stringify(spot));
+  // 菜单里「消息与成员」那一项上也是这个数
+  await page.click("#ol-menu-open");
+  assert.equal(await page.locator('#pm-overlay [data-pause-item="room"] .pm-dot').innerText(), "1");
+  await page.keyboard.press("Escape");
   // 打开面板、翻到大厅交流：看到了，红点消失；收起后也不再亮
-  await page.click('#online-dock [data-online="openRoom"]');
+  await openRoom(page);
   await page.locator('#online-panel [data-keep-scroll="lobby"]').evaluate(e => e.scrollIntoView({ block: "center" }));
-  await page.waitForFunction(() => !document.querySelector("#online-dock .ol-dot, #online-panel .ol-dot"));
+  await page.waitForFunction(() => !document.querySelector("#online-dock .pm-dot, #online-panel .ol-dot"));
   await page.click('#online-panel [data-online="close"]');
   assert.equal(await page.isVisible("#online-panel"), false);
   assert.equal(await dockDot(page).count(), 0, "看过了，收起后不再亮");
@@ -707,7 +715,7 @@ test("#207 私信：面板收着时主持人发来一条，按钮上红点 1；�
   await letter(page, "msg-3", "gm", "all", "全体注意");
   assert.equal(await dockDot(page).innerText(), "2");
   assert.doesNotMatch(await page.locator("#online-dock .ol-dock-label").innerText(), /新消息/);
-  await page.click('#online-dock [data-online="openRoom"]');
+  await openRoom(page);
   assert.equal(await dockDot(page).count(), 0, "打开面板，红点消失");
   await page.click('#online-panel [data-online="close"]');
   assert.equal(await dockDot(page).count(), 0, "看过了，收起后不再亮");
@@ -724,24 +732,24 @@ test("#207 红点出现那一下轻轻弹一下、条数变多不再弹；系统
   const o = await open(t); if (!o) return; const { page } = o;
   await player(page, { screen: "exploration" });
   await letter(page, "msg-1", "gm", "p1", "线索一");
-  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "ol-dot-pop", "出现的那一下弹一下");
+  assert.equal(await animationOf(page, "#online-dock .pm-dot"), "pm-pop", "出现的那一下弹一下");
   await letter(page, "msg-2", "gm", "p1", "线索二");
-  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "none", "条数变多不再弹");
+  assert.equal(await animationOf(page, "#online-dock .pm-dot"), "none", "条数变多不再弹");
   // 「小队」标签：切到记录频道，别人在小队里说话
   await page.click('#online-side [data-side="log"]');
   await say(page, "chat-1", "p2", "我先上");
   const tabDot = '#online-side [data-side="chat"] .ol-dot';
   assert.equal(await page.locator(tabDot).innerText(), "1");
   const look = selector => page.locator(selector).evaluate(e => { const s = getComputedStyle(e); return [s.backgroundColor, s.color, s.borderTopColor, s.borderTopWidth, s.borderRadius, s.height]; });
-  assert.deepEqual(await look(tabDot), await look("#online-dock .ol-dot"), "和按钮上的红点一个样式");
+  assert.deepEqual(await look(tabDot), await look("#online-dock .pm-dot"), "和按钮上的红点一个样式");
   assert.equal(await animationOf(page, tabDot), "ol-dot-pop");
   // 系统开了「减少动态效果」：重新出现的红点也不动
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.click('#online-dock [data-online="openRoom"]'); await page.click('#online-panel [data-online="close"]');
+  await openRoom(page); await page.click('#online-panel [data-online="close"]');
   assert.equal(await dockDot(page).count(), 0);
   await letter(page, "msg-3", "gm", "p1", "线索三");
   assert.equal(await dockDot(page).innerText(), "1");
-  assert.equal(await animationOf(page, "#online-dock .ol-dot"), "none");
+  assert.equal(await animationOf(page, "#online-dock .pm-dot"), "none");
   assert.equal(await animationOf(page, tabDot), "none");
   assert.deepEqual(o.errors, []);
 });
@@ -750,7 +758,7 @@ test("#207 手机：玩家的按钮在顶栏右边，红点不被裁掉（省略
   const o = await open(t, true); if (!o) return; const { page } = o;
   await player(page, { screen: "exploration" });
   await letter(page, "msg-1", "gm", "p1", "线索");
-  assert.equal(await page.locator('#online-dock [data-online="openRoom"]').evaluate(e => getComputedStyle(e).overflow), "visible");
+  assert.equal(await page.locator("#ol-menu-open").evaluate(e => getComputedStyle(e).overflow), "visible");
   assert.equal(await page.locator("#online-dock .ol-dock-label").evaluate(e => getComputedStyle(e).textOverflow), "ellipsis");
   const box = await dockDot(page).evaluate(e => { e.getAnimations().forEach(a => a.finish()); const r = e.getBoundingClientRect(); return { top: r.top, right: r.right, width: r.width, viewport: innerWidth }; });
   assert.ok(box.width > 0 && box.top >= 0 && box.right <= box.viewport, "红点整个在屏幕里：" + JSON.stringify(box));

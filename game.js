@@ -5050,7 +5050,8 @@
         if (e.key === " " || e.key === "Escape") { e.preventDefault(); G.skip = true; }
         return;
       }
-      if (e.key === "Escape") { e.preventDefault(); disarm(); return; }
+      // 选着技能 / 正在选目标才算用掉了这一下 Esc；什么都没选时留给暂停页面（pause-menu.js，#298）
+      if (e.key === "Escape") { if (G.arm) e.preventDefault(); disarm(); return; }
       if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey)) { e.preventDefault(); doUndo(); return; }
       if (e.key === " ") {
         // 用键盘把焦点移到按钮、链接等可以操作的东西上时，空格是「按下它」，不是结束行动；
@@ -5074,6 +5075,8 @@
         armSkill(G.skillsShown[n - 1]);
       }
     });
+    // 暂停页面（pause-menu.js，#298）：选着技能 / 正在选目标、弹着选项、在播演出时，Esc 留给上面取消，不开菜单
+    if (window.PauseMenu) PauseMenu.addBlocker(() => document.body.dataset.screen === "battle" && (!!G.arm || !!choiceResolve || G.depth > 0));
     document.addEventListener("contextmenu", (e) => {
       if (G.arm) { e.preventDefault(); disarm(); }
     });
