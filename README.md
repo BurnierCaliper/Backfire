@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **图鉴「可能掉落」改为模糊档位，不显示具体数字**（策划要求；bestiary-ui.js · `DROP_RARITY` / `dropChanceText`；测试 tests/bestiary-drops-ui.test.js）
+  - 以前：图鉴写「25% 掉 1 份」「保底 1 份，15% 再多 1 份」这样的具体概率和份数（PR #173）。
+  - 现在：期望份数 ≥ 1 写「必掉」（有小数部分写「必掉，有时更多」）；否则按掉率分档：≥ 40% 常见、15%–40% 少见、< 15% 罕见（档位集中在 `DROP_RARITY`）。材料的常见 / 精制标签保留。掉落数据（items.js · `ENEMY_DROPS`）和掉落规则不变。
 - **区域下面再分「场景」（采矿场的矿外 / 矿内 / 矿底，沙漠的沙丘 / 沙珊瑚台地）：战斗状态带上 `state.scene`，单局每场按战斗的种子随机，跑团 / 战斗原型默认列表第一个，主持人可以在战场配置里改；联机白名单放行**（主人要求，issue #239，接着 #229；默认规则按主人在 issue 里补充的那条；world-data.js · `BATTLE_SCENES` / `battleScenes` / `battleSceneId` / `battleSceneName` / `battleSceneAuto` / `battleLookRegion` / `battleLookStart` / `battleLookSync` / `battleLookSet`；rogue.js · `battleSpec`（`sceneSeed`）；sim.js · `BattleSim.setup`（`scene` / `sceneSeed`）；battle-commands.js · `battle.panel` 的 `setScene`；online-view.js · `projectState`；online-game.js · 战场配置的公开记录、`rawPacket` 的注释；game.html、game.js · `renderLookSelects` / `setLook`；prototypes/hd2d/hd2d-layout.js · `SCENES` / `sceneOf` / `groundOf` / `build`，index.html，hd2d.css，README.md；docs/d3/privacy.md；测试：新增 tests/region-scene.test.js，改 tests/region-light.test.js 两条源码正则）
   - **以前**：一个区域只有一种画面。战斗状态只有 `state.region` / `state.light`，同一个采矿场站在矿坑边上打和在矿坑底部打分不出来，HD-2D 原型也只能按区域挑地面。
   - **现在**：
