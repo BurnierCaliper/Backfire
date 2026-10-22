@@ -4,7 +4,8 @@
 //   node tools/enemy-balance.js                       五组全跑，每格 100 场 → docs/balance/new-enemies-1021.{md,json}
 //   node tools/enemy-balance.js --samples 20 --groups template,fortress --out docs/balance/try --workers 2
 //   node tools/enemy-balance.js --groups fortress --out docs/balance/fortress-token-1021
-//                                                     移动堡垒占 1 枚代币的补测（issue #235）：有车不占 / 有车占 1 枚 / 没车，种子和 #232 的堡垒组一样
+//                                                     移动堡垒占 1 枚代币的补测（issue #235；作者 10/21 定为现在的规则，issue #243）：
+//                                                     有车不占（旧规则）/ 有车占 1 枚（现在的规则）/ 没车，种子和 #232 的堡垒组一样
 //
 // 每场的布置照 R1 单场矩阵（tools/score-by-act.js · one）：R1 的 10 名角色里随机 2–4 人、外城区所在的第 1 幕、
 // 我方等级 = 敌人等级、升级选主属性 / 第一个合法选项、满状态、不用道具、BASIC 打法、30 回合上限。
@@ -43,11 +44,11 @@ const PAIRS = [
   { id: "captain", label: "镇压小队长 ↔ 警卫队队长（狼）", kind: "elite", count: 2, riot: "riot_captain", ref: "captain_wolf" },
   { id: "molotov", label: "燃烧瓶投手 ↔ 燃烧步枪（投手没有模板）", kind: "battle", count: 4, riot: "riot_molotov", ref: "riot_rifle" }
 ];
-// 2. 移动堡垒：必定有车（不占代币 = 游戏现在的规则；占 1 枚代币 = 只给工具用的开关 VEHICLES.fortress.tokens，issue #235）↔ 必定没车。
-//    appear = 出现概率（掷骰次数不变，三组抽到的遭遇一样）；tokens = 车占几枚代币
+// 2. 移动堡垒：必定有车（不占代币 = 旧规则；占 1 枚代币 = 现在的规则，VEHICLES.fortress.tokens 游戏里默认 1，作者 10/21 定）↔ 必定没车。
+//    appear = 出现概率（掷骰次数不变，三组抽到的遭遇一样）；tokens = 车占几枚代币（每组都写死，不跟着游戏的默认值走，重跑的数和 #235 的报告对得上）
 const FORTRESS = [
-  { id: "with", label: "有车 · 不占代币", appear: 1, tokens: 0 },
-  { id: "token", label: "有车 · 占 1 枚代币", appear: 1, tokens: 1 },
+  { id: "with", label: "有车 · 不占代币（旧规则）", appear: 1, tokens: 0 },
+  { id: "token", label: "有车 · 占 1 枚代币（现在的规则）", appear: 1, tokens: 1 },
   { id: "without", label: "没车", appear: 0, tokens: 0 }
 ];
 // 3. 种族被动：警卫队队长按种类各一组（两只同种队长 = 4 枚代币，精英战等级）
@@ -150,7 +151,7 @@ function runJob(job) {
         : orig(Object.assign({}, opt, { faction: job.faction }));
     }
     if (job.fortress != null) get("VEHICLES").fortress.appear = job.fortress;   // 必定有 1 / 必定没有 0（掷骰次数不变，两组抽到的遭遇一样）
-    if (job.vehicleTokens) get("VEHICLES").fortress.tokens = job.vehicleTokens;   // 车占代币（只给工具用的开关，默认 0 = 不占）
+    if (job.vehicleTokens != null) get("VEHICLES").fortress.tokens = job.vehicleTokens;   // 车占几枚代币（游戏里默认 1；旧规则那组写回 0 = 不占）
     if (job.raceOff) get("RACE_PERK").off = 1;
     const m = instrument(c);
     const { spec, level } = prepare(c, job);
@@ -247,7 +248,8 @@ function meanCi(xs) {
   return { mean, ci: [mean - half, mean + half] };
 }
 /** 移动堡垒组按种子配对（同一种子三组只差车）：两两的胜率差，和按出现率 appear 折算的镇压队遭遇平均胜率
- *  （现状 = appear × 有车不占 + (1 − appear) × 没车；占 1 枚 = appear × 有车占 1 枚 + (1 − appear) × 没车）。区间是配对后的正态近似 */
+ *  （旧规则 now = appear × 有车不占 + (1 − appear) × 没车；现在的规则 token = appear × 有车占 1 枚 + (1 − appear) × 没车。
+ *  键名照 #235 报告的 json 不改：now 是当时的现状，也就是旧规则）。区间是配对后的正态近似 */
 function fortressStats(rows, sizes, appear) {
   const out = { appear, cells: {} };
   ["battle", "elite"].forEach(kind => sizes.concat("all").forEach(size => {
@@ -294,7 +296,7 @@ function compareTable(l, S, group, cell, a, b, labels, sizes, extra) {
     l.push(`|${size === "all" ? "合计" : size}|${lv(x)}|${winCell(x)}|${winCell(y)}|${ppText(pp(x.winRate, y.winRate))}|${wlt(x)} ↔ ${wlt(y)}|${f1(x.rounds)} ↔ ${f1(y.rounds)}|${f1(x.taken)} ↔ ${f1(y.taken)}|${f1(x.downs)} ↔ ${f1(y.downs)}|${pct(x.burnShare)} ↔ ${pct(y.burnShare)}|${extra ? extra.row(x, y) : ""}`);
   }
 }
-/** 移动堡垒组：每种人数三行（有车不占代币 / 有车占 1 枚代币 / 没车） */
+/** 移动堡垒组：每种人数三行（有车不占代币 = 旧规则 / 有车占 1 枚代币 = 现在的规则 / 没车） */
 function fortressTable(l, S, kind, sizes) {
   l.push("|人数|对照组|敌人等级|敌人：代币 / 只数|胜率（95%）|胜/败/超时|平均回合|我方承伤|倒地|灼烧人·回合|实际带车|代挡 / 场|殉爆率|抢车 / 场|堡垒伤害 / 场（车载 + 殉爆）|堡垒装甲承伤 / 场|");
   l.push("|---:|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|");
@@ -357,8 +359,8 @@ function markdown(report) {
     const F = report.fortress, a = F ? F.appear : null;
     l.push("## 2. 镇压部队的遭遇：必定有车（不占代币 / 占 1 枚代币）↔ 必定没车", "",
       "按 `run.js · rollEncounter` 正常抽外城区的镇压队遭遇（阵营定为镇压队，含 15% 和安保 / 警卫队混编；普通战 4 枚代币（5% 是 5 枚）、精英战 5 枚），三组用同一批种子：", "",
-      "- **有车 · 不占代币**（游戏现在的规则）：移动堡垒的出现概率改成 1，车加在抽满代币的遭遇上。",
-      "- **有车 · 占 1 枚代币**（issue #235）：出现概率 1，再把只给工具用的开关 `VEHICLES.fortress.tokens` 改成 1——带车的遭遇退掉 1 枚代币的敌人：从最后抽到的往前退，镇压队至少留一个人当驾驶员；退掉的是 2 枚代币的精英时，从同一个池子补抽 1 枚，和一开始就少抽 1 枚代币一样（`vehicle.js · vehiclePayTokens`）。",
+      "- **有车 · 不占代币**（旧规则）：移动堡垒的出现概率改成 1，`VEHICLES.fortress.tokens` 改回 0，车加在抽满代币的遭遇上。",
+      "- **有车 · 占 1 枚代币**（现在的规则，作者 10/21 定）：出现概率 1，`VEHICLES.fortress.tokens` 照游戏里的 1——带车的遭遇退掉 1 枚代币的敌人：从最后抽到的往前退，镇压队至少留一个人当驾驶员；退掉的是 2 枚代币的精英时，从同一个池子补抽 1 枚，和一开始就少抽 1 枚代币一样（`vehicle.js · vehiclePayTokens`）。",
       "- **没车**：出现概率改成 0。", "",
       "掷骰次数不变（退代币在区制、站位、带不带车都定下来以后），所以三组的区制、站位、天气、配置物一样；「不占代币」和「没车」抽到的敌人一样，「占 1 枚代币」只差退掉的那 1 枚。混编抽到的遭遇里没有镇压队员时没有驾驶员，车不会上场、也不退代币，「实际带车」一列是真正有车的场数。「敌人：代币 / 只数」= 开局敌人占的代币和只数（每场平均，成组的空投蜂群 3 只记 1 枚）。", "");
     ["battle", "elite"].forEach(kind => {
@@ -371,7 +373,7 @@ function markdown(report) {
           "|人数|占 1 枚 − 不占代币|没车 − 不占代币|没车 − 占 1 枚|", "|---:|---|---|---|");
         sizes.concat("all").forEach(size => { const m = F.cells[`${kind}|${size}`]; if (m) l.push(`|${size === "all" ? "合计" : size}|${ppCi(m.tokenVsWith)}|${ppCi(m.withoutVsWith)}|${ppCi(m.withoutVsToken)}|`); });
         l.push("", `按 ${Math.round(a * 100)}% 出现率折算的镇压队遭遇平均胜率（每个种子按 ${a} × 有车 + ${Number((1 - a).toFixed(2))} × 没车 折算；括号是配对后的正态近似 95% 区间）：`, "",
-          "|人数|现状：车不占代币|车占 1 枚代币|差（百分点）|", "|---:|---|---|---|");
+          "|人数|旧规则：车不占代币|现在的规则：车占 1 枚代币|差（百分点）|", "|---:|---|---|---|");
         sizes.concat("all").forEach(size => { const m = F.cells[`${kind}|${size}`]; if (m) l.push(`|${size === "all" ? "合计" : size}|${pctCi(m.now)}|${pctCi(m.token)}|${ppCi(m.gain)}|`); });
       }
       const xs = FORTRESS.map(v => [v, S[`fortress|${kind}|${v.id}|all`]]).filter(([, x]) => x);

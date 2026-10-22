@@ -72,15 +72,23 @@ test("数值：纯装甲 42+11×(等级−1)+2×⌊等级/5⌋，架势 5 每 10
   assert.equal(c.vehicleStats("fortress", 5, 3).armor, Math.round(88 * 1.5));
 });
 
-test("登记：移动堡垒是配置物（props），不占代币、不进敌人表；座位 4、出现概率 30%、只有镇压队能上，数值写在 VEHICLES 里", () => {
+test("登记：移动堡垒是配置物（props），占 1 枚代币（作者 10/21 定）、不进敌人表；座位 4、出现概率 30%、只有镇压队能上，数值写在 VEHICLES 里", () => {
   const c = H.load();
   const v = get(c, "VEHICLES").fortress;
-  eq([v.seats, v.appear, v.faction, v.stunMarks], [4, 0.3, "镇压队", 2]);
-  assert.equal(c.enemyInfo("fortress"), null, "不是敌人，没有代币");
+  eq([v.seats, v.appear, v.faction, v.stunMarks, v.tokens], [4, 0.3, "镇压队", 2, 1], "占 1 枚代币写在 VEHICLES.fortress.tokens");
+  assert.equal(c.enemyInfo("fortress"), null, "不是敌人，不进敌人表");
   assert.equal(c.propKindName("fortress"), "移动堡垒");
   const p = c.makeProp("fortress", 2, 5);
   assert.ok(p.isVehicle && p.kind === "fortress" && p.hp === 88 && p.maxHp === 88);
-  assert.ok(get(c, "CODEX_PROPS").some(x => x.id === "fortress"), "图鉴里有配置物条目");
+  const codex = get(c, "CODEX_PROPS").find(x => x.id === "fortress");
+  assert.ok(codex, "图鉴里有配置物条目");
+  assert.match(codex.lines[0], /占1枚代币/, "图鉴写车占 1 枚代币");
+  assert.doesNotMatch(codex.lines.join(""), /不占代币/);
+  // 设计文档第 3 节（开头和「出现」）：以前写的「不占代币」改成占 1 枚代币
+  const doc = fs.readFileSync(path.join(H.ROOT, "docs/suppression-force.md"), "utf8");
+  const sec = doc.slice(doc.indexOf("## 3. 移动堡垒"), doc.indexOf("### 数值"));
+  assert.match(sec, /\*\*占 1 枚代币\*\*/);
+  assert.doesNotMatch(sec, /不占代币/);
 });
 
 /* ---------- 上车 / 下车 / 驾驶员递补 ---------- */
@@ -845,7 +853,7 @@ test("遭遇：镇压队的遭遇有 30% 带一台移动堡垒，别的阵营没
   }
 });
 
-/* ---------- 车占代币（VEHICLES.fortress.tokens：只给平衡模拟工具用，issue #235） ---------- */
+/* ---------- 车占代币（VEHICLES.fortress.tokens：issue #235 加的开关，作者 10/21 定为规则、默认占 1 枚，issue #243） ---------- */
 /** 遭遇里的敌人占几枚代币（成组的整组记一次；三区制的站位把一组拆成一只一行，按只数折回去） */
 function tokensOf(c, e) {
   const n = {};
@@ -859,9 +867,48 @@ function tokensOf(c, e) {
 const units = e => e.enemies.flatMap(r => Array(Math.max(1, Number(r.count) || 1)).fill(r.preset)).sort();
 const minus = (a, b) => { const left = b.slice(); return a.filter(k => { const i = left.indexOf(k); if (i < 0) return true; left.splice(i, 1); return false; }); };
 
-test("车占代币：默认 0 = 不占，带车的遭遇照常抽满代币；抽出来的遭遇和不走「车占代币」这一步时一模一样，也不多掷骰（游戏行为不变）", () => {
+test("车占代币：默认占 1 枚（作者 10/21 定）——带车的遭遇少 1 枚代币的敌人，开战时驾驶员还在；区制、站位、天气、带不带车和旧规则（不占）一样，不带车的遭遇原样", () => {
   const a = H.load(), b = H.load();
-  assert.equal(get(a, "VEHICLES").fortress.tokens, 0, "默认不占代币");
+  assert.equal(get(a, "VEHICLES").fortress.tokens, 1, "默认占 1 枚代币");
+  get(b, "VEHICLES").fortress.tokens = 0;   // 对照：旧规则（车不占代币，加在抽满代币的遭遇上）
+  const faction = k => (a.enemyInfo(k) || {}).faction;
+  let cars = 0, swaps = 0, built = 0;
+  for (let i = 0; i < 600; i++) {
+    // 每场两边从同一个种子开始（带车时退掉精英要补抽，会多掷一次骰）
+    a.Math.random = a.makeRng("VEH-TOK1:" + i); b.Math.random = b.makeRng("VEH-TOK1:" + i);
+    const opt = { region: "外城区", faction: "镇压队" };   // 区制、混编都照常随机
+    const x = a.rollEncounter(opt), y = b.rollEncounter(opt);
+    eq([x.zoneMode, x.layout, x.weather, x.tokens, x.vehicles.length], [y.zoneMode, y.layout, y.weather, y.tokens, y.vehicles.length], "区制、站位、天气、代币预算、带不带车都一样");
+    if (!x.vehicles.length) { eq(x, y, "不带车的遭遇原样"); continue; }
+    cars++;
+    assert.equal(tokensOf(b, y), y.tokens, "旧规则：照常抽满代币");
+    assert.equal(tokensOf(a, x), y.tokens - 1, `带车的遭遇少 1 枚代币的敌人：${units(y)} → ${units(x)}`);
+    assert.equal(x.vehicles[0].tokens, 1, "车上记着占了 1 枚");
+    assert.ok(x.enemies.some(r => faction(r.preset) === "镇压队"), "至少留一个镇压队员当驾驶员");
+    const gone = minus(units(y), units(x)), added = minus(units(x), units(y));
+    assert.equal(new Set(gone).size, 1, `只退掉一次抽到的（一只或一组）：${gone}`);
+    if (added.length) {
+      swaps++;
+      assert.ok(a.enemyTokens(gone[0]) >= 2, `只有退掉 2 枚代币以上的才补抽：${gone} → ${added}`);
+    }
+    // 开战（buildEncounter）：上场的就是少了 1 枚代币的这些敌人，车上坐着其中一个镇压队员当驾驶员
+    if (built >= 60) continue;
+    built++;
+    a.BattleSim.setup({ party: ["kolt", "helu"], enemies: [], seed: "tok" + i });
+    const S = a.S.state;
+    S.units = S.units.filter(u => u.isPlayer); S.props = [];
+    const made = a.buildEncounter(x, 5, 2);
+    eq(made.map(u => u.kit).sort(), units(x), "上场的敌人");
+    const cars0 = S.props.filter(p => p.isVehicle), pilot = cars0.length ? a.vehiclePilot(cars0[0]) : null;
+    assert.equal(cars0.length, 1, "车照样上场");
+    assert.ok(pilot && made.includes(pilot) && faction(pilot.kit) === "镇压队" && pilot.vehMerged, `驾驶员还在：${units(x)}`);
+  }
+  assert.ok(cars > 120 && swaps > 10 && built === 60, `带车 ${cars} 场，其中退精英补抽 ${swaps} 场`);
+});
+
+test("车占代币：填 0（旧规则，平衡工具「有车 · 不占代币」那一组用）时这一步什么都不做：带车的遭遇照常抽满代币，和不走「车占代币」这一步时一模一样，也不多掷骰", () => {
+  const a = H.load(), b = H.load();
+  get(a, "VEHICLES").fortress.tokens = 0;
   b.vehiclePayTokens = undefined;   // 对照：finishEncounter 不走「车占代币」这一步（加开关以前的样子）
   a.Math.random = a.makeRng("VEH-TOK0"); b.Math.random = b.makeRng("VEH-TOK0");
   let cars = 0;
@@ -876,32 +923,6 @@ test("车占代币：默认 0 = 不占，带车的遭遇照常抽满代币；抽
   }
   assert.ok(cars > 120, `带车的遭遇 ${cars} 场`);
   assert.equal(a.Math.random.draws(), b.Math.random.draws(), "不多掷骰");
-});
-
-test("车占代币：开关改成 1 时，带车的遭遇少 1 枚代币的敌人（镇压队至少留一个当驾驶员）；区制、站位、带不带车不变，不带车的遭遇原样", () => {
-  const a = H.load(), b = H.load();
-  get(b, "VEHICLES").fortress.tokens = 1;
-  const faction = k => (b.enemyInfo(k) || {}).faction;
-  let cars = 0, swaps = 0;
-  for (let i = 0; i < 600; i++) {
-    // 每场两边从同一个种子开始（带车时退掉精英要补抽，会多掷一次骰）
-    a.Math.random = a.makeRng("VEH-TOK1:" + i); b.Math.random = b.makeRng("VEH-TOK1:" + i);
-    const opt = { region: "外城区", faction: "镇压队" };
-    const x = a.rollEncounter(opt), y = b.rollEncounter(opt);
-    eq([y.zoneMode, y.layout, y.weather, y.tokens, y.vehicles.length], [x.zoneMode, x.layout, x.weather, x.tokens, x.vehicles.length], "区制、站位、天气、代币预算、带不带车都一样");
-    if (!x.vehicles.length) { eq(y, x, "不带车的遭遇原样"); continue; }
-    cars++;
-    assert.equal(tokensOf(b, y), tokensOf(a, x) - 1, `带车的遭遇少 1 枚代币的敌人：${units(x)} → ${units(y)}`);
-    assert.equal(y.vehicles[0].tokens, 1, "车上记着占了 1 枚");
-    assert.ok(y.enemies.some(r => faction(r.preset) === "镇压队"), "至少留一个镇压队员当驾驶员");
-    const gone = minus(units(x), units(y)), added = minus(units(y), units(x));
-    assert.equal(new Set(gone).size, 1, `只退掉一次抽到的（一只或一组）：${gone}`);
-    if (added.length) {
-      swaps++;
-      assert.ok(b.enemyTokens(gone[0]) >= 2, `只有退掉 2 枚代币以上的才补抽：${gone} → ${added}`);
-    }
-  }
-  assert.ok(cars > 120 && swaps > 10, `带车 ${cars} 场，其中退精英补抽 ${swaps} 场`);
 });
 
 test("车占代币：退的是最后抽到的那个（三区制把站位打乱了也认得出）；最后一个镇压队员不退；退掉精英时补抽 1 枚，和一开始就少抽 1 枚代币的分布一样", () => {
