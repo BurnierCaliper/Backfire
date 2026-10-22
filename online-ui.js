@@ -874,7 +874,7 @@
       const b = document.body, vars = th ? global.OnlinePaper.themeVars(th) : {};
       if (paperThemeKey) { Object.keys(global.OnlinePaper.themeVars({ time: "day" })).forEach(k => b.style.removeProperty(k)); b.style.removeProperty("--olp-grit"); }
       paperThemeKey = key;
-      if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; return; }
+      if (!th) { delete b.dataset.olpTime; delete b.dataset.olpWeather; b.style.removeProperty("--olp-dock-h"); return; }
       b.dataset.olpTime = th.time; b.dataset.olpWeather = th.weather;
       Object.keys(vars).forEach(k => b.style.setProperty(k, vars[k]));
       const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
@@ -886,6 +886,9 @@
     function paperDress() {
       if (!paperOn || !global.OnlinePaper) return;
       global.OnlinePaper.dress(document, null, paperTheme);
+      // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起
+      const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
+      if (document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
       if (typeof ResizeObserver !== "function") return;
       if (!paperSizer) paperSizer = new ResizeObserver(() => {
         if (paperDressQueued) return;
@@ -966,8 +969,9 @@
     /* ---------- 小队聊天 ---------- */
     const chatRows = () => (hs().chat || []).filter(m => m && typeof m.text === "string");
     const clock = at => { if (!at) return ""; const d = new Date(at); return isNaN(d) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-    function chatListMarkup(rows) {
-      return rows.map(m => `<li class="${m.operatorId && m.operatorId === own() ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
+    /** paper：纸片画面（#308）的便利贴——每条带上这个发送人固定的便利贴颜色（online-paper.js · noteColor） */
+    function chatListMarkup(rows, paper) {
+      return rows.map(m => { const mine = !!(m.operatorId && m.operatorId === own()); return `<li class="${mine ? "ol-mine" : ""}${m.roll ? " ol-roll" : ""}${m.tier ? " ol-tier-" + m.tier : ""}${m.secret ? " ol-secret" : ""}${m.title ? " ol-title-row" : ""}"${paper ? ` style="--olp-note:${global.OnlinePaper.noteColor(m.operatorId || m.name, mine)}"` : ""}><div><b>${esc(m.name || m.operatorName || playerName(m.operatorId))}</b><small>${esc(clock(m.at))}</small></div><p${artAttr(m.text)}>${esc(m.text)}</p></li>`; }).join("") || '<li class="ol-muted">还没有人说话。消息所有人都能看到，并一直保留在记录里。</li>';
     }
     /** 更新列表（只换列表内容，不碰输入框）；原来在底部就继续贴底 */
     function fillList(list, markup) {
@@ -998,11 +1002,13 @@
       const badge = chatTab.querySelector(".ol-badge"); badge.hidden = !unread; badge.textContent = dotText(unread);
       paintSideCollapse();
       const logs = view.packet?.publicLogs || [];
-      const logMarkup = logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
+      // 纸片画面（#308）：战斗记录是一长条热敏收据（online-paper.js · receiptHtml：同样这几条记录，按回合分好、伤害靠右、本回合合计）
+      const logMarkup = paperOn ? global.OnlinePaper.receiptHtml(logs, { room: view.roomCode }) : logs.map(l => `<li>${esc(l.text || "")}</li>`).join("") || '<li class="ol-muted">还没有公开记录。</li>';
       if (force || sideKeys.log !== logMarkup) { sideKeys.log = logMarkup; fillList(side.querySelector(".ol-side-log"), logMarkup); }
-      const chatMarkup = chatListMarkup(chatRows());
+      const chatMarkup = chatListMarkup(chatRows(), paperOn);
       if (force || sideKeys.chat !== chatMarkup) { sideKeys.chat = chatMarkup; fillList(side.querySelector(".ol-side-chat"), chatMarkup); }
       side.querySelector(".ol-side-form button[type=submit]").disabled = chatSending || paused();
+      if (paperOn) paperDress();   // 换了频道（收据 ↔ 便利贴底下那张纸）、拉出来 / 收回去：换一张纸
     }
     /** 聊天框：Enter 发送，Shift+Enter 换行；输入法选字时按的 Enter 不算 */
     function chatEnter(event) {

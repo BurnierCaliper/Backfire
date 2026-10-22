@@ -58,6 +58,22 @@
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
     cam: { label: "镜头：远景 / 中景 / 近景" },
+    /* 战斗记录 = 一长条热敏收据（审查：照 shot-day.jpg 右边那张）：顶上「BACKFIRE / 战斗记录 · 房间码」、一排等号，每个回合「*** 第 N 回合 ***」开头、
+     * 每条之间虚线、伤害数字靠右、回合末尾「本回合合计」，底下是锯齿撕口（纸纹 receipt 那一种的 zig）。
+     * 每条记录都是 online-view.js · projectLogs 投影过的那一句（谁 · 用了什么 → 目标：N 伤害，击破 M，弹字），这里只是拆开排版，不多给一个数：
+     * 合计只把这一回合收据上已经写着的伤害 / 击破 / 治疗加起来（打在坚毅生命上的那几下投影本来就不给数）。
+     *   rule / cut  一排等号、合计上面那一排虚线（放不下的截掉）
+     *   parts       投影那一句里的几种数：伤害、击破、治疗（认这几种写法；别的弹字原样写在小字里）
+     *   phases      「我方回合 / 敌人回合 / 战斗结束……」这种一句话的，写成居中的一行 */
+    receipt: {
+      brand: "BACKFIRE", head: "战斗记录 · {0}", round: "*** 第 {0} 回合 ***", total: "* 本回合合计 {0} *", empty: "还没有公开记录。",
+      rule: "=".repeat(60), cut: "- ".repeat(40).trim(), arrow: " → ", sep: " · ", gm: "主持人",
+      parts: { dmg: { re: /^(\d+) 伤害$/, label: "伤害 {0}" }, brk: { re: /^击破 (\d+)$/, label: "击破 {0}" }, heal: { re: /^治疗 (\d+)$/, label: "治疗 {0}" } },
+      phases: ["phase", "victory", "defeat", "retreat"]
+    },
+    /* 小队聊天 = 贴在纸上的便利贴（样稿 shot-night.jpg）：每个发送人固定一种颜色（按 id 算），自己发的是 mine 那一种、靠右。
+     * 便利贴上的字一直是深色（ink），正文用清楚的无衬线黑体，只有发送人名字用手写体（online-paper.css） */
+    notes: { colors: ["#f4e27a", "#ffb3c7", "#c8f0b0", "#ffd59e", "#e3c8ff"], mine: "#b8e3ff", ink: "#1a1712" },
     tilt: [-3, 2, -1.5, 3, -2, 1.5],
     /* 白天 / 夜晚 / 天气（第 2 步，规格见 docs/ui-paper/README.md）：所有浮着的面板跟着这一包的光影（pv.light；旧主机没发就按游戏时钟）和天气换色调。
      *   theme.light    光影 → 纸的底色（傍晚和规则表一样算夜里：PartyCards.isNight）
@@ -72,14 +88,15 @@
       weather: { sand: "sand", acid: "rain", thunder: "rain", snow: "snow", phase: "fog", glow: "fog" }
     },
     /*              board 瓦楞纸板（深一点，喷漆字才看得清）、spray「结束行动」的喷漆、spray2「唤出」的喷漆（和角色主属性的颜色混一半）、sprayEdge 喷漆字的深色描边；
+     *              boardyInk 黄纸（「菜单」、选中的索引标签）上的字：夜里也是深色；
      *              receiptMuted 收据上的小字、虚线 */
     palette: {
       day: { kraft: "#c8a46e", kraftInk: "#2a1b0c", paper: "#f3ecdc", paperInk: "#1d160e", card: "#fbf7ee", muted: "#6e5c44",
-        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#6b4a29", boardInk: "#f6efe1", boardy: "#e9c443", receipt: "#f6f4ee", receiptInk: "#26231d", receiptMuted: "#7b746a",
+        tape: "#e8d6a6", tapeInk: "#2a1d0c", board: "#6b4a29", boardInk: "#f6efe1", boardy: "#e9c443", boardyInk: "#2a1b0c", receipt: "#f6f4ee", receiptInk: "#26231d", receiptMuted: "#7b746a",
         spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(24, 12, 2, .9)",
         on: "#55d6c2", onInk: "#08332c", stamp: "#c8281e", turn: "#0b6b5a", ring: "#e2b320", hl: "rgba(255, 226, 64, .55)" },
       night: { kraft: "#3a2d20", kraftInk: "#efe4cf", paper: "#1d1c21", paperInk: "#eae4d6", card: "#26252b", muted: "#a59c8a",
-        tape: "#a09678", tapeInk: "#1c150c", board: "#4a3521", boardInk: "#f6efe1", boardy: "#c9a73a", receipt: "#1d1c21", receiptInk: "#eae4d6", receiptMuted: "#a39b8d",
+        tape: "#a09678", tapeInk: "#1c150c", board: "#4a3521", boardInk: "#f6efe1", boardy: "#c9a73a", boardyInk: "#1c1208", receipt: "#1d1c21", receiptInk: "#eae4d6", receiptMuted: "#a39b8d",
         spray: "#ffd21a", spray2: "#3fe8d2", sprayEdge: "rgba(0, 0, 0, .92)",
         on: "#3fb8a6", onInk: "#04201b", stamp: "#e0473c", turn: "#3fd1b8", ring: "#e2b320", hl: "rgba(255, 226, 64, .35)" }
     },
@@ -97,19 +114,20 @@
      *   facet      折面数按面积算（审查：大面板的折面被放大成一块块「碎地砖」）：每 area 平方像素一块，至少是这种纸的 facets，最多 max 块（防止太慢）
      *   cache      最多记多少张（同一个尺寸、同一套配色只画一次）
      *   kinds      每种纸：color 用配色表里的哪个颜色、facets 小纸片至少几块折面 / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
-     *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）
+     *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）、zig 底边是锯齿撕口（收据撕下来的那一头：每 step 像素一个齿、齿深 depth）
      *   weather    天气在纸上加的：沙暴撒沙粒（每多少像素一粒）、下雨几块深色水渍、雪边上一层霜、雾蒙一层灰
      *   grit       印章、喷漆的斑驳遮罩：多大、挖几个小洞（只一点点，字一定要清楚） */
     art: {
       pad: 8,
       shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
       scale: 0.5, pixels: 90000, cache: 48,
-      facet: { area: 1600, max: 240 },
+      facet: { area: 1200, max: 320 },
       kinds: {
         tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 } },
         kraft: { color: "kraft", facets: 18, amp: 0.09, crease: 0.22, grain: 0.05, jag: 2, torn: { bottom: 5 } },
         dock: { color: "kraft", facets: 26, amp: 0.08, crease: 0.22, grain: 0.05, jag: 3, torn: { top: 6 } },
         paper: { color: "paper", facets: 20, amp: 0.06, crease: 0.18, grain: 0.04, jag: 2 },
+        receipt: { color: "receipt", facets: 12, amp: 0.035, crease: 0.09, grain: 0.03, jag: 1, zig: { step: 8, depth: 7 } },
         card: { color: "card", facets: 8, amp: 0.05, crease: 0.15, grain: 0.04, jag: 1.5 },
         tag: { color: "kraft", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
         tagon: { color: "on", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
@@ -125,7 +143,7 @@
         [".ol-battle > .g-hud.hd2d-shell > .hd2d-party", "kraft"], [".ol-battle > .g-hud.hd2d-shell", "dock"],
         [".ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm", "card"], [".ol-battle .olp-party-tools .ol-button", "card"],
         [".ol-battle > .g-hud.hd2d-shell .skills .sk", "tag"], [".ol-battle > .g-hud.hd2d-shell .summonbtn", "board"], [".ol-battle > .g-hud.hd2d-shell .endturn", "board"],
-        ["#online-side:not(.ol-side-collapsed)", "paper"], ["#online-side.ol-side-collapsed", "kraft"]
+        ['#online-side[data-tab="log"]:not(.ol-side-collapsed)', "receipt"], ['#online-side[data-tab="chat"]:not(.ol-side-collapsed)', "paper"], ["#online-side.ol-side-collapsed", "kraft"]
       ]
     }
   };
@@ -191,6 +209,7 @@
       out["--olp-" + kebab(k)] = v;
     });
     out["--olp-edge-fx"] = W ? W.edge : "inset 0 0 0 transparent";
+    out["--olp-note-ink"] = PAPER.notes.ink;   // 便利贴上的字：白天夜里都是深色（便利贴本身不跟着变黑）
     return out;
   }
 
@@ -205,7 +224,9 @@
     const j = (side) => (torn[side] ? torn[side] : jag), st = (side) => (torn[side] ? 4 : 9);
     for (let x = 0; x <= w; x += st("top")) p.push([x, rnd() * j("top")]);
     for (let y = 0; y <= h; y += st("right")) p.push([w - rnd() * j("right"), y]);
-    for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom")]);
+    // 收据的锯齿撕口（mock.html · zig）：一高一低交替
+    if (o.zig) for (let x = w, i = 0; x >= 0; x -= o.zig.step, i++) p.push([x, h - (i % 2 ? 0 : o.zig.depth) - rnd() * 1.5]);
+    else for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom")]);
     for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y]);
     return p;
   }
@@ -407,6 +428,75 @@
     return `<ol class="olp-tags" aria-label="${esc(T.order)}">${list}</ol>`;
   }
 
+  /* ---------- 战斗记录：热敏收据 ---------- */
+  /** 投影过的一条记录（{ kind, text, turn }）拆成收据上的一行：who 谁（加粗）、what 干了什么、targets [{ name, dmg, brk, heal, words }]（「→ 目标：…」那几段）。
+   *  只拆 online-view.js · projectLogs 写出来的那一句，不认得的写法原样放在 what 里 */
+  function receiptLine(row) {
+    const R = PAPER.receipt, text = String((row && row.text) || ""), kind = (row && row.kind) || "";
+    const at = text.indexOf(R.arrow), head = at >= 0 ? text.slice(0, at) : text, tail = at >= 0 ? text.slice(at + R.arrow.length) : "";
+    let who = "", what = head;
+    const dot = head.indexOf(R.sep);
+    if ((kind === "action" || !kind) && dot > 0) { who = head.slice(0, dot); what = head.slice(dot + R.sep.length); }
+    else if ((kind === "gm" || kind === "transfer") && head.startsWith(R.gm)) { who = R.gm; what = head.slice(R.gm.length); }
+    const targets = tail ? tail.split("；").filter(Boolean).map(seg => {
+      const c = seg.indexOf("："), t = { name: c >= 0 ? seg.slice(0, c) : seg, dmg: 0, brk: 0, heal: 0, words: [] };
+      (c >= 0 ? seg.slice(c + 1).split("，") : []).forEach(p => {
+        p = p.trim(); if (!p) return;
+        const k = Object.keys(R.parts).find(key => R.parts[key].re.test(p));
+        if (k) t[k] += Number(R.parts[k].re.exec(p)[1]); else t.words.push(p);
+      });
+      return t;
+    }) : [];
+    return { kind, who, what, targets };
+  }
+  /** 一条条记录按回合分好：[{ turn 第几回合（还没开打的那几条是 null）, lines, total: { dmg, brk, heal } }]。
+   *  每条带的 turn 换了就是下一回合；没带 turn 的（主持人改物资……）算在当时那一回合里。「第 N 回合开始」那一句不单独占一行（回合分隔已经写了），带着结算的照旧写 */
+  function receiptGroups(logs) {
+    const out = [];
+    let cur = null;
+    (logs || []).forEach(row => {
+      if (!row || typeof row !== "object") return;
+      const t = Number(row.turn != null ? row.turn : row.turnNo);
+      const turn = t > 0 ? Math.floor(t) : null;
+      if (!cur || (turn != null && turn !== cur.turn)) { cur = { turn: turn != null ? turn : cur ? cur.turn : null, lines: [], total: { dmg: 0, brk: 0, heal: 0 } }; out.push(cur); }
+      const line = receiptLine(row);
+      if (line.kind === "round" && !line.targets.length) return;
+      line.targets.forEach(x => { cur.total.dmg += x.dmg; cur.total.brk += x.brk; cur.total.heal += x.heal; });
+      cur.lines.push(line);
+    });
+    return out.filter(g => g.lines.length || g.turn != null);
+  }
+  /** 收据（.ol-side-log 里的一个个 <li>）：o = { room 房间码 } */
+  function receiptHtml(logs, o) {
+    o = o || {};
+    const R = PAPER.receipt, P = R.parts, groups = receiptGroups(logs);
+    const nums = x => Object.keys(P).filter(k => k !== "dmg" && x[k]).map(k => fill(P[k].label, x[k])).concat(x.words || []);
+    const small = list => (list.length ? `<small>${esc(list.join(R.sep))}</small>` : "");
+    const n = v => `<span class="olp-rc-n">${v ? esc(v) : ""}</span>`;
+    const line = (l) => {
+      if (R.phases.includes(l.kind) && !l.targets.length) return `<li class="olp-rc-p">${esc(l.what)}</li>`;
+      const lead = `${l.who ? `<b>${esc(l.who)}</b> ` : ""}${esc(l.what.trim())}`;
+      if (l.targets.length === 1) {
+        const t = l.targets[0];
+        return `<li class="olp-rc-r"><span class="olp-rc-l">${lead}${esc(R.arrow)}${esc(t.name)}</span>${n(t.dmg)}${small(nums(t))}</li>`;
+      }
+      return `<li class="olp-rc-r"><span class="olp-rc-l">${lead}</span>${n(0)}` +
+        l.targets.map(t => `<span class="olp-rc-t">${esc(R.arrow.trim())} ${esc(t.name)}</span>${n(t.dmg)}${small(nums(t))}`).join("") + `</li>`;
+    };
+    const total = g => `<li class="olp-rc-cut" aria-hidden="true">${esc(R.cut)}</li><li class="olp-rc-total">${esc(fill(R.total,
+      Object.keys(P).filter(k => k === "dmg" || g.total[k]).map(k => fill(P[k].label, g.total[k])).join(R.sep)))}</li>`;
+    const body = groups.map(g => (g.turn != null ? `<li class="olp-rc-sep">${esc(fill(R.round, g.turn))}</li>` : "") + g.lines.map(line).join("") + (g.turn != null ? total(g) : "")).join("");
+    return `<li class="olp-rc-h"><b>${esc(R.brand)}</b><span>${esc(fill(R.head, o.room || ""))}</span></li><li class="olp-rc-rule" aria-hidden="true">${esc(R.rule)}</li>` +
+      (body || `<li class="olp-rc-empty">${esc(R.empty)}</li>`);
+  }
+
+  /* ---------- 小队聊天：便利贴 ---------- */
+  /** 这条消息贴哪种颜色的便利贴：自己发的是 PAPER.notes.mine；别人按发送人（id，没有就按名字）固定一种 */
+  function noteColor(from, mine) {
+    const N = PAPER.notes;
+    return mine ? N.mine : N.colors[hash(from || "") % N.colors.length];
+  }
+
   /* ---------- 页面：热座栏里原来的按钮、新画面的镜头按钮 ---------- */
   /** 热座栏（#hs-order）里每一格现在的按钮：Map 格子 → [{ hs 哪一种（move / moveStart / moveCancel）, label, aria, title, primary, disabled }] */
   function readMoves(doc) {
@@ -443,5 +533,6 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
+  return { PAPER, active, isOpen, setOpen, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml,
+    receiptLine, receiptGroups, receiptHtml, noteColor, readMoves, pressMove, readCam, pressCam };
 });

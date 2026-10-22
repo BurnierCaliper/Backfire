@@ -59,7 +59,7 @@ body.ol-paper .olp-cam-b { width: 30px; padding: 0; color: var(--olp-tape-ink); 
 body.ol-paper .olp-cam-b.on { background: var(--olp-hl); }
 body.ol-paper .olp-tools-b { padding: 4px 12px; color: var(--olp-board-ink); background: var(--olp-board); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
 body.ol-paper .olp-tools-b[aria-expanded="true"] { outline: 2px solid var(--olp-tape-ink); outline-offset: 1px; }
-body.ol-paper .olp-menu-b { position: relative; padding: 4px 12px; color: var(--olp-kraft-ink); background: var(--olp-boardy); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
+body.ol-paper .olp-menu-b { position: relative; padding: 4px 12px; color: var(--olp-boardy-ink); background: var(--olp-boardy); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }   /* 黄纸上深色字（夜里也是） */
 body.ol-paper .olp-menu-b kbd { font: 400 11px/1 "Black Ops One", var(--sk-body, sans-serif); }
 body.ol-paper .olp-top button:focus-visible { outline: 2px solid var(--olp-stamp); outline-offset: 2px; }
 /* 「工具 ▾」下拉：牛皮纸卡片，挂在按钮下面 */
@@ -138,7 +138,7 @@ body.online-player.ol-paper .olp-party-tools .ol-button {
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed { width: auto; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party { display: grid; justify-items: center; gap: 6px; padding: 0 8px 8px; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm { width: max-content; padding: 2px; background: transparent; border: 0; }
-body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm::before { display: none; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm::before { display: none !important; }   /* 压过下面贴纸纹的 :is(…, #online-side)（带 id，权重高） */
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm > :not(.face) { display: none; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon { margin-left: 0; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed .olp-party-tools { display: none; }
@@ -169,7 +169,7 @@ body.ol-paper .ol-side {
 }
 body.ol-paper .ol-side .ol-side-tabs { border-bottom: 1.5px dashed rgba(0, 0, 0, .3); }
 body.ol-paper .ol-side .ol-tab { color: var(--olp-kraft-ink); background: var(--olp-kraft); }
-body.ol-paper .ol-side .ol-tab.on { color: var(--olp-kraft-ink); background: var(--olp-boardy); }
+body.ol-paper .ol-side .ol-tab.on { color: var(--olp-boardy-ink); background: var(--olp-boardy); }
 body.ol-paper .ol-side .ol-side-log, body.ol-paper .ol-side .ol-side-chat { color: var(--olp-paper-ink); }
 body.ol-paper .ol-side .ol-side-chat li { background: var(--olp-card); border-left-color: var(--olp-kraft); }
 body.ol-paper .ol-side .ol-side-chat li.ol-mine { border-left-color: var(--olp-on); }
@@ -193,7 +193,7 @@ body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse:not([hidden]):hover {
 body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse-dot {
   top: auto; bottom: 8px; right: 50%; min-width: 26px; height: auto; padding: 2px 5px; transform: translateX(50%) rotate(-8deg); writing-mode: horizontal-tb;
   font: 400 15px/1.1 var(--olp-stencil); letter-spacing: 0; text-shadow: none; color: var(--olp-stamp); background: color-mix(in srgb, var(--olp-stamp) 8%, transparent);
-  border: 2.5px solid var(--olp-stamp); border-radius: 4px; box-shadow: none;
+  border: 2.5px solid var(--olp-stamp); border-radius: 4px; box-shadow: none; animation: none;   /* 章是盖上去的：不用红点那一下弹（弹的时候会把斜着、居中的 transform 顶掉） */
   -webkit-mask-image: var(--olp-grit, none); mask-image: var(--olp-grit, none); -webkit-mask-size: 120px; mask-size: 120px;
 }
 /* ---------- 纸片美术（第 3 步）：纹理照 mock.html 程序生成（online-paper.js · texture / dress），写成 --olp-tex ----------
@@ -275,16 +275,57 @@ body.ol-paper #online-side:not(.ol-side-collapsed)::after {
   content: ""; position: absolute; z-index: 6; right: 20px; top: -12px; width: 74px; height: 24px; pointer-events: none; transform: rotate(5deg);
   background: var(--olp-tape); opacity: .9; box-shadow: 0 1px 2px rgba(0, 0, 0, .25);
 }
-/* 战斗记录：一长条热敏收据（白天白纸、夜里黑纸；打印体、虚线分隔）；小队聊天：便利贴（自己发的靠右），正文清楚的黑体，只有名字是手写体 */
-body.ol-paper #online-side .ol-side-log { font-family: var(--olp-mono); font-size: 13.5px; line-height: 1.55; color: var(--olp-receipt-ink); padding-left: 22px; }
-body.ol-paper #online-side .ol-side-log li { padding: 5px 0; border-bottom: 1px dashed color-mix(in srgb, var(--olp-receipt-ink) 30%, transparent); }
-body.ol-paper #online-side .ol-side-chat li { position: relative; width: 82%; padding: 8px 12px 10px; border: 0; color: #1a1712; background: #f4e27a; box-shadow: 1px 3px 4px rgba(0, 0, 0, .35); transform: rotate(-1deg); }
-body.ol-paper #online-side .ol-side-chat li:nth-child(3n + 2) { background: #ffb3c7; transform: rotate(1.2deg); }
-body.ol-paper #online-side .ol-side-chat li:nth-child(3n) { background: #c8f0b0; transform: rotate(-.6deg); }
-body.ol-paper #online-side .ol-side-chat li.ol-mine { margin-left: auto; background: #b8e3ff; transform: rotate(.8deg); }
-body.ol-paper #online-side .ol-side-chat li b { font-family: var(--olp-hand); font-weight: 400; font-size: 16px; color: #3a2f22; }
-body.ol-paper #online-side .ol-side-chat li small { color: #6b5d4b; }
-body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); font-size: 15px; font-weight: 600; line-height: 1.45; color: #1a1712; }
+/* 战斗记录：一长条热敏收据（online-paper.js · receiptHtml；白天白纸、夜里黑纸，纸纹 receipt 底边是锯齿撕口）：
+ * 顶上「BACKFIRE / 战斗记录 · 房间码」、一排等号；「*** 第 N 回合 ***」；每条之间虚线、伤害数字靠右、小字（击破 / 治疗 / 弹字）；回合末尾「本回合合计」 */
+body.ol-paper #online-side .ol-side-log {
+  list-style: none; padding: 18px 20px 34px; font: 13.5px/1.55 var(--olp-mono); color: var(--olp-receipt-ink); font-variant-numeric: tabular-nums;
+}
+body.ol-paper #online-side .ol-side-log > li { margin: 0; padding: 0; border: 0; }
+body.ol-paper #online-side .ol-side-log > .olp-rc-h { text-align: center; }
+body.ol-paper #online-side .olp-rc-h b { display: block; font: 700 17px/1.3 var(--olp-mono); letter-spacing: 4px; }
+body.ol-paper #online-side .olp-rc-h span { display: block; font-size: 12px; color: var(--olp-receipt-muted); }
+body.ol-paper #online-side .ol-side-log > :is(.olp-rc-rule, .olp-rc-cut) { overflow: hidden; white-space: nowrap; text-align: center; color: var(--olp-receipt-muted); letter-spacing: 1px; line-height: 1.2; margin: 6px 0; }
+body.ol-paper #online-side .ol-side-log > .olp-rc-sep { text-align: center; color: var(--olp-receipt-muted); letter-spacing: 1px; margin: 8px 0 2px; }
+body.ol-paper #online-side .ol-side-log > .olp-rc-r {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; align-items: baseline; padding: 5px 0;
+  border-bottom: 1px dashed color-mix(in srgb, var(--olp-receipt-ink) 32%, transparent);
+}
+body.ol-paper #online-side .olp-rc-r b { font-weight: 900; }
+body.ol-paper #online-side .olp-rc-l, body.ol-paper #online-side .olp-rc-t { grid-column: 1; min-width: 0; overflow-wrap: anywhere; }
+body.ol-paper #online-side .olp-rc-t { padding-left: 1.2em; }
+body.ol-paper #online-side .olp-rc-n { grid-column: 2; justify-self: end; text-align: right; font-weight: 900; }
+body.ol-paper #online-side .olp-rc-r small { grid-column: 1 / -1; font-size: 12px; line-height: 1.4; color: var(--olp-receipt-muted); }
+body.ol-paper #online-side .ol-side-log > :is(.olp-rc-p, .olp-rc-empty) { text-align: center; padding: 4px 0; color: var(--olp-receipt-muted); border-bottom: 1px dashed color-mix(in srgb, var(--olp-receipt-ink) 32%, transparent); }
+body.ol-paper #online-side .ol-side-log > .olp-rc-total { text-align: center; font-size: 12.5px; margin-bottom: 4px; }
+/* 拉出来的抽屉（电脑上）：两张牛皮纸索引标签（战斗记录 / 小队）探出纸的上边、压在纸后面一点；收起按钮是右边一张小标签 */
+@media (min-width: 761px) {
+  body.ol-paper .ol-side:not(.ol-side-collapsed) { top: calc(var(--olp-under) + 30px); height: min(560px, calc(100vh - var(--olp-under) - 240px)); overflow: visible; }
+  body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-tabs { position: absolute; z-index: -2; left: 12px; right: 10px; top: -32px; height: 36px; gap: 8px; align-items: stretch; border: 0; }
+  body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-tabs > :is(.ol-tab, .ol-side-collapse:not([hidden])) {
+    flex: 0 0 auto; min-width: 0; padding: 3px 16px 9px; border: 0; font: 400 18px/1.2 var(--olp-label); color: var(--olp-kraft-ink); background: var(--olp-kraft);
+    box-shadow: 1px -1px 3px rgba(0, 0, 0, .35); clip-path: polygon(5% 0, 95% 4%, 100% 100%, 0 100%);
+  }
+  body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-tabs > .ol-tab.on { color: var(--olp-boardy-ink); background: var(--olp-boardy); }
+  body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-tabs > .ol-side-collapse:not([hidden]) { margin-left: auto; padding-inline: 12px; }
+  body.ol-paper #online-side:not(.ol-side-collapsed)::after { right: 78px; }
+}
+/* 小队聊天的输入框在纸的最底下：一条横线（像写在纸上），掷骰 / 发送是贴上去的小标签 */
+body.ol-paper #online-side .ol-side-form { padding: 10px 14px 14px; }
+body.ol-paper #online-side .ol-side-form textarea { font: 15px/20px var(--olp-sans); color: var(--olp-paper-ink); background: transparent; border: 0; border-bottom: 2px solid var(--olp-paper-ink); }
+body.ol-paper #online-side .ol-side-form textarea::placeholder { color: var(--olp-muted); }
+body.ol-paper #online-side .ol-side-form .ol-button { min-height: 36px; font: 400 16px/1 var(--olp-label); color: var(--olp-kraft-ink); background: var(--olp-kraft); border: 0; box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
+body.ol-paper #online-side .ol-side-form .ol-button.ol-primary { color: var(--olp-boardy-ink); background: var(--olp-boardy); }
+/* 小队聊天：便利贴（颜色按发送人固定，online-paper.js · PAPER.notes / noteColor 写在 --olp-note；自己发的靠右），
+ * 便利贴上的字一直是深色：正文用清楚的无衬线黑体（识别度优先），只有发送人名字是手写体 */
+body.ol-paper #online-side .ol-side-chat { padding: 16px 16px 8px; }
+body.ol-paper #online-side .ol-side-chat li { position: relative; width: 82%; margin-bottom: 12px; padding: 8px 12px 10px; border: 0; color: var(--olp-note-ink); background: var(--olp-note, #f4e27a); box-shadow: 1px 3px 4px rgba(0, 0, 0, .35); transform: rotate(-1deg); }
+body.ol-paper #online-side .ol-side-chat li:nth-child(3n + 2) { transform: rotate(1.2deg); }
+body.ol-paper #online-side .ol-side-chat li:nth-child(3n) { transform: rotate(-.6deg); }
+body.ol-paper #online-side .ol-side-chat li.ol-mine { margin-left: auto; transform: rotate(.8deg); }
+body.ol-paper #online-side .ol-side-chat li.ol-muted { width: auto; color: var(--olp-muted); background: transparent; box-shadow: none; transform: none; }
+body.ol-paper #online-side .ol-side-chat li b { font-family: var(--olp-hand); font-weight: 400; font-size: 17px; color: color-mix(in srgb, var(--olp-note-ink) 80%, transparent); }
+body.ol-paper #online-side .ol-side-chat li small { color: color-mix(in srgb, var(--olp-note-ink) 62%, transparent); }
+body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); font-size: 15px; font-weight: 600; line-height: 1.45; color: var(--olp-note-ink); }
 /* ---------- 手机竖屏（第 4 步）：队伍只显示头像；记录 / 聊天从底下拉出来盖满屏幕；技能栏在最底下 ---------- */
 @media (max-width: 760px) {
   body.ol-paper { --olp-top: 4px; --olp-bar: 40px; --olp-under: 96px; --olp-edge: 6px; }
@@ -305,14 +346,16 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-tape { display: none; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party { justify-items: center; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm { width: max-content; padding: 2px; background: transparent; border: 0; }
-  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm::before { display: none; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm::before { display: none !important; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm > :not(.face) { display: none; }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.weapon { margin-left: 0; }
   body.online-player.ol-paper .olp-party-tools { flex-direction: column; padding: 0 6px 8px; }
   /* 技能栏在最底下，横贯整个屏幕 */
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed { bottom: 0; width: 100%; padding: 10px 10px calc(8px + env(safe-area-inset-bottom)); }
   /* 记录 / 聊天：收着是右边缘的竖标签（在技能栏上面）；拉出来盖满屏幕（从底下拉上来） */
-  body.ol-paper .ol-side.ol-side-collapsed { top: auto; left: auto; bottom: 200px; border: 0; }   /* 压过 online.css 手机上贴底的那一条（left: 0） */
+  /* 竖标签挂在技能栏上面（--olp-dock-h：online-ui.js 量的技能栏实际高度，换行变高了也跟着挪）；压过 online.css 手机上贴底的那一条（left: 0） */
+  body.ol-paper .ol-side.ol-side-collapsed { top: auto; left: auto; bottom: calc(var(--olp-dock-h, 190px) + 12px); border: 0; }
+  body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse:not([hidden]) { min-height: 140px; font-size: 19px; letter-spacing: 2px; }
   body.ol-paper .ol-side:not(.ol-side-collapsed) { z-index: 60; inset: 0; width: auto; height: auto; min-height: 0; animation: olp-sheet-up .22s ease-out; }
   body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-collapse:not([hidden]) { min-width: 56px; }
 }

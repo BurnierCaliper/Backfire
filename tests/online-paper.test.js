@@ -158,6 +158,54 @@ test("纸纹的折面数跟着面积走（审查：大面板的折面被放大�
   assert.deepEqual(P.nearest2([{ x: 1, y: 1 }], 10, 10)(5, 5).i1, 0, "只有一个点也行");
 });
 
+test("战斗记录是热敏收据（审查第 1 条）：BACKFIRE / 战斗记录 · 房间码、一排等号；*** 第 N 回合 *** 分隔；伤害数字靠右单独一格、击破 / 弹字写小字；回合末尾「本回合合计」", () => {
+  const logs = [
+    { kind: "gm", text: "主持人调整了队伍物资" },
+    { kind: "round", text: "第 1 回合开始", turn: 1 },
+    { kind: "action", text: "瑞比 · 普通攻击 → 狂徒(匕首)：12 伤害，击破 1，克制", turn: 1 },
+    { kind: "gm", text: "主持人调整了战场" },                                            // 没带回合：算在当时那一回合
+    { kind: "action", text: "结人 · 冰封领域 → 狂徒：5 伤害；强盗：4 伤害，冻伤", turn: 1 },
+    { kind: "phase", text: "敌人回合", phase: "enemy", turn: 1 },
+    { kind: "round", text: "第 2 回合开始 → 狂徒：3 伤害，灼烧", turn: 2 },
+    { kind: "action", text: "灯 · 包扎 → 结人：治疗 6", turn: 2 }
+  ];
+  const g = P.receiptGroups(logs);
+  assert.deepEqual(g.map(x => [x.turn, x.lines.length, x.total]), [[null, 1, { dmg: 0, brk: 0, heal: 0 }], [1, 4, { dmg: 21, brk: 1, heal: 0 }], [2, 2, { dmg: 3, brk: 0, heal: 6 }]],
+    "按回合分好；「第 1 回合开始」不单独占一行，带结算的「第 2 回合开始」照旧写；合计只加收据上写着的数");
+  assert.deepEqual(P.receiptLine(logs[2]), { kind: "action", who: "瑞比", what: "普通攻击", targets: [{ name: "狂徒(匕首)", dmg: 12, brk: 1, heal: 0, words: ["克制"] }] });
+  assert.deepEqual(P.receiptLine(logs[0]), { kind: "gm", who: "主持人", what: "调整了队伍物资", targets: [] });
+  assert.equal(P.receiptLine({ text: "红玉 · 普通攻击 → 狂徒 12" }).who, "红玉", "旧的写法（没有 kind）也认");
+  const h = P.receiptHtml(logs, { room: "SA3X7C" });
+  // 顶上：BACKFIRE / 战斗记录 · 房间码、一排等号
+  assert.match(h, /^<li class="olp-rc-h"><b>BACKFIRE<\/b><span>战斗记录 · SA3X7C<\/span><\/li><li class="olp-rc-rule" aria-hidden="true">={20,}<\/li>/);
+  // 回合分隔、每条一行（虚线在 CSS：.olp-rc-r 的下边框）、伤害靠右（单独一格 .olp-rc-n）
+  assert.match(h, /<li class="olp-rc-sep">\*\*\* 第 1 回合 \*\*\*<\/li>/);
+  assert.match(h, /<li class="olp-rc-r"><span class="olp-rc-l"><b>瑞比<\/b> 普通攻击 → 狂徒\(匕首\)<\/span><span class="olp-rc-n">12<\/span><small>击破 1 · 克制<\/small><\/li>/);
+  assert.match(h, /<li class="olp-rc-r"><span class="olp-rc-l"><b>主持人<\/b> 调整了队伍物资<\/span><span class="olp-rc-n"><\/span><\/li>/);
+  assert.match(h, /<b>结人<\/b> 冰封领域<\/span><span class="olp-rc-n"><\/span><span class="olp-rc-t">→ 狂徒<\/span><span class="olp-rc-n">5<\/span><span class="olp-rc-t">→ 强盗<\/span><span class="olp-rc-n">4<\/span><small>冻伤<\/small>/, "打了几个目标：一个目标一行，各自的数靠右");
+  assert.match(h, /<li class="olp-rc-p">敌人回合<\/li>/);
+  // 本回合合计：每个回合的末尾（合计上面一排虚线）
+  assert.match(h, /<li class="olp-rc-cut" aria-hidden="true">- - [- ]+<\/li><li class="olp-rc-total">\* 本回合合计 伤害 21 · 击破 1 \*<\/li><li class="olp-rc-sep">\*\*\* 第 2 回合 \*\*\*<\/li>/);
+  assert.match(h, /<li class="olp-rc-total">\* 本回合合计 伤害 3 · 治疗 6 \*<\/li>$/, "最后一回合也有（写到现在为止）");
+  assert.equal((h.match(/class="olp-rc-sep"/g) || []).length, 2);
+  // 空的：只有抬头和一句提示；转义
+  assert.match(P.receiptHtml([], { room: "R" }), /<li class="olp-rc-empty">还没有公开记录。<\/li>$/);
+  assert.match(P.receiptHtml([{ kind: "action", text: "<b>x</b> · 攻击", turn: 1 }], { room: "<r>" }), /&lt;r&gt;[\s\S]*&lt;b&gt;x&lt;\/b&gt;/);
+  // 收据的纸：底边是锯齿撕口（一高一低交替）
+  const zig = P.PAPER.art.kinds.receipt.zig, path = P.roughPath(80, 60, P.PAPER.art.kinds.receipt, P.rng(3)), bottom = path.filter(([, y]) => y > 60 - zig.depth - 2);
+  assert.ok(bottom.some(([, y]) => y <= 60 - zig.depth + 0.01) && bottom.some(([, y]) => y > 60 - 1.6), "锯齿：有深有浅");
+  assert.deepEqual(P.PAPER.art.targets.find(([sel]) => /data-tab="log"/.test(sel)), ['#online-side[data-tab="log"]:not(.ol-side-collapsed)', "receipt"], "战斗记录那一面贴收据纸");
+});
+
+test("小队聊天的便利贴：每个发送人固定一种颜色，自己发的是另一种（都在配置表里）", () => {
+  const N = P.PAPER.notes;
+  assert.equal(P.noteColor("p1", true), N.mine);
+  assert.equal(P.noteColor("p2"), P.noteColor("p2"), "同一个人一样");
+  assert.ok(N.colors.includes(P.noteColor("p2")) && N.colors.includes(P.noteColor("")));
+  assert.ok(new Set(["p1", "p2", "p3", "gm", "p4", "p5"].map(id => P.noteColor(id))).size > 1, "不同的人不全是一个颜色");
+  assert.equal(P.themeVars({ time: "night" })["--olp-note-ink"], N.ink, "便利贴上的字夜里也是深色");
+});
+
 test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 每条规则都挂在 body.ol-paper 下面；game.html 加载了它们；online-ui.js 只在联机玩家 + 新画面开着时加这个类", () => {
   const fs = require("node:fs"), path = require("node:path");
   const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
