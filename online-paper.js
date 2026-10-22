@@ -17,9 +17,10 @@
  *     PAPER                                 配置：类名、本机记住收起的键、文字、……
  *     active(o)                             这一刻是不是纸片画面：o = { active, isHost, screen, on3d }
  *     isOpen(name, storage, dflt) / setOpen(name, open, storage)   各块的收起 / 展开（读写都包 try/catch）
+ *     shellHtml()                           骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块（分开重画）
  *     topHtml(info)                         顶栏
  *     tagsHtml(slots, o)                    行动顺序吊牌
- *     toolsHtml(items, open)                「工具 ▾」下拉
+ *     toolsHtml(items)                      「工具 ▾」下拉里的按钮
  *   页面（online-ui.js 调）：
  *     readMoves(root)                       热座栏里每一格现在的按钮（延后 / 换位 / 换到这里……）
  *     pressMove(root, index, n)             点热座栏里第 index 格的第 n 个按钮（原来那一个）
@@ -33,7 +34,7 @@
   /* ---------- 配置 ----------
    *   bodyClass   纸片画面开着时 body 上的类（所有样子都挂在它下面）
    *   screens     哪些画面算战斗画面（战斗、战斗结算：新画面在这两个画面都挂着）
-   *   keys        本机记住收起 / 展开的键（存 "open" / "closed"）：drawer 右边的记录 / 聊天抽屉、drawerTab 抽屉开着时看哪一页。
+   *   keys        本机记住收起 / 展开的键（存 "open" / "closed"）：drawer 右边的战斗记录 / 小队聊天抽屉。
    *               技能栏、队伍栏用 hd2d-shell.js 的 SHELL.keys（单机新画面、原型页同一个习惯）
    *   defaults    没记过时开不开：抽屉平时收着（主人：「平时藏在右边」）
    *   text        顶栏、吊牌、下拉、抽屉上的字
@@ -42,7 +43,7 @@
   const PAPER = {
     bodyClass: "ol-paper",
     screens: ["battle", "ended"],
-    keys: { drawer: "backfire.online.paper.drawer", drawerTab: "backfire.online.paper.drawerTab" },
+    keys: { drawer: "backfire.online.paper.drawer" },
     defaults: { drawer: false },
     text: {
       title: "联机跑团", titleRogue: "联机单局",
@@ -52,7 +53,7 @@
       toolsHead: "工具（点了就收起）",
       menu: "菜单", menuKey: "Esc", menuTitle: "菜单（Esc）：消息与成员、大厅、克制表……",
       order: "行动顺序", swap: "⇅", swapTitle: "延后 / 换位", empty: "空位", vacated: "已挪走",
-      drawer: "记录 · 聊天", drawerOpen: "展开战斗记录与小队聊天", drawerClose: "收起战斗记录与小队聊天",
+      drawer: "记录 · 聊天", drawerOpen: "展开战斗记录与小队聊天", drawerClose: "收起战斗记录与小队聊天", logTab: "战斗记录",
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
     cam: { label: "镜头：远景 / 中景 / 近景" },
@@ -91,20 +92,22 @@
       return true;
     } catch (e) { return false; }
   }
-  /** 抽屉开着时看哪一页（"log" / "chat"）：记在本机；认不得就是 dflt */
-  function tabOf(storage, dflt) {
-    try { const v = storage ? storage.getItem(PAPER.keys.drawerTab) : null; if (v === "log" || v === "chat") return v; } catch (e) { /* 读不了 */ }
-    return dflt === "chat" ? "chat" : "log";
-  }
-  function setTab(tab, storage) {
-    try { if (!storage || (tab !== "log" && tab !== "chat")) return false; storage.setItem(PAPER.keys.drawerTab, tab); return true; } catch (e) { return false; }
+
+  /* ---------- 骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块，分开重画 ----------
+   * 下拉里的按钮列表（.olp-tools-list）只在按钮变了时重画：申请检定（check-request-ui.js 补进来的）、新画面开关（hd2d-field.js 挪进来的）
+   * 都在这个列表里，开 / 收下拉只换 hidden，不重画它们 */
+  function shellHtml() {
+    const T = PAPER.text;
+    return `<div class="olp-top-host"></div>` +
+      `<div class="olp-tools olp-sheet" id="olp-tools" data-paper="kraft" role="group" aria-label="${esc(T.tools)}" hidden><p class="olp-tools-head">${esc(T.toolsHead)}</p><div class="olp-tools-list"></div></div>` +
+      `<div class="olp-tags-host"></div><p class="olp-note" role="status" hidden></p>`;
   }
 
   /* ---------- 顶栏 ---------- */
   /**
    * info = { rogue 联机单局, room 房间码, reconnecting 断线重连中, turnNo 回合, day / time / period 游戏时间（没有 = 不写）,
    *          weather 天气的名字, night 夜晚（天气前面加「夜 · 」）, cams [{ label, on }] 镜头按钮（新画面的那几个，没有 = 不画）,
-   *          toolsOpen 「工具」下拉开着没, tools 下拉里的按钮（toolsHtml 的 items）}
+   *          toolsOpen 「工具」下拉开着没 }
    * 菜单按钮带 data-pause-open（pause-menu.js 接点击、画新消息的红点）
    */
   function topHtml(info) {
@@ -121,16 +124,14 @@
       `<span class="olp-meta olp-turn">${esc(fill(T.turn, Math.max(1, Math.round(Number(info.turnNo) || 1))))}</span>${time}${weather}` +
       `<span class="olp-right">${cams}` +
       `<button type="button" class="olp-tools-b olp-sheet" data-paper="board" data-olp="tools" aria-expanded="${info.toolsOpen ? "true" : "false"}" aria-controls="olp-tools" title="${esc(T.toolsTitle)}">${esc(T.tools)} ${esc(T.toolsArrow)}</button>` +
-      `<button type="button" class="olp-menu-b olp-sheet pm-open" data-paper="boardy" data-pause-open="1" title="${esc(T.menuTitle)}">${esc(T.menu)} <kbd>${esc(T.menuKey)}</kbd></button>` +
-      `</span></div>` + toolsHtml(info.tools || [], !!info.toolsOpen);
+      `<button type="button" class="olp-menu-b olp-sheet" data-paper="boardy" data-pause-open="1" title="${esc(T.menuTitle)}">${esc(T.menu)} <kbd>${esc(T.menuKey)}</kbd></button>` +
+      `</span></div>`;
   }
 
   /* ---------- 「工具 ▾」下拉 ---------- */
-  /** items = 一个个按钮的 HTML（online-ui.js 用原来那一排按钮同一个画法：同一个 data-online、同一个处理）；open = 开着没 */
-  function toolsHtml(items, open) {
-    const list = (items || []).filter(Boolean);
-    return `<div class="olp-tools olp-sheet" id="olp-tools" data-paper="kraft" role="menu" aria-label="${esc(PAPER.text.tools)}"${open ? "" : " hidden"}>` +
-      `<p class="olp-tools-head">${esc(PAPER.text.toolsHead)}</p><div class="olp-tools-list">${list.join("")}</div></div>`;
+  /** 下拉里的按钮列表：items = 一个个按钮的 HTML（online-ui.js 用原来那一排按钮同一个画法：同一个 data-online、同一个处理），空的不画 */
+  function toolsHtml(items) {
+    return (items || []).filter(Boolean).join("");
   }
 
   /* ---------- 行动顺序吊牌 ---------- */
@@ -195,5 +196,5 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, tabOf, setTab, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
+  return { PAPER, active, isOpen, setOpen, shellHtml, topHtml, toolsHtml, tagsHtml, readMoves, pressMove, readCam, pressCam };
 });

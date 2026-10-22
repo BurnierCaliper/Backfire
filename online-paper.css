@@ -1,0 +1,200 @@
+/* 联机玩家战斗画面的「纸片风」界面（#308，online-paper.js；设计定稿在 docs/ui-paper/，排版照 layout-open.jpg / layout-collapsed.jpg）
+ * 只在 body.ol-paper 时生效：online-ui.js 只给开着新画面（3D 战场建好了）的联机玩家的战斗画面加这个类；
+ * 新画面关着时的联机画面、单机 game.html、主持人那边，下面一条都套不上（每条规则都以 body.ol-paper 开头）。
+ * 第 1 步：先用简单的纯色面板把位置、收起、功能做对；颜色都是下面的变量（白天 / 夜晚 / 天气换色、纸纹在后面几步）。
+ *   战场铺满整个画面；顶上一条（.olp-top）；顶栏下面中间挂行动顺序吊牌（.olp-tags）；左上角队伍（hd2d-shell.js 的 .hd2d-party）；
+ *   右上「工具 ▾」下拉（.olp-tools）；右边战斗记录 / 小队聊天的抽屉（#online-side）；底下技能栏（hd2d-shell.js 的 .g-hud）。 */
+body.ol-paper {
+  --olp-top: 6px;            /* 顶栏离上边 */
+  --olp-bar: 46px;           /* 顶栏高 */
+  --olp-under: 100px;        /* 顶栏 + 吊牌下面：队伍、抽屉、浮着的提示从这里往下 */
+  --olp-edge: 14px;          /* 面板离屏幕边 */
+  --olp-dock: min(960px, calc(100vw - 2 * var(--olp-edge)));
+  --olp-kraft: #c8a46e; --olp-kraft-ink: #2a1b0c;
+  --olp-paper: #f3ecdc; --olp-paper-ink: #1d160e;
+  --olp-card: #fbf7ee; --olp-muted: #6e5c44;
+  --olp-tape: #e8d6a6; --olp-tape-ink: #2a1d0c;
+  --olp-board: #9a7448; --olp-board-ink: #f6efe1; --olp-boardy: #e9c443;
+  --olp-on: #55d6c2; --olp-on-ink: #08332c;
+  --olp-stamp: #c8281e; --olp-hl: rgba(255, 226, 64, .55);
+  --olp-shadow: 2px 5px 6px rgba(0, 0, 0, .45);
+}
+
+/* ---------- 战场铺满：舞台铺满整个画面，热座栏、「房间码 · 菜单」按钮让开（它们的内容在顶栏、吊牌上）---------- */
+body.ol-paper #hotseat-root, body.ol-paper .ol-dock { display: none !important; }
+body.online-player.ol-paper .ol-stage { inset: 0 !important; padding: 0 !important; overflow: hidden; display: block; }
+body.online-player.ol-paper .ol-stage > .ol-battle-slot { position: absolute; inset: 0; display: block; min-height: 0; }
+body.online-player.ol-paper .ol-battle { position: absolute; inset: 0; margin: 0; border: 0; display: block; overflow: visible; }
+body.online-player.ol-paper .ol-battle > .g-field { position: absolute; inset: 0; height: auto; min-height: 0; padding: 0; border: 0; }
+/* 首领机制横幅 / 援军倒计时（.g-topstack）：让开顶栏和吊牌 */
+body.online-player.ol-paper .ol-battle > .g-field > .g-topstack { margin-top: var(--olp-under); }
+/* 新画面原来的镜头按钮（右下角）：搬到顶栏上了（顶栏的远 / 中 / 近点的就是它们）；中景 / 近景两边的换区箭头照旧 */
+body.ol-paper .ol-battle .hd2d-field > .hd2d-cam { display: none; }
+/* 舞台上的提示、战斗结算、连锁、检定：浮在吊牌下面的中间 */
+body.online-player.ol-paper .ol-stage > .olp-float {
+  position: absolute; z-index: 9; top: var(--olp-under); left: 50%; transform: translateX(-50%); width: min(620px, 56vw);
+  display: grid; gap: 6px; pointer-events: none;
+}
+body.online-player.ol-paper .ol-stage > .olp-float > * { pointer-events: auto; margin: 0; box-shadow: var(--olp-shadow); }
+body.online-player.ol-paper .ol-stage > .olp-float:empty { display: none; }
+/* 别的浮层让开顶栏：房间暂停的横幅、右上角的提示、互换请求 */
+body.ol-paper .ol-pause-bar { top: calc(var(--olp-top) + var(--olp-bar) + 4px); }
+body.ol-paper .ol-toast { top: var(--olp-under); right: calc(var(--olp-edge) + 48px); }
+body.ol-paper .hs-swap { top: var(--olp-under); }
+
+/* ---------- 顶上一条 + 吊牌 + 「工具 ▾」（#online-paper，浮在战场和抽屉上面；自己不挡点击，只有里面的东西接）---------- */
+body.ol-paper #online-paper { position: fixed; z-index: 50; left: 0; right: 0; top: 0; height: 0; pointer-events: none; font-size: 15px; }
+body.ol-paper #online-paper > * { pointer-events: auto; }
+body.ol-paper .olp-top {
+  position: absolute; left: 12px; right: 12px; top: var(--olp-top); height: var(--olp-bar); display: flex; align-items: center; gap: 16px; padding: 0 18px;
+  color: var(--olp-tape-ink); background: var(--olp-tape); box-shadow: var(--olp-shadow); white-space: nowrap;
+}
+body.ol-paper .olp-top > * { flex-shrink: 0; }
+body.ol-paper .olp-title { font: 400 22px/1 var(--sk-tag, "ZCOOL QingKe HuangYou", sans-serif); }
+body.ol-paper .olp-meta { font: 400 18px/1 var(--sk-tag, "ZCOOL QingKe HuangYou", sans-serif); }
+body.ol-paper .olp-meta b { font-weight: 700; }
+body.ol-paper .olp-stamp { display: inline-block; color: var(--olp-stamp); border: 2.5px solid var(--olp-stamp); border-radius: 4px; padding: 0 6px; font-weight: 900; transform: rotate(-6deg); }
+body.ol-paper .olp-room { font: 400 15px/1.3 "Black Ops One", var(--sk-body, sans-serif); letter-spacing: 1px; user-select: all; }
+body.ol-paper .olp-right { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-shrink: 1; min-width: 0; }
+body.ol-paper .olp-cam { display: inline-flex; gap: 2px; }
+body.ol-paper .olp-cam-b, body.ol-paper .olp-tools-b, body.ol-paper .olp-menu-b {
+  min-height: 32px; cursor: pointer; font: 400 17px/1 var(--sk-tag, "ZCOOL QingKe HuangYou", sans-serif); border: 0; border-radius: 2px;
+}
+body.ol-paper .olp-cam-b { width: 30px; padding: 0; color: var(--olp-tape-ink); background: transparent; }
+body.ol-paper .olp-cam-b.on { background: var(--olp-hl); }
+body.ol-paper .olp-tools-b { padding: 4px 12px; color: var(--olp-board-ink); background: var(--olp-board); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
+body.ol-paper .olp-tools-b[aria-expanded="true"] { outline: 2px solid var(--olp-tape-ink); outline-offset: 1px; }
+body.ol-paper .olp-menu-b { position: relative; padding: 4px 12px; color: var(--olp-kraft-ink); background: var(--olp-boardy); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
+body.ol-paper .olp-menu-b kbd { font: 400 11px/1 "Black Ops One", var(--sk-body, sans-serif); }
+body.ol-paper .olp-top button:focus-visible { outline: 2px solid var(--olp-stamp); outline-offset: 2px; }
+/* 「工具 ▾」下拉：牛皮纸卡片，挂在按钮下面 */
+body.ol-paper .olp-tools {
+  position: absolute; z-index: 2; top: calc(var(--olp-top) + var(--olp-bar) + 6px); right: calc(var(--olp-edge) + 96px); width: 300px; padding: 10px 12px 12px;
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); box-shadow: var(--olp-shadow);
+}
+body.ol-paper .olp-tools[hidden] { display: none; }
+body.ol-paper .olp-tools-head { margin: 0 0 8px; font-size: 12px; color: var(--olp-muted); }
+body.ol-paper .olp-tools-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+body.ol-paper .olp-tools-list .ol-button, body.ol-paper .olp-tools-list #g-hd2d-toggle {
+  min-height: 38px; width: 100%; padding: 4px 8px; font: 700 14px/1.2 var(--sk-body, sans-serif); color: var(--olp-paper-ink);
+  background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); cursor: pointer;
+}
+body.ol-paper .olp-tools-list .ol-button[data-alert="1"] { border-color: var(--olp-stamp); box-shadow: 0 0 0 2px rgba(200, 40, 30, .35); }
+body.ol-paper .olp-tools-list #g-hd2d-toggle[aria-pressed="true"] { background: var(--olp-on); color: var(--olp-on-ink); }
+/* 热座栏的提示（延后 / 换位没成功的原因……）：挂在吊牌下面 */
+body.ol-paper .olp-note {
+  position: absolute; top: calc(var(--olp-under) - 10px); left: 50%; transform: translateX(-50%); max-width: min(560px, 80vw); margin: 0; padding: 4px 12px;
+  color: var(--olp-paper-ink); background: var(--olp-card); box-shadow: var(--olp-shadow); font-size: 13px;
+}
+/* 行动顺序吊牌：一串挂在顶栏下面的小牌子（细线挂着），当前行动的是青色；自己的带 ⇅ */
+body.ol-paper .olp-tags {
+  position: absolute; top: calc(var(--olp-top) + var(--olp-bar) - 4px); left: 50%; transform: translateX(-50%); max-width: calc(100vw - 2 * 280px);
+  display: flex; justify-content: center; gap: 12px; margin: 0; padding: 10px 4px 4px; list-style: none; pointer-events: none;
+}
+body.ol-paper .olp-tag { position: relative; flex: 0 1 auto; min-width: 0; transform: rotate(var(--tilt, 0deg)); pointer-events: auto; }
+body.ol-paper .olp-tag::before { content: ""; position: absolute; left: 50%; top: -12px; width: 1.5px; height: 14px; background: rgba(40, 28, 14, .8); }
+body.ol-paper .olp-tag-card {
+  position: relative; display: flex; align-items: center; gap: 6px; height: 40px; min-width: 96px; max-width: 150px; padding: 0 8px 0 18px;
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); box-shadow: var(--olp-shadow);
+}
+body.ol-paper .olp-tag.on .olp-tag-card { color: var(--olp-on-ink); background: var(--olp-on); }
+body.ol-paper .olp-tag.done .olp-tag-card { opacity: .62; }
+body.ol-paper .olp-tag.vacated .olp-tag-card { opacity: .45; background: transparent; border: 1.5px dashed var(--olp-kraft); box-shadow: none; }
+body.ol-paper .olp-hole { position: absolute; left: 6px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-radius: 50%; background: rgba(0, 0, 0, .55); }
+body.ol-paper .olp-tag .face.av { flex: none; width: 24px; height: 24px; display: grid; place-items: center; border: 1.5px solid #0b0806; border-radius: 5px; }
+body.ol-paper .olp-tag .face.av .av-ic { width: 18px; height: 18px; }
+body.ol-paper .olp-tag-nm { min-width: 0; display: grid; line-height: 1.05; }
+body.ol-paper .olp-tag-nm b { font: 400 15px/1.1 var(--sk-tag, "ZCOOL QingKe HuangYou", sans-serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.ol-paper .olp-tag-nm small { font: 10px/1.2 var(--sk-body, sans-serif); color: var(--olp-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body.ol-paper .olp-tag.on .olp-tag-nm small { color: inherit; opacity: .75; }
+body.ol-paper .olp-swap { margin-left: auto; padding: 2px 4px; font-size: 14px; color: inherit; background: none; border: 0; cursor: pointer; opacity: .8; }
+body.ol-paper .olp-swap[aria-expanded="true"], body.ol-paper .olp-swap:hover { opacity: 1; background: rgba(0, 0, 0, .12); }
+/* ⇅ 点开 / 换位中：热座栏原来的按钮摆在牌子下面 */
+body.ol-paper .olp-moves { display: flex; justify-content: center; gap: 4px; margin-top: 6px; }
+body.ol-paper .olp-move {
+  min-height: 28px; padding: 2px 8px; font: 700 12px/1.2 var(--sk-body, sans-serif); color: var(--olp-paper-ink); background: var(--olp-card);
+  border: 1.5px solid rgba(0, 0, 0, .4); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); cursor: pointer; white-space: nowrap;
+}
+body.ol-paper .olp-move.primary { color: var(--olp-on-ink); background: var(--olp-on); }
+body.ol-paper .olp-move:disabled { opacity: .45; cursor: default; }
+
+/* ---------- 左上角队伍（hd2d-shell.js 的队伍栏：挪到顶栏下面的左上角；收起只剩头像一列）---------- */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party {
+  position: fixed; z-index: 12; left: var(--olp-edge); top: calc(var(--olp-top) + var(--olp-bar) + 36px); bottom: auto; width: 236px;
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); background-image: none; border: 0; box-shadow: var(--olp-shadow);
+}
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-toggle { color: var(--olp-kraft-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .4); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-tape { color: var(--olp-kraft-ink); background: transparent; box-shadow: none; clip-path: none; transform: none; font-size: 18px; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party { display: grid; gap: 5px; padding: 0 10px 8px; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm {
+  color: var(--olp-paper-ink); background: var(--olp-card); border-left: 4px solid var(--olp-on); text-shadow: none;
+}
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .nm { text-shadow: none; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .lv { color: var(--olp-muted); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm .pm-tag { color: var(--olp-stamp); background: transparent; border: 1.5px solid var(--olp-stamp); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.on { outline: 3px solid #e2b320; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.off { opacity: .8; }
+body.online-player.ol-paper .olp-party-tools { display: flex; gap: 5px; padding: 0 10px 10px; }
+body.online-player.ol-paper .olp-party-tools .ol-button {
+  flex: 1 1 0; min-height: 32px; min-width: 0; padding: 2px 6px; font: 700 13px/1.2 var(--sk-body, sans-serif); white-space: nowrap;
+  color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3);
+}
+/* 收起：只剩一列头像（点「队伍 ▶」展开） */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed { width: auto; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party { display: grid; gap: 6px; padding: 0 8px 8px; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm { padding: 2px; background: transparent; border: 0; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm > :not(.face) { display: none; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon { margin-left: 0; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed .olp-party-tools { display: none; }
+
+/* ---------- 底下技能栏（hd2d-shell.js 的 .g-hud）：浮在战场底下中间；收起成一行（「技能 ▲ 谁 · 轮到你了」）---------- */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell {
+  position: absolute; z-index: 11; left: 0; right: 0; bottom: 10px; display: block; width: var(--olp-dock); max-height: none; margin: 0 auto; padding: 12px 16px 10px; overflow: visible;
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); background-image: none; border: 0; box-shadow: var(--olp-shadow);
+}
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell::before { display: none; }   /* skin.css 的黄黑警示条：纸片上不要 */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-who { color: var(--olp-kraft-ink); text-shadow: none; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-who small { color: var(--olp-muted); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-dock-toggle { color: var(--olp-kraft-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .4); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .olp-turn { margin-left: auto; color: #0b6b5a; border-color: #0b6b5a; font-size: 15px; }
+/* 提示栏（选目标、取消、为什么不能用……）：在技能那一排下面；收起时只在要点选（有按钮 / 标题）时露出来 */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hint {
+  position: static; width: auto; max-height: none; margin: 6px 0 0; text-align: left; color: var(--olp-muted); font-size: 13px;
+}
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hint b { color: var(--olp-stamp); }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed { width: min(560px, calc(100vw - 2 * var(--olp-edge))); padding: 8px 14px; }
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed > .hint:not(:has(button, b)) { display: none; }
+
+/* ---------- 右边：战斗记录 / 小队聊天的抽屉（#online-side）——平时只剩右边缘一个竖标签「记录 · 聊天」，有新消息挂数字 ---------- */
+body.ol-paper .ol-side {
+  top: var(--olp-under); right: var(--olp-edge); bottom: auto; width: min(340px, calc(100vw - 2 * var(--olp-edge)));
+  height: min(560px, calc(100vh - var(--olp-under) - 210px)); min-height: 260px;
+  color: var(--olp-paper-ink); background: var(--olp-paper); border: 0; box-shadow: var(--olp-shadow);
+}
+body.ol-paper .ol-side .ol-side-tabs { border-bottom: 1.5px dashed rgba(0, 0, 0, .3); }
+body.ol-paper .ol-side .ol-tab { color: var(--olp-kraft-ink); background: var(--olp-kraft); }
+body.ol-paper .ol-side .ol-tab.on { color: var(--olp-kraft-ink); background: var(--olp-boardy); }
+body.ol-paper .ol-side .ol-side-log, body.ol-paper .ol-side .ol-side-chat { color: var(--olp-paper-ink); }
+body.ol-paper .ol-side .ol-side-chat li { background: var(--olp-card); border-left-color: var(--olp-kraft); }
+body.ol-paper .ol-side .ol-side-chat li.ol-mine { border-left-color: var(--olp-on); }
+body.ol-paper .ol-side .ol-side-chat li b { color: var(--olp-kraft-ink); }
+body.ol-paper .ol-side .ol-side-chat li small { color: var(--olp-muted); }
+body.ol-paper .ol-side .ol-side-form { border-top: 1.5px dashed rgba(0, 0, 0, .3); }
+body.ol-paper .ol-side .ol-side-form textarea { color: var(--olp-paper-ink); background: var(--olp-card); border: 0; border-bottom: 2px solid var(--olp-paper-ink); }
+body.ol-paper .ol-side .ol-side-collapse:not([hidden]) { display: inline-flex; align-items: center; justify-content: center; color: var(--olp-kraft-ink); border-left: 1.5px dashed rgba(0, 0, 0, .3); }
+/* 收着：只剩右边缘一个竖着的小标签，有新消息盖红章数字 */
+body.ol-paper .ol-side.ol-side-collapsed {
+  top: 36%; right: 0; width: 40px; height: auto; min-height: 0; background: var(--olp-kraft); box-shadow: var(--olp-shadow);
+}
+body.ol-paper .ol-side.ol-side-collapsed > :not(.ol-side-tabs), body.ol-paper .ol-side.ol-side-collapsed .ol-side-tabs > :not(.ol-side-collapse) { display: none !important; }
+body.ol-paper .ol-side.ol-side-collapsed .ol-side-tabs { border: 0; }
+body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse:not([hidden]) {
+  width: 100%; min-height: 150px; padding: 14px 0 30px; border: 0; writing-mode: vertical-rl; font: 400 18px/1 var(--sk-tag, "ZCOOL QingKe HuangYou", sans-serif);
+}
+body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse-dot {
+  top: auto; bottom: 6px; right: 50%; transform: translateX(50%) rotate(8deg); writing-mode: horizontal-tb; color: var(--olp-stamp); background: var(--olp-card);
+  border: 2px solid var(--olp-stamp); border-radius: 4px; box-shadow: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.ol-paper .olp-tools, body.ol-paper .ol-side, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party { transition: none !important; animation: none !important; }
+}

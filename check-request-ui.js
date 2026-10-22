@@ -71,6 +71,9 @@
       <ul class="crq-list">${rows || '<li class="ol-muted">没有待处理的申请。</li>'}</ul>${done ? `<h3>最近处理的</h3><ul class="crq-list">${done}</ul>` : ""}</div>`;
   }
 
+  // 玩家的「申请检定」按钮放在哪：舞台顶上那一排；纸片画面（#308）是顶栏「工具 ▾」下拉（#online-paper）。点它们都打开同一个浮层
+  const TOOLS = "#online-stage .ol-stage-heading .ol-info-tools, #online-paper .olp-tools-list";
+  const OPENERS = '#online-stage [data-crq="open"], #online-paper [data-crq="open"]';
   function mount(o) {
     const doc = root.document;
     const box = doc.createElement("section"); box.id = "online-check-req"; box.className = "ol-ui ol-overlay ol-bag ovl crq"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "申请检定"); box.hidden = true;
@@ -88,17 +91,18 @@
     }
     function sync() {
       const on = enabled(), isHost = !!v().isHost;
-      if (!on || isHost) doc.querySelectorAll('#online-stage [data-crq="open"]').forEach(b => b.remove());
+      if (!on || isHost) doc.querySelectorAll(OPENERS).forEach(b => b.remove());
       if (!on) { open = false; box.hidden = true; pill.hidden = true; return; }
       const pending = (hs().checkRequests || []).filter(r => r.status === "pending");
-      // 主持人：有人申请时左下角提示；玩家：标题工具栏里放「申请检定」（舞台每次重画后补回去）
+      // 主持人：有人申请时左下角提示；玩家：标题工具栏里放「申请检定」（舞台每次重画后补回去）；
+      // 纸片画面（#308，online-paper.js）没有那一排，放进顶栏的「工具 ▾」下拉里（排在新画面开关前面）
       pill.hidden = !(isHost && pending.length) || open; pill.textContent = `检定申请 · ${pending.length}`;
       if (!isHost) {
-        const tools = doc.querySelector("#online-stage .ol-stage-heading .ol-info-tools");
+        const tools = doc.querySelector(TOOLS);
         const mine = pending.filter(r => r.operatorId === o.own()).length;
         if (tools) {
           let b = tools.querySelector('[data-crq="open"]');
-          if (!b) { b = doc.createElement("button"); b.type = "button"; b.className = "g-btn ol-button"; b.dataset.crq = "open"; tools.appendChild(b); }
+          if (!b) { b = doc.createElement("button"); b.type = "button"; b.className = "g-btn ol-button"; b.dataset.crq = "open"; tools.insertBefore(b, tools.classList.contains("olp-tools-list") ? tools.querySelector(".ol-hd2d-slot") : null); }
           const label = `申请检定${mine ? " · 等待 " + mine : ""}`; if (b.textContent !== label) b.textContent = label;
         }
       }
@@ -126,7 +130,7 @@
     }
     const onInput = e => { if (e.target.id === "crq-note") form.note = e.target.value; };
     const onKey = e => { e.stopPropagation(); if (e.key === "Escape") { open = false; sync(); } };
-    const onDocClick = e => { if (e.target.closest('#online-stage [data-crq="open"]')) onClick(e); };
+    const onDocClick = e => { if (e.target.closest(OPENERS)) onClick(e); };
     box.addEventListener("click", onClick); pill.addEventListener("click", onClick); box.addEventListener("change", onChange); box.addEventListener("input", onInput); box.addEventListener("keydown", onKey);
     doc.addEventListener("click", onDocClick);
     return { sync, el: box, pill, destroy() { doc.removeEventListener("click", onDocClick); box.remove(); pill.remove(); } };
