@@ -1,7 +1,8 @@
 /* Antlerscale: Backfire · HD-2D 战场（正式画面和原型共用）
  * 3D 画布上叠的东西：天气的 2D 层、铭牌、伤害数字、纸片的淡影子；正式画面里新战场的位置。美术参照 art/style-guide.html。
- * 这里只放战场自己的样子：正式画面（game.html，「新画面（HD-2D）」开关）的技能栏、队伍栏、日志用正式画面现有的；
- * 原型页（prototypes/hd2d/index.html）的界面外壳（顶栏、技能栏、队伍栏、日志抽屉……）在 prototypes/hd2d/hd2d-shell.css。 */
+ * 这里放战场自己的样子，和新画面的技能栏 / 队伍栏（#297：技能按钮、队伍栏一个人、贴纸图标，原型页和正式画面共用；
+ * 正式画面开着新画面时 hd2d/hd2d-shell.js 给 .g-hud 换上的新外壳也在这里），日志用正式画面现有的；
+ * 原型页（prototypes/hd2d/index.html）自己的界面外壳（顶栏、面板摆在哪、日志抽屉、调试按钮……）在 prototypes/hd2d/hd2d-shell.css。 */
 
 /* 配色、字体（art/style-guide.html 那一套）：挂在 .hd2d-theme 上——原型页的 <body>、正式画面的新战场容器（.hd2d-field）。
  * 不写在 :root 上：正式画面的 game.css 有自己的 --ink / --muted（另一套颜色），不能被盖掉 */
@@ -514,6 +515,9 @@ body.online-player .ol-battle.hd2d-on > .g-field.ol-field { overflow: hidden; } 
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .skills .sk { padding: 6px 13px 5px 28px; }
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .skills .sk .key { left: auto; top: auto; right: 5px; bottom: 3px; }
   body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .party > .pc { width: auto; padding: 5px 8px 5px 6px; }
+  /* 唤出武器人和结束行动两个大按钮并排（同原型页的手机） */
+  body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon, body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon + .hud-side { flex: 1 1 0; min-width: 0; }
+  body.online-player.ol-in-battle .ol-battle > .g-hud.hd2d-shell .hud-summon > .summonbtn { width: 100%; }
 }
 
 /* 「新画面 关 / 开」开关（#g-hd2d-toggle，同一个按钮）挪到联机舞台顶上的工具栏里时：样子照旁边的按钮（online.css 的 .ol-button） */

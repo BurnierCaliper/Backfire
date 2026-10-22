@@ -3,7 +3,9 @@
  * 选了技能以后在战场上直接点目标（单位卡 / 区域），分步里的其他选项排在提示栏里。
  * 规则和预演都在主机上：这里只画主机发来的展示数据（online-view.js 的投影），点选通过回调交给 online-ui.js 去问主机。
  *   const b = OnlineBattle.create({ onUnit, onZone, onSkill, onOption, onCancel, onEnd })
- *   b.el → 挂到页面上；b.update(data, ui)：data 是展示用的战场，ui 是 { mine, current, acting, menu, skills, armed, hint, busy } */
+ *   b.el → 挂到页面上；b.update(data, ui)：data 是展示用的战场，ui 是 { mine, current, acting, menu, skills, armed, hint, busy }
+ * 新画面开着时（#297，hd2d/hd2d-shell.js 给这里的 .g-hud 换上了新外壳）：技能按钮、队伍栏画成原型那一套，唤出 / 收回武器人单独做成大按钮（Q）；
+ * 按钮、点击、悬停、快捷键还是这里的那一份，关着时一点没变 */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -281,7 +283,7 @@
           <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(o.disabled ? why : cost)}</span></button>`;
       }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : "");
       paintSummon(shown && shown.summon, cur, ui);
-      if (SH) SH.who(hud, SH.whoHtml(cur, !!ui.acting));
+      if (SH) SH.who(hud, ui.acting ? SH.whoHtml(cur, true) : "");   // 技能栏上面那一行：谁在行动（敌人回合空着）
       const end = hud.querySelector(".endturn");
       end.disabled = !(ui.acting && mine.has(ui.current)) || !!ui.busy;
       // 提示栏：现在要做什么；分步里的「选项」类选择、可以不选的步骤、取消，放成按钮

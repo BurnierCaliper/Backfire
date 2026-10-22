@@ -15,7 +15,9 @@
  *     effectElements(list)                      图鉴里带属性的效果（技能按钮的属性角标要）
  *     skillButton(row, i, unit, o)              正式画面的一个技能按钮换成新样子：{ cls, html, label }
  *     summonButton(row, unit, o)                唤出 / 收回武器人的大按钮：{ back, color, html, label }
+ *     pickSummon(rows)                          技能里挑出唤出 / 收回武器人的那一个（照 game.js 的挑法）：{ summon, rest }
  *     hintsOf(unit)                             联机：本机的技能表里这个人每个技能的提示（读属性 / 攻击还是技能）
+ *     member(u, o)                              队伍栏一个人里面的东西（头像按 lookOf）
  *     whoHtml(u, acting)                        技能栏上面那一行：谁在行动
  *   页面：
  *     wirePanel(panel, btn, o)                  一块面板的收起 / 展开（原型页的技能栏 / 队伍栏 / 日志、正式画面的技能栏 / 队伍栏）

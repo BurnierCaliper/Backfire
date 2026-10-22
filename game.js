@@ -3780,8 +3780,9 @@
       box.appendChild(b);
     });
     G.skillsShown = list;
-    // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）
-    if (shell) shell.who(hudEl, shell.whoHtml(actorView, !!state.combatStarted && state.combatPhase === "player"));
+    // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
+    const acting = !!state.combatStarted && state.combatPhase === "player";
+    if (shell) shell.who(hudEl, !state.combatStarted || acting ? shell.whoHtml(actorView, acting) : "");
     // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
     const gauge = $("g-gauge");
     if (gauge) {

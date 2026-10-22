@@ -5,6 +5,8 @@
  *   mechsHtml(mechs, UnitCard) / towersHtml(towers, UnitCard)   铭牌上方的首领机制图标、地台上的踩塔（#283；画法、文字全用 unit-card.js）
  *   effectsOf(u, icons) / effectsHtml(list, icons)   队伍栏名字右边身上的效果（状态图标用 hud-icons.js，没有图标的写短标签；多了写 +n，悬停看全部）
  *   heroLooks(cards, eleByCn) / avatarOf(look) / avatarHtml(av)   按主职责的头像：职责图标 + 主属性到副属性的渐变底
+ *   partyInner(u, look, o) / layerBarHtml(layers)   队伍栏一个人：头像 + 名字 / 等级 / 效果 + 分层血条（#297：原型页和正式画面的新画面共用）
+ *   skillBar / skillButton / skillInner / skillHtml / summonInner   技能按钮（属性 / 攻击-技能角标）、唤出武器人的大按钮（skillInner：正式画面的新画面也用）
  * 不碰 three.js，也不碰 DOM，Node 里可以直接 require 来测（tests/hd2d-ui.test.js）。
  * 单位数据只读联机投影过的（online-view.js · projectUnit 的白名单）；坚毅生命（shp）压根不读。
  * 数值和对应表都在下面的 UI 里。 */
