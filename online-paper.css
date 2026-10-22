@@ -264,6 +264,36 @@ body.ol-paper #online-side .ol-side-chat li.ol-mine { margin-left: auto; backgro
 body.ol-paper #online-side .ol-side-chat li b { font-family: var(--olp-hand); font-weight: 400; font-size: 16px; color: #3a2f22; }
 body.ol-paper #online-side .ol-side-chat li small { color: #6b5d4b; }
 body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); font-size: 15px; font-weight: 600; line-height: 1.45; color: #1a1712; }
+/* ---------- 手机竖屏（第 4 步）：队伍只显示头像；记录 / 聊天从底下拉出来盖满屏幕；技能栏在最底下 ---------- */
+@media (max-width: 760px) {
+  body.ol-paper { --olp-top: 4px; --olp-bar: 40px; --olp-under: 96px; --olp-edge: 6px; }
+  body.ol-paper .olp-top { left: 4px; right: 4px; gap: 6px; padding: 0 6px; }
+  body.ol-paper :is(.olp-title, .olp-time) { display: none; }
+  body.ol-paper .olp-room { font-size: 12px; padding: 0 4px; }
+  body.ol-paper .olp-top > .olp-weather { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* 放不下时天气省略，菜单不被挤出去 */
+  body.ol-paper .olp-right { gap: 6px; flex-shrink: 0; }
+  body.ol-paper :is(.olp-meta, .olp-cam-b, .olp-tools-b, .olp-menu-b) { font-size: 14px; }
+  body.ol-paper .olp-cam-b { width: 24px; }
+  body.ol-paper :is(.olp-tools-b, .olp-menu-b) { padding: 4px 8px; }
+  body.ol-paper .olp-menu-b kbd { display: none; }
+  body.ol-paper .olp-tools { right: var(--olp-edge); width: min(300px, calc(100vw - 2 * var(--olp-edge))); }
+  body.ol-paper .olp-tags { left: 0; right: 0; transform: none; max-width: none; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; padding-inline: 8px; }
+  body.ol-paper .olp-tag-card { min-width: 0; max-width: 112px; }
+  /* 队伍：只显示头像一列（名字、血条藏起来；展开时下面照旧是角色资料 / 武器 / 背包） */
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party { width: auto; top: var(--olp-under); }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-tape { display: none; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm { padding: 2px; background: transparent; border: 0; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm > :not(.face) { display: none; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm.weapon { margin-left: 0; }
+  body.online-player.ol-paper .olp-party-tools { flex-direction: column; padding: 0 6px 8px; }
+  /* 技能栏在最底下，横贯整个屏幕 */
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed { bottom: 0; width: 100%; padding: 10px 10px calc(8px + env(safe-area-inset-bottom)); }
+  /* 记录 / 聊天：收着是右边缘的竖标签（在技能栏上面）；拉出来盖满屏幕（从底下拉上来） */
+  body.ol-paper .ol-side.ol-side-collapsed { top: auto; left: auto; bottom: 200px; border: 0; }   /* 压过 online.css 手机上贴底的那一条（left: 0） */
+  body.ol-paper .ol-side:not(.ol-side-collapsed) { z-index: 60; inset: 0; width: auto; height: auto; min-height: 0; animation: olp-sheet-up .22s ease-out; }
+  body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-collapse:not([hidden]) { min-width: 56px; }
+}
+@keyframes olp-sheet-up { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   body.ol-paper .olp-tools, body.ol-paper .ol-side, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party { transition: none !important; animation: none !important; }
 }

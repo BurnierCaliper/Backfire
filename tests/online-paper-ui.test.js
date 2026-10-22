@@ -432,6 +432,32 @@ test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是�
   assert.deepEqual(o.errors, []);
 });
 
+test("手机竖屏（390 × 844）：顶栏放得下；队伍只显示头像；技能栏在最底下；记录 / 聊天从底下拉出来盖满屏幕，收回去是竖标签", { timeout: 60000 }, async t => {
+  const o = await paperPage(t, { context: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await asPlayer(page);
+  await page.waitForSelector("#online-paper .olp-top", { state: "visible" });
+  await settle(page);
+  const top = await page.evaluate(() => { const el = document.querySelector("#online-paper .olp-top"), r = el.getBoundingClientRect(), m = el.querySelector("[data-pause-open]").getBoundingClientRect(), tl = el.querySelector('[data-olp="tools"]').getBoundingClientRect(); return { right: r.right, menu: m.right, tools: [tl.left, tl.right], vw: innerWidth }; });
+  assert.ok(top.right <= top.vw && top.menu <= top.right && top.tools[0] > 0 && top.tools[1] < top.menu, "顶栏放得下、「工具」「菜单」都在屏幕里：" + JSON.stringify(top));
+  assert.equal(await page.isVisible(".hd2d-party .pm .face"), true, "头像");
+  assert.equal(await page.isVisible(".hd2d-party .pm .meta"), false, "名字、血条不显示");
+  const party = await rect(page, ".hd2d-party");
+  assert.ok(party.width < 120, "队伍只剩窄窄一列：" + JSON.stringify(party));
+  const dock = await rect(page, ".ol-battle > .g-hud");
+  assert.ok(Math.abs(dock.bottom - dock.vh) < 1 && dock.width >= dock.vw - 1, "技能栏在最底下、横贯：" + JSON.stringify(dock));
+  const tab = await rect(page, "#online-side");
+  assert.ok(tab.right >= tab.vw - 1 && tab.width <= 44 && tab.bottom <= dock.top, "收着是右边缘的竖标签，在技能栏上面：" + JSON.stringify(tab));
+  await page.click("#online-side [data-side-collapse]");
+  await page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  const sheet = await rect(page, "#online-side");
+  assert.deepEqual([sheet.left, sheet.top, Math.round(sheet.width), Math.round(sheet.height)], [0, 0, sheet.vw, sheet.vh], "拉出来盖满屏幕");
+  assert.ok(await page.isVisible("#online-side [data-side-collapse]"), "盖满时也收得回去");
+  await page.click("#online-side [data-side-collapse]");
+  await page.waitForFunction(() => document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  assert.deepEqual(o.errors, []);
+});
+
 test("新加的 DOM（顶栏、吊牌、下拉、队伍栏下面的按钮、技能栏那一行、抽屉标签）里没有坚毅生命的数字", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);
