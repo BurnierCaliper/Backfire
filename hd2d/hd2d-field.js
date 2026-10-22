@@ -11,7 +11,9 @@
  *   · 2D 攻击演出（attack-fx / hit-fx）的位置问这里（rectOf / zoneRectOf：铭牌、地台、间隔按这一刻的镜头投影到屏幕上）；
  *     伤害 / 击破 / 治疗 / 格挡 / 状态字换成原型的纸片风数字（numbers）、打中那一下的纸片感（paper）、出手时推一下镜头（push / release），
  *     都交给 hd2d-play.js（和原型页同一份），演出倍率、跳过跟着 game.js 的 G.fxClock 走（#283）
- *   · 三段镜头（按钮、滚轮、中景 / 近景左右键换区）、双击特写、铭牌、天气（hd2d-scene.js / hd2d-wfx.js）照原型；技能栏、队伍栏、日志用正式画面现有的
+ *   · 三段镜头（按钮、滚轮、中景 / 近景左右键换区）、双击特写、铭牌、天气（hd2d-scene.js / hd2d-wfx.js）照原型；日志用正式画面现有的
+ *   · 技能栏、队伍栏（#297）：建好时给战斗画面底下的 .g-hud 换上原型那一套外壳（hd2d-shell.js · attach：能收起 / 展开、队伍栏浮在战场左下角），
+ *     按钮里面的样子由 game.js / online-battle.js 画的时候换（按钮、点击、快捷键还是它们自己的）；拆掉时换回原样，再叫旧画面画一遍
  *   · 新旧画面之间的云雾转场（#261 追加）：远景再往外拉（滚轮 / 双指）→ 镜头升到正上方 → 白色云雾涌进来盖满 → 切到旧画面（开关拨到关）→ 云雾散开；
  *     旧战场上往前滚反过来（云雾 → 切到新画面 → 云雾散开、镜头从正上方降回远景）。顶栏开关走同一个入口（switchTo）；转场中滚轮、开关都不理；
  *     减少动态效果时直接切。几段在 mistPlan、数值在 MIST
@@ -41,7 +43,7 @@
   /* ---------- 配置 ----------
    *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
-   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI）；scene 最后加载的场景包（也是普通脚本：
+   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
    *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
    *                            全用普通脚本，直接双击打开 game.html（file://）也能开新画面——浏览器不让 file:// 加载 ES 模块
    *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
@@ -56,7 +58,7 @@
     text: {
       fail: "新画面打不开（这个浏览器用不了 WebGL：{0}），先用旧画面"
     },
-    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
+    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
     scene: "hd2d-scene.bundle.js",
     sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
@@ -256,7 +258,7 @@
    *    broken = 这一次打开页面新画面打不开过（旧战场上往前滚就不再去开它，要开点开关——开关会说为什么打不开）
    * T：新旧画面之间的转场——busy 正在转（滚轮、开关都不理）、to 转去哪边（"old" / "new"）、step 走到哪一段、plan 剩下的几段（mistPlan）、mist 云雾那一层、
    *    pre 旧 → 新时云雾一涌进来就开始加载的、gen 第几次（页面重新 boot 过，旧的计时器到了也不算）、gesture 战场上这一次滚动（wheelGate） */
-  const S = { want: false, loading: null, create: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false };
+  const S = { want: false, loading: null, create: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false, hud: null };
   const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
   const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null, toggle: null, home: null };
   let keysBound = false;
@@ -280,12 +282,15 @@
    * 联机玩家（不是房主 / 主持人）进了战斗，online-ui.js 用 attach(spec) 换成他自己的战斗画面（online-battle.js 的 .ol-battle），spec：
    *   field()   3D 战场、云雾铺在哪一格（.ol-battle 的战场）          app()   加 .hd2d-on 的那一层（旧的区和单位卡看不见、点不到）
    *   view()    画面用的那一份：他收到的包（packetView，已经投影过）   input   { unit(id), hover(id, on, 元素), zone(区号 | null), zoneHover(区号, on) }：旧战场同样的回调
-   *   clock()   演出倍率（1 正常、0.5 两倍速、0 跳过）                 refresh()  让旧画面再画一遍（拆掉 3D 时）
+   *   clock()   演出倍率（1 正常、0.5 两倍速、0 跳过）                 refresh()  让旧画面再画一遍（拆掉 3D 时；技能栏、队伍栏也跟着换回旧的样子）
    *   hint(msg) 打不开时告诉玩家                                      slot()  顶栏开关（#g-hd2d-toggle）挪到哪（同一个按钮、同一个入口 switchTo）
+   *   hud()     技能栏、队伍栏所在的 .g-hud（#297：开着新画面时换上 hd2d-shell.js 的新外壳）；不给 = app() 里的那一个
    * 只读 spec 给的，不碰 GAME / 规则的 state。下面 host.input() 给的是接好的场景回调（wire） */
+  const hudIn = (app) => (app && typeof app.querySelector === "function" ? app.querySelector(".g-hud") : null);
   const SOLO = {
     field: () => (env.doc ? env.doc.getElementById("g-field") : null),
     app: () => (env.doc ? env.doc.getElementById("g-app") : null),
+    hud: () => hudIn(SOLO.app()),
     view: () => soloView(),
     input: () => { const G = root.GAME; return G && G.fieldInput ? wire(G.fieldInput) : null; },
     clock: () => (root.GAME && typeof root.GAME.fxClock === "function" ? root.GAME.fxClock : null),
@@ -562,6 +567,9 @@
       }
     } catch (e) { teardown(false); throw e; }
     app.classList.add("hd2d-on");
+    // 技能栏、队伍栏换上原型那一套（#297，hd2d-shell.js）：按钮还是 game.js / online-battle.js 自己画、自己接，下面 refresh 一画就是新样子
+    const shell = root.HD2DShell, hud = h.hud ? h.hud() : null;
+    if (shell && hud && shell.attach(hud, { storage: env.storage })) S.hud = hud;
     S.broken = false;
     paint(true);
     // 旧战场的天气叠加层拿掉（画在新画面上）、行动的人、标记都按现在的再走一遍；演出中先不打断，播完 game.js 自己会刷新
@@ -578,6 +586,8 @@
     S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = null;
     S.pushed = false;
     S.insetKey = "";
+    // 技能栏、队伍栏的新外壳拆掉（#297）：.g-hud 回到换上之前的样子（按钮里面的东西等 refresh / 下一次画技能栏换回旧的）
+    if (S.hud) { if (root.HD2DShell) root.HD2DShell.detach(S.hud); S.hud = null; }
     const app = host.app();
     if (app) app.classList.remove("hd2d-on");
     if (!hadStage) return;
@@ -766,7 +776,8 @@
       clock: () => (typeof spec.clock === "function" ? spec.clock : null),
       refresh: () => { if (typeof spec.refresh === "function") spec.refresh(); },
       hint: typeof spec.hint === "function" ? spec.hint : null,
-      slot: () => (typeof spec.slot === "function" ? spec.slot() : null)
+      slot: () => (typeof spec.slot === "function" ? spec.slot() : null),
+      hud: () => (typeof spec.hud === "function" ? spec.hud() : hudIn(spec.app()))
     };
     const mine = () => host === h;
     h.handle = {
