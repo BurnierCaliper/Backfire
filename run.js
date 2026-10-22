@@ -360,7 +360,7 @@ function enemyTokens(preset) {
 }
 /** 专门区域（作者 10/22，docs/ratfolk.md 第 1 节）：隶属某个大区（parent）、有自己的敌人池的区域。
  *  只出没在专门区域里的敌人不进「敌人不分地区」的遭遇（单局休息时被偷袭的遭遇战，anyRegion），不和别的区域的敌人混用；
- *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。地图上怎么进专门区域另做 */
+ *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。单局怎么进下水道：带着下水道地图，幕间改走（rogue.js · interludeOptions） */
 const SUB_REGIONS = { "下水道": { parent: "巨人城" } };
 function regionPool(region, opt) {
   opt = opt || {};
