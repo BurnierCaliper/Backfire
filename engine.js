@@ -1031,7 +1031,8 @@ function resolveAttack(ctx) {
       hitDealt = 0;
       hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
     } else if (!onShp) {
-      const startBefore = startLayer ? Math.max(0, Number(startLayer.current) || 0) : 0;
+      // 出血要看这一段扣到了哪一层：打穿外层、溢进肉体 / 星灵的也算（作者 10/22 定），所以先记下每一层原来的血量
+      const layersBefore = layersWork.map(l => Math.max(0, Number(l.current) || 0));
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -1046,8 +1047,11 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
-      // 出血：这一段打中的是肉体 / 星灵层、而且真的扣了这一层的血 → 同一层再扣「上限 × 比例」的真实伤害（不溢出）
-      if (ctx.bleed && startLayer && BLEED.layers.includes(startLayer.type) && startBefore > (Number(startLayer.current) || 0)) {
+      // 出血：这一段扣到了肉体 / 星灵层的血（直接打中，或者打穿外层溢进去都算）→ 对扣到的第一层肉体 / 星灵再扣「上限 × 比例」的真实伤害（不溢出）
+      const bleedIdx = ctx.bleed ? layersWork.findIndex((l, i) => BLEED.layers.includes(l.type) && layersBefore[i] > (Number(l.current) || 0)) : -1;
+      const bleedLayer = bleedIdx >= 0 ? layersWork[bleedIdx] : null;
+      if (bleedLayer) {
+        const startLayer = bleedLayer;   // 下面照原来的写法结算这一层
         const rate = BLEED.pct * Math.pow(BLEED.decay, bleedCount);
         bleedCount++;
         const cap = Number(startLayer.max) || 0;
