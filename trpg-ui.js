@@ -1666,6 +1666,11 @@
       if (!window.Bestiary) return;
       Bestiary.open({ partySize: Math.max(2, Math.min(4, heroes().filter(h => !h.dead).length)), sub: "跑团" });
     };
+    // 规则说明：图鉴的「规则」一本（rulebook.js）；在里面切到敌人图鉴时照样按队伍人数算
+    $("tr-rules").onclick = () => {
+      if (!window.Bestiary) return;
+      Bestiary.open({ mode: "rules", partySize: Math.max(2, Math.min(4, heroes().filter(h => !h.dead).length)), sub: "跑团" });
+    };
     $("tr-map").onclick = () => { if (window.WorldMap) WorldMap.open(mapOptions()); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {

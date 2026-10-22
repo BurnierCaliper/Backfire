@@ -1097,6 +1097,11 @@
       if (!window.Bestiary || !run) return;
       Bestiary.open({ partySize: Math.max(2, Math.min(4, run.party.length + (run.solo ? 1 : 0))), sub: run.solo ? "单人模式" : "单局" });
     };
+    // 规则说明：图鉴的「规则」一本（rulebook.js）；在里面切到敌人图鉴时照样按队伍人数算
+    $("run-rules").onclick = () => {
+      if (!window.Bestiary || !run) return;
+      Bestiary.open({ mode: "rules", partySize: Math.max(2, Math.min(4, run.party.length + (run.solo ? 1 : 0))), sub: run.solo ? "单人模式" : "单局" });
+    };
     $("run-map").onclick = () => { const o = window.RunFlow.mapOptions(); if (o && window.WorldMap) WorldMap.open(o); };
     $("run-title").onclick = () => {
       sessionCommand("leave", { save: true });
