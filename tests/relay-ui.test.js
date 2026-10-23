@@ -32,6 +32,7 @@ test("D3 real relay browsers: private traffic, mobile viewport, 30-second host i
   const contexts = [], pages = [], errors = [], frames = [];
   for (const width of [1440, 1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 844 } }); contexts.push(context);
+    await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
     const page = await context.newPage(); pages.push(page);
     page.on("pageerror", error => errors.push(error.message));
     page.on("websocket", ws => { for (const event of ["framesent", "framereceived"]) ws.on(event, frame => { let kind; try { kind = JSON.parse(frame.payload).kind; } catch (_) {} frames.push({ event, kind, bytes: Buffer.byteLength(frame.payload) }); }); });

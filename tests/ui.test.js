@@ -41,6 +41,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function open(t) {
   if (!browser) { t.skip(skipWhy); return null; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", e => errors.push("pageerror: " + e.message));
@@ -570,6 +571,7 @@ test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅�
 test("手机竖屏：战斗不横向溢出；点目标先预览、再点才出手；战斗记录在抽屉里", async (t) => {
   if (!browser) { t.skip(skipWhy); return; }
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage();
   const errors = [];
@@ -1420,6 +1422,7 @@ test("悬停技能就预演：要选目标的技能（柯尔特普攻）只高�
 test("手机竖屏：不用选目标的技能（拉响引擎）第一下只预演不扣点，点别的地方取消，再点一下才放出去", async (t) => {
   if (!browser) { t.skip(skipWhy); return; }
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage();
   const errors = [];

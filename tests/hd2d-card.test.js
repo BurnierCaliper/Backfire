@@ -135,6 +135,7 @@ test("3D 铭牌是 UnitCard 画的白卡：名字、Lv、ATK、血量数字（�
   assert.equal(p.measure, true, "内容变了：画出来以后量一下大小");
   // 场景源码：有卡片快照就画白卡（UnitCard），原型页没有才画以前的铭牌；画卡时不响（旧画面的卡已经响过）
   const scene = read("hd2d/hd2d-scene.js");
+  assert.doesNotThrow(() => new vm.Script(scene.replace(/^import .*$/gm, "").replace(/^export /gm, ""), { filename: "hd2d-scene.js" }), "场景源码能解析（ES 模块，Node 里不加载）");
   assert.match(scene, /if \(u\.card && UC && UC\.create\) syncCard\(p, u, UC\);/);
   assert.match(fnSrc(scene, "syncCard"), /UC\.create\(u\.card\)/);
   assert.match(fnSrc(scene, "syncCard"), /UC\.update\(p\.card, u\.card, \{ quiet: true \}\)/);
