@@ -3439,12 +3439,13 @@ function raceNoteAttack(a, t) {
 /** 易怒蛮牛「一击」的暂存：dealTo 期间（depth > 0）受伤只记下来，等这一击（主伤害 + 高压场地等连带伤害）全部结算完再判。
  *  这一击里任何一段把它打进失衡 / 晕眩（含首领立刻恢复架势的 result.broke），整击都不发作、也不占这回合的次数。
  *  只是结算过程中的临时值，不进 state（不进存档 / 撤销） */
-var RAGE_HOLD = { depth: 0, pending: [] };
+var RAGE_HOLD = { depth: 0, pending: [], assistOf: null };
 
 function rageBlocked(target, result) {
-  // 首领架势规则的精英牛被打进失衡、立刻恢复后，排上队的协助攻击（_bossAssistWindow 开着）也算这次失衡的一部分，和 lv 5 的牛一样不发作。
-  // 两个条件要一起看：窗口没人协助时会一直开着；全反击反打攻击者时也带 assist
-  const assistOfBreak = !!(result && result.flags && result.flags.assist && target._bossAssistWindow);
+  // 首领架势规则的精英牛被打进失衡、立刻恢复后，finishAssist 正在结算的、以这只牛为目标的那次协助攻击里打到它的每一下
+  // （含冷气注射等不带 assist 的连带伤害）都算这次失衡的一部分，和 lv 5 的牛一样不发作。
+  // 不看 flags.assist / _bossAssistWindow：窗口可能没人关，全反击 / 防守反击 / 支援也带 assist
+  const assistOfBreak = !!(RAGE_HOLD.assistOf && RAGE_HOLD.assistOf === target);
   return !!(target.stunned || (!target.noPosture && Number(target.def) <= 0) || (result && result.broke) || assistOfBreak);
 }
 

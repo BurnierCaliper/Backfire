@@ -7,7 +7,7 @@ const H = require("./headless");
 function setup(opt) {
   opt = opt || {};
   const c = H.load();
-  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "captain_ox", lv: opt.lv || 10, zone: 1, race: "兽人·牛" }], seed: opt.seed || "BULL" });
+  c.BattleSim.setup({ party: opt.party || ["kolt", "helu"], enemies: [{ id: "captain_ox", lv: opt.lv || 10, zone: 1, race: "兽人·牛" }], seed: opt.seed || "BULL" });
   c.startCombat();
   const S = c.S.state;
   S.zoneMode = 2;
@@ -185,3 +185,28 @@ for (const lv of [10, 5]) {
     assert.ok(!foe.raceRageUsed);
   });
 }
+
+test("诺拉的协助攻击（lv 10、牛已有冻伤）：冷气注射那一下不带 assist，也算这次失衡的一部分，不发作", () => {
+  const { c, S, foe } = setup({ lv: 10, party: ["kolt", "nora"] });
+  const kolt = S.units.find(u => u.kit === "kolt"), nora = S.units.find(u => u.kit === "nora");
+  kolt.zone = 1;
+  nora.zone = 2;
+  foe.statuses = foe.statuses || {};
+  foe.statuses.frostbite = true;
+  const r = hit(c, kolt, foe, { baseBreak: 99 });
+  assert.equal(rages(r), 0);
+  const before = S.logPages.flatMap(p => p.lines).length;
+  c.finishAssist(nora.id);
+  const txt = S.logPages.flatMap(p => p.lines).slice(before).map(l => l.text).join("\n");
+  assert.match(txt, /协助攻击/);
+  assert.match(txt, /冷气注射/, "冷气注射确实打了");
+  assert.ok(!foe.raceRageUsed, "不发作");
+});
+
+test("_bossAssistWindow 没人关时，之后和这次失衡无关、带 assist 的攻击（全反击等）照常让牛发作", () => {
+  const { c, foe, kolt } = setup({ lv: 10 });
+  foe._bossAssistWindow = true;          // 打进失衡时没人能协助，窗口一直开着（只有 finishAssist 会关）
+  const r = hit(c, kolt, foe, { flags: { action: true, assist: true, blockResolved: true } });
+  assert.equal(rages(r), 1, "不经过 finishAssist 的 assist 攻击照常发作");
+  assert.ok(foe.raceRageUsed);
+});
