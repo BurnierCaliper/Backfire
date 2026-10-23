@@ -368,9 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **新画面（HD-2D）设成默认：单机和联机玩家打开战斗都先是新画面**（主人提，issue #316；hd2d/hd2d-field.js：`FIELD.defaultOn` 改成 `true`、`enabled` 的注释；测试：tests/hd2d-field.test.js 改「默认开」的断言、新增「本机没选过：默认开」，tests/hd2d-mist.test.js / tests/hd2d-online.test.js 的假页面「关着」改成本机明确记着 `off`）
-  - **以前**：战斗顶栏的「新画面」开关默认关，本机没选过的人打开战斗看到的是旧画面，要自己点开关 / 往前滚滚轮才换成 3D 战场。
-  - **现在**：本机没选过（localStorage 里没有 `backfire-hd2d-field`，或者读不了）的，打开战斗就是新画面（单机、联机玩家都一样）；明确选过关（存着 `off`）的照旧是旧画面；浏览器开不了 WebGL 时照旧退回旧画面、开关记成关、提示为什么（记成关以后再打开页面也照旧关，不会每次都试一遍）。
+- **新画面（HD-2D）设成默认；3D 战场上的铭牌改回旧画面的白色单位卡（大小、内容和旧画面一样）**（主人提，issue #316；hd2d/hd2d-field.js：`FIELD.defaultOn` 改成 `true`，新增 `FIELD.cardKeys` / `cardsOf`，`packetView` 带上卡片快照，`layoutOpts` / `paint` 把卡片快照和量到的卡片大小交给布局，`onCardSize` 按量到的重排；hd2d/hd2d-scene.js：新增 `syncCard` / `measureCards`，`syncPlates` 有卡片快照就用 `UnitCard.create` / `update` 画卡，`markPlates` 给卡加旧画面的 `is-actor` / `is-targetable` / `is-hover` / `is-dim`，每帧按 `L.cardScale` 缩放，`plateOf` 给卡片大小；hd2d/hd2d-layout.js：新增 `CONFIG.card`、`cardScale` / `cardSize` / `cardAt`，`build` 按卡排列数 / 抬高 / 取景（`fitView` 能把卡也装进去），`columnsOf` / `plateRect` / `liftPlates` 认白卡的尺寸；hd2d/hd2d-camera.js：中景 / 近景 / 特写按卡片大小和每段的基础缩放；hd2d/hd2d-fx.js：攻击演出的位置按卡片大小；hd2d/hd2d.css：白卡挂在铭牌里的样子；测试：tests/hd2d-field.test.js 改「默认开」的断言、新增「本机没选过：默认开」，tests/hd2d-mist.test.js / tests/hd2d-online.test.js 的假页面「关着」改成本机明确记着 `off`，新增 tests/hd2d-card.test.js）
+  - **以前**：战斗顶栏的「新画面」开关默认关，本机没选过的人打开战斗看到的是旧画面。新画面 3D 战场上的铭牌是深色小牌（名字、血条、架势），血量数字、ATK、状态要悬停 / 选中才展开，看不到旧画面单位卡上的那些信息。
+  - **现在**：
+    - **默认开**：本机没选过（localStorage 里没有 `backfire-hd2d-field`，或者读不了）的，打开战斗就是新画面（单机、联机玩家都一样）；明确选过关（存着 `off`）的照旧是旧画面；浏览器开不了 WebGL 时照旧退回旧画面、开关记成关、提示为什么（记成关以后再打开页面也照旧关，不会每次都试一遍）。
+    - **白卡**：3D 战场上的铭牌就是旧画面的单位卡（unit-card.js 画的同一张卡、game.css 的同一套样式）：名字、Lv、ATK、血量数字和分层血条、架势菱形、耐久条和数字、行动点 / 附赠、状态徽章、底下的小字、首领机制图标都在。单机用 game.js 这一帧的快照（旧画面的卡画的同一份），联机玩家只用收到的包（online-battle.js · snapUnit / snapProp，和他旧画面的卡同一份）；交给 3D 的快照只带画卡要读的字段（`FIELD.cardKeys`），坚毅生命连字段都没有。
+    - **大小**：卡宽和旧画面一样（两区 196、一排三个区以上 148、手机 150）；中景和旧画面一样大（基础缩放 1），远景缩小（0.85），近景选中的区放大（1.25），特写再乘放大；再按远近微调，最后夹在 0.8–2.4 之间（最小 0.8：远景里卡上的小字也看得清）。数值都在 `CONFIG.card`。
+    - **排法**：每个区一排站几张卡、后排抬多高按卡的真实大小算（先估，画出来以后量到的不一样就按量到的重排）；远景取景把抬高以后的卡也装进画面；各段镜头下同一区、不同区的卡都互不重叠（抬高的上限放宽到 `CONFIG.card.maxLift`）。
+    - **交互照旧**：整张卡就是铭牌能点的地方（点 = 点单位卡，只算一次；卡上没有旧画面的那一份监听），悬停弹单位说明挂在卡上，选目标时用旧画面的描边 / 变暗 / 行动的人的样式，攻击演出、纸片数字按卡在屏幕上的位置，首领机制图标在卡上（新点名照样弹一下，不重复响），踩塔照旧。原型页（没有卡片快照）照旧是深色铭牌。
+    - 场景（hd2d-scene.js）改了，场景包 hd2d/hd2d-scene.bundle.js 要重新打包（`npm run build:hd2d`），打包前 tests/hd2d-bundle.test.js 会失败。
 
 - **新增规则说明页：图鉴第七本「规则」，标题画面 / 单局顶栏 / 跑团顶栏的「图鉴」旁边加「规则」入口**（作者夕夏定，issue #263；新增 rulebook.js（`RULEBOOK_GROUPS` / `RULEBOOK_CHAPTERS` / `rulebookEntries`）；bestiary-ui.js：`MODES` 加「规则」、`codexList` / `codexTabs` / `renderCodexDetail` 接上、新增 `rulebookHtml` / `ruleLine`、规则这一本的搜索提示；bestiary.css：`.bx-rules` 放宽详情栏、`.rx-table` 表格；game.html：`#t-rules` / `#run-rules` / `#tr-rules` 三个按钮、在 codex.js 之后加载 rulebook.js；screens.js / rogue-ui.js / trpg-ui.js 接三个按钮；ROADMAP 代码地图加一行；测试：新增 tests/rulebook.test.js）
   - **以前**：没有成体系的规则说明。图鉴只有角色 / 专长 / 义体 / 敌人 / 配置物 / 效果六本，回合、行动点、检定、伤害怎么算、武器 ATK、义体改造率这些规则只能翻手册或问主持人。

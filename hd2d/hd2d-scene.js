@@ -543,7 +543,7 @@ export function createHd2dScene(container, options) {
       const w = p.card.wrap;
       w.setAttribute("data-hit", "");
       w.setAttribute("role", "button");
-      w.tabIndex = 0;
+      w.setAttribute("tabindex", "0");
       p.bob.appendChild(w);
       p.el.classList.add("card");
       p.key = "";
