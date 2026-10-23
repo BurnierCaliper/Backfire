@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机：暂停页面直接有「离开房间」（主持人是「离开并保存」），点了先确认**（主人反馈：新的暂停页面以后找不到离开房间的按钮；pause-menu.js · PAUSE_MENU.items.leave / order、pause-menu.css；online-ui.js · 登记 leave 项、leaveAsk；测试 tests/online-ui.test.js「暂停页面直接有「离开房间」」）
+  - **以前**：#298 把顶上的「房间」按钮收进暂停页面以后，「离开房间 / 离开并保存」只在「菜单 → 消息与成员」打开的面板最底下，要点两层才看得到，玩家以为没法离开房间。
+  - **现在**：联机时（大厅、探索、战斗、结算，断线重连中也算）菜单最后一项就是「离开房间」（主持人显示「离开并保存」），红字、和上面隔开一点；点了先弹游戏内确认框（「留下」不走），确认后走和面板底下同一个 api.leave()。面板底下的按钮照旧保留。其余 #298 / #308 收起来的按钮（克制表、主持人工具、角色分配、大厅、地图、战绩、角色资料 / 武器 / 背包、聊天）逐个对过，都还有入口。
+
 - **新增规则说明页：图鉴第七本「规则」，标题画面 / 单局顶栏 / 跑团顶栏的「图鉴」旁边加「规则」入口**（作者夕夏定，issue #263；新增 rulebook.js（`RULEBOOK_GROUPS` / `RULEBOOK_CHAPTERS` / `rulebookEntries`）；bestiary-ui.js：`MODES` 加「规则」、`codexList` / `codexTabs` / `renderCodexDetail` 接上、新增 `rulebookHtml` / `ruleLine`、规则这一本的搜索提示；bestiary.css：`.bx-rules` 放宽详情栏、`.rx-table` 表格；game.html：`#t-rules` / `#run-rules` / `#tr-rules` 三个按钮、在 codex.js 之后加载 rulebook.js；screens.js / rogue-ui.js / trpg-ui.js 接三个按钮；ROADMAP 代码地图加一行；测试：新增 tests/rulebook.test.js）
   - **以前**：没有成体系的规则说明。图鉴只有角色 / 专长 / 义体 / 敌人 / 配置物 / 效果六本，回合、行动点、检定、伤害怎么算、武器 ATK、义体改造率这些规则只能翻手册或问主持人。
   - **现在**：

@@ -262,13 +262,13 @@ async function pick(page, id) {
 test("联机：主持人和玩家看到的菜单项不同；标题写「菜单」并说明不会真的暂停；原来的按钮都不在了", { timeout: 60000 }, async t => {
   const o = await onlinePage(t); if (!o) return; const { page } = o;
   await asHost(page);
-  assert.deepEqual(await menuIds(page), ["gmTools", "assign", "room", "lobby"], "主持人（探索）：主持人工具、角色分配、消息与成员、大厅");
+  assert.deepEqual(await menuIds(page), ["gmTools", "assign", "room", "lobby", "leave"], "主持人（探索）：主持人工具、角色分配、消息与成员、大厅");
   await page.evaluate(() => fixture.set({ screen: "battle" }));
-  assert.deepEqual(await menuIds(page), ["gmTools", "room", "lobby"], "主持人（战斗）：没有角色分配");
+  assert.deepEqual(await menuIds(page), ["gmTools", "room", "lobby", "leave"], "主持人（战斗）：没有角色分配");
   await asPlayer(page);
-  assert.deepEqual(await menuIds(page), ["matchupOnline", "room", "lobby"], "玩家（战斗）：克制表、消息与成员、大厅；没有主持人工具");
+  assert.deepEqual(await menuIds(page), ["matchupOnline", "room", "lobby", "leave"], "玩家（战斗）：克制表、消息与成员、大厅；没有主持人工具");
   await asPlayer(page, { screen: "exploration" });
-  assert.deepEqual(await menuIds(page), ["room", "lobby"], "玩家（探索）：没有克制表");
+  assert.deepEqual(await menuIds(page), ["room", "lobby", "leave"], "玩家（探索）：没有克制表");
   await page.click("#ol-menu-open");
   await page.waitForSelector("#pm-overlay", { state: "visible" });
   assert.equal(await page.locator("#pm-title").innerText(), "菜单");
