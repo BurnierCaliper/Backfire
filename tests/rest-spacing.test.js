@@ -81,3 +81,103 @@ test("悬赏：各种检定成败下，一路走完连续不长休都不超过 1
   }
   assert.ok(n > 100);
 });
+
+/* ---------- 方案 A：按小时补的休息点「离开」无报酬 ---------- */
+/** 找一个有补出来休息点的主线，走到第 col 列的休息点 */
+function mainWithInserted() {
+  for (let s = 0; s < 200; s++) {
+    const c = H.load(); const R = c.Rogue;
+    const run = R.newRun({ party: ["kolt", "helu"], seed: "NP" + s });
+    if ((run.main.noPayCols || []).length) return { c, R, run };
+  }
+  throw new Error("没找到补了休息点的主线");
+}
+function walkTo(R, run, pred) {
+  for (let g = 0; g < 60 && run.stage === "task"; g++) {
+    if (!R.currentNode(run)) { const ch = R.nodeChoices(run); R.chooseNode(run, ch[0].i); }
+    const n = R.currentNode(run);
+    if (pred(n)) return n;
+    if (n.type === "check") R.skipCheck(run);
+    else if (n.type === "battle" || n.type === "elite") R.finishBattle(run, "win");
+    else if (n.type === "rest") R.restAtNode(run, "leave");
+    else R.leaveNode(run);
+  }
+  return null;
+}
+test("补出来的休息点：离开 0 奎支、按钮写「无报酬」；模板原有的休息点照常 250", () => {
+  const { c, R, run } = mainWithInserted();
+  R.acceptTask(run, "main");
+  const restCols = run.task.cols.map((q, i) => (q[0] === "rest" ? i : -1)).filter(i => i >= 0);
+  const orig = restCols.filter(i => run.task.noPayCols.indexOf(i) < 0);
+  assert.equal(orig.length, 1, "模板原有的休息点正好一个");
+  let paid = 0, free = 0;
+  for (let g = 0; g < 10; g++) {
+    const n = walkTo(R, run, x => x.type === "rest");
+    if (!n) break;
+    const before = c.S.state.kuizhi;
+    const inserted = run.task.noPayCols.indexOf(run.task.index) >= 0;
+    assert.equal(!!n.noPay, inserted);
+    const log = R.restAtNode(run, "leave").join("");
+    if (inserted) {
+      free++;
+      assert.equal(c.S.state.kuizhi, before);
+      assert.match(log, /无报酬/); assert.doesNotMatch(log, /250/);
+    } else {
+      paid++;
+      assert.equal(c.S.state.kuizhi, before + 250);
+    }
+  }
+  assert.equal(paid, 1); assert.ok(free >= 1);
+});
+test("按钮文字：补的写「无报酬」，原有的写「获得 250 奎支」", () => {
+  const { R, run } = mainWithInserted();
+  R.acceptTask(run, "main");
+  const seen = new Set();
+  for (let g = 0; g < 10; g++) {
+    const n = walkTo(R, run, x => x.type === "rest");
+    if (!n) break;
+    const label = R.restSkipLabel(run);
+    assert.equal(label, n.noPay ? "无报酬" : "获得 250 奎支");
+    assert.equal(R.restSkipPay(run), n.noPay ? 0 : 250);
+    seen.add(label);
+    R.restAtNode(run, "leave");
+  }
+  assert.equal(seen.size, 2);
+});
+test("悬赏强制的休息点也是无报酬", () => {
+  let hit = 0;
+  for (let s = 0; s < 40 && hit < 5; s++) {
+    let run, k = -1;
+    for (let i = 0; i < 80 && k < 0; i++) { run = R.newRun({ party: ["kolt", "helu"], seed: `NPB${s}:${i}` }); k = run.board.findIndex(t => t.kind === "bounty"); }
+    R.acceptTask(run, k);
+    const task = run.task;
+    const n = walkTo(R, run, x => x.type === "rest" && x.noPay);
+    if (!n || run.task !== task) continue;
+    const before = c.S.state.kuizhi;
+    assert.equal(R.restSkipLabel(run), "无报酬");
+    R.restAtNode(run, "leave");
+    assert.equal(c.S.state.kuizhi, before);
+    hit++;
+  }
+  assert.ok(hit >= 3, "悬赏应该经常出强制休息点");
+});
+test("标记经过存档读回、JSON（联机同步）后还在，读回后照样不给钱", () => {
+  const { c, R, run } = mainWithInserted();
+  R.acceptTask(run, "main");
+  const n = walkTo(R, run, x => x.type === "rest" && x.noPay);
+  assert.ok(n);
+  R.save(run);
+  const saved = c.localStorage.getItem(c.SaveStore.KEYS.run);
+  const b = H.load();
+  b.localStorage.setItem(b.SaveStore.KEYS.run, saved);
+  const runB = b.SaveStore.loadRun();
+  b.Rogue.enterRunMode(runB);
+  assert.equal(b.Rogue.currentNode(runB).noPay, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(runB.task.noPayCols)), JSON.parse(JSON.stringify(run.task.noPayCols)));
+  const viaJson = JSON.parse(JSON.stringify(runB));
+  assert.equal(viaJson.task.nodes[viaJson.task.index].noPay, true);
+  const before = b.S.state.kuizhi;
+  assert.equal(b.Rogue.restSkipLabel(runB), "无报酬");
+  b.Rogue.restAtNode(runB, "leave");
+  assert.equal(b.S.state.kuizhi, before);
+});

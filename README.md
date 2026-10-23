@@ -368,9 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **休息点按小时排：任何一条路线连续不长休都不超过 18 小时**（rogue.js · `spaceRests`（新）/ `worstRestGap`（新）/ `huntHoursSinceRest`（新）/ `huntNext` / `makeTask`；tests/rest-spacing.test.js）
+- **休息点按小时排：任何一条路线连续不长休都不超过 18 小时**（rogue.js · `spaceRests`（新）/ `worstRestGap`（新）/ `huntHoursSinceRest`（新）/ `restSkipPay`（新）/ `restSkipLabel`（新）/ `huntNext` / `makeTask` / `acceptTask` / `restAtNode`；rogue-ui.js；online-rogue.js；tests/rest-spacing.test.js）
   - **以前**：普通任务（主线、护送、侦察、清剿）只保证一个休息点，位置随机，之后插进来的检定还会拉长前后两段，没有按小时检查；2000 种子统计：主线 15.5% 的任务无论怎么走都会超过 20 小时（最坏路线最长 31 小时），护送 10.1%（30 小时），侦察 4.4%。悬赏丢了模板里保证的休息点，之后每站只有 1/7 的机会抽到，约九成的悬赏必然力竭，最长 61 小时不长休。
   - **现在**：普通任务生成完路线后，按「每站路程 3 小时 + 节点本身的小时」逐列算最坏情况（每列取最慢的分支，覆盖所有路线），走完下一列就到不了休息点（或终点）超过 18 小时时，在那一列前面补一个休息点（单节点列，所有路线必经；不在第一站和最后一站）。悬赏一站一站走时记从上一个休息点起累计的小时：再走一站 + 一个线索检定后会到不了休息点就强制下一站是休息点；目标那一战走过去会超 18 小时就先插一个休息点再遇到目标。补休息点不掷随机数，同一个种子的路线主干、天气、分支和以前一样，只是多了休息点列。Boss 战后的长休没有加（待定）。
+  - **经济（Akane 选方案 A）**：补出来的休息点（普通任务的 `task.noPayCols` / 节点 `noPay`、悬赏强制的休息点）「离开」**无报酬**（按钮和日志都写「无报酬」，rogue.js · `restSkipPay` / `restSkipLabel`（新）；rogue-ui.js、online-rogue.js 的离开按钮）；模板原有的休息点照常 250 奎支。所以离开拿到的奎支和以前完全一样：不这样做的话，每次都离开的一局约多 1,600 奎支（全接悬赏约 4,200，约占一局收入 6.5 万的 2.4% / 6%）。标记跟着任务存在存档里，读档、联机同步后照样生效。
   - **数字**（2000 种子，前 → 后）：主线必然 >20 小时 15.5% → 0%，最坏路线最长 31 → 18 小时，平均休息点 1.00 → 1.43；护送 10.1% → 0%，30 → 18 小时，1.00 → 1.28；侦察 4.4% → 0%，25 → 18 小时；悬赏（检定成功率 50%）92.6% → 0%，61 → 18 小时，平均休息点 0.48 → 2.35。
 
 - **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定；app.js · `applyBonusPenalties`（新）/ `refreshEconomy` / `refreshEnemyEconomy` / `performAssistBlock` 日志；vehicle.js · `vehicleBonusFloor`（新）/ `vehicleEconomy`；codex.js · `CODEX_EFFECTS` 不稳；rulebook.js「行动点与附赠动作」「协助格挡」两章；tests/bonus-penalty.test.js、tests/enemy-race-perks.test.js）

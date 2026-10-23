@@ -278,7 +278,7 @@ const Rogue = (function () {
       const weather = rollTaskWeather(run);
       insertChecks(types);
       const cols = buildRoute(types, tpl);   // 放在最后掷：主干、天气和以前完全一样
-      spaceRests(types, cols);               // 按小时补休息点：任何一条路线连续不长休都不超过 REST_GAP_MAX 小时（不掷随机数）
+      const added = spaceRests(types, cols); // 按小时补休息点：任何一条路线连续不长休都不超过 REST_GAP_MAX 小时（不掷随机数）
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
@@ -286,6 +286,7 @@ const Rogue = (function () {
         days: tpl.days, diff: tpl.diff || 0, key: !!tpl.key,
         reward: clone(tpl.reward), supply: clone(tpl.supply || {}),
         nodeTypes: types,    // 主干：任务板上不给玩家看
+        noPayCols: added,    // 按小时补的休息点在哪几列：在那里「离开」没有奎支（模板原有的休息点照常给）
         cols                 // 路线图：每一列可选的节点（接下任务后在地图上一列一列选）
       };
     });
@@ -353,6 +354,7 @@ const Rogue = (function () {
    *  只看每列最大值 = 覆盖所有路线的最坏情况。不掷随机数，种子流不变 */
   function spaceRests(types, cols) {
     const T = travelMax();
+    const added = [];   // 补进去的休息点最后落在第几列
     let cum = 0;
     for (let c = 0; c < cols.length; c++) {
       if (types[c] === "rest") { cum = 0; continue; }
@@ -362,12 +364,13 @@ const Rogue = (function () {
       if (c > 0 && cum + step + (last ? 0 : T) > REST_GAP_MAX) {
         types.splice(c, 0, "rest");
         cols.splice(c, 0, ["rest"]);
+        added.push(c);
         cum = 0;
         continue;   // 下一轮重新看原来这一列
       }
       cum += step;
     }
-    return cols;
+    return added;
   }
   /** 一条路线（每列一组可选节点）上最坏的不长休小时数：检查所有路线（按连线做最大值 DP） */
   function worstRestGap(cols) {
@@ -495,7 +498,8 @@ const Rogue = (function () {
     const cols = task.cols || task.nodeTypes.map(t => [t]);
     run.task = Object.assign(clone(task), {
       index: 0, cols: clone(cols),
-      nodes: cols.map(col => col.length === 1 ? { type: col[0], done: false } : null),
+      // 按小时补的休息点（task.noPayCols）：节点上记 noPay，在那里「离开」无报酬
+      nodes: cols.map((col, i) => col.length === 1 ? Object.assign({ type: col[0], done: false }, col[0] === "rest" && (task.noPayCols || []).indexOf(i) >= 0 ? { noPay: true } : {}) : null),
       pick: cols.map(col => col.length === 1 ? 0 : null)
     });
     run.board = null;
@@ -1190,14 +1194,14 @@ const Rogue = (function () {
         // 目标那一战打完就结束：走过去要是会超 REST_GAP_MAX，先插一个休息点
         if (huntHoursSinceRest(t) + travelMax() + nodeHours("elite") > REST_GAP_MAX) {
           h.targetAfterRest = true;
-          pushHuntNode(t, { type: "rest" });
+          pushHuntNode(t, { type: "rest", noPay: true });
         } else pushHuntNode(t, { type: "elite", target: true });
         return;
       }
       // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 REST_GAP_MAX 就这一站强制是休息点
       const T = travelMax(), worstOther = Math.max(...Object.keys(BOUNTY().other).filter(k => k !== "rest").map(nodeHours));
       if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > REST_GAP_MAX) {
-        pushHuntNode(t, { type: "rest" });
+        pushHuntNode(t, { type: "rest", noPay: true });
         return;
       }
       const w = Object.assign({}, BOUNTY().other);
@@ -1550,9 +1554,11 @@ const Rogue = (function () {
       doLongRest(run, notes, watch, plan);
     } else if (mode === "leave") {
       // 不休息直接走：拿一笔奎支，不花时间
-      const pay = Number(C.restSkipKuizhi) || 0;
-      state.kuizhi = (Number(state.kuizhi) || 0) + pay;
-      notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
+      const pay = restSkipPay(run);
+      if (pay > 0) {
+        state.kuizhi = (Number(state.kuizhi) || 0) + pay;
+        notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
+      } else notes.push("没有停下休息，直接上路：这里没什么零活可做，无报酬。");
     } else {
       const can = canShortRestAtNode(run);
       if (!can.ok) throw new Error(can.why);
@@ -1564,6 +1570,16 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
+  /** 在当前休息点「离开」能拿多少奎支：按小时补的休息点（node.noPay）是 0，模板原有的休息点是 restSkipKuizhi */
+  function restSkipPay(run) {
+    const node = currentNode(run);
+    return node && node.noPay ? 0 : Number(C.restSkipKuizhi) || 0;
+  }
+  /** 「离开」按钮上的说明：「获得 250 奎支」/「无报酬」 */
+  function restSkipLabel(run) {
+    const pay = restSkipPay(run);
+    return pay > 0 ? `获得 ${pay} 奎支` : "无报酬";
+  }
   /** 休息点的短休按钮：没人有次数时不能点（以前照样白过一站） */
   function canShortRestAtNode(run) {
     if (!shortRestLeftAll(run).some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了" };
@@ -3142,7 +3158,7 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, worstRestGap, REST_GAP_MAX, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, restSkipPay, restSkipLabel, worstRestGap, REST_GAP_MAX, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
     interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,

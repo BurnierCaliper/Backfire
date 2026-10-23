@@ -280,7 +280,7 @@
             try { plan = Rogue.restPlan(r, {}); } catch (e) {}
             if (plan.ok) add("rest:long", "长休（血量、耐久回满）", { action: "restAtNode", mode: "long" });
             add("rest:short", "短休", { action: "restAtNode", mode: "short" });
-            add("rest:leave", "不休息，直接离开", { action: "restAtNode", mode: "leave" });
+            add("rest:leave", `不休息，直接离开（${Rogue.restSkipLabel(r)}）`, { action: "restAtNode", mode: "leave" });
           }
         } else if (node.type === "check") {
           let c = null;
