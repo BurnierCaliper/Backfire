@@ -511,7 +511,8 @@ function statusLine(u) {
   return s.length ? s.join(" · ") : "无状态";
 }
 
-function gainHighFromHits(target, res, extra) {
+/** reason：日志里写的来源（高能余波这类只有一段的），不给就写「第 N 段能量伤害」 */
+function gainHighFromHits(target, res, extra, reason) {
   if (!target || !res) return;
   if (!(target.statuses && target.statuses.high)) return;   // 只有高能状态才吃能量伤害涨高能值（蓄能不算）
   if ((res.element || "") !== "energy") return;
@@ -519,8 +520,14 @@ function gainHighFromHits(target, res, extra) {
   const damaging = hits.filter(h => (h.dealt || 0) > 0);
   if (!damaging.length) return;
   damaging.forEach((h, i) => {
-    extra.push(addHighEnergy(target, `第${i + 1}段能量伤害`));
+    extra.push(addHighEnergy(target, reason || `第${i + 1}段能量伤害`));
   });
+}
+
+/** 本回合刚被施加高能（施加时记下 highApplyTurn）：这一回合受到的能量伤害不累积高能值（瑞比扳机的说明）。
+ *  现在只有高能余波用它（applyTypedDotIn · highGain）；打中（dealTo → gainHighFromHits）没有这条判断 */
+function highFreshThisTurn(unit) {
+  return !!unit && unit.highApplyTurn != null && Number(unit.highApplyTurn) === Number(state.turnNo);
 }
 
 function tagHighFrom(unit, kit) {
@@ -697,7 +704,8 @@ function explodeHigh(unit, total, opt) {
       // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
       if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
       // 余波打死的敌人算高能状态的所有者的击杀（不是引爆的那个人）；没有所有者就不改它们各自的最后一击
-      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner });
+      // 余波是能量伤害：带高能状态的单位照打中时的口径累积高能值，先累积、再判它会不会连锁自爆（applyTypedDotIn · highGain）
+      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner, highGain: "余波能量伤害" });
       if (envBoom) withEnvOwner(opt.envBy, hitIt); else hitIt();
       // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
       if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
@@ -1690,6 +1698,8 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
+  state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油
@@ -3437,7 +3447,11 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
     else if ("by" in opts) creditPlayerHit(unit, opts.by);
     else creditPlayerHit(unit, actingPlayerId());
   }
-  notes.push(...applyCombat(unit, res, null));
+  // opts.highGain（高能自爆的余波）要先累积高能值再判自爆：applyCombat 里会判一次，这里像行动中那样先记下（_highDefer），
+  // 下面累积完再判（flushHighBooms：这一下打死、已经清了场的敌人照样带着高能自爆）
+  if (opts.highGain) state._highDefer = (Number(state._highDefer) || 0) + 1;
+  try { notes.push(...applyCombat(unit, res, null)); }
+  finally { if (opts.highGain) state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
   if (rotOwner) {
     const after = byType();
     rotOwner.resources = rotOwner.resources || {};
@@ -3462,7 +3476,11 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
+  // opts.highGain（值是日志里写的来源）：带高能状态的单位照打中时的口径累积高能值（gainHighFromHits），累积完再判自爆；
+  // 本回合刚被施加高能的不累积
+  if (opts.highGain && !highFreshThisTurn(unit)) gainHighFromHits(unit, res, notes, opts.highGain);
   checkHighBoom(unit);
+  if (opts.highGain && !state._highDefer) flushHighBooms();
   // 共振分享、高压场地都按「真的受到的伤害」：没受到伤害（免疫、濒死倒地、0 伤）就不触发
   if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
@@ -7015,7 +7033,9 @@ function finishAssist(helperId, extra) {
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
   state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
-  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; }
+  const prevAssistOf = RAGE_HOLD.assistOf;
+  RAGE_HOLD.assistOf = target;     // 易怒蛮牛：这次协助攻击打到 target 的每一下都算这次失衡（rageBlocked）
+  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; RAGE_HOLD.assistOf = prevAssistOf; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
@@ -8133,7 +8153,30 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
   return extra;
 }
 
+/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush） */
 function dealTo(attacker, target, opt) {
+  if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
+  RAGE_HOLD.depth++;
+  let out, ok = false;
+  try { out = dealToInner(attacker, target, opt); ok = true; }
+  finally {
+    RAGE_HOLD.depth--;
+    // 中途出错：这一击作废，暂存的记录一起丢掉（不然会挂到下一次毫不相干的攻击上发作；意图预测还会留下指向模拟单位的记录）
+    if (!ok && RAGE_HOLD.depth === 0) RAGE_HOLD.pending = [];
+  }
+  if (RAGE_HOLD.depth === 0) {
+    const notes = raceRageFlush();
+    if (notes.length) {
+      // 打配置物 / 危墙的替身（dealToStructure）：formatHitLines 只输出 out.lines
+      if (out && out.structure && Array.isArray(out.lines)) out.lines.push(...notes);
+      else if (out && Array.isArray(out.extra)) out.extra.push(...notes);
+      else appendLog(notes.join("\n"));
+    }
+  }
+  return out;
+}
+
+function dealToInner(attacker, target, opt) {
   if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
@@ -11359,6 +11402,7 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  if (typeof raceRageMarkBroke === "function") raceRageMarkBroke(u);   // 易怒蛮牛：这一击（含纯击破的一段）打出了失衡，整击不发作
   u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
   u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
