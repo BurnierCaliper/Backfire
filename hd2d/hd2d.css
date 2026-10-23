@@ -352,6 +352,51 @@
 .hd2d-wave-tag.el-fire { --wave-el: #c86b6b; } .hd2d-wave-tag.el-acid { --wave-el: #6a9a6a; } .hd2d-wave-tag.el-electric { --wave-el: #c2b25a; }
 .hd2d-wave-tag.el-ice { --wave-el: #6b95b8; } .hd2d-wave-tag.el-energy { --wave-el: #5aa0a6; } .hd2d-wave-tag.el-physical { --wave-el: #c8844a; }
 .hd2d-wave-tag.el-harmonic { --wave-el: #9a74b0; }
+/* 沙下动静（#358，旧画面 game.css 的 .sandstir）：下潜中的中立生物不画卡，每个区一块，挂在地台前沿的一角（hd2d-field.js · syncStirs / placeStirs 每一帧按镜头摆位）。
+ * 样子照旧画面：深色底、沙黄描边、斜切的角、沙纹图标；点开的列表弹层每只一行（名字、血条、已被发现、几回合后离开）。
+ * 整层不挡鼠标、也不设 z-index（里面的标记直接和铭牌那一层比高低）：标记在铭牌（.hd2d-labels，z 1）下面——压到卡时卡在上面，不挡卡；点开（.open）的在铭牌上面。
+ * .right 弹层右对齐（挂在右角，或者左对齐会伸出画面）、.down 上面放不下（弹层往下开）、.dim 近景里别的区（和别的区的卡一样淡一截）；
+ * 选目标时：里面有能选的 .pick（描边一明一暗，同单位卡的 is-targetable）、能选的那一行 .is-targetable（写「可选」）、鼠标停着的 .is-hover */
+.hd2d-stirs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.hd2d-stir { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: auto; font: 12px/1.35 var(--ui-sans); color: #ece0c6; transition: opacity .2s; }
+.hd2d-stir[hidden] { display: none; }
+.hd2d-stir.open { z-index: 2; }
+.hd2d-stir.dim:not(.open) { opacity: .5; }
+.hd2d-stir-b {
+  display: flex; align-items: center; gap: 7px; margin: 0; cursor: pointer; text-align: left; white-space: nowrap;
+  background: #15110d; color: #f0cf9a; border: 2px solid #d9a35f; padding: 5px 10px 5px 6px; font: 700 13px/1.25 var(--ui-sans);
+  clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+}
+.hd2d-stir-b svg { width: 22px; height: 22px; flex: none; }
+.hd2d-stir-b small { display: block; font-weight: 400; font-size: 10px; color: #c9b48c; }
+.hd2d-stir-b:focus-visible { outline: 2px solid var(--canvas); outline-offset: 2px; }
+.hd2d-stir.pick .hd2d-stir-b { border-color: var(--hazard); animation: hd2d-stir-pick 1.1s ease-in-out infinite; }
+@keyframes hd2d-stir-pick { 0%, 100% { background: #15110d; } 50% { background: #3a2e12; } }
+.hd2d-stir-pop {
+  display: none; position: absolute; left: 0; bottom: calc(100% + 6px); width: 230px; box-sizing: border-box;
+  background: #15110d; color: #ece0c6; border: 2px solid #d9a35f; padding: 8px 10px; box-shadow: 3px 4px 0 rgba(0, 0, 0, .5);
+}
+.hd2d-stir.open .hd2d-stir-pop { display: block; }
+.hd2d-stir.right .hd2d-stir-pop { left: auto; right: 0; }
+.hd2d-stir.down .hd2d-stir-pop { bottom: auto; top: calc(100% + 6px); }
+.hd2d-stir-pop h4 { margin: 0 0 6px; font-size: 13px; color: #f0cf9a; }
+.hd2d-stir-pop .r {
+  display: flex; align-items: center; gap: 6px; width: 100%; margin: 4px 0; padding: 2px 3px; box-sizing: border-box; cursor: pointer; text-align: left;
+  font: inherit; color: inherit; background: none; border: 0;
+}
+.hd2d-stir-pop .r:hover, .hd2d-stir-pop .r:focus-visible { background: rgba(217, 163, 95, .15); outline: none; }
+.hd2d-stir-pop .r .n { width: 34px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hd2d-stir-pop .r .bar { flex: 1; height: 5px; background: #3b342c; position: relative; }
+.hd2d-stir-pop .r .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #d9a35f; }
+.hd2d-stir-pop .r em { font-style: normal; font-size: 10px; color: #3fe0ff; white-space: nowrap; }
+.hd2d-stir-pop .r small { font-size: 10px; color: #a8977b; white-space: nowrap; }
+.hd2d-stir-pop .r .ok { font-size: 10px; padding: 0 4px; color: var(--ink); background: var(--hazard); border-radius: 2px; white-space: nowrap; }
+.hd2d-stir-pop .r:not(.is-targetable) .ok { display: none; }
+.hd2d-stir-pop .r.is-targetable { cursor: crosshair; box-shadow: inset 0 0 0 2px var(--hazard); }
+.hd2d-stir-pop .r.is-hover { background: rgba(242, 194, 48, .22); }
+.hd2d-stir-pop footer { margin-top: 6px; font-size: 10px; color: #a8977b; border-top: 1px dashed #4d4337; padding-top: 5px; }
+.hd2d-stirs.still .hd2d-stir-b { animation: none; }
+@media (prefers-reduced-motion: reduce) { .hd2d-stir .hd2d-stir-b { animation: none; } }
 /* 镜头按钮（远 / 中 / 近 + 看的那个区）：右下角，样子照原型顶栏的镜头按钮；中景 / 近景时两边的换区箭头（键盘左右键也行） */
 .hd2d-cam {
   position: absolute; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 4px 6px;
