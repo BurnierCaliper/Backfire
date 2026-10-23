@@ -1,6 +1,6 @@
 /* Antlerscale: Backfire · HD-2D 战场 · 接进正式战斗画面（game.html，#261）
  *
- * 战斗顶栏的「新画面」开关（默认关，记在本机 localStorage）开着时，战场那一格（#g-field）里铺一层 3D 战场，盖住旧的区和单位卡：
+ * 战斗顶栏的「新画面」开关（默认开（#316），记在本机 localStorage：明确选过关的照旧关）开着时，战场那一格（#g-field）里铺一层 3D 战场，盖住旧的区和单位卡：
  *   · 画面数据走联机玩家的那条路：本机的战斗状态先过 online-view.js 的白名单（OnlineView.projectState），演出途中每一下的快照
  *     （game.js · setView 拿到的 snapUnit / snapProp）照联机演出带（projectTape）的做法过 OnlineView.projectUnit，再交给布局（hd2d-layout.js）。
  *     区域 / 场景 / 光影读投影里的 region / scene / light。坚毅生命投影里本来就没有，这里一个字都不碰
@@ -22,7 +22,7 @@
  *   同一个场景；画面只用他收到的包（packetView：已经过 online-view.js 的白名单，不再碰房主的 state），点铭牌 / 地台走联机现有的回调，
  *   收到行动包时整包交给 hd2d-play.js 播（play）。离开战斗 detach，开关放回单机的顶栏。开关、镜头只在这台电脑上，不发给别人。
  *
- *   HD2DField.enabled(storage) / setEnabled(on, storage)   开关（读写 localStorage 都包 try/catch，默认关）
+ *   HD2DField.enabled(storage) / setEnabled(on, storage)   开关（读写 localStorage 都包 try/catch，默认开；存着 "off" 的照旧关）
  *   HD2DField.viewState(state, snaps, { OV, itemCatalog })  画面用的那一份（纯函数）
  *   HD2DField.layoutOpts(v, view, portrait)                 交给 HD2DLayout.build 的选项（区域 / 场景 / 光影读投影）
  *   HD2DField.marksOf(marks, layout, actorId)               game.js 的标记 → 场景要的（纯函数）
@@ -41,7 +41,7 @@
   "use strict";
 
   /* ---------- 配置 ----------
-   *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
+   *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（#316 起默认开：本机没选过的打开页面就是新画面；明确选过关的照旧关）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
    *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
    *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
@@ -52,7 +52,7 @@
    *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」 */
   const FIELD = {
     storageKey: "backfire-hd2d-field",
-    defaultOn: false,
+    defaultOn: true,
     toggleId: "g-hd2d-toggle",
     label: { on: "新画面 开", off: "新画面 关", loading: "新画面 …" },
     text: {
@@ -94,7 +94,7 @@
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
   /* ---------- 开关 ---------- */
-  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（关） */
+  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（FIELD.defaultOn：开） */
   function enabled(storage) {
     try {
       const v = storage ? storage.getItem(FIELD.storageKey) : null;

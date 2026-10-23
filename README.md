@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面（HD-2D）设成默认：单机和联机玩家打开战斗都先是新画面**（主人提，issue #316；hd2d/hd2d-field.js：`FIELD.defaultOn` 改成 `true`、`enabled` 的注释；测试：tests/hd2d-field.test.js 改「默认开」的断言、新增「本机没选过：默认开」，tests/hd2d-mist.test.js / tests/hd2d-online.test.js 的假页面「关着」改成本机明确记着 `off`）
+  - **以前**：战斗顶栏的「新画面」开关默认关，本机没选过的人打开战斗看到的是旧画面，要自己点开关 / 往前滚滚轮才换成 3D 战场。
+  - **现在**：本机没选过（localStorage 里没有 `backfire-hd2d-field`，或者读不了）的，打开战斗就是新画面（单机、联机玩家都一样）；明确选过关（存着 `off`）的照旧是旧画面；浏览器开不了 WebGL 时照旧退回旧画面、开关记成关、提示为什么（记成关以后再打开页面也照旧关，不会每次都试一遍）。
+
 - **新增规则说明页：图鉴第七本「规则」，标题画面 / 单局顶栏 / 跑团顶栏的「图鉴」旁边加「规则」入口**（作者夕夏定，issue #263；新增 rulebook.js（`RULEBOOK_GROUPS` / `RULEBOOK_CHAPTERS` / `rulebookEntries`）；bestiary-ui.js：`MODES` 加「规则」、`codexList` / `codexTabs` / `renderCodexDetail` 接上、新增 `rulebookHtml` / `ruleLine`、规则这一本的搜索提示；bestiary.css：`.bx-rules` 放宽详情栏、`.rx-table` 表格；game.html：`#t-rules` / `#run-rules` / `#tr-rules` 三个按钮、在 codex.js 之后加载 rulebook.js；screens.js / rogue-ui.js / trpg-ui.js 接三个按钮；ROADMAP 代码地图加一行；测试：新增 tests/rulebook.test.js）
   - **以前**：没有成体系的规则说明。图鉴只有角色 / 专长 / 义体 / 敌人 / 配置物 / 效果六本，回合、行动点、检定、伤害怎么算、武器 ATK、义体改造率这些规则只能翻手册或问主持人。
   - **现在**：
