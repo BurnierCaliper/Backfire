@@ -245,6 +245,10 @@ body.ol-has-side .ol-toast { right: 344px; }
 /* 技能栏贴在舞台底部：战场比一屏高时也不用每次往下翻去点技能 */
 .ol-battle .g-hud { position: sticky; bottom: 0; z-index: 8; }
 .ol-battle .pc.off { opacity: .6; }
+/* 只是在等主机回话才灰掉的按钮（online-battle.js 挂 .ob-wait，#317 追加）：先照常亮着，过 0.3 秒还没回来才变灰——主机回得快就不闪。
+   动画的值盖过 game.css / hd2d.css 里 [disabled] 的透明度；减少动态效果时也一样（只是晚一点变灰，不是动画） */
+.ob-wait:disabled { animation: ob-wait-dim .32s step-end forwards; }
+@keyframes ob-wait-dim { from { opacity: 1; } to { opacity: .4; } }
 .ol-battle .pc.mine .k { color: var(--gold, #f2c230); }
 .ol-battle .hint .g-btn.small { margin-left: 6px; height: 26px; }
 .ol-battle .unit-wrap { position: relative; }

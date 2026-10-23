@@ -280,7 +280,8 @@ test("技能按钮：每个都有两个角标——左上角属性（icons.js �
       assert.equal((html.match(/class="sk-el/g) || []).length, 1, b.id + "：一个属性角标");
       assert.equal((html.match(/class="sk-kind"/g) || []).length, 1, b.id + "：一个攻击 / 技能角标");
       assert.ok(html.startsWith(`<button class="sk t-${b.tint} k-${b.kind}"`), b.id + "：按钮样式照 game.js 的 .sk");
-      if (b.element) assert.ok(html.includes(IC.element(b.element)) && html.includes(`style="color:${U.UI.elements[b.element]}"`), b.id + "：用 icons.js 的属性图标、属性色");
+      // #317：技能按钮里的属性图标不要白描边（icons.js 的 rim: false，只有属性色那一层）
+      if (b.element) assert.ok(html.includes(IC.element(b.element, { rim: false })) && html.includes(`style="color:${U.UI.elements[b.element]}"`), b.id + "：用 icons.js 的属性图标（不带白描边）、属性色");
       else assert.ok(/class="sk-el none"/.test(html) && html.includes('title="无属性"'), b.id + "：无属性是灰圈");
       assert.ok(html.includes(`title="${U.UI.skill.kinds[b.kind].name}"`) && html.includes(U.stickerSvg(U.UI.skill.kinds[b.kind].glyph, "sk-k-ic")), b.id + "：攻击是剑、技能是齿轮");
       assert.ok(html.includes(U.esc(b.name)) && html.includes(U.esc(b.text.split("\n")[0])), b.id + "：悬停写着说明");

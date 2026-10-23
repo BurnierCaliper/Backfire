@@ -1767,7 +1767,7 @@
       comboEnd();
       G.depth--;
       G.version++;
-      syncBusy();
+      syncBusy(true);
       if (hotseat()) autoSelect(true);
       refreshAll();
       checkEnd();
@@ -1775,10 +1775,11 @@
     }
   }
 
-  function syncBusy() {
+  /** 演出中 / 演完：quiet = 先不画技能栏（后面 refreshAll 马上就画，#317：一次只画一遍） */
+  function syncBusy(quiet) {
     $("g-app").classList.toggle("busy", G.depth > 0);
     paintUndo();
-    refreshHud();
+    if (!quiet) refreshHud();
   }
 
   /* ================= 7. 格挡与协助 ================= */
@@ -2569,13 +2570,14 @@
     paintMarks({ pick: false, targets: [], hover: null, zones: [], hoverZone: null });
   }
 
-  function disarm() {
+  /** 取消正在选的技能 / 目标。quiet：先不画技能栏（接下来马上还要画的地方用：选下一个技能、切人、结束回合；一次操作只画一遍，#317） */
+  function disarm(quiet) {
     const a = G.arm;
     G.arm = null;
     if (a && a.reject) a.reject();
     unmarkTargets();
     clearPreview();
-    refreshHud();
+    if (!quiet) refreshHud();
   }
 
   /** 进入目标选择。candidates: [{id, preview}]；返回被点中的 id，取消返回 null */
@@ -2869,11 +2871,12 @@
     if (!actor) return;
     const why = blockReason(actor, sk);
     if (why) { flashHint(`${sk.name}：${why}`); return; }
-    disarm();
+    // 这一下只画一遍（#317）：取消上一个不画；接着选目标 / 区域、直接出手都会画，都没画（弹选项）才在这一下跑完时补画
+    disarm(true);
     const my = G.arm = { skillId: sk.id, actorId: actor.id };
     const stale = () => G.arm !== my;
     const cancel = () => { if (!stale()) disarm(); };
-    refreshHud();
+    hudSoon();
     const label = (id) => `${actor.name} · ${sk.name}${id ? " → " + targetName(id) : ""}`;
 
     if (sk.id === "__stand") {
@@ -3168,7 +3171,7 @@
       ], { label: "取消", value: "no" });
       if (ans !== "yes") return;
     }
-    disarm();
+    disarm(true);   // 下面 syncBusy 马上画（#317：一次只画一遍）
     pushUndo(`结束第 ${state.turnNo} 回合`);
     G.depth++;
     syncBusy();
@@ -3195,7 +3198,7 @@
     } finally {
       G.depth--;
       G.version++;
-      syncBusy();
+      syncBusy(true);
       refreshAll();
       checkEnd();
     }
@@ -3513,7 +3516,7 @@
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
     if (unitById(id) && unitById(id).escort) return;   // 护送对象玩家不能操作
-    if (G.arm) disarm();
+    if (G.arm) disarm(true);   // 下面马上画（#317：一次只画一遍）
     G.actorId = id;
     refreshHud();
     idleBox();
@@ -3640,11 +3643,54 @@
     b.title = G.undo.length ? `撤销：${G.undo[G.undo.length - 1].label}（Ctrl+Z）` : "还没有可以撤销的操作（Ctrl+Z）";
   }
 
+  /* ---------- 技能栏 / 队伍栏按需更新（#317）----------
+   * 主人反馈新画面选技能时一闪一闪：以前每画一遍都 innerHTML = "" 整块重建（图标、贴纸 SVG 重新解析，悬停状态丢掉），
+   * 点一个要选目标的技能还要画三遍（disarm、armSkill、pickUnit 各一遍）。现在按钮按 data-id / data-skill 对上：
+   * 同一个人、同一个技能还是同一个按钮，只改变了的 class / 属性；按钮里面变了也只换变了的那几个节点（hud-patch.js）。
+   * 一次操作只画一遍：接下来马上还要画的地方先不画（disarm(true) / syncBusy(true)），armSkill 用 hudSoon */
+  let hudPaints = 0;   // refreshHud 画过几遍（hudSoon 看这一下里有没有人画过）
+  /** 属性和现在不一样才写：v 是 null / false = 拿掉，true = 空值（disabled、hidden） */
+  function hudAttr(e, k, v) {
+    if (v == null || v === false) { if (e.hasAttribute(k)) e.removeAttribute(k); return; }
+    const s = v === true ? "" : String(v);
+    if (e.getAttribute(k) !== s) e.setAttribute(k, s);
+  }
+  function hudCls(e, c) { if (e.className !== c) e.className = c; }
+  /** 按钮里面换成 html：hud-patch.js 只改变了的节点；没加载它（只加载了一部分脚本的测试页）就整块换，内容没变照样不碰 */
+  function hudInner(e, h) {
+    if (window.HudPatch) { HudPatch.html(e, h); return; }
+    if (e.__hudHtml !== h) { e.innerHTML = h; e.__hudHtml = h; }
+  }
+  /** 一排按钮按 key 记下来（keyOf(按钮) → key，对不上的不是这里画的、拿掉）：返回 Map，用过的 delete 掉 */
+  function hudKeep(box, keyOf) {
+    const m = new Map();
+    [...box.childNodes].forEach(b => {
+      const k = b.nodeType === 1 ? keyOf(b) : null;
+      if (k != null && !m.has(k)) m.set(k, b); else box.removeChild(b);
+    });
+    return m;
+  }
+  /** 把 b 放到 box 的第 i 个（已经在那就不动） */
+  function hudPlace(box, b, i) {
+    const at = box.children[i] || null;
+    if (at !== b) box.insertBefore(b, at);
+  }
+  /** 第 n 个以后的都拿掉（这一遍没用上的旧按钮） */
+  function hudTrim(box, n) { while (box.children.length > n) box.removeChild(box.lastElementChild); }
+  /** 同一下操作里后面多半还要再画（选目标 pickUnit / pickZone、出手 syncBusy 都会画）：先不画，
+   *  这一下同步的部分跑完（微任务：浏览器画出来之前）还没人画过才补画一遍 */
+  function hudSoon() {
+    const n = hudPaints;
+    Promise.resolve().then(() => { if (hudPaints === n) refreshHud(); });
+  }
+
   function refreshHud() {
+    hudPaints++;
     refreshTop();
-    // 队伍
+    // 队伍（#317：按 data-id 对上，同一个人还是同一个按钮）
     const party = $("g-party");
-    party.innerHTML = "";
+    const keepPc = hudKeep(party, b => (b.dataset.id ? "u:" + b.dataset.id : b.classList.contains("pc-armory") ? "armory" : b.classList.contains("pc-sheet") ? "sheet" : null));
+    let pcs = 0;
     const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed && !u.escort);   // 护送对象玩家不能操作，不进队伍栏
     const heroes = all.filter(u => !isWeaponUnit(u));
     const ordered = [];
@@ -3670,37 +3716,44 @@
     ordered.forEach((u, i) => {
       const s = snapUnit(u);
       const op = operatorOf(u);
-      const b = el("button", "pc" + (isWeaponUnit(u) ? " weapon" : "") + (s.dead ? " downed" : "") +
-        (u.id === G.actorId ? " on" : "") + ((s.ap + s.bonus === 0 && !s.dying) || s.stunned ? " off" : ""));
+      const cls = "pc" + (isWeaponUnit(u) ? " weapon" : "") + (s.dead ? " downed" : "") +
+        (u.id === G.actorId ? " on" : "") + ((s.ap + s.bonus === 0 && !s.dying) || s.stunned ? " off" : "") + (shell ? " pm" : "");
       const pct = sumMax(s) ? (sumCur(s) / sumMax(s)) * 100 : 0;
       let econ = "";
       for (let k = 0; k < Math.max(s.apMax, s.ap); k++) econ += `<i class="econ-ap${k < s.ap ? " on" : ""}"></i>`;
       for (let k = 0; k < Math.max(s.bonusMax, s.bonus); k++) econ += `<i class="econ-bonus${k < s.bonus ? " on" : ""}"></i>`;
-      b.innerHTML = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
+      let inner = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
         <div class="mini"><i style="width:${pct}%"></i></div>
         <div class="u-econ">${s.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ}${!s.dead && s.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!s.dead && s.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`;
       // 新画面：主职责头像 + 名字 / 等级 / 操控者（倒下也写上）+ 身上的效果 + 分层血条
       if (shell) {
         const pu = shellView(u);
-        b.classList.add("pm");
-        if (pu) b.innerHTML = shell.member(pu, { tag: [op, s.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
+        if (pu) inner = shell.member(pu, { tag: [op, s.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
       }
-      b.dataset.id = u.id;
+      const b = keepPc.get("u:" + u.id) || el("button", cls);
+      keepPc.delete("u:" + u.id);
+      hudCls(b, cls);
+      hudInner(b, inner);
+      hudAttr(b, "data-id", u.id);
       b.onclick = () => { if (G.depth === 0 && !choiceResolve && !u.dead) selectActor(u.id); };
-      party.appendChild(b);
+      hudPlace(party, b, pcs++);
     });
     if (heroes.length) {
-      const info = el("button", "pc pc-sheet");
-      info.innerHTML = `<span class="n"><span>角色资料</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">技能 · 数值</div>`;
-      info.title = "查看每个角色的数值、被动和技能说明";
-      info.dataset.sheet = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
-      party.appendChild(info);
-      const arm = el("button", "pc pc-sheet pc-armory");
-      arm.innerHTML = `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`;
-      arm.title = "查看武器补正、atk 明细、改装件和客制化";
-      arm.dataset.armory = info.dataset.sheet;
-      party.appendChild(arm);
+      const sheetKit = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
+      const info = keepPc.get("sheet") || el("button", "pc pc-sheet");
+      hudCls(info, "pc pc-sheet");
+      hudInner(info, `<span class="n"><span>角色资料</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">技能 · 数值</div>`);
+      hudAttr(info, "title", "查看每个角色的数值、被动和技能说明");
+      if (info.dataset.sheet !== sheetKit) info.dataset.sheet = sheetKit;
+      hudPlace(party, info, pcs++);
+      const arm = keepPc.get("armory") || el("button", "pc pc-sheet pc-armory");
+      hudCls(arm, "pc pc-sheet pc-armory");
+      hudInner(arm, `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`);
+      hudAttr(arm, "title", "查看武器补正、atk 明细、改装件和客制化");
+      if (arm.dataset.armory !== sheetKit) arm.dataset.armory = sheetKit;
+      hudPlace(party, arm, pcs++);
     }
+    hudTrim(party, pcs);
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
     if (window.HD2DField) HD2DField.actor(state.combatPhase === "player" ? G.actorId : null);   // 新画面：同一个人描金边、脚下光圈
 
@@ -3709,7 +3762,7 @@
     G.skillTap = null;
     stopSkillPv(true);
     const box = $("g-skills");
-    box.innerHTML = "";
+    const keepSk = hudKeep(box, b => (b.dataset.skill != null ? b.dataset.skill : null));   // #317：同一个技能还是同一个按钮
     const actor = unitById(G.actorId);
     // 武器生物化（唤出武器人 / 收回为武器）单独放到结束回合左边的特殊按钮里，不占技能栏
     const allSkills = gameSkills(actor);
@@ -3739,21 +3792,21 @@
     };
     const sb = $("g-summon");
     if (sb) {
-      sb.hidden = !summonSk;
+      hudAttr(sb, "hidden", !summonSk);
       sb.onclick = sb.onmouseenter = sb.onmouseleave = null;
       if (summonSk) {
         const why = blockReason(actor, summonSk);
         const back = /_return$/.test(summonSk.id) || summonSk.id === "weapon_retrieve";
-        const ele = mainElementOf(actor);
-        sb.className = "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : "");
-        sb.style.setProperty("--el", ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)");
-        sb.dataset.skill = summonSk.id;
-        sb.disabled = !!why;
+        const ele = mainElementOf(actor), color = ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)";
+        hudCls(sb, "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : ""));
+        if (sb.style.getPropertyValue("--el") !== color) sb.style.setProperty("--el", color);
+        hudAttr(sb, "data-skill", summonSk.id);
+        hudAttr(sb, "disabled", !!why);
         const cost = [];
         if (summonSk.cost.ap) cost.push(`行动 ${summonSk.cost.ap}`);
         if (summonSk.cost.bonus) cost.push(`附赠 ${summonSk.cost.bonus}`);
-        sb.innerHTML = `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`;
-        sb.setAttribute("aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
+        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`);
+        hudAttr(sb, "aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
         wireSkill(sb, summonSk, why);
       }
     }
@@ -3761,25 +3814,33 @@
     const actorView = shell ? shellView(actor) : null;   // 新画面：绯秋的刀、夕夏的引擎跟着变属性，读投影里的
     list.forEach((sk, i) => {
       const why = blockReason(actor, sk);
-      const b = el("button", "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : ""));
-      b.dataset.skill = sk.id;
+      let cls = "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : "");
       const cost = [];
       if (sk.cost.ap) cost.push(`<span class="ap">行动 ${sk.cost.ap}</span>`);
       if (sk.cost.bonus) cost.push(`<span class="bn">附赠 ${sk.cost.bonus}</span>`);
       if (!cost.length) cost.push("不耗行动");
-      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
-      if (why) { b.disabled = true; b.setAttribute("aria-label", `${sk.name}：${why}`); }
+      let inner = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
+      let label = why ? `${sk.name}：${why}` : null;
       // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、点击、悬停说明照旧（下面 wireSkill 接的还是这个按钮）
       if (shell) {
         const nb = shell.skillButton({ id: sk.id, name: sk.name, hint: sk.hint, cost: sk.cost }, i, actorView, { key: i < 9 ? i + 1 : "" });
-        nb.cls.split(" ").forEach(c => b.classList.add(c));
-        b.innerHTML = nb.html;
-        b.setAttribute("aria-label", nb.label + (why ? "：" + why : ""));
+        cls += " " + nb.cls;
+        inner = nb.html;
+        label = nb.label + (why ? "：" + why : "");
       }
+      // 同一个技能还是上一遍那个按钮：只改变了的（选中、灰掉、数字键、费用、读屏念的）
+      const b = keepSk.get(sk.id) || el("button", cls);
+      keepSk.delete(sk.id);
+      hudCls(b, cls);
+      hudAttr(b, "data-skill", sk.id);
+      hudInner(b, inner);
+      hudAttr(b, "disabled", !!why);
+      hudAttr(b, "aria-label", label);
       // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）；停一会儿就按当前数值预演
       wireSkill(b, sk, why);
-      box.appendChild(b);
+      hudPlace(box, b, i);
     });
+    hudTrim(box, list.length);
     G.skillsShown = list;
     // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
     const acting = !!state.combatStarted && state.combatPhase === "player";
@@ -3790,25 +3851,29 @@
       let gh = "";
       try { if (window.HudIcons && actor && actor.isPlayer && !isWeaponUnit(actor)) gh = HudIcons.gauge(HudIcons.gaugeState(actor, state.units)); } catch (e) { gh = ""; }
       if (gauge.dataset.html !== gh) { gauge.innerHTML = gh; gauge.dataset.html = gh; }
-      gauge.setAttribute("aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
+      hudAttr(gauge, "aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
     }
 
+    // 开始战斗 / 结束回合：字没变就不碰（#317）
     const et = $("g-endturn");
+    let etText;
     if (!state.combatStarted) {
       et.disabled = G.depth > 0 || G.ended;
-      et.innerHTML = "开始战斗<small>空格</small>";
+      etText = "开始战斗<small>空格</small>";
     } else {
       et.disabled = G.depth > 0 || G.ended || state.combatPhase !== "player";
-      et.innerHTML = "结束回合<small>空格</small>";
+      etText = "结束回合<small>空格</small>";
     }
     if ($("g-start")) {
       $("g-start").disabled = !!state.combatStarted || G.ended;
-      $("g-start").textContent = state.combatStarted ? "战斗中" : "开始战斗";
+      const t = state.combatStarted ? "战斗中" : "开始战斗";
+      if ($("g-start").textContent !== t) $("g-start").textContent = t;
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
-      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); et.innerHTML = "结束单位行动<small>空格</small>"; }
+      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动<small>空格</small>"; }
     }
+    hudInner(et, etText);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
   }
 
