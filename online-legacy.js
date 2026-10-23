@@ -7,13 +7,16 @@
   const domains = new Set(["battle.panel", "battle.setup", "backstage", "calc", "trpg", "trpg.ui"]);
   const encounterActions = new Set(["setZones", "selectEncounter", "rollEncounter", "rollBossEncounter", "loadSlot"]);
   const resets = new Set(["party", "reset", "enter", "new", "delete", "import", "title", "toBattle", "backFromBattle"]);
+  // 回到探索环节（主持人确认过放弃这场战斗）：战斗中、演出 / 敌人回合中也马上执行，不拒绝、不排队——
+  // 处理函数先停下战斗流程（trpg-ui.js · backFromBattle → game.js · abandonBattle，#322；以前这里当成「重置遭遇」拒绝，点了没反应）
+  const leave = cmd => cmd.type === "trpg.ui" && cmd.action === "backFromBattle";
   let off = null, executing = 0;
   function fail(message) { const error = new Error(message); error.code = "HOTSEAT_REJECT"; throw error; }
   function preflight(cmd) {
     const inCombat = state.combatStarted && !GAME.ended;
     const reset = cmd.type === "battle.setup" || cmd.type === "battle.panel" && encounterActions.has(cmd.action) ||
       cmd.type === "calc" && (["clearField", "loadLive"].includes(cmd.action) || cmd.action === "global" && cmd.field === "zoneMode") ||
-      cmd.type === "trpg.ui" && resets.has(cmd.action);
+      cmd.type === "trpg.ui" && resets.has(cmd.action) && !leave(cmd);
     if (reset && inCombat) fail("联机战斗中不能重置遭遇、切换存档或改变区数；请先结束战斗");
     if (reset && GAME.depth > 0 && !GAME.tape) fail("请等待当前结算结束后再设置遭遇或切换存档");
     if (root.OnlineGame.isPaused()) fail("房主连接中断，等待恢复");
@@ -50,7 +53,7 @@
           return result;
         } finally { executing--; }
       };
-      if (GAME.depth > 0 && !GAME.tape) {
+      if (GAME.depth > 0 && !GAME.tape && !leave(cmd)) {
         if (typeof root.OnlineGame.queueHostEdit !== "function") fail("主持人编辑队列尚未就绪");
         // The queue reports failures to the room notice. The original UI must not
         // receive a Promise in place of its legacy synchronous return value.
