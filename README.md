@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **移动堡垒的「焚烧」改成每个被打的单位各掷一次 35% 灼烧，伤害不变**（vehicle.js · `VEHICLES.fortress.burn.burnChance = 0.35`）。
+  - **以前**：焚烧打同区所有敌对单位 0.5×atk 火，**每个被打的人都必定**灼烧 1。
+  - **现在**：伤害照旧 0.5×atk 火；每个被打的单位**各自独立掷一次**，35% 灼烧 1。掷骰用游戏装好的种子随机数（`Math.random`，`RNG.install`），回放 / 联机同种子结果一样。技能提示、图鉴（codex.js）、docs/suppression-force.md 一起改了。
+  - **测试**：新增 tests/fortress-burn.test.js（多种子灼烧率约 35%、伤害不变、每人各掷一次、同种子结果一样）；tests/vehicle.test.js 的焚烧测试固定掷骰 0.3。
+  - **平衡模拟**（`node tools/enemy-balance.js --groups fortress,heat`，每格 100 场 × 2/3/4 人）：有车 · 占 1 枚代币的普通战胜率 49.3% → 62.3%、精英战 33.3% → 40.7%；酷暑下的镇压队遭遇（车 30%）64.7% → 69.3%。
 - **义体（植入体）的安装和拆除 5 级起才解锁，高档义体还要角色等级到它的档位才能装（.vol2 10 级、.vol3 15 级、.vol4 20 级）；血量层改造照旧 1 级就能用**（#315，主人原话「把植入体安装及拆除的功能设置成从 5 级开始解锁。这和血量层改造不同，血量层改造从一级就可以使用」，后来追加「不同档位的义体也是得到了对应等级才可以安装这样比较好」（推翻 issue 正文第 7 点「档位不另加等级要求」）。改了 cyberware.js（配置 `CYBERWARE_UNLOCK_LEVEL = 5`；新函数 `cyberwareLockWhy`（5 级总开关）、`cyberwareInstallLevel`（这一档要几级：直接用档位数 `def.tier`，和 5 级取高的，不另写表）、`cyberwareTierNeed`（档位等级）；`cyberwareInstallPreview` / `cyberwareInstall` / `cyberwareRemove` 等级不够时不执行、不扣钱、写原因，预览多 `locked` / `needLevel`；`cyberwareView` 多 `locked` / `unlockLevel`，`cyberwareShopView` 多 `locked` / `needLevel`；`cyberwareCodexInfo` 诊所说明写这件几级起能装）、online-view.js（`projectCyberware` 白名单放行 `locked` / `unlockLevel` / `needLevel`）、cyberware-ui.js（`lockOf` / `levelTag`；拆除、安装 / 以新换旧按钮灰掉写「5 级解锁」或「需要 10 级」之类，目录上面一行说明）、rulebook.js（规则页「义体与改造率」·「义体」一节加一句，档位表加一列「角色几级能装」，读 `CYBERWARE_UNLOCK_LEVEL` / `cyberwareInstallLevel`）；测试 tests/cyberware-unlock.test.js（新）；原来几条义体测试（tests/cyberware-ui.test.js、cyberware-online.test.js、cyberware-trpg.test.js、cyberware-vol.test.js、cyberware-campaign-memory.test.js，浏览器的 tests/ui.test.js、online-ui.test.js）里装 / 拆义体的角色从 1 级调到 5 级（cyberware-vol.test.js 里装 .vol2 / .vol4 的调到 10 / 20 级），改造率的数字跟着变（例：柯尔特装示例义体 40% → 23.9%）；tests/rulebook.test.js 的档位表多核对一列）
   - **以前**：装、拆义体没有等级限制，1 级的角色在诊所（单局、跑团，单机、联机都一样）就能买、装、拆任何一档。
   - **现在**：
