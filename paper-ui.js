@@ -20,7 +20,8 @@
  *   页面：
  *     readMoves(root) / pressMove(root, index, n)   热座栏里每一格现在的按钮 / 点原来那一个
  *     readCam(root) / pressCam(root, i)             新画面的镜头按钮（远 / 中 / 近）现在哪个亮着 / 点第 i 个
- *     coverRects(doc, selectors) / make(…).cover(doc)   浮在战场上、3D 白卡要让开的面板这一刻的矩形（#339；交给 hd2d-field.js · cover） */
+ *     coverRects(doc, selectors) / make(…).cover(doc)   浮在战场上、3D 白卡要让开的面板这一刻的矩形（#339；交给 hd2d-field.js · cover）
+ *     dockHeight(hud)                               技能栏这一刻多高（--olp-dock-h）；选中技能以后先收着的这一段照旧用收起之前的（#362） */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root);
   else root.PaperUI = factory(root);
@@ -638,16 +639,32 @@
   }
 
   /* ---------- 3D 白卡让开浮在战场上的面板（#339 第 4 步）---------- */
+  /** 这块是不是选中技能以后先收着的技能栏（hd2d-shell.js · fold / held，#362） */
+  const held = (el) => { const SH = root.HD2DShell; return !!(el && SH && typeof SH.held === "function" && SH.held(el)); };
+  /** 每块面板上一次量到的矩形（#362：先收着的技能栏照收起之前量到的那一块算） */
+  const measured = new WeakMap();
   /** 浮在战场上、取景要让开的面板这一刻在视口里的矩形：selectors = 这一家配置里的 cover（顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉……）；
-   *  藏着的、没大小的不算。返回 [{ left, top, right, bottom }]（视口坐标，和 getBoundingClientRect 一样；交给 hd2d-field.js · cover 换成战场里的坐标、算让多少） */
+   *  藏着的、没大小的不算。返回 [{ left, top, right, bottom }]（视口坐标，和 getBoundingClientRect 一样；交给 hd2d-field.js · cover 换成战场里的坐标、算让多少）。
+   *  选中技能以后技能栏先收着的这一段（held）：技能栏照收起之前量到的那一块——收起、打完再展开，取景都不变，镜头不跟着重新取景（#362） */
   function coverRects(doc, selectors) {
     const out = [];
     if (!doc || typeof doc.querySelectorAll !== "function") return out;
     (selectors || []).forEach(sel => doc.querySelectorAll(sel).forEach(el => {
-      const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) out.push({ left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) });
+      let r = held(el) ? measured.get(el) : null;
+      if (!r) {
+        const b = el.getBoundingClientRect();
+        r = b.width > 0 && b.height > 0 ? { left: Math.round(b.left), top: Math.round(b.top), right: Math.round(b.right), bottom: Math.round(b.bottom) } : null;
+        measured.set(el, r);
+      }
+      if (r) out.push(Object.assign({}, r));
     }));
     return out;
+  }
+  /** 技能栏这一刻多高，写进 --olp-dock-h（右边的抽屉、悬停预演、手机上的竖标签挂在它上面）："NNpx"，量不到 = ""；
+   *  选中技能以后先收着的这一段（held）= null：照旧用收起之前的，挂在它上面的面板不跟着挪，取景也就不变（#362） */
+  function dockHeight(hud) {
+    if (held(hud)) return null;
+    return hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
   }
 
   /* ---------- 一份界面（联机 / 单机各拿自己的配置）---------- */
@@ -772,6 +789,6 @@
   }
 
   const SHARED = { dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, tileSpec, fits, tornClip, texture, grit, flush, pending, undress, toolsHtml,
-    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, coverRects };
+    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, coverRects, dockHeight };
   return Object.assign({ BASE, make, dress: dressWith, readOpen, writeOpen }, SHARED);
 });

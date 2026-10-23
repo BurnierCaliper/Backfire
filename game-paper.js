@@ -516,9 +516,10 @@
     if (!env.on) return;
     P.dress(env.doc, null, env.theme);
     pushCover();
-    // 技能栏现在多高（--olp-dock-h）：右边的抽屉、悬停预演让开它（技能多了换行变高也跟着让）；手机上抽屉的竖标签挂在它上面
-    const hud = app() && app().querySelector(":scope > .g-hud"), b = env.doc.body, dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
-    if (b.style.getPropertyValue("--olp-dock-h") !== dockH) { if (dockH) b.style.setProperty("--olp-dock-h", dockH); else b.style.removeProperty("--olp-dock-h"); }
+    // 技能栏现在多高（--olp-dock-h）：右边的抽屉、悬停预演让开它（技能多了换行变高也跟着让）；手机上抽屉的竖标签挂在它上面。
+    // 选中技能以后先收着的这一段照旧用收起之前的（paper-ui.js · dockHeight 给 null，#362）：挂在它上面的面板不跟着挪，取景也就不变
+    const hud = app() && app().querySelector(":scope > .g-hud"), b = env.doc.body, dockH = UI.dockHeight(hud);
+    if (dockH != null && b.style.getPropertyValue("--olp-dock-h") !== dockH) { if (dockH) b.style.setProperty("--olp-dock-h", dockH); else b.style.removeProperty("--olp-dock-h"); }
     if (typeof ResizeObserver !== "function") return;
     if (!env.sizer) env.sizer = new ResizeObserver(() => dressSoon());
     [env.box.querySelector(".olp-top"), topBar(), app() && app().querySelector(":scope > .g-hud"), app() && app().querySelector(".hd2d-party"), $("g-log")].forEach(n => { if (n) env.sizer.observe(n); });

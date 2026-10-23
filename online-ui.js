@@ -980,9 +980,10 @@
       if (!paperOn || !global.OnlinePaper) return;
       global.OnlinePaper.dress(document, null, paperTheme);
       paperCover();
-      // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起
-      const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
-      if (document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
+      // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起。
+      // 选中技能以后先收着的这一段照旧用收起之前的（online-paper.js / paper-ui.js · dockHeight 给 null，#362）：竖标签不跟着挪，取景也就不变
+      const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = global.OnlinePaper.dockHeight(hud);
+      if (dockH != null && document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
       if (typeof ResizeObserver !== "function") return;
       if (!paperSizer) paperSizer = new ResizeObserver(() => {
         if (paperDressQueued) return;

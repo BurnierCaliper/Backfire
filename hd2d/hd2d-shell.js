@@ -23,7 +23,8 @@
  *     wirePanel(panel, btn, o)                  一块面板的收起 / 展开（原型页的技能栏 / 队伍栏 / 日志、正式画面的技能栏 / 队伍栏）
  *     attach(hud, o) / detach(hud) / on(hud)    正式画面底下的 .g-hud 换上 / 拆掉新外壳（hd2d-field.js 建好 / 拆掉新画面时调）
  *     who(hud, html)                            写技能栏上面那一行
- *     manual(hud, name) / setPanel(hud, name, open)   手动点过没有 / 页面自己收起、展开一块（不记；联机纸片画面的手机上轮到你时展开技能栏，#311） */
+ *     manual(hud, name) / setPanel(hud, name, open)   手动点过没有 / 页面自己收起、展开一块（不记；联机纸片画面的手机上轮到你时展开技能栏，#311）
+ *     fold(hud, on) / held(hud)                 选中技能以后先收起技能栏、打完这一下再放开（#362，不记）/ 这一刻是不是这样收着的（取景照收起之前的技能栏让开） */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-ui.js"));
   else root.HD2DShell = factory(root, null);
@@ -267,12 +268,13 @@
     hud.appendChild(panel);
     Object.assign(st, { row, who, panel, storage });
     hud[STATE] = st;
-    // 两块面板：页面自己收起 / 展开用（setPanel，不记）；clicked = 这次挂上以后手动点过（存不了的时候也算手动选过）
+    // 两块面板：页面自己收起 / 展开用（setPanel，不记）；clicked = 这次挂上以后手动点过（存不了的时候也算手动选过）；
+    // 技能栏（fold，#362）：folding = 选中了技能、还没打完这一下；folded = 这一段里是这里收起的——手动点一下就以手动的为准，这一段不再自己收、打完也不自己放开
     st.panels = {
-      dock: { set: wirePanel(hud, dockBtn, { name: "dock", storage, open: !phone, cls: "dock-closed" }), target: hud, cls: "dock-closed", clicked: false },
+      dock: { set: wirePanel(hud, dockBtn, { name: "dock", storage, open: !phone, cls: "dock-closed" }), target: hud, cls: "dock-closed", clicked: false, folding: false, folded: false },
       party: { set: wirePanel(panel, partyBtn, { name: "party", storage, open: !phone }), target: panel, cls: "collapsed", clicked: false }
     };
-    dockBtn.addEventListener("click", () => { st.panels.dock.clicked = true; });
+    dockBtn.addEventListener("click", () => { st.panels.dock.clicked = true; st.panels.dock.folded = false; });
     partyBtn.addEventListener("click", () => { st.panels.party.clicked = true; });
     return true;
   }
@@ -281,13 +283,41 @@
     const st = hud && hud[STATE], p = st && st.panels && st.panels[name];
     return !!(p && (p.clicked || saved(name, st.storage)));
   }
-  /** 页面自己收起 / 展开一块（联机纸片画面的手机上：轮到你时展开技能栏，online-ui.js）：不记在本机，和现在一样就不动。没换上新外壳：返回 false */
+  /** 页面自己收起 / 展开一块（联机纸片画面的手机上：轮到你时展开技能栏，online-ui.js）：不记在本机，和现在一样就不动。
+   *  选中技能以后先收着的技能栏（fold）不在这里展开，等打完这一下 fold 放开。没换上新外壳：返回 false */
   function setPanel(hud, name, open) {
     const st = hud && hud[STATE], p = st && st.panels && st.panels[name];
     if (!p) return false;
     if (p.target.classList.contains(p.cls) === !open) return true;
+    if (open && p.folded) return true;
     p.set(!!open);
     return true;
+  }
+  /**
+   * 选中技能以后先收起技能栏（#362：选目标时提示栏写满、多出按钮条，技能栏变高挡住战场），打完这一下回到选技能时再放开
+   * （单机 game.js · refreshHud、联机玩家 online-battle.js · paintHud 每画一遍技能栏调一次）：
+   *   on = true：这一段的头一次——开着的收起来，记下是这里收的（held）；本来就收着的（手动收的、手机上默认收着的）不动。
+   *              这一段里再叫不再收（中间手动点开的就开着）
+   *   on = false：这一段完了——这里收的放开；中间手动点过「技能 ▼ / ▲」的以手动的为准，不再管
+   * 收着的这一段里，取景照收起之前的技能栏让开（paper-ui.js · coverRects），挂在技能栏上面的面板照旧用收起之前的 --olp-dock-h，镜头不跟着重新取景。
+   * 不记在本机，也不算手动点过。没换上新外壳：返回 false；不然返回这一刻是不是这样收着的
+   */
+  function fold(hud, on) {
+    const st = hud && hud[STATE], p = st && st.panels && st.panels.dock;
+    if (!p) return false;
+    if (on && !p.folding) {
+      p.folding = true;
+      if (!p.target.classList.contains(p.cls)) { p.folded = true; p.set(false); }
+    } else if (!on && p.folding) {
+      p.folding = false;
+      if (p.folded) { p.folded = false; p.set(true); }
+    }
+    return p.folded;
+  }
+  /** 这块技能栏是不是选中技能以后先收着的（fold）：取景、挂在技能栏上面的面板照收起之前的算（paper-ui.js · coverRects、game-paper.js / online-ui.js 的 --olp-dock-h） */
+  function held(hud) {
+    const st = hud && hud[STATE], p = st && st.panels && st.panels.dock;
+    return !!(p && p.folded);
   }
   /** 拆掉新外壳：队伍栏放回原来的位置，加的那一行、那块面板拿掉，加的类去掉——旧画面的 .g-hud 和换上之前一模一样。没换上过：返回 false */
   function detach(hud) {
@@ -316,6 +346,6 @@
 
   return {
     SHELL, saved, isOpen, setOpen, labelOf, phoneNow, wirePanel, looks, lookOf, effectElements,
-    skillButton, summonButton, pickSummon, hintsOf, member, whoHtml, attach, detach, on, who, manual, setPanel
+    skillButton, summonButton, pickSummon, hintsOf, member, whoHtml, attach, detach, on, who, manual, setPanel, fold, held
   };
 });

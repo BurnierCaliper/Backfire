@@ -823,6 +823,10 @@ test("手机竖屏（#311）：展开的技能栏紧凑——纳米仪表一行�
   // 滑到最后一个技能：照旧是同一个按钮，点了照旧问主机（选目标）
   await page.click('.ol-battle [data-ob-skill="__item"]');
   await page.waitForFunction(() => /选择目标/.test(document.querySelector(".ol-battle > .g-hud .hint").textContent));
+  // 选目标时技能栏先收起（#362）：这里量展开的样子，先手动点开
+  await waitDock(page, true);
+  await page.click(".ol-battle .hd2d-dock-toggle");
+  await waitDock(page, false);
   // 提示栏字多：技能栏还是不超过 35%，提示栏自己滚（选目标的按钮都还在）
   await page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud .hint"); h.insertAdjacentHTML("afterbegin", "<span>" + "提示栏里字很多。".repeat(60) + "</span>"); });
   await settle(page);
@@ -994,5 +998,41 @@ test("新加的 DOM（顶栏、吊牌、下拉、队伍栏下面的按钮、技�
     .filter(Boolean).map(el => el.outerHTML).join("\n").replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, "data:…"));   // 纸纹（base64 里碰巧有这几个字母不算）
   for (const n of [SHP, SHP_MAX]) assert.ok(!html.includes(String(n)), "出现了坚毅生命的数字 " + n);
   assert.doesNotMatch(html, /shp|坚毅/i);
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- 选中技能以后先收起技能栏（#362）：选目标时不挡战场，镜头不跟着技能栏变高 / 变矮重新取景 ---------- */
+test("选中技能以后技能栏先收起（#362）：主机问目标时技能那一排藏起来（提示栏、取消按钮照旧在），比选技能之前矮；交给新画面让开的面板（HD2DField.cover）、--olp-dock-h 一下都没变；点目标出手、回到选技能自动展开，还是没变；不记在本机", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await asPlayer(page);
+  await page.waitForSelector('.ol-battle [data-ob-skill="ruby_aa"]:not([disabled])');
+  await page.waitForFunction(() => document.body.classList.contains("ol-paper") && HD2DField.covers.some(c => c && c.length === 5) && !!document.querySelector(".ol-battle > .g-hud[data-olp-tex]"));
+  await page.waitForTimeout(300);
+  // 交给新画面的面板（变了才交，交一次新画面重排一次、镜头回到默认）、技能栏的高度（挂在它上面的面板跟着它）
+  const look = () => page.evaluate(() => ({ covers: HD2DField.covers.length, last: HD2DField.covers[HD2DField.covers.length - 1], dockH: document.body.style.getPropertyValue("--olp-dock-h") }));
+  const before = await look(), hud0 = await rect(page, ".ol-battle > .g-hud");
+  assert.ok(/^\d+px$/.test(before.dockH), "量过技能栏的高度：" + JSON.stringify(before));
+  // 选普通攻击：主机问目标 → 技能栏收起
+  await page.click('.ol-battle [data-ob-skill="ruby_aa"]');
+  await waitDock(page, true);
+  await page.waitForTimeout(300);   // 等 ResizeObserver → 贴纸纹 → 量面板（online-ui.js · paperDress / paperCover）跑完
+  const pick = await page.evaluate(() => {
+    const h = document.querySelector(".ol-battle > .g-hud"), cancel = h.querySelector('.hint [data-ob="cancel"]');
+    return { row: getComputedStyle(h.querySelector(".hud-row")).display, hint: /选择目标/.test(h.querySelector(".hint").textContent), cancel: !!cancel && cancel.getClientRects().length > 0, label: h.querySelector(".hd2d-dock-toggle").textContent };
+  });
+  assert.deepEqual(pick, { row: "none", hint: true, cancel: true, label: "技能 ▲" }, "选目标时：技能那一排藏起来，提示栏、取消按钮照旧在");
+  const hud1 = await rect(page, ".ol-battle > .g-hud");
+  assert.ok(hud1.top > hud0.top + 20, "收起以后比选技能之前矮（不挡战场）：" + JSON.stringify([hud0, hud1]));
+  assert.deepEqual(await look(), before, "收起：交给新画面的面板、--olp-dock-h 都没变（镜头不重新取景）");
+  await shot(page, "paper-362-picking");
+  // 点目标出手：主机回「确认执行」→ 提交 → 回到选技能，自动展开
+  await page.evaluate(() => document.querySelector('.ol-battle .unit-wrap[data-unit-id="enemy"]').click());
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "submit" && c.args.type === "skill"));
+  assert.deepEqual(await page.evaluate(() => fixture.calls.filter(c => c.kind === "submit").map(c => c.args)), [{ type: "skill", actor: "a", skill: "ruby_aa", target: "enemy", picks: {} }], "点哪个打哪个");
+  await waitDock(page, false);
+  await page.waitForTimeout(300);
+  assert.deepEqual(await look(), before, "打完展开：交给新画面的面板、--olp-dock-h 还是没变");
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null, "自己收起 / 展开的不记在本机");
   assert.deepEqual(o.errors, []);
 });

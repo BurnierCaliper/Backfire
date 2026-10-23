@@ -704,3 +704,56 @@ test("技能吊牌名字下面那行消耗（「行动 1」「附赠 1」）、�
   }
   assert.deepEqual(o.errors, []);
 });
+
+/* ---------- 选中技能以后先收起技能栏（#362）：选目标时不挡战场，镜头不跟着技能栏变高 / 变矮重新取景 ---------- */
+test("#362 选中技能以后技能栏先收起：选目标时技能那一排藏起来（提示栏、放弃按钮照旧在），比选技能之前矮；收起、点目标演完再展开，取景（让开的上下左右）、--olp-dock-h 都没变，镜头一次都没重新取景；演完回到选技能自动展开，不记在本机", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  // 开战（柯尔特的初始刀头选第一个），等「战斗开始」的大字收走
+  await page.evaluate(() => document.getElementById("g-start").click());
+  await page.waitForFunction(() => !!document.querySelector("#g-choice.show .opts button"), null, { timeout: 15000 });
+  await page.evaluate(() => document.querySelector("#g-choice.show .opts button").click());
+  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0 && !document.querySelector("#g-choice.show, .phase-card"), null, { timeout: 30000 });
+  // 敌人的架势、血量垫高：一下打不倒、不失衡，不弹别的问题；行动的人行动点给够（打完还是他行动）
+  await page.evaluate(() => {
+    state.units.filter(u => !u.isPlayer).forEach(u => { u.def = u.defMax = 99; u.layers.forEach(l => { l.max = Math.max(l.max, 300); l.current = l.max; }); });
+    const a = state.units.find(u => u.id === GAME.actorId); a.ap = a.apMax = Math.max(3, a.apMax || 0);
+    GAME.refresh();
+  });
+  // 等纸片画面量好面板、新画面按让出来的那一块排好、纸纹贴完
+  await page.waitForFunction(() => window.__scene && window.__scene.layout && window.__scene.layout.view.left > 0 && window.__scene.layout.view.right > 0 &&
+    document.querySelector("#g-app > .g-hud").dataset.olpTex === "dock" && PaperUI.pending() === 0, null, { timeout: 30000 });
+  await page.waitForTimeout(400);
+  const look = () => page.evaluate(() => { const v = window.__scene.layout.view; return { top: v.top, bottom: v.bottom, left: v.left, right: v.right, dockH: document.body.style.getPropertyValue("--olp-dock-h") }; });
+  const before = await look(), hud0 = await rect(page, "#g-app > .g-hud");
+  assert.ok(/^\d+px$/.test(before.dockH) && before.bottom > 0, "量过技能栏、取景让开了它：" + JSON.stringify(before));
+  // 从这里起数镜头重新取景了几次（hd2d-field.js · paint(true) → 场景的 refit：镜头直接切回这一段的默认位置）
+  await page.evaluate(() => { window.__refits = 0; const sc = window.__scene, f = sc.refit; sc.refit = function () { window.__refits++; return f.apply(this, arguments); }; });
+  // 数字键选普通攻击（不经过鼠标悬停）→ 选目标：技能栏收起
+  const n = await page.evaluate(() => GAME.skillsShown.findIndex(s => /_aa$/.test(s.id)) + 1);
+  assert.ok(n >= 1, "有普通攻击");
+  await page.keyboard.press(String(n));
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  await page.waitForTimeout(400);   // 等 ResizeObserver → 贴纸纹 → 量面板（game-paper.js · dress / pushCover）跑完
+  const pick = await page.evaluate(() => {
+    const h = document.querySelector("#g-app > .g-hud"), give = h.querySelector("#g-pick-bar.show .g-btn.danger");
+    return { closed: h.classList.contains("dock-closed"), row: getComputedStyle(h.querySelector(".hud-row")).display, give: !!give && give.getClientRects().length > 0,
+      hint: h.querySelector(".hint").getClientRects().length > 0, label: h.querySelector(".hd2d-dock-toggle").textContent };
+  });
+  assert.deepEqual(pick, { closed: true, row: "none", give: true, hint: true, label: "技能 ▲" }, "选目标时技能栏收起：技能那一排藏起来，提示栏、放弃按钮照旧在");
+  const hud1 = await rect(page, "#g-app > .g-hud");
+  assert.ok(hud1.top > hud0.top, "收起以后比选技能之前矮（不再挡战场）：" + JSON.stringify([hud0, hud1]));
+  assert.deepEqual(await look(), before, "收起：取景、--olp-dock-h 都没变");
+  assert.equal(await page.evaluate(() => window.__refits), 0, "选目标时镜头没重新取景");
+  await shot(page, "solo-paper-362-picking");
+  // 点目标出手（无界面 Chrome 按触屏走：第一下预览，再点一下确认）；演完回到选技能，自动展开
+  const target = await page.evaluate(() => [...GAME.arm.map.entries()].find(([id, c]) => !c.invalid && !String(id).includes(":"))[0]);
+  await page.evaluate(id => GAME.fieldInput.unit(id), target);
+  if (await page.evaluate(() => !!(GAME.arm && GAME.arm.tapId))) await page.evaluate(id => GAME.fieldInput.unit(id), target);
+  await page.waitForFunction(() => GAME.depth === 0 && !GAME.arm && !document.querySelector("#g-choice.show") && !document.getElementById("g-hint").dataset.flash, null, { timeout: 30000 });
+  await page.waitForFunction(() => !document.querySelector("#g-app > .g-hud").classList.contains("dock-closed"));
+  await page.waitForTimeout(400);
+  assert.deepEqual(await look(), before, "演完展开：取景、--olp-dock-h 还是没变");
+  assert.equal(await page.evaluate(() => window.__refits), 0, "从选技能到演完，镜头一次都没重新取景");
+  assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null, "自己收起 / 展开的不记在本机");
+  assert.deepEqual(o.errors, []);
+});
