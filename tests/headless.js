@@ -56,7 +56,6 @@ function load(opt) {
     compiled(f).runInContext(ctx);
   });
   ctx.__errors = logs;
-  if (process.env.BF_FIXDATE) fixDate(ctx, process.env.BF_FIXDATE);
   // 顶层 const / let 不会挂到 window 上，这里取出常用的几个
   const names = ["state", "RUN", "RNG", "EnemyAI", "BattleSim", "SaveStore", "Rogue", "SKILL_RANGE", "ENEMY_RANK", "ITEM_CATALOG", "LEDGER", "ROGUE_CONFIG", "ROGUE_SHOP", "ROGUE_SMITH", "ROGUE_CLINIC", "ROGUE_SMITHS", "ROGUE_SMITH_RULES", "ROGUE_CHECKS", "ROGUE_NODE_TYPES", "FEATS", "ROGUE_GROWTH", "DESERT", "HERO_PROFILES", "PROF_LIST", "HANDBOOK_SHOP", "HANDBOOK_WEAPON_UPGRADE", "TRPG", "SCORE_GRADES", "SCORE_RULES", "SCORE_SPEED", "WORLD_PLACES", "BESTIARY_TEXT", "CODEX_PROPS", "CODEX_EFFECTS", "CODEX_EFFECT_GROUPS", "WORLD_TRAVEL", "WORLD_TRAVEL_EDGES", "WORLD_TRAVEL_MODES", "WORLD_GEO"];
   ctx.S = vm.runInContext("({" + names.map(n =>
@@ -72,13 +71,3 @@ function load(opt) {
 }
 
 module.exports = { load, ROOT, RULE_FILES };
-
-/** 把这个上下文里的「现在」固定到某一天的中午（本机时区）：每日任务 / 每日挑战跟着本机日期变，测试要结果不随日期变时用 */
-function fixDate(ctx, ymd) {
-  ctx.__fixedNow = new Date(ymd + "T12:00:00").getTime();
-  vm.runInContext(`(() => { const D0 = Date; const T = __fixedNow;
-    class FixedDate extends D0 { constructor(...a) { if (a.length) super(...a); else super(T); } static now() { return T; } }
-    globalThis.Date = FixedDate; })();`, ctx);
-  return ctx;
-}
-module.exports.fixDate = fixDate;

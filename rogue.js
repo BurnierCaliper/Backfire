@@ -486,10 +486,18 @@ const Rogue = (function () {
     Object.keys(s.items || {}).forEach(id => { items[id] = Math.max(0, Math.round(s.items[id] * h)); });
     return {
       kuizhi: Math.round((task.reward.kuizhi || 0) * h * actScale(run) / 100) * 100,
-      xp: task.reward.xp || 0,
+      xp: taskXp(run, task),
       water: Math.round((s.water || 0) * h / 100) * 100,
       items
     };
+  }
+  /** 任务的每人经验。长线养成照跑团：主持人手册的任务经验表（trpg-tasks.js · TRPG_TASK_PAY / trpgTaskHandbookPay），
+   *  按任务天数查长度档、按队伍平均等级（partyLevel：和跑团 trpgPartyLevel 一样平均、四舍五入）查经验档，每人全额。
+   *  普通单局、每日挑战、单人模式照任务模板（rogue-data.js · ROGUE_TASKS 的 reward.xp，单局的经验曲线另调过） */
+  function taskXp(run, task) {
+    if (task && task.lockedXp != null) return task.lockedXp;   // 长线养成：接任务那一刻就定下（acceptTask），途中升级不变（作者 10/23）
+    if (run.growth && typeof trpgTaskHandbookPay === "function") return trpgTaskHandbookPay(task.days, partyLevel(run)).xp;
+    return task.reward.xp || 0;
   }
 
   /** which：支线在任务板上的序号，或 "main" */
@@ -508,6 +516,8 @@ const Rogue = (function () {
       nodes: cols.map((col, i) => col.length === 1 ? Object.assign({ type: col[0], done: false }, col[0] === "rest" && (task.noPayCols || []).indexOf(i) >= 0 ? { noPay: true } : {}) : null),
       pick: cols.map(col => col.length === 1 ? 0 : null)
     });
+    // 长线养成的任务经验按接任务时的队伍平均等级定下来，完成时照这个数发（任务卡上写多少就发多少）
+    if (run.growth) run.task.lockedXp = taskXp(run, task);
     run.board = null;
     run.stage = "task";
     if (run.task.escort) run.task.escort = Object.assign({}, run.task.escort, { level: enemyLevel(run, 0), cur: null, lost: false });
@@ -2750,8 +2760,11 @@ const Rogue = (function () {
     { id: "shop", name: "商店消费", desc: () => "在商店花费 500 奎支", target: () => 500 },
     { id: "weather", name: "更换天气", desc: () => "主动将天气改为指定天气 1 次", target: () => 1 }
   ];
+  /** 按哪天换题：默认读本机时钟；setGrowthDailyClock(() => 日期) 换成别的时钟（测试固定日期用），传空恢复本机时钟 */
+  let growthDailyClock = () => new Date();
+  function setGrowthDailyClock(fn) { growthDailyClock = typeof fn === "function" ? fn : () => new Date(); }
   function growthDailyKey(run) {
-    const d = new Date();
+    const d = growthDailyClock();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   }
   function ensureGrowthDaily(run) {
@@ -3194,7 +3207,7 @@ function advanceDays(run, n) {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook
