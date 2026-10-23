@@ -138,6 +138,7 @@ const Screens = (function () {
     if ($("t-daily")) $("t-daily").onclick = () => RunFlow.startDaily && RunFlow.startDaily();
     $("t-continue").onclick = () => RunFlow.resume();
     if ($("t-codex")) $("t-codex").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "hero", sub: "主菜单" }); };
+    if ($("t-rules")) $("t-rules").onclick = () => { if (window.Bestiary) Bestiary.open({ mode: "rules", sub: "主菜单" }); };   // 规则说明：图鉴的「规则」一本（rulebook.js）
     $("t-sandbox").onclick = () => {
       // 没加载 trpg-ui.js 时的后备：直接进战斗画面（trpg-ui.js 会把这个按钮换成进探索环节）
       dispatch({ type: "run.session", action: "sandbox" }, { setupBattle() {

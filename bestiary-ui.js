@@ -1,8 +1,9 @@
-/* Antlerscale: Backfire · 图鉴（界面）：角色 / 专长 / 义体 / 敌人 / 配置物 / 效果
+/* Antlerscale: Backfire · 图鉴（界面）：角色 / 专长 / 义体 / 敌人 / 配置物 / 效果 / 规则
  * Bestiary.open(opt) 打开全屏图鉴。opt.partySize：按几人队算血量（默认 4，界面上可以切）；
- * opt.mode：先打开哪一本（"enemy" 默认 / "hero" / "feat" / "cyber" / "prop" / "effect"）。
+ * opt.mode：先打开哪一本（"enemy" 默认 / "hero" / "feat" / "cyber" / "prop" / "effect" / "rules"）。
  * 配置物、效果、义体图鉴是规则说明（数据在 codex.js），一直都能查，可以按分类筛、按关键词搜。
  * 义体图鉴只写固定的规则（可以写坚毅生命的具体消耗），不显示任何角色当前的坚毅生命。
+ * 「规则」一本是规则说明页（章节在 rulebook.js）：按分类筛、能搜，详情按节画出列表、表格和说明。
  * 左边是卡片墙（按 杂兵 / 精英 / 首领 筛），右边是选中敌人的详情：
  *   遭遇过 → 行动方式、能力、按等级和人数现算的血量 / 架势 / atk、遭遇记录；
  *   没遭遇过 → 「？？？」，只看得到阵营和出没区域。数据在 bestiary.js。 */
@@ -12,9 +13,10 @@ const Bestiary = (() => {
   const RANGE = { melee: "近距离", ranged: "远距离", any: "远近皆可" };
   let root = null, filter = "all", sel = null, lv = null, party = 4, sub = "";
   let mode = "enemy", query = "";
-  const MODES = [["hero", "角色"], ["feat", "专长"], ["cyber", "义体"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"]];
+  const MODES = [["hero", "角色"], ["feat", "专长"], ["cyber", "义体"], ["enemy", "敌人"], ["prop", "配置物"], ["effect", "效果"], ["rules", "规则"]];
+  const SEARCH_HINT = { rules: "搜索规则（例：检定、atk、改造率、力竭）", other: "搜索名字或效果文字（例：灼烧、击破、飞行）" };
   let heroLv = 1;   // 角色图鉴：查看哪个等级的技能（默认 1 级，点别的等级才显示后面的技能，免得剧透）
-  const codexSel = { hero: null, feat: null, cyber: null, prop: null, effect: null }, codexFilter = { hero: "all", feat: "all", cyber: "all", prop: "all", effect: "all" };
+  const codexSel = { hero: null, feat: null, cyber: null, prop: null, effect: null, rules: null }, codexFilter = { hero: "all", feat: "all", cyber: "all", prop: "all", effect: "all", rules: "all" };
 
   function build() {
     root = document.createElement("div");
@@ -34,7 +36,7 @@ const Bestiary = (() => {
         <div class="bx-body">
           <section class="bx-list">
             <nav class="bx-tabs"></nav>
-            <input class="bx-search" type="search" placeholder="搜索名字或效果文字（例：灼烧、击破、飞行）" aria-label="搜索">
+            <input class="bx-search" type="search" placeholder="${SEARCH_HINT.other}" aria-label="搜索">
             <div class="bx-grid"></div>
           </section>
           <aside class="bx-detail" aria-live="polite"></aside>
@@ -77,8 +79,10 @@ const Bestiary = (() => {
 
   function render() {
     root.querySelectorAll("[data-mode]").forEach(b => { const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-selected", on ? "true" : "false"); });
-    root.querySelector(".bx-head h3").textContent = (MODES.find(([k]) => k === mode) || [, "敌人"])[1] + "图鉴";
+    root.querySelector(".bx-head h3").textContent = mode === "rules" ? "规则说明" : (MODES.find(([k]) => k === mode) || [, "敌人"])[1] + "图鉴";
+    root.classList.toggle("bx-rules", mode === "rules");   // 规则正文多：详情栏放宽（bestiary.css）
     root.querySelector(".bx-search").hidden = mode === "enemy";
+    root.querySelector(".bx-search").placeholder = mode === "rules" ? SEARCH_HINT.rules : SEARCH_HINT.other;
     root.querySelector(".bx-bar").hidden = mode !== "enemy";
     if (mode !== "enemy") { renderCodex(); return; }
     const all = entries();
@@ -217,6 +221,7 @@ const Bestiary = (() => {
     if (mode === "prop") return typeof codexPropEntries === "function" ? codexPropEntries() : [];
     if (mode === "feat") return typeof codexFeatEntries === "function" ? codexFeatEntries() : [];
     if (mode === "cyber") return typeof codexCyberwareEntries === "function" ? codexCyberwareEntries() : [];
+    if (mode === "rules") return typeof rulebookEntries === "function" ? rulebookEntries() : [];
     return typeof codexEffectEntries === "function" ? codexEffectEntries() : [];
   }
   function codexTabs() {
@@ -225,6 +230,7 @@ const Bestiary = (() => {
     if (mode === "feat") return [["all", "全部"], ["t1", "①7级"], ["t2", "②11级"], ["t3", "③13级"], ["t4", "④16级"]];
     // 义体：按种类分（codex.js · codexCyberwareGroups，加了新种类自动多一个标签）
     if (mode === "cyber") return [["all", "全部"]].concat((typeof codexCyberwareGroups === "function" ? codexCyberwareGroups() : []).map(g => [g.id, g.name]));
+    if (mode === "rules") return [["all", "全部"]].concat((typeof RULEBOOK_GROUPS !== "undefined" ? RULEBOOK_GROUPS : []).map(g => [g.id, g.name]));
     return [["all", "全部"]].concat((typeof CODEX_EFFECT_GROUPS !== "undefined" ? CODEX_EFFECT_GROUPS : []).map(g => [g.id, g.name]));
   }
   function renderCodex() {
@@ -233,7 +239,7 @@ const Bestiary = (() => {
     const matched = all.filter(e => typeof codexMatch !== "function" || codexMatch(e, query));
     root.querySelector(".bx-prog-text").innerHTML = query.trim()
       ? `搜到 <b>${matched.length}</b> 条`
-      : `共 <b>${all.length}</b> ${mode === "hero" ? "名角色" : mode === "feat" ? "项专长" : mode === "cyber" ? "件义体" : mode === "prop" ? "种配置物" : "条效果"}`;
+      : `共 <b>${all.length}</b> ${mode === "hero" ? "名角色" : mode === "feat" ? "项专长" : mode === "cyber" ? "件义体" : mode === "prop" ? "种配置物" : mode === "rules" ? "章规则" : "条效果"}`;
     root.querySelector(".bx-tabs").innerHTML = codexTabs().map(([k, n]) => {
       const c = k === "all" ? matched.length : matched.filter(e => e.group === k).length;
       return `<button class="bx-tab${f === k ? " on" : ""}" data-filter="${k}">${esc(n)}<small>${c}</small></button>`;
@@ -379,11 +385,41 @@ const Bestiary = (() => {
         <p class="bx-note">这是义体，不是同名的专长 / 技能。这里只写固定的规则，不显示任何角色现在的状态。</p>
       </div>`;
   }
+  /* ---------- 规则说明（rulebook.js） ---------- */
+  /** 一条规则：「：」前面的短标签加粗（和效果图鉴一样）；括号里的「：」不算（「瑞比（角色卡：力量 6…）」不会只加粗半个括号） */
+  function ruleLine(a) {
+    let depth = 0, i = -1;
+    for (let k = 0; k < a.length && i < 0; k++) {
+      const ch = a[k];
+      if (ch === "（" || ch === "(") depth++;
+      else if (ch === "）" || ch === ")") depth = Math.max(0, depth - 1);
+      else if (ch === "：" && !depth) i = k;
+    }
+    return `<li>${i > 0 && i < 12 ? `<b>${esc(a.slice(0, i))}</b>${esc(a.slice(i))}` : esc(a)}</li>`;
+  }
+  /** 一章规则的详情（纯函数，测试直接调）：导语，然后每一节画出列表、表格和说明 */
+  function rulebookHtml(e) {
+    if (!e) return "";
+    const secs = (e.sections || []).map(s => {
+      const t = s.table;
+      const table = t ? `<div class="rx-table-wrap"><table class="rx-table"><thead><tr>${t.head.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
+        `<tbody>${t.rows.map(r => `<tr>${r.map(x => `<td>${esc(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
+      return `<section class="bx-sec"><div class="bx-sec-h"><span>${esc(s.title)}</span></div>` +
+        `${(s.lines || []).length ? `<ul class="bx-abil">${s.lines.map(ruleLine).join("")}</ul>` : ""}${table}${s.note ? `<p class="bx-note">${esc(s.note)}</p>` : ""}</section>`;
+    }).join("");
+    return `<div class="bx-d rx-d">
+        <div class="bx-kicker">规则 · ${esc(e.groupName)}</div>
+        <h4>${esc(e.name)}</h4>
+        ${e.blurb ? `<p class="hx-intro">${esc(e.blurb)}</p>` : ""}
+        ${secs}
+      </div>`;
+  }
   function renderCodexDetail(e) {
     const box = root.querySelector(".bx-detail");
     if (!e) { box.innerHTML = ""; return; }
     if (mode === "feat") { renderFeatDetail(e); return; }
     if (mode === "cyber") { renderCyberDetail(e); return; }
+    if (mode === "rules") { box.innerHTML = rulebookHtml(e); return; }
     const chips = [];
     if (e.element) chips.push(`<span class="bx-chip e-${esc(e.element)}">${eleIcon(e.element)}${esc(typeof ELE !== "undefined" ? ELE[e.element] : e.element)}属性</span>`);
     if (mode === "prop") {
@@ -432,6 +468,7 @@ const Bestiary = (() => {
     root.classList.remove("show");
     document.body.classList.remove("bx-open");
   }
-  return { open, close, pickRateNote, dropsSection, dropChanceText, isOpen: () => !!(root && root.classList.contains("show")) };
+  return { open, close, pickRateNote, dropsSection, dropChanceText, rulebookHtml, modes: MODES.map(m => m.slice()),
+    isOpen: () => !!(root && root.classList.contains("show")) };
 })();
 if (typeof window !== "undefined") window.Bestiary = Bestiary;
