@@ -57,6 +57,9 @@
   const FIELD = {
     storageKey: "backfire-hd2d-field",
     defaultOn: true,
+    // 用右上角开关关掉新画面（主人 10/23）：本机另记一个「锁」，旧战场上的滚轮就不再转到新画面（要开就点开关）；
+    // 远景再往外拉（滚轮）回到旧画面的不锁，往前滚照样能回去。点开关打开时解锁
+    lockKey: "backfire-hd2d-lock",
     toggleId: "g-hd2d-toggle",
     label: { on: "新画面 开", off: "新画面 关", loading: "新画面 …" },
     text: {
@@ -108,6 +111,14 @@
       const v = storage ? storage.getItem(FIELD.storageKey) : null;
       return v === "on" ? true : v === "off" ? false : FIELD.defaultOn;
     } catch (e) { return FIELD.defaultOn; }
+  }
+  /** 用开关关掉的（锁着：滚轮不转到新画面）；读不了按没锁 */
+  function locked(storage) {
+    try { return !!storage && storage.getItem(FIELD.lockKey) === "1"; } catch (e) { return false; }
+  }
+  /** 记住锁没锁；存不了不报错 */
+  function setLocked(on, storage) {
+    try { if (!storage) return false; storage.setItem(FIELD.lockKey, on ? "1" : "0"); return true; } catch (e) { return false; }
   }
   /** 记住开关；存不了（隐私模式、存满了）不报错，返回 false */
   function setEnabled(on, storage) {
@@ -367,7 +378,7 @@
     if (field && !field.hd2dWheel) { field.hd2dWheel = true; field.addEventListener("wheel", onFieldWheel, { capture: true, passive: false }); }
   }
   /** 顶栏开关：和滚轮走同一个入口（switchTo）——开着就转回旧画面、关着就转到新画面；转场中点了不理 */
-  function toggle() { switchTo(S.want ? "old" : "new"); }
+  function toggle() { const to = S.want ? "old" : "new"; if (T.busy) return; setLocked(to === "old", env.storage); switchTo(to); }
   /** 打开：加载（只第一次）→ 建场景。加载途中又关掉就不建。pre = 已经在加载的（转场：云雾一涌进来就开始加载） */
   function start(pre) {
     S.want = true;
@@ -510,7 +521,7 @@
   }
   /** 战场上的滚轮（#g-field，捕获阶段，一次滚动 = wheelGate）：
    *   正在转场、这一次滚动已经换过一次画面（触控板的惯性还在来）：不理（镜头不换段，页面也不滚）
-   *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的
+   *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的；用右上角开关关掉的（FIELD.lockKey 锁着）往前滚也不转
    *   新画面：交给场景（三段镜头换段；远景再往外拉由场景叫 onZoomOut）
    * 这一次打开页面新画面已经打不开过：旧画面的滚轮照旧，要开就点开关 */
   function onFieldWheel(e) {
@@ -519,7 +530,7 @@
     if (T.busy || T.gesture.ate) { e.preventDefault(); e.stopPropagation(); return; }
     // 联机玩家的旧战场自己会滚动：还没滚到顶就照旧滚，这一次滚动不打开新画面（#289）
     if (!S.want && !S.sc && scrollsUp(e)) { T.gesture.done = true; return; }
-    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || S.broken) return;
+    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || S.broken || locked(env.storage)) return;   // 用开关关掉的：滚轮照旧是浏览器自己的
     e.preventDefault(); e.stopPropagation();
     if (switchTo("new")) T.gesture.ate = true;
   }
@@ -918,7 +929,7 @@
     if (S.push && root.HD2DFx && root.HD2DPlay) S.push.release(root.HD2DFx.FX.push.out * root.HD2DPlay.clock);
   }
 
-  const api = { FIELD, MIST, enabled, setEnabled, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach };
+  const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());
