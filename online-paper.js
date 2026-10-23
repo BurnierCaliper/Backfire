@@ -19,9 +19,10 @@
  *     isOpen(name, storage, dflt) / setOpen(name, open, storage)   各块的收起 / 展开（读写都包 try/catch）
  *     dockAuto(o) / phoneVars()             手机竖屏（#311）：技能栏这一刻该开着还是收着（没手动点过时轮到你展开）/ 技能栏最多多高
  *     themeOf({ light, night, weather }) / themeVars(theme)          白天 / 夜晚 / 天气 → 面板的配色（CSS 变量）
- *     bucket(v) / texSpec(kind, w, h, theme) / fits(tex, kind, th, w, h)   纸纹按尺寸分档（#321）：一边往上取到哪一档 / 这块面板要哪一张 / 一张纹理贴上去合不合适
- *     texture(doc, kind, w, h, theme)       同步拿一张纸纹（缓存里有这一档就给，没有现画；测试、兜底用）
- *     dress(doc, targets, theme) / flush() / pending()   给面板贴纸纹（缺的那一档挪到空闲时画，见 need）/ 马上画完缺的（测试用）/ 还有几张没画好
+ *     tileSpec(kind, theme)                 纸纹（#321）：每种纸 × 每套配色一张能无缝平铺的小纹理（和面板多大无关）
+ *     bucket(v) / tornClip(kind, w, h) / fits(clip, kind, w, h)   撕边（CSS clip-path）：一边往上取到哪一档 / 这块面板的撕边 / 那一档的撕边接着用合不合适
+ *     texture(doc, kind, theme)             同步拿一张平铺纸纹（缓存里有就给，没有现画；测试、兜底用）
+ *     dress(doc, targets, theme) / flush() / pending()   给面板贴纸纹、撕边、影子层（缺的纹理挪到空闲时画，见 need）/ 马上画完缺的（测试用）/ 还有几张没画好
  *     shellHtml()                           骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块（分开重画）
  *     topHtml(info)                         顶栏
  *     tagsHtml(slots, o)                    行动顺序吊牌
@@ -117,44 +118,50 @@
       snow: { tint: "#e6f1ff", mix: 0.28, edge: "inset 0 0 14px rgba(255, 255, 255, .95)" },
       fog: { tint: "#9b9b9b", mix: 0.3, edge: "inset 0 0 22px rgba(170, 170, 170, .55)", fade: 0.22 }
     },
-    /* 纸片美术（第 3 步）：纹理照 docs/ui-paper/mock.html 用程序生成（crumple 揉皱的折面 + 折痕 + 纤维、rough 撕边、grit 斑驳），按尺寸分档缓存，不放图片文件。
-     *   pad        纹理比面板四边多出来的像素（画撕边外面的影子）
-     *   shadow     不均匀的影子：两层（偏移、模糊、浓淡）
-     *   scale      折面按几分之一的大小算（再放大、糊一点，和样稿一样）；pixels 算的像素最多这么多（大面板自动再缩）
-     *   facet      折面数按面积算（审查：大面板的折面被放大成一块块「碎地砖」）：每 area 平方像素一块，至少是这种纸的 facets，最多 max 块（防止太慢）
-     *   cache      最多记多少张（同一档、同一套配色只画一次；页面上还贴着的不扔）
-     *   bucket     分档（#321）：纹理按宽高各自往上取到的那一档画，CSS 再拉到面板的实际大小（online-paper.css 的 100% 100%）。
-     *              不到 steps 里第一个数的按第二个数一档（面板越小档越细：24 像素以上的拉伸不超过 1/8），更大的按 big 一档
-     *   reuse      已经贴着纹理的面板变了大小（技能栏选技能 / 取消时高度在 235 ↔ 288 之间跳）：和那张纹理差不到这么多（宽高各自比，连撕边外的影子）
-     *              就接着用、不重画；新面板也先找缓存里差不到这么多的那张。都没有才画新的
-     *   settle     缺的纹理等这么久（毫秒）没有再缺新的才开始画：拖着窗口缩放时中间那些尺寸不画（防抖）
+    /* 纸片美术（第 3 步）：纹理照 docs/ui-paper/mock.html 用程序生成（crumple 揉皱的折面 + 折痕 + 纤维、rough 撕边、grit 斑驳），不放图片文件。
+     * #321：纸纹不再按面板大小画——每种纸 × 每套配色只画一张 tile 见方、能无缝平铺的小纹理（折面、纤维、噪点、天气都在里面），
+     * CSS 平铺铺满任意大小的面板（online-paper.css 的 repeat）；撕边是 CSS clip-path（按面板大小生成的点），影子是 CSS drop-shadow，都不画进位图。
+     *   tile       平铺纹理的边长（像素）：一张纹理就这么大，整个页面一套配色 kinds 那么多张，开局画好，之后换面板大小、开新面板都不再画
+     *   scale      折面按几分之一的大小算（再插值放大，和样稿一样糊一点）
+     *   facet      折面数按面积算（审查：大面板的折面被放大成一块块「碎地砖」）：每 area 平方像素一块，至少是这种纸的 facets，最多 max 块
+     *   fiber      纤维：每多少平方像素一根细短的线
+     *   shadow     不均匀的影子：两层（偏移、模糊、浓淡），写成 CSS 的 drop-shadow（--olp-ply-fx；模糊按 canvas 的 shadowBlur 算，CSS 用它的一半）
+     *   bucket     撕边的点数按面板宽高各自往上取到的那一档算（点的位置写成「百分比 + 像素」，CSS 按面板的实际大小摆）：
+     *              不到 steps 里第一个数的按第二个数一档，更大的按 big 一档
+     *   reuse      面板变了大小（技能栏选技能 / 取消时高度在 235 ↔ 288 之间跳）：和现在的撕边那一档差不到这么多（宽高各自比）就接着用，不换
+     *   clips      撕边最多记多少种大小（拖着窗口缩放时一路的大小，最久没用的扔）
      *   idle       画纹理挪到浏览器空闲的时候（requestIdleCallback），最多等这么久（毫秒）；画完 toBlob 交给浏览器编码、URL.createObjectURL 拿地址
-     *              （以前是同步的 toDataURL：选个技能主线程堵好几秒）。新的画好之前面板照旧贴着上一张（拉伸一点）
+     *              （以前是同步的 toDataURL：选个技能主线程堵好几秒）。还没画好时面板照旧是纯色（换了配色时照旧贴着上一套）
      *   slice      一次空闲里画完一张，空闲时间还剩这么多毫秒以上就接着画下一张，不然等下一次空闲
-     *   kinds      每种纸：color 用配色表里的哪个颜色、facets 小纸片至少几块折面 / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
-     *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）、zig 底边是锯齿撕口（收据撕下来的那一头：每 step 像素一个齿、齿深 depth）
-     *   weather    天气在纸上加的：沙暴撒沙粒（每多少像素一粒）、下雨几块深色水渍、雪边上一层霜、雾蒙一层灰
+     *   kinds      每种纸：color 用配色表里的哪个颜色、facets 至少几块折面 / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
+     *              corrugated 瓦楞纸的竖纹（大约每多少像素一道）、flat 按钮那种不撕边、没有影子（直接当底图平铺）、
+     *              zig 底边是锯齿撕口（收据撕下来的那一头：每 step 像素一个齿、齿深 depth）、
+     *              ply 大面板：影子挂在补进去的一层 .olp-ply 上（面板里的内容变了、滚动都不连累影子；技能吊牌、队伍卡这些小纸片的影子挂在它自己身上——
+     *              它们里面由 hud-patch.js 按需更新，补进去的节点会被拿掉）
+     *   weather    天气在纹理里加的：沙暴撒沙粒（每多少平方像素一粒）、下雨几块深色水渍（每张纹理）、雾蒙一层灰；
+     *              雪：纸边一层霜，是纸那一层的内阴影（frost，写成 --olp-frost）
      *   grit       印章、喷漆的斑驳遮罩：多大、挖几个小洞（只一点点，字一定要清楚） */
     art: {
-      pad: 8,
-      shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
-      scale: 0.5, pixels: 90000, cache: 48,
-      bucket: { steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 },
-      reuse: 0.25, settle: 160, idle: 600, slice: 10,
+      tile: 256,
+      scale: 0.5,
       facet: { area: 1200, max: 320 },
+      fiber: 260,
+      shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
+      bucket: { steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 },
+      reuse: 0.25, clips: 64, idle: 600, slice: 10,
       kinds: {
-        tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 } },
-        kraft: { color: "kraft", facets: 18, amp: 0.09, crease: 0.22, grain: 0.05, jag: 2, torn: { bottom: 5 } },
-        dock: { color: "kraft", facets: 26, amp: 0.08, crease: 0.22, grain: 0.05, jag: 3, torn: { top: 6 } },
-        paper: { color: "paper", facets: 20, amp: 0.06, crease: 0.18, grain: 0.04, jag: 2 },
-        receipt: { color: "receipt", facets: 12, amp: 0.035, crease: 0.09, grain: 0.03, jag: 1, zig: { step: 8, depth: 7 } },
+        tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 }, ply: true },
+        kraft: { color: "kraft", facets: 18, amp: 0.09, crease: 0.22, grain: 0.05, jag: 2, torn: { bottom: 5 }, ply: true },
+        dock: { color: "kraft", facets: 26, amp: 0.08, crease: 0.22, grain: 0.05, jag: 3, torn: { top: 6 }, ply: true },
+        paper: { color: "paper", facets: 20, amp: 0.06, crease: 0.18, grain: 0.04, jag: 2, ply: true },
+        receipt: { color: "receipt", facets: 12, amp: 0.035, crease: 0.09, grain: 0.03, jag: 1, zig: { step: 8, depth: 7 }, ply: true },
         card: { color: "card", facets: 8, amp: 0.05, crease: 0.15, grain: 0.04, jag: 1.5 },
         tag: { color: "kraft", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
         tagon: { color: "on", facets: 6, amp: 0.06, crease: 0.2, grain: 0.05, jag: 1.5 },
         board: { color: "board", facets: 10, amp: 0.1, crease: 0.22, grain: 0.05, corrugated: 7, flat: true },
         boardy: { color: "boardy", facets: 6, amp: 0.06, crease: 0.18, grain: 0.05, flat: true }
       },
-      weather: { sand: { grains: 90 }, rain: { stains: 5 }, snow: { frost: 6 }, fog: { veil: 0.12 } },
+      weather: { sand: { grains: 90 }, rain: { stains: 3 }, snow: { frost: "inset 0 0 10px 3px rgba(255, 255, 255, .85)" }, fog: { veil: 0.12 } },
       grit: { size: 160, holes: 200 },
       // 哪些面板贴哪种纸（online-ui.js 交给 dress）："on" = 当前行动的吊牌换青色那一种
       targets: [
@@ -231,7 +238,8 @@
     return "#" + x.map((c, i) => Math.round(c + (y[i] - c) * t).toString(16).padStart(2, "0")).join("");
   }
   const kebab = (k) => k.replace(/[A-Z]/g, c => "-" + c.toLowerCase());
-  /** 这一套配色写成的 CSS 变量：{ "--olp-kraft": "#…", …, "--olp-edge-fx": 纸边那一圈 }。天气给底色混一点色调、纸边加一圈；雾天字往灰里退（对比低一点） */
+  /** 这一套配色写成的 CSS 变量：{ "--olp-kraft": "#…", …, "--olp-edge-fx": 纸边那一圈 }。天气给底色混一点色调、纸边加一圈；雾天字往灰里退（对比低一点）。
+   *  纸纹（#321）用的也在这里：--olp-tile 平铺纹理多大、--olp-ply-fx 纸片的影子（drop-shadow）、--olp-frost 雪天纸边的霜（别的天气没有） */
   function themeVars(th) {
     th = th || {};
     const base = PAPER.palette[th.time] || PAPER.palette.day, W = PAPER.weathers[th.weather] || null, out = {};
@@ -243,24 +251,29 @@
     });
     out["--olp-edge-fx"] = W ? W.edge : "inset 0 0 0 transparent";
     out["--olp-note-ink"] = PAPER.notes.ink;   // 便利贴上的字：白天夜里都是深色（便利贴本身不跟着变黑）
+    const A = PAPER.art, Wx = A.weather[th.weather] || {};
+    out["--olp-tile"] = A.tile + "px";
+    out["--olp-ply-fx"] = A.shadow.map(s => `drop-shadow(${s.x}px ${s.y}px ${s.blur / 2}px rgba(0, 0, 0, ${s.a}))`).join(" ");
+    out["--olp-frost"] = Wx.frost || "inset 0 0 0 transparent";
     return out;
   }
 
-  /* ---------- 纸片美术（第 3 步）：照 mock.html 程序生成的纹理，按尺寸分档缓存（#321） ---------- */
-  /** 同一个种子总是同一串随机数（Park–Miller，和 mock.html 一样）：同一档的纸每次画出来一样 */
+  /* ---------- 纸片美术（第 3 步）：照 mock.html 程序生成的纹理；#321 起每种纸 × 每套配色一张能无缝平铺的小纹理 ---------- */
+  /** 同一个种子总是同一串随机数（Park–Miller，和 mock.html 一样）：同一种纸、同一套配色每次画出来一样 */
   function rng(seed) { let s = (Math.abs(Math.floor(seed)) % 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
   const hash = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
-  /** 撕边（mock.html · rough）：w × h 的纸四条边按步长往里随机缩一点，torn 的那几条边更毛、更碎；返回多边形的点 [[x, y]]（左上角是 0, 0） */
+  /** 撕边（mock.html · rough）：w × h 的纸四条边按步长往里随机缩一点，torn 的那几条边更毛、更碎；
+   *  返回多边形的点 [[x, y, 哪条边（t 上 / r 右 / b 下 / l 左）]]（左上角是 0, 0） */
   function roughPath(w, h, o, rnd) {
     o = o || {};
     const jag = o.jag == null ? 2 : o.jag, torn = o.torn || {}, p = [];
     const j = (side) => (torn[side] ? torn[side] : jag), st = (side) => (torn[side] ? 4 : 9);
-    for (let x = 0; x <= w; x += st("top")) p.push([x, rnd() * j("top")]);
-    for (let y = 0; y <= h; y += st("right")) p.push([w - rnd() * j("right"), y]);
+    for (let x = 0; x <= w; x += st("top")) p.push([x, rnd() * j("top"), "t"]);
+    for (let y = 0; y <= h; y += st("right")) p.push([w - rnd() * j("right"), y, "r"]);
     // 收据的锯齿撕口（mock.html · zig）：一高一低交替
-    if (o.zig) for (let x = w, i = 0; x >= 0; x -= o.zig.step, i++) p.push([x, h - (i % 2 ? 0 : o.zig.depth) - rnd() * 1.5]);
-    else for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom")]);
-    for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y]);
+    if (o.zig) for (let x = w, i = 0; x >= 0; x -= o.zig.step, i++) p.push([x, h - (i % 2 ? 0 : o.zig.depth) - rnd() * 1.5, "b"]);
+    else for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom"), "b"]);
+    for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y, "l"]);
     return p;
   }
   /** 这种纸 w × h 画几块折面：按面积算（每 PAPER.art.facet.area 平方像素一块），小纸片至少是这种纸的 facets，大纸最多 facet.max 块。
@@ -293,158 +306,163 @@
       return { d1, d2, i1 };
     };
   }
-  /** 分档（#321）：一边的尺寸往上取到一档（PAPER.art.bucket：不到 steps[i][0] 像素按 steps[i][1] 像素一档，更大的按 big 一档） */
+  /** 分档：一边的尺寸往上取到一档（PAPER.art.bucket：不到 steps[i][0] 像素按 steps[i][1] 像素一档，更大的按 big 一档）。撕边的点数按它算 */
   function bucket(v) {
     const B = PAPER.art.bucket, n = Math.max(1, Math.ceil(Number(v) || 0));
     const row = B.steps.find(([below]) => n < below), step = row ? row[1] : B.big;
     return Math.ceil(n / step) * step;
   }
   const themeKey = (th) => (th ? (th.time || "day") + "|" + (th.weather || "none") : "day|none");
-  /** w × h 的面板贴这种纸要哪一张纹理：{ key 缓存的键, kind, w, h 那一档的大小, th 配色的键, theme, base 纸的底色 }；种类认不得、没有大小 → null */
-  function texSpec(kind, w, h, theme) {
+  /** 这种纸、这一套配色要哪一张平铺纹理（和面板多大无关）：{ key 缓存的键, kind, th 配色的键, theme, base 纸的底色 }；种类认不得 → null */
+  function tileSpec(kind, theme) {
     const K = PAPER.art.kinds[kind];
-    if (!K || !(w > 0) || !(h > 0)) return null;
+    if (!K) return null;
     theme = theme || { time: "day", weather: "none" };
-    const base = themeVars(theme)["--olp-" + kebab(K.color)] || "#cccccc", bw = bucket(w), bh = bucket(h), th = themeKey(theme);
-    return { key: [kind, bw, bh, th, base].join("|"), kind, w: bw, h: bh, th, theme, base };
+    const base = themeVars(theme)["--olp-" + kebab(K.color)] || "#cccccc", th = themeKey(theme);
+    return { key: [kind, th, base].join("|"), kind, th, theme, base };
   }
-  /** 一张纹理（tex = { kind, th, w, h }，按那一档的大小画的）贴到 w × h 的面板上合不合适：同一种纸、同一套配色，
-   *  宽高（连撕边外的影子）各自差不到 PAPER.art.reuse（CSS 拉伸这么一点看不出来） */
-  function fits(tex, kind, th, w, h) {
-    if (!tex || tex.kind !== kind || tex.th !== th || !PAPER.art.kinds[kind]) return false;
-    const pad = PAPER.art.kinds[kind].flat ? 0 : PAPER.art.pad, r = 1 + PAPER.art.reuse;
-    const ok = (a, b) => { const q = (a + 2 * pad) / (b + 2 * pad); return q <= r && q >= 1 / r; };
-    return ok(w, tex.w) && ok(h, tex.h);
+  /** 撕边那一档（prev = { kind, w, h }，按分档的大小）贴到 w × h 的面板上合不合适：同一种纸，宽高各自差不到 PAPER.art.reuse（点稍微疏一点密一点看不出来） */
+  function fits(prev, kind, w, h) {
+    if (!prev || prev.kind !== kind || !PAPER.art.kinds[kind]) return false;
+    const r = 1 + PAPER.art.reuse, ok = (a, b) => { const q = a / b; return q <= r && q >= 1 / r; };
+    return ok(w, prev.w) && ok(h, prev.h);
+  }
+  /* 撕边（#321）：CSS clip-path 的 polygon，按分档的大小记下来（键 → { kind, w, h, css }，超过 PAPER.art.clips 种从最久没用的扔） */
+  const clipCache = new Map();
+  const num = (v) => String(Math.round(v * 100) / 100);
+  /** 这种纸贴到 w × h 的面板上的撕边：{ kind, w, h 那一档, css: "polygon(…)" }；按钮那种（flat）、认不得、没有大小 → null。
+   *  点照 roughPath 的走法按那一档的大小生成，位置写成「百分比 + 像素」：沿着边走的那个方向是百分比、往里缩的深度是像素
+   *  （右边、下边从 100% 往回减）——面板在这一档附近变大变小，CSS 自己按实际大小摆，撕口深浅不变 */
+  function tornClip(kind, w, h) {
+    const K = PAPER.art.kinds[kind];
+    if (!K || K.flat || !(w > 0) || !(h > 0)) return null;
+    const bw = bucket(w), bh = bucket(h), key = [kind, bw, bh].join("|");
+    let c = clipCache.get(key);
+    if (c) { clipCache.delete(key); clipCache.set(key, c); return c; }
+    const pct = (v, t) => num((Math.min(t, Math.max(0, v)) / t) * 100) + "%", px = (v) => num(Math.max(0, v)) + "px", back = (v) => `calc(100% - ${px(v)})`;
+    const pts = roughPath(bw, bh, K, rng(hash(key))).map(([x, y, s]) =>
+      s === "t" ? `${pct(x, bw)} ${px(y)}` : s === "r" ? `${back(bw - x)} ${pct(y, bh)}` : s === "b" ? `${pct(x, bw)} ${back(bh - y)}` : `${px(x)} ${pct(y, bh)}`);
+    c = { kind, w: bw, h: bh, css: `polygon(${pts.join(", ")})` };
+    clipCache.set(key, c);
+    while (clipCache.size > PAPER.art.clips) clipCache.delete(clipCache.keys().next().value);
+    return c;
   }
 
-  /* 缓存：键 → { key, kind, th, w, h, url }。Map 的先后就是最近用过的先后（用到就挪到最后），超过 PAPER.art.cache 张从最久没用的扔，页面上还贴着的不扔；
-   * 扔掉的 blob: 地址交还给浏览器（URL.revokeObjectURL） */
+  /* 纹理的缓存：键（种类 | 配色 | 底色）→ { key, kind, th, url }。张数最多是「种类 × 见过的配色」，不按面板大小，不用扔 */
   const texCache = new Map();
-  function cacheGet(key) {
-    const v = texCache.get(key);
-    if (v) { texCache.delete(key); texCache.set(key, v); }
-    return v || null;
-  }
-  /** 缓存里有没有一张合适的（fits），挑大小最接近的那张 */
-  function cacheFit(kind, th, w, h) {
-    let best = null, gap = Infinity;
-    texCache.forEach(v => {
-      if (!fits(v, kind, th, w, h)) return;
-      const d = Math.abs(Math.log(v.w / w)) + Math.abs(Math.log(v.h / h));
-      if (d < gap) { gap = d; best = v; }
-    });
-    return best ? cacheGet(best.key) : null;
-  }
-  function cachePut(doc, spec, url) {
-    const v = { key: spec.key, kind: spec.kind, th: spec.th, w: spec.w, h: spec.h, url };
-    texCache.delete(spec.key); texCache.set(spec.key, v);
-    if (texCache.size > PAPER.art.cache) {
-      const used = new Set();
-      try { doc.querySelectorAll("[data-olp-tex]").forEach(el => { if (el.__olpTex) used.add(el.__olpTex.url); }); } catch (e) { /* 量不了就都当没在用 */ }
-      for (const [k, old] of texCache) {
-        if (texCache.size <= PAPER.art.cache) break;
-        if (used.has(old.url) || k === spec.key) continue;
-        texCache.delete(k);
-        revoke(old.url);
-      }
-    }
-    return v;
-  }
   const urlApi = () => (typeof URL !== "undefined" && URL && typeof URL.createObjectURL === "function" ? URL : null);
-  function revoke(url) {
-    const U = urlApi();
-    if (U && typeof U.revokeObjectURL === "function" && /^blob:/.test(url)) { try { U.revokeObjectURL(url); } catch (e) { /* 已经交还过了 */ } }
-  }
   function dataUrl(c) { try { return c.toDataURL(); } catch (e) { return ""; } }
 
-  /** 同步拿一张纹理（测试、兜底用）：kind = PAPER.art.kinds 里的一种，w × h 面板的大小，theme = { time, weather }。
-   *  缓存里有这一档就给（同一档、同一套配色只画一次），没有就现画一张（data: 地址）。没有 canvas（Node 里）返回空字符串。
-   *  面板上贴纹理走 dress：缺的那一档挪到空闲时画，不堵主线程 */
-  function texture(doc, kind, w, h, theme) {
+  /** 同步拿一张平铺纹理（测试、兜底用）：kind = PAPER.art.kinds 里的一种，theme = { time, weather }。
+   *  缓存里有就给（每种纸、每套配色只画一次），没有就现画一张（data: 地址）。没有 canvas（Node 里）返回空字符串。
+   *  面板上贴纹理走 dress：缺的挪到空闲时画，不堵主线程 */
+  function texture(doc, kind, theme) {
     if (!doc || typeof doc.createElement !== "function") return "";
-    const spec = texSpec(kind, Math.round(w), Math.round(h), theme);
+    const spec = tileSpec(kind, theme);
     if (!spec) return "";
-    const hit = cacheGet(spec.key);
+    const hit = texCache.get(spec.key);
     if (hit) return hit.url;
-    const c = paintTex(doc, spec), url = c ? dataUrl(c) : "";
-    if (url) cachePut(doc, spec, url);
+    const c = paintTile(doc, spec), url = c ? dataUrl(c) : "";
+    if (url) texCache.set(spec.key, { key: spec.key, kind: spec.kind, th: spec.th, url });
     return url;
   }
-  /** 画一张纸（spec = texSpec(…)：按那一档的大小画）：返回画好的 canvas；没有 canvas（Node 里）返回 null。
-   *  画法（mock.html · crumple）：几块折面（Voronoi）明暗不同、折痕处一道亮一道暗、撒纤维噪点；瓦楞纸加竖纹；撕边外面画两层不均匀的影子；天气再加一层 */
-  function paintTex(doc, spec) {
-    const A = PAPER.art, K = A.kinds[spec.kind], w = spec.w, h = spec.h, theme = spec.theme, base = spec.base;
-    const pad = K.flat ? 0 : A.pad, W = w + 2 * pad, H = h + 2 * pad, rnd = rng(hash(spec.key));
+  /** 画一张平铺纹理（spec = tileSpec(…)）：PAPER.art.tile 见方，左右、上下接得上（折面按环面找最近的点、纤维 / 沙粒 / 水渍跨过边从另一边接着画，
+   *  瓦楞纸的竖纹间距取到正好铺满一张）。全在一块像素里算完，只 putImageData 一次：不用 shadowBlur、filter、一条条描线（这些在软件渲染里很慢）。
+   *  画法（mock.html · crumple）：几块折面（Voronoi）明暗不同、折痕处一道亮一道暗、撒噪点（按 scale 算再插值放大），细短的纤维；瓦楞纸加竖纹；天气再加一层。
+   *  返回画好的 canvas；没有 canvas（Node 里）返回 null */
+  function paintTile(doc, spec) {
+    const A = PAPER.art, K = A.kinds[spec.kind], S = A.tile, rnd = rng(hash(spec.key));
     const out = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null;
     if (!out || typeof out.getContext !== "function") return null;
-    out.width = W; out.height = H;
+    out.width = S; out.height = S;
     const g = out.getContext("2d");
     if (!g) return null;
-    // 折面：按 scale 算（大面板再缩），放大时糊一点
-    let sc = A.scale;
-    if (w * h * sc * sc > A.pixels) sc = Math.sqrt(A.pixels / (w * h));
-    const sw = Math.max(8, Math.round(w * sc)), sh = Math.max(8, Math.round(h * sc));
-    const small = doc.createElement("canvas"); small.width = sw; small.height = sh;
-    const sx = small.getContext("2d"), img = sx.createImageData(sw, sh), d = img.data, c0 = rgbOf(base) || [204, 204, 204];
-    const pts = Array.from({ length: facetCount(spec.kind, w, h) }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 })), near = nearest2(pts, sw, sh);
-    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
-      const { d1, d2, i1 } = near(x, y);
-      const gap = Math.sqrt(d2) - Math.sqrt(d1);
-      let s = 1 + pts[i1].l * K.amp;
-      if (gap < 1.6) s += (i1 % 2 ? 1 : -1) * K.crease * (1 - gap / 1.6);
-      s += (rnd() - 0.5) * K.grain;
-      const k = (y * sw + x) * 4;
-      d[k] = c0[0] * s; d[k + 1] = c0[1] * s; d[k + 2] = c0[2] * s; d[k + 3] = 255;
+    // 折面：点撒在 s × s 上，四周各补一份（挪 ±s），找最近的点时跨过边也算——环面上的 Voronoi，平铺起来接得上
+    const s = Math.max(8, Math.round(S * A.scale)), n = facetCount(spec.kind, S, S), pts = [];
+    for (let i = 0; i < n; i++) {
+      const x = rnd() * s, y = rnd() * s, l = rnd() * 2 - 1;
+      for (let dy = 0; dy < 3; dy++) for (let dx = 0; dx < 3; dx++) pts.push({ x: x + dx * s, y: y + dy * s, l, k: i });
     }
-    sx.putImageData(img, 0, 0);
-    const poly = K.flat ? [[0, 0], [w, 0], [w, h], [0, h]] : roughPath(w, h, K, rnd);
-    const path = () => { g.beginPath(); poly.forEach(([x, y], i) => (i ? g.lineTo(x + pad, y + pad) : g.moveTo(x + pad, y + pad))); g.closePath(); };
-    // 不均匀的影子：沿着撕边，两层
-    if (!K.flat) A.shadow.forEach(s => { g.save(); g.shadowColor = `rgba(0, 0, 0, ${s.a})`; g.shadowBlur = s.blur; g.shadowOffsetX = s.x; g.shadowOffsetY = s.y; g.fillStyle = base; path(); g.fill(); g.restore(); });
-    g.save(); path(); g.clip();
-    g.filter = "blur(.6px)"; g.drawImage(small, pad, pad, w, h); g.filter = "none";
-    // 纤维：细短的线
-    for (let i = 0; i < (w * h) / 260; i++) {
-      g.strokeStyle = rnd() < 0.5 ? "rgba(0, 0, 0, .06)" : "rgba(255, 255, 255, .08)"; g.lineWidth = 0.7;
-      const a = rnd() * 6.28, L = 2 + rnd() * 5, px = pad + rnd() * w, py = pad + rnd() * h;
-      g.beginPath(); g.moveTo(px, py); g.lineTo(px + Math.cos(a) * L, py + Math.sin(a) * L); g.stroke();
+    const near = nearest2(pts, 3 * s, 3 * s), f = new Float32Array(s * s);
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+      const { d1, d2, i1 } = near(x + s, y + s), p = pts[i1], gap = Math.sqrt(d2) - Math.sqrt(d1);
+      let v = p.l * K.amp;
+      if (gap < 1.6) v += (p.k % 2 ? 1 : -1) * K.crease * (1 - gap / 1.6);
+      f[y * s + x] = v + (rnd() - 0.5) * K.grain;
     }
-    if (K.corrugated) for (let x = 0; x < w; x += K.corrugated) { g.fillStyle = "rgba(0, 0, 0, .07)"; g.fillRect(pad + x, pad, 3, h); }
-    const Wx = A.weather[theme.weather] || {};
-    if (Wx.grains) for (let i = 0; i < (w * h) / Wx.grains; i++) { g.fillStyle = `rgba(${150 + rnd() * 60}, ${110 + rnd() * 40}, 60, ${0.2 + rnd() * 0.3})`; g.fillRect(pad + rnd() * w, pad + rnd() * h, 1.3, 1.3); }
+    // 放大到 S × S（双线性插值，跨过边从另一边取：和样稿一样糊一点），乘上纸的底色；瓦楞纸的竖纹
+    const c0 = rgbOf(spec.base) || [204, 204, 204], buf = new Float32Array(S * S * 3), r = s / S, at = (x, y) => f[((y + s) % s) * s + ((x + s) % s)];
+    const cn = K.corrugated ? Math.max(1, Math.round(S / K.corrugated)) : 0, cstep = cn ? S / cn : 0;
+    for (let y = 0; y < S; y++) {
+      const v = (y + 0.5) * r - 0.5, y0 = Math.floor(v), ty = v - y0;
+      for (let x = 0; x < S; x++) {
+        const u = (x + 0.5) * r - 0.5, x0 = Math.floor(u), tx = u - x0;
+        const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx, b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
+        let k = 1 + a + (b - a) * ty;
+        if (cn && x % cstep < 3) k *= 0.93;
+        const i = (y * S + x) * 3;
+        buf[i] = c0[0] * k; buf[i + 1] = c0[1] * k; buf[i + 2] = c0[2] * k;
+      }
+    }
+    /** 往 (x, y) 那个像素上叠一层颜色（a = 浓淡）；出了边从另一边接着 */
+    const blend = (x, y, R, G, B, a) => {
+      const i = ((((Math.round(y) % S) + S) % S) * S + (((Math.round(x) % S) + S) % S)) * 3;
+      buf[i] += (R - buf[i]) * a; buf[i + 1] += (G - buf[i + 1]) * a; buf[i + 2] += (B - buf[i + 2]) * a;
+    };
+    // 纤维：细短的线，一半暗一半亮
+    for (let i = 0; i < (S * S) / A.fiber; i++) {
+      const dark = rnd() < 0.5, ang = rnd() * 6.28, L = 2 + rnd() * 5, px = rnd() * S, py = rnd() * S, c = dark ? 0 : 255, a = dark ? 0.05 : 0.07;
+      for (let t = 0; t <= L; t++) blend(px + Math.cos(ang) * t, py + Math.sin(ang) * t, c, c, c, a);
+    }
+    const Wx = A.weather[spec.theme.weather] || {};
+    // 沙暴：撒沙粒（一粒 1.3 像素左右：一个像素浓、旁边淡一点）
+    if (Wx.grains) for (let i = 0; i < (S * S) / Wx.grains; i++) {
+      const R = 150 + rnd() * 60, G = 110 + rnd() * 40, a = 0.2 + rnd() * 0.3, x = rnd() * S, y = rnd() * S;
+      blend(x, y, R, G, 60, a); blend(x + 1, y, R, G, 60, a * 0.3); blend(x, y + 1, R, G, 60, a * 0.3); blend(x + 1, y + 1, R, G, 60, a * 0.09);
+    }
+    // 下雨：几块深色水渍（中间浓、边上淡，跨过边从另一边接着）
     if (Wx.stains) for (let i = 0; i < Wx.stains; i++) {
-      const x = pad + rnd() * w, y = pad + rnd() * h, r = 8 + rnd() * Math.min(40, Math.max(w, h) / 6), gr = g.createRadialGradient(x, y, r * 0.2, x, y, r);
-      gr.addColorStop(0, "rgba(30, 44, 66, .16)"); gr.addColorStop(0.85, "rgba(30, 44, 66, .1)"); gr.addColorStop(1, "rgba(30, 44, 66, 0)");
-      g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 6.28); g.fill();
+      const cx = rnd() * S, cy = rnd() * S, rad = 8 + rnd() * Math.min(40, S / 6), R2 = Math.ceil(rad);
+      for (let dy = -R2; dy <= R2; dy++) for (let dx = -R2; dx <= R2; dx++) {
+        const d = Math.sqrt(dx * dx + dy * dy) / rad;
+        if (d >= 1) continue;
+        blend(cx + dx, cy + dy, 30, 44, 66, d <= 0.2 ? 0.16 : d <= 0.85 ? 0.16 - (0.06 * (d - 0.2)) / 0.65 : (0.1 * (1 - d)) / 0.15);
+      }
     }
-    if (Wx.veil) { g.fillStyle = `rgba(150, 150, 150, ${Wx.veil})`; g.fillRect(pad, pad, w, h); }
-    g.restore();
-    if (Wx.frost) { g.save(); path(); g.clip(); g.shadowColor = "rgba(255, 255, 255, .95)"; g.shadowBlur = Wx.frost * 2; g.strokeStyle = "rgba(255, 255, 255, .8)"; g.lineWidth = Wx.frost; path(); g.stroke(); g.restore(); }
+    const img = g.createImageData(S, S), d = img.data, veil = Wx.veil || 0;
+    for (let i = 0, j = 0; i < S * S * 3; i += 3, j += 4) {
+      let R = buf[i], G = buf[i + 1], B = buf[i + 2];
+      if (veil) { R += (150 - R) * veil; G += (150 - G) * veil; B += (150 - B) * veil; }   // 雾：蒙一层灰
+      d[j] = R; d[j + 1] = G; d[j + 2] = B; d[j + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
     return out;
   }
 
-  /* 缺的纹理（#321）：dress 发现缺哪一档先记在 want 里（键 → { doc, spec, els 等这一张的面板 }）；PAPER.art.settle 毫秒里没有再缺新的才排进队（queue），
+  /* 缺的纹理（#321）：dress 发现这一套配色的纸纹还没有，就把这一套的每一种纸都排上（开局一次画好，之后开新面板、换大小都不用再画）；
+   * want = 排着 / 正在画、编码的（键 → { doc, spec, els 等这一张的面板 }），queue = 排着的先后。
    * 浏览器空闲时画（requestIdleCallback，最多等 PAPER.art.idle 毫秒）：先画一张，空闲时间还剩 PAPER.art.slice 毫秒以上就接着画下一张，不然等下一次空闲；
    * 没有 requestIdleCallback 就 setTimeout，一次一张。画完 toBlob → URL.createObjectURL（编码交给浏览器，不堵主线程；没有 toBlob 就 toDataURL），
-   * 放进缓存，还在等它的面板贴上（encoding = 正在编码的）。画之前、编码完都再看一眼面板还在不在页面上、要的还是不是这一档
-   * （窗口又变了、重画了、大小又回到合适的那张）：没人要了就不画、不贴 */
-  const want = new Map(), queue = [], encoding = new Set();
-  let settleTimer = null, scheduled = false, flushing = false;
+   * 放进缓存，还在等它的面板贴上 */
+  const want = new Map(), queue = [];
+  let scheduled = false, flushing = false;
   const later = (fn, ms) => (typeof setTimeout === "function" ? setTimeout(fn, ms) : null);
   function onIdle(fn) {
     if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: PAPER.art.idle });
     else later(() => fn(null), 0);
   }
-  /** 记下这块面板缺这一档：同一档的面板一起等；新缺了一档才重新数 settle（每次画面刷新都会叫 dress，缺的还是那几档不算「又变了」） */
-  function need(doc, spec, el) {
-    const same = j => j.spec.key === spec.key;
-    const job = want.get(spec.key) || queue.find(same) || [...encoding].find(same);
-    if (job) { job.els.add(el); return; }
-    want.set(spec.key, { doc, spec, els: new Set([el]) });
-    if (settleTimer != null && typeof clearTimeout === "function") clearTimeout(settleTimer);
-    settleTimer = later(() => { settleTimer = null; want.forEach(j => queue.push(j)); want.clear(); pump(); }, PAPER.art.settle);
+  /** 这一套配色的每一种纸都排上（已经有的、排着的不重复）；el 等的是 kind 那一张 */
+  function need(doc, theme, el, kind) {
+    Object.keys(PAPER.art.kinds).forEach(k => {
+      const spec = tileSpec(k, theme);
+      if (texCache.has(spec.key)) return;
+      let job = want.get(spec.key);
+      if (!job) { job = { doc, spec, els: new Set() }; want.set(spec.key, job); queue.push(job); }
+      if (el && k === kind) job.els.add(el);
+    });
+    pump();
   }
-  /** 还在等这一张的面板：还在页面上、要的还是这一档 */
+  /** 还在等这一张的面板：还在页面上、要的还是这一张 */
   const waiting = (job) => [...job.els].filter(el => el.isConnected !== false && el.__olpWant === job.spec.key);
   /** 排着的等浏览器空闲时画 */
   function pump() {
@@ -459,16 +477,15 @@
       pump();
     });
   }
-  /** 画一张、交给浏览器编码，编码完放进缓存、贴到还在等它的面板上；没人要了就不画 */
+  /** 画一张、交给浏览器编码，编码完放进缓存、贴到还在等它的面板上 */
   function run(job) {
-    if (!job || !waiting(job).length) return;
-    const c = paintTex(job.doc, job.spec);
-    if (!c) return;
-    encoding.add(job);
+    const c = job && paintTile(job.doc, job.spec);
+    if (!c) { if (job) want.delete(job.spec.key); return; }
     encode(c, (url) => {
-      encoding.delete(job);
+      want.delete(job.spec.key);
       if (!url) return;
-      const tex = cachePut(job.doc, job.spec, url);
+      const tex = { key: job.spec.key, kind: job.spec.kind, th: job.spec.th, url };
+      texCache.set(tex.key, tex);
       waiting(job).forEach(el => apply(el, tex));
     });
   }
@@ -483,23 +500,38 @@
     }
     cb(dataUrl(c));
   }
-  /** 马上把缺的都画完（测试用）：不等 settle、不等空闲；toBlob 是同步回来的就编码完、贴上再返回。返回这一次处理了几张（没人要了、不画的也算） */
+  /** 马上把排着的都画完（测试用）：不等空闲；toBlob 是同步回来的就编码完、贴上再返回。返回这一次画了几张 */
   function flush() {
-    if (settleTimer != null && typeof clearTimeout === "function") clearTimeout(settleTimer);
-    settleTimer = null;
-    want.forEach(j => queue.push(j)); want.clear();
     let n = 0;
     flushing = true;
     try { while (queue.length) { n++; run(queue.shift()); } } finally { flushing = false; }
     return n;
   }
-  /** 还有几张纹理没画好（等着的、排着的、正在编码的） */
-  function pending() { return want.size + queue.length + encoding.size; }
+  /** 还有几张纹理没画好（排着的、正在编码的） */
+  function pending() { return want.size; }
   /** 给面板贴上一张纹理 */
   function apply(el, tex) {
     el.__olpTex = tex; el.__olpWant = null; el.dataset.olpTex = tex.kind;
     el.style.setProperty("--olp-tex", `url("${tex.url}")`);
-    el.style.setProperty("--olp-pad", (PAPER.art.kinds[tex.kind].flat ? 0 : PAPER.art.pad) + "px");
+  }
+  /** 撕边、影子层（#321）：撕边写成 --olp-clip（和现在那一档差不到 PAPER.art.reuse 就不换）；大面板（ply）补一层 .olp-ply 挂影子（没了就再补，只补一个） */
+  function shape(doc, el, kind, w, h) {
+    const K = PAPER.art.kinds[kind];
+    if (!K || K.flat) return;
+    if (!fits(el.__olpClip, kind, w, h)) {
+      const c = tornClip(kind, w, h);
+      if (!c) return;
+      el.__olpClip = c;
+      el.style.setProperty("--olp-clip", c.css);
+    }
+    if (!K.ply || typeof doc.createElement !== "function") return;
+    const p = el.__olpPly;
+    if (p && p.parentNode === el) return;
+    const ply = doc.createElement("i");
+    ply.className = "olp-ply";
+    ply.setAttribute("aria-hidden", "true");
+    el.appendChild(ply);
+    el.__olpPly = ply;
   }
   /** 印章、喷漆的斑驳遮罩（mock.html · grit）：一块黑底挖几个小洞；只一点点（PAPER.art.grit），字一定要清楚。每个页面只画一次 */
   let gritUrl = null;
@@ -515,28 +547,31 @@
     return gritUrl;
   }
   /**
-   * 给纸片画面里的面板贴上纹理（online-ui.js 每次画完、窗口变了叫）：targets = [[选择器, 纸的种类]]，theme = 这一套配色。
-   * 每个面板记着现在贴的那一张（种类 + 那一档的大小 + 配色）：还合适（fits：大小差不到 PAPER.art.reuse）就不动；不合适了先从缓存拿
-   * （这一档，或者差不到 reuse 的那张），都没有才记下缺这一档，等大小停下来、浏览器空闲时画（need）——新的画好之前照旧贴着上一张。
-   * 纹理写成 --olp-tex（online-paper.css 用：面板挂在 ::before 上、按钮直接当底图），面板上加 data-olp-tex = 种类。看不见的（宽 0）先不贴。
+   * 给纸片画面里的面板贴上纹理（online-ui.js 每次画完、面板大小变了叫）：targets = [[选择器, 纸的种类]]，theme = 这一套配色。
+   * 纹理只看种类和配色（和面板多大无关）：缓存里有就贴；这一套还没画就把这一套的每一种纸都排上，浏览器空闲时画（need），画好再贴
+   * （之前照旧是纯色 / 上一套的）。撕边、影子层按面板现在的大小（shape：只换 CSS 变量，不画纹理）。
+   * 纹理写成 --olp-tex（online-paper.css 用：面板挂在 ::before 上平铺、按钮直接当底图平铺），面板上加 data-olp-tex = 种类。看不见的（宽 0）先不贴。
    * 返回这一次马上贴上的块数
    */
   function dress(doc, targets, theme) {
     if (!doc || typeof doc.querySelectorAll !== "function") return 0;
     let n = 0;
-    const th = themeKey(theme);
     (targets || PAPER.art.targets).forEach(([sel, kind]) => doc.querySelectorAll(sel).forEach(el => {
       const w = el.offsetWidth, h = el.offsetHeight;
       if (!(w > 0) || !(h > 0)) return;
       // 「tag|tagon」：当前行动的那一格（.olp-tag.on）用后一种
       const k = kind.includes("|") ? kind.split("|")[el.closest && el.closest(".olp-tag.on") ? 1 : 0] : kind;
-      if (fits(el.__olpTex, k, th, w, h)) { el.__olpWant = null; return; }
-      const spec = texSpec(k, w, h, theme);
+      const spec = tileSpec(k, theme);
       if (!spec) return;
-      const hit = cacheGet(spec.key) || cacheFit(k, th, w, h);
-      if (hit) { apply(el, hit); n++; return; }
-      el.__olpWant = spec.key;
-      need(doc, spec, el);
+      const tex = texCache.get(spec.key);
+      if (tex) {
+        el.__olpWant = null;
+        if (el.__olpTex !== tex) { apply(el, tex); n++; }
+      } else {
+        el.__olpWant = spec.key;
+        need(doc, theme, el, k);
+      }
+      shape(doc, el, k, w, h);
     }));
     return n;
   }
@@ -713,6 +748,6 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, texSpec, fits, texture, grit, dress, flush, pending, shellHtml, topHtml, toolsHtml, tagsHtml,
+  return { PAPER, active, isOpen, setOpen, dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, tileSpec, fits, tornClip, texture, grit, dress, flush, pending, shellHtml, topHtml, toolsHtml, tagsHtml,
     receiptLine, receiptGroups, receiptHtml, noteColor, readMoves, pressMove, readCam, pressCam };
 });
