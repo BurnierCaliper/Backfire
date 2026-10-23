@@ -1,7 +1,8 @@
 /* Antlerscale: Backfire · 单位悬停说明（战斗画面和联机玩家画面共用）
  * 鼠标停在单位 / 配置物上：一段简单描述（从图鉴摘：角色介绍、敌人的行动方式和能力、配置物说明），
  * 再把身上的效果一条条用文字写出来（名字 + 图鉴里的说明），玩家不认识图标也看得懂。
- *   UnitTip.describe(info)  → { kicker, text, list, stage }   info: { kind: "hero" | "weapon" | "enemy" | "prop" | "gap", kit, propKind, gapType, ownerName, stage }
+ *   UnitTip.describe(info)  → { kicker, text, list, stage }   info: { kind: "hero" | "weapon" | "enemy" | "prop" | "gap", kit, propKind, gapType, ownerName, stage, text }
+ *     text：间隔自己的一段说明（驻波墙写这一道墙过滤什么属性、降幅还是增幅），不给就按配置物图鉴
  *     stage：分阶段的首领 / 精英现在在第几阶段（bestiary.js · bestiaryStageOf，联机由房主算好发过来），能力只列这一阶段的
  *   UnitTip.effect(token)   → { name, text }           token：状态文字里的一个词（「灼烧×3」「高能 5」「导体」「失衡」…）
  *   UnitTip.html(info, tokens, head) → 浮窗内容 */
@@ -94,6 +95,7 @@
       const id = info.kind === "gap" ? info.gapType : info.propKind;
       const p = (g("CODEX_PROPS") || []).find(x => x.id === id);
       if (info.kind === "gap" && id === "void") { const e = codexEffects().find(x => x.name === "空隙（间隔）"); if (e) out.text = lineOf(e); }
+      if (info.kind === "gap" && typeof info.text === "string" && info.text) out.text = info.text;   // 驻波墙：这一道墙自己的说明（属性、降幅 / 增幅）
       if (p) { out.kicker = [KIND_NAME[info.kind], p.place, p.source].filter(Boolean).join(" · "); out.list = p.lines.slice(); }
     }
     return out;

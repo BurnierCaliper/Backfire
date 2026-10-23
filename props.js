@@ -14,7 +14,8 @@ function gapLabel(type) {
     bridge: "不稳桥梁",
     wall: "危墙",
     door: "机关门",
-    void: "空隙"
+    void: "空隙",
+    wave: "驻波墙"   // Helumica「频域造物」暂时取代原来的间隔（app.js · placeWaveWall）
   })[type] || type;
 }
 
