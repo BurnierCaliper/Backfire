@@ -368,17 +368,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定）
+- **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定；app.js · `applyBonusPenalties`（新）/ `refreshEconomy` / `refreshEnemyEconomy` / `performAssistBlock` 日志；vehicle.js · `vehicleBonusFloor`（新）/ `vehicleEconomy`；codex.js · `CODEX_EFFECTS` 不稳；rulebook.js「行动点与附赠动作」「协助格挡」两章；tests/bonus-penalty.test.js、tests/enemy-race-perks.test.js）
   - **以前**：不稳、空手格挡成功的下一回合直接把附赠动作清零；玩家这边清零后才加沙暴顺风 +1（所以照样有 1 个），敌人那边最后才清零，两边顺序不一样。
-  - **现在**：所有附赠加成（沙暴顺风、警戒、千里马、单局图纸等）先算完，再按惩罚各 −1：不稳 −1、空手格挡 −1，两个都有 −2，最少 0。我方和敌人同一个顺序（`app.js · applyBonusPenalties`）。易怒蛮牛发作后没有附赠，不在这次改动里。
-  - **文字**：效果图鉴「不稳」、空手格挡成功的日志、敌人回合的提示都改成「−1」。
-  - **测试**：tests/bonus-penalty.test.js——各自单独、两个都有、配沙暴顺风、最少 0、敌人一侧。
+  - **现在**：所有附赠加成（沙暴顺风、警戒、千里马、单局图纸、绯秋 · 剑术+ 留到这回合的附赠、敌人载具驾驶员最少 1 个）先算完，再按惩罚各 −1：不稳 −1、空手格挡 −1，两个都有 −2，最少 0。我方和敌人同一个顺序（`app.js · applyBonusPenalties`）。作者裁定剑术+ 留下的和驾驶员托底也算加成：以前剑术+ 是扣完再加（不稳 + 空手 + 留 1 个，有 1 个；现在 1 + 1 − 2 = 0），驾驶员是扣完再托到 1（不稳照样 1 个；现在托底 1 再扣 → 0）。日志写实际扣掉的数：本来就是 0、没东西可扣时不写「−1」，写「本来就没有附赠动作，没有可扣的」。易怒蛮牛发作后没有附赠，不在这次改动里。
+  - **文字**：效果图鉴「不稳」、规则页（rulebook.js「行动点与附赠动作」「协助格挡 · 挡住以后」）、空手格挡成功的日志、敌人回合的提示都改成「−1」。
+  - **测试**：tests/bonus-penalty.test.js——各自单独、两个都有、配沙暴顺风、最少 0、敌人一侧（用精英机甲触灵（机枪），基础 1 附赠，测得出顺序）、剑术+ 留下的先加再扣、驾驶员先托底再扣、日志的数和实际扣掉的一样、新文字的正面断言；tests/enemy-race-perks.test.js 千里马那条的期望从 0 改成 1。
 
-- **诊所能换的肉体不再因浮点误差少给 1 点**（PR #275 审查发现）
-  - **以前**：(改造率上限 − 义体占用) × 原生命上限恰好是整数时，浮点乘积落在 x.9999…，向下取整少给 1 点（例：体质 3、智力 5、5 级、装打击义体.vol1，应该能换 2 点，诊所给 1 点）。
+- **诊所能换的肉体不再因浮点误差少给 1 点**（PR #275 审查发现；growth.js · `cyberConvertLimit`；app.js · `performAssistBlock` 日志；codex.js 相位条目；party.js · `RACE_CHECK_PERKS`；tests/clinic-float.test.js、tests/rulebook.test.js）
+  - **以前**：(改造率上限 − 义体占用) × 原生命上限恰好是整数时，浮点乘积落在 x.9999…，向下取整少给 1 点（例：体质 3、智力 5、5 级、装打击义体.vol1，应该能换 2 点，诊所给 1 点）。没装义体也会少给：改造率 70% × 生命上限 90 / 170 给 62 / 118，应该是 63 / 119（体质 8、智力 7、10 / 20 级）。
   - **现在**：`growth.js · cyberConvertLimit` 取整前加 1e-9，恰好整数时给足。规则不变，只修计算。
   - **顺带改文字**：空手格挡成功的日志不再写「架势照扣（最少留 1）」，改成「架势照常扣（可能被打进失衡）」，和实际结算一致；效果图鉴「相位·波谷」写明是 −50% 加算；猫类人-猫的特长文字改成「侦察 / 躲藏」，和实际的优势项一致。
-  - **测试**：tests/clinic-float.test.js——审查里的例子、4000 多种组合逐项比对、三处文字。
+  - **测试**：tests/clinic-float.test.js——审查里的例子、几千种组合逐项比对（和诊所一样用现上限 = 原生命 − 义体扣的生命）、`cyberConvertLimit` 修之前真的少 1 的输入（20 × (0.5 − 0.4) = 2、90 × 0.7 = 63）、三处文字；tests/rulebook.test.js 诊所那条的容差去掉，改成严格相等。
 
 - **新增规则说明页：图鉴第七本「规则」，标题画面 / 单局顶栏 / 跑团顶栏的「图鉴」旁边加「规则」入口**（作者夕夏定，issue #263；新增 rulebook.js（`RULEBOOK_GROUPS` / `RULEBOOK_CHAPTERS` / `rulebookEntries`）；bestiary-ui.js：`MODES` 加「规则」、`codexList` / `codexTabs` / `renderCodexDetail` 接上、新增 `rulebookHtml` / `ruleLine`、规则这一本的搜索提示；bestiary.css：`.bx-rules` 放宽详情栏、`.rx-table` 表格；game.html：`#t-rules` / `#run-rules` / `#tr-rules` 三个按钮、在 codex.js 之后加载 rulebook.js；screens.js / rogue-ui.js / trpg-ui.js 接三个按钮；ROADMAP 代码地图加一行；测试：新增 tests/rulebook.test.js）
   - **以前**：没有成体系的规则说明。图鉴只有角色 / 专长 / 义体 / 敌人 / 配置物 / 效果六本，回合、行动点、检定、伤害怎么算、武器 ATK、义体改造率这些规则只能翻手册或问主持人。

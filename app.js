@@ -1667,12 +1667,14 @@ function refreshEnemyEconomy(u, notes) {
   // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳只扣 1，抵得掉）。
   // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
   if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
+  // 载具驾驶员每回合最少 1 个附赠（移动 / 冲撞）：也是加成，在扣之前托底
+  if (typeof vehicleBonusFloor === "function") bonus = vehicleBonusFloor(u, bonus);
   // 不稳 / 空手格挡：和玩家同一个顺序，所有加成算完再各 −1
   bonus = applyBonusPenalties(u, bonus, notes);
-  // 易怒蛮牛发作后这回合没有附赠
+  // 易怒蛮牛发作后这回合没有附赠（驾驶员照旧留 1 个开车）
   if (u.raceNoBonus) {
     u.raceNoBonus = false;
-    bonus = 0;
+    bonus = u.vehMerged ? 1 : 0;
     if (notes) notes.push(`${u.name} 易怒蛮牛：这回合失去附赠动作。`);
   }
   if (loseAp) ap = 0;
@@ -1680,7 +1682,7 @@ function refreshEnemyEconomy(u, notes) {
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
   u.bonusMax = Math.max(u.bonus, bonus);
-  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员每回合有 1 个附赠（移动 / 冲撞）
+  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员：附赠上限对齐（最少 1 已在扣之前托底）
 }
 
 function beginRound(notes) {
@@ -5315,17 +5317,16 @@ function ambushSkipRound() {
 /** 附赠动作的惩罚（玩家、敌人共用，所有加成算完之后调用）：
  *  不稳 −1（触发一次后消失）、空手格挡成功后的下一回合 −1；两个都有 −2；最少 0 */
 function applyBonusPenalties(u, bonus, notes) {
-  if (u.statuses && u.statuses.unstable) {
-    bonus -= 1;
-    u.statuses.unstable = false;
-    if (notes) notes.push(`${u.name} 不稳：这回合附赠动作 −1。`);
-  }
-  if (u.loseBonusNext) {
-    bonus -= 1;
-    u.loseBonusNext = false;
-    if (notes) notes.push(`${u.name} 空手格挡：这回合附赠动作 −1。`);
-  }
-  return Math.max(0, bonus);
+  // 所有加成（含剑术+ 留下的、载具驾驶员最少 1）都算完以后再扣；最少扣到 0，日志写实际扣掉的数
+  bonus = Math.max(0, Number(bonus) || 0);
+  const take = (label) => {
+    const n = Math.min(1, bonus);
+    bonus -= n;
+    if (notes) notes.push(n > 0 ? `${u.name} ${label}：这回合附赠动作 −${n}。` : `${u.name} ${label}：本来就没有附赠动作，没有可扣的。`);
+  };
+  if (u.statuses && u.statuses.unstable) { u.statuses.unstable = false; take("不稳"); }
+  if (u.loseBonusNext) { u.loseBonusNext = false; take("空手格挡"); }
+  return bonus;
 }
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
@@ -5356,18 +5357,18 @@ function refreshEconomy(u) {
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof featAlertBonus === "function") bonus += featAlertBonus(u);   // 警戒（feats.js）：每场第一回合 +1 附赠
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
+  // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）；也是加成，在扣之前加
+  const carry = u.resources && u.resources.stanceCarry;
+  if (carry && carry.turn === Number(state.turnNo)) {
+    bonus += carry.n;
+    u.resources.stanceCarry = null;
+  }
   bonus = applyBonusPenalties(u, bonus);   // 所有加成算完再扣：不稳、空手格挡各 −1
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
-  u.bonusMax = Math.max(u.bonus, bonus);
-  // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）
-  const carry = u.resources && u.resources.stanceCarry;
-  if (carry && carry.turn === Number(state.turnNo)) {
-    u.bonus += carry.n; u.bonusMax += carry.n;
-    u.resources.stanceCarry = null;
-  }
+  u.bonusMax = u.bonus;
 }
 
 function skillNameHint(id) {
