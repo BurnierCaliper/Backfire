@@ -62,6 +62,7 @@
      *   tints    普通技能按钮按顺序轮流用的颜色（以前原型的做法：黄、薄荷、米白、粉）
      *   max      最多摆几个按钮
      *   kinds    右上角的角标：攻击（打伤害 / 击破的）还是技能（功能性的：加状态、治疗、移动、换架势……）；图标画法同头像（白边 + 墨线）
+     *   rim      左上角属性图标的白描边（icons.js 底下那层 .o）：主人 10/23 定不要（#317：白边让图标看不清），只留属性色那一层；头像、别处的贴纸照旧带白边
      * 技能的属性、攻击还是技能，从技能的提示文字（party.js · skillList 的 hint）里读，照 engine.js · parseSkillRange 的做法：
      *   按「·」分段，有 atk 又写了属性 / 伤害 / 击破、或者写着「N 击破」的那一段算打伤害（攻击）；属性先看打伤害的那段里的属性字，
      *   再看挂上的效果名（图鉴 codex.js · CODEX_EFFECTS 里带属性的：感电、熔融、过载、雪天……），再看提示里随便哪个属性字；都没有 = 无属性。
@@ -71,6 +72,7 @@
       first: "weapon_retrieve",
       tints: ["hazard", "mint", "canvas", "pink"],
       max: 12,
+      rim: false,
       kinds: {
         attack: { name: "攻击", glyph: `<path d="M13 35 L37 11"/><path d="M33 9 L39 9 L39 15"/><path d="M9 29 L19 39"/><path class="bold" d="M7 41 L12 36"/>` },   // 一把剑
         skill: { name: "技能", glyph: `<circle cx="24" cy="24" r="13" class="bold" stroke-dasharray="5.1 5.1"/><circle cx="24" cy="24" r="8.5"/><circle class="solid" cx="24" cy="24" r="2.6"/>` }   // 齿轮
@@ -329,12 +331,14 @@
     const summon = summonRow ? Object.assign(buttonOf(summonRow, unit, opts && opts.effects, 0), { back: /_return$/.test(summonRow.id) || summonRow.id === UI.skill.first }) : null;
     return { skills, summon };
   }
-  /** 属性角标：icons.js 的七种属性贴纸图标（Icons.element），颜色 = 属性色；无属性画一个灰圈。titles = false：不写悬停的小字（正式画面悬停弹完整的技能说明） */
+  /** 属性角标：icons.js 的七种属性贴纸图标（Icons.element），颜色 = 属性色；无属性画一个灰圈。titles = false：不写悬停的小字（正式画面悬停弹完整的技能说明）。
+   *  白描边按 UI.skill.rim（现在不要：只画属性色那一层，灰圈也一样） */
   function elementBadge(b, icons, titles) {
     const tip = b.element ? b.elementName + "属性" : "无属性";
     const color = b.element ? UI.elements[b.element] : UI.avatar.fallback;
-    const svg = b.element && icons && typeof icons.element === "function" ? icons.element(b.element)
-      : `<svg class="eicon" viewBox="0 0 48 48" aria-hidden="true"><g class="o"><circle cx="24" cy="24" r="12"/></g><g class="c"><circle cx="24" cy="24" r="12"/></g></svg>`;
+    const ring = `<circle cx="24" cy="24" r="12"/>`;
+    const svg = b.element && icons && typeof icons.element === "function" ? icons.element(b.element, { rim: UI.skill.rim })
+      : `<svg class="eicon" viewBox="0 0 48 48" aria-hidden="true">${UI.skill.rim ? `<g class="o">${ring}</g>` : ""}<g class="c">${ring}</g></svg>`;
     return `<span class="sk-el${b.element ? "" : " none"}" style="color:${color}"${titles === false ? "" : ` title="${esc(tip)}"`}>${svg}</span>`;
   }
   /** 攻击 / 技能角标：贴纸风的小图标（剑 / 齿轮） */
