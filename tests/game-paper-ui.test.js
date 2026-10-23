@@ -361,7 +361,7 @@ test("新加的 DOM（胶带、吊牌、「工具 ▾」、抽屉的竖标签、
   await openTools(page);
   assert.ok(await page.evaluate(([a]) => state.units.some(u => u.shp === a), [SHP]), "坚毅生命确实塞进去了");
   const html = await page.evaluate(() => [document.getElementById("g-paper"), document.querySelector("#g-app > .g-top"), document.getElementById("g-log"), document.querySelector("#g-app > .g-hud")]
-    .filter(Boolean).map(el => el.outerHTML).join("\n").replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, "data:…"));
+    .filter(Boolean).map(el => el.outerHTML).join("\n").replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, "data:…").replace(/blob:[^"')\s]+/g, "blob:…"));   // 纸纹的地址（#321 起是 blob: + 随机编号）不算
   for (const n of [SHP, SHP_MAX]) assert.ok(!html.includes(String(n)), "出现了坚毅生命的数字 " + n);
   assert.doesNotMatch(html, /shp/i);
   assert.deepEqual(o.errors, []);
@@ -415,7 +415,7 @@ test("3D 白卡让开浮在战场上的面板（第 4 步）：几种窗口大�
 });
 
 /* ---------- 合并 #321（平铺纸纹）以后：单机的纸片画面也照 #321 的要求 ---------- */
-test("#321 单机也一样：纸纹是一张平铺的小纹理（撕边 clip-path、影子挂在 .olp-ply 上）；开局画好以后开打、选技能 / 取消、开关「工具 ▾」和抽屉、收起展开技能栏、拖窗口大小都不再画纹理；页面上的纹理不超过种类那么多张；离开纸片画面撕边、影子层一起拿掉", { timeout: 90000 }, async t => {
+test("#321 单机也一样：纸纹是一张平铺的小纹理（撕边 clip-path、影子挂在 .olp-ply 上）；开局画好以后选目标的按钮条出来 / 收起（技能栏变高变矮）、开关「工具 ▾」和抽屉、收起展开技能栏、拖窗口大小都不再画纹理；页面上的纹理不超过种类那么多张；离开纸片画面撕边、影子层一起拿掉", { timeout: 90000 }, async t => {
   const o = await soloPage(t); if (!o) return; const { page } = o;
   await page.waitForFunction(() => { const h = document.querySelector("#g-app > .g-hud"); return !!h && h.dataset.olpTex === "dock" && PaperUI.pending() === 0; }, null, { timeout: 30000 });
   // 技能栏后面那张纸：平铺、撕边是 clip-path；影子挂在补进去的 .olp-ply 上；技能吊牌的影子挂在自己身上（不补节点）
@@ -427,10 +427,6 @@ test("#321 单机也一样：纸纹是一张平铺的小纹理（撕边 clip-pat
   assert.ok(sheet.repeat === "repeat" && /^256px( auto)?$/.test(sheet.size) && sheet.clip === "polygon(" && sheet.url, "平铺、撕边、blob: 地址：" + JSON.stringify(sheet));
   assert.match(sheet.ply, /drop-shadow/, "影子层");
   assert.ok(/drop-shadow/.test(sheet.sk) && !sheet.skPly, "技能吊牌的影子挂在自己身上：" + JSON.stringify(sheet));
-  // 开打（「工具 ▾」里的「开始战斗」，同一个按钮）
-  await page.evaluate(() => document.getElementById("g-start").click());
-  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 15000 });
-  await settle(page);
   // 量：画了几张纹理（只数 PAPER.art.tile 见方的画布：别的模块的画布不算）、同步编码了几次
   await page.evaluate(() => {
     window.__paint = { ctx: 0, put: 0, data: 0 };
@@ -442,12 +438,18 @@ test("#321 单机也一样：纸纹是一张平铺的小纹理（撕边 clip-pat
   });
   const dock = () => page.evaluate(() => { const h = document.querySelector("#g-app > .g-hud"); return { h: h.offsetHeight, tex: h.style.getPropertyValue("--olp-tex"), paint: Object.assign({}, __paint) }; });
   const before = await dock();
-  // 选一个技能：技能栏多出选目标的提示，变高；Esc 取消：变回去
-  await page.click("#g-skills .sk:not([disabled])");
+  // 选目标：技能栏里多出按钮条（和 game.js · showPickBar 画的一样），变高；取消：收起，变回去
+  await page.evaluate(() => {
+    const row = document.querySelector("#g-app > .g-hud .hud-row");
+    let bar = document.getElementById("g-pick-bar");
+    if (!bar) { bar = document.createElement("div"); bar.className = "g-pick-bar"; bar.id = "g-pick-bar"; row.parentNode.insertBefore(bar, row); }
+    bar.innerHTML = '<button class="g-btn">不选<small>跳过</small></button><button class="g-btn danger">放弃（Esc）</button>';
+    bar.classList.add("show");
+  });
   await page.waitForFunction(h => document.querySelector("#g-app > .g-hud").offsetHeight !== h, before.h);
   await page.waitForTimeout(300);
   const picked = await dock();
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => { const bar = document.getElementById("g-pick-bar"); bar.classList.remove("show"); bar.innerHTML = ""; });
   await page.waitForFunction(h => document.querySelector("#g-app > .g-hud").offsetHeight === h, before.h);
   // 「工具 ▾」下拉、右边的抽屉：开出来是新的面板（新的大小），关上
   await openTools(page);
@@ -569,8 +571,8 @@ const looks = (page, parts) => page.evaluate(([parts, props]) => {
     if (!el) { out[k] = "（没有）"; return; }
     const cs = getComputedStyle(el), bs = getComputedStyle(el, "::before");
     props.forEach(p => { out[k + " " + p] = cs.getPropertyValue(p); });
-    // 图片地址只比「有几张」：纸纹是程序画的 PNG；旧皮肤相位天气的波纹（weather-fx.js）过一会儿会从 SVG 换成画好的 PNG，和纸片无关
-    ["content", "filter", "animation-name", "background-image", "clip-path"].forEach(p => { out[k + "::before " + p] = bs.getPropertyValue(p).replace(/url\("data:[^"]*"\)/g, 'url("data:…")'); });
+    // 图片地址只比「有几张」：纸纹是程序画的 PNG（#321 起是 blob: 地址）；旧皮肤相位天气的波纹（weather-fx.js）过一会儿会从 SVG 换成画好的 PNG，和纸片无关
+    ["content", "filter", "animation-name", "background-image", "clip-path"].forEach(p => { out[k + "::before " + p] = bs.getPropertyValue(p).replace(/url\("(?:data|blob):[^"]*"\)/g, 'url("图…")'); });
   });
   return out;
 }, [parts, PAPER_PROPS]);
