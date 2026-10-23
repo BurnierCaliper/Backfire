@@ -227,6 +227,82 @@ test("「工具 ▾」：旧顶栏的每一个按钮、下拉框、链接都在�
   assert.deepEqual(o.errors, []);
 });
 
+test("「工具 ▾」的「查看」里另有图鉴、规则（单局 / 跑团探索画面顶栏上的那两个，同一个图鉴入口）；离开纸片画面就拿掉", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  await openTools(page);
+  assert.deepEqual(await page.evaluate(() => ["gp-bestiary", "gp-rules"].map(id => { const b = document.getElementById(id); return b && b.textContent; })), ["图鉴", "规则"]);
+  await page.click("#gp-rules");
+  await page.waitForFunction(() => { const r = document.querySelector(".bx.show"); return r && /规则说明/.test(r.textContent); });
+  await page.waitForSelector("#g-app > .g-top", { state: "hidden" });
+  await page.evaluate(() => Bestiary.close && Bestiary.close());
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("g-paper"));
+  assert.equal(await page.locator("#gp-bestiary, #gp-rules, .gp-tools-h").count(), 0, "旧顶栏里不多出东西");
+  assert.deepEqual(o.errors, []);
+});
+
+test("联机跑团的房主：胶带写「联机跑团」+ 房间码红章；「房间码 · 菜单」那颗按钮让开（菜单在胶带上）；房主的小队聊天照旧在战斗记录的抽屉里，收着时竖标签挂未读数", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  await page.evaluate(() => {
+    OnlineGame.getView = () => ({ active: true, isHost: true, roomCode: "SA3X7C", mode: "trpg", status: { connected: true, hostOnline: true } });
+    document.body.classList.add("ol-host-online");
+    // online-ui.js · mountHostChat 给房主的战斗记录栏加的「战斗 / 小队」标签（这里只放一个，带 3 条未读）
+    const nav = document.createElement("nav"); nav.className = "ol-host-tabs";
+    nav.innerHTML = '<button type="button" data-host-tab="log" class="ol-tab on">战斗</button><button type="button" data-host-tab="chat" class="ol-tab">小队<span class="ol-dot ol-badge">3</span></button>';
+    document.getElementById("g-log").prepend(nav);
+    GamePaper.sync();
+  });
+  await page.waitForFunction(() => /^联机跑团/.test(document.querySelector("#g-paper .olp-title").textContent) && !!document.querySelector("#g-paper .olp-room"));
+  assert.equal(await page.locator("#g-paper .olp-room").innerText(), "SA3X7C");
+  assert.equal(await page.isVisible("#online-dock"), false, "「房间码 · 菜单」让开");
+  await page.waitForFunction(() => { const d = document.querySelector("#g-log .gp-drawer-dot"); return d && !d.hidden && d.textContent === "3"; });
+  // 拉开抽屉：「战斗 / 小队」标签在里面
+  await page.click("#g-log .gp-drawer-tab");
+  await page.waitForFunction(() => !document.getElementById("g-log").classList.contains("gp-collapsed"));
+  assert.ok(await page.isVisible('#g-log [data-host-tab="chat"]'), "小队聊天的标签在抽屉里");
+  assert.deepEqual(o.errors, []);
+});
+
+test("热座 / 联机房主：吊牌是热座栏的行动顺序（谁操作写在下面）；⇅ 点开是热座栏原来的「延后 / 换位」，点的就是热座栏那几个按钮；一台电脑的热座：「当前操作员」「分配角色」那一条照旧在（左下角），点得到", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  const hotseat = net => page.evaluate(net => {
+    const heroes = state.units.filter(u => u.isPlayer && !u.weaponOf).slice(0, 2);
+    const view = { enabled: true, network: net, configured: true, mode: "trpg", playerId: "gm", hostId: "gm",
+      players: [{ id: "gm", name: "主持人", gm: true }, { id: "p2", name: "乙" }], heroes: heroes.map((u, i) => ({ id: u.id, name: u.name, owner: i ? "p2" : "gm" })),
+      units: heroes.map((u, i) => ({ id: u.id, name: u.name, owner: i ? "p2" : "gm" })), phase: "acting", currentUnitId: heroes[0].id,
+      order: heroes.map((u, i) => ({ actor: u.id, owner: i ? "p2" : "gm", current: !i })), canConfigure: !net, canDisable: false };
+    window.__sent = [];
+    HotseatGame.isActive = () => true; HotseatGame.getView = () => view;
+    HotseatUI.mount({ getView: () => view, submit: cmd => { window.__sent.push(cmd); return { ok: true }; }, switchPlayer: id => { window.__switched = id; return { ok: true }; }, configure: () => ({ ok: true }) });
+    GamePaper.sync();
+    return heroes.map(u => u.name);
+  }, net);
+  const names = await hotseat(true);
+  await page.waitForFunction(() => document.querySelectorAll("#g-paper .olp-tag").length === 2 && !!document.querySelector("#g-paper [data-olp-swap]"));
+  assert.equal(await page.isVisible("#hotseat-root"), false, "联机房主：热座栏让开（只有字，胶带和吊牌上都有）");
+  assert.deepEqual(await page.locator("#g-paper .olp-tag .olp-tag-nm").evaluateAll(els => els.map(e => e.innerText.replace(/\s+/g, " "))), [names[0] + " 主持人", names[1] + " 乙"]);
+  assert.equal(await page.locator("#g-paper .olp-tag.on").count(), 1);
+  await page.click('#g-paper [data-olp-swap="0"]');
+  await page.waitForSelector('#g-paper [data-olp-move="0 0"]', { state: "visible" });
+  assert.deepEqual(await page.locator('#g-paper [data-olp-slot="0"] [data-olp-move]').evaluateAll(els => els.map(e => e.textContent)), ["延后", "换位"]);
+  await page.click('#g-paper [data-olp-move="0 0"]');
+  await page.waitForFunction(() => window.__sent.length === 1);
+  assert.equal(await page.evaluate(() => window.__sent[0].type), "orderMove", "延后 = 热座栏的「延后」（同一个按钮、同一条指令）");
+  // 一台电脑的热座（没联网）：那一条还有「当前操作员」「分配角色」——留着，贴在左下角
+  await hotseat(false);
+  await page.evaluate(() => GamePaper.sync());
+  await page.waitForSelector("#hotseat-root #hs-player", { state: "visible" });
+  const strip = await page.evaluate(() => {
+    const root = document.getElementById("hotseat-root"), r = root.getBoundingClientRect(), sel = document.getElementById("hs-player").getBoundingClientRect(), btn = document.querySelector('#hs-bar [data-hs="openConfig"]');
+    const b = btn.getBoundingClientRect(), hit = el => { const x = el.getBoundingClientRect(), h = document.elementFromPoint(x.left + x.width / 2, x.top + x.height / 2); return !!h && (h === el || el.contains(h)); };
+    return { left: r.left, bottom: r.bottom, vh: innerHeight, order: getComputedStyle(document.getElementById("hs-order")).display, sel: hit(document.getElementById("hs-player")), btn: hit(btn), w: sel.width };
+  });
+  assert.ok(strip.left < 30 && strip.bottom < strip.vh - 100, "贴在左下角、技能栏上面：" + JSON.stringify(strip));
+  assert.equal(strip.order, "none", "行动顺序在吊牌上，热座栏里的那一条不重复");
+  assert.ok(strip.sel && strip.btn, "「当前操作员」「分配角色」点得到：" + JSON.stringify(strip));
+  assert.deepEqual(o.errors, []);
+});
+
 test("胶带上的「菜单 Esc」打开暂停页面（同一个 pause-menu.js：克制表在里面）；没东西可取消时按 Esc 也打开", { timeout: 90000 }, async t => {
   const o = await soloPage(t); if (!o) return; const { page } = o;
   await page.click("#g-paper [data-pause-open]");

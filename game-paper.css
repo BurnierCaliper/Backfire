@@ -89,17 +89,18 @@ body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .log-tools > .mobile-only { di
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed)::after { right: 96px; }   /* 贴着抽屉的那条胶带（online-paper.css）让开「收起 ▸」标签 */
 
 /* ---------- 热座栏：行动顺序、提示挪到吊牌上了（online-paper.css 把整条藏起来）；一台电脑上的热座（没联网）那一条还有「当前操作员」「分配角色」，
- * 这一条照旧留着（同一个 #hs-bar，hotseat-ui.js 照旧画、照旧接点击），缩成一张牛皮纸条贴在左下角技能栏上面；联机房主的那一条只有字（胶带上都有了），照旧藏 ---------- */
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hotseat-root {
+ * 那一条有能点的东西时照旧留着（同一个 #hs-bar，hotseat-ui.js 照旧画、照旧接点击），缩成一张牛皮纸条贴在左下角技能栏上面；
+ * 联机房主的那一条只有字（模式、阶段：胶带上都有了），照旧藏 ---------- */
+body.ol-paper.g-paper #hotseat-root:has(> #hs-bar :is(select, button)) {
   display: block !important; position: fixed; z-index: 43; top: auto; right: auto; left: var(--olp-edge); bottom: calc(var(--olp-dock-h, 200px) + 18px);
   max-width: calc(100vw - 2 * var(--olp-edge)); color: var(--olp-kraft-ink); background: var(--olp-kraft); border: 0; box-shadow: var(--olp-shadow);
 }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hotseat-root > :is(#hs-order, #hs-notice) { display: none !important; }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hs-bar { min-height: 0; padding: 6px 10px; gap: 8px; }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hs-bar :is(label, .hs-phase) { color: var(--olp-muted); }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hs-bar .hs-tag { font-size: 18px; }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hs-bar select { min-height: 32px; padding: 3px 6px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); }
-body.ol-paper.g-paper.hotseat-active:not(.ol-host-online) #hs-bar .hs-button { min-height: 32px; padding: 3px 10px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); }
+body.ol-paper.g-paper #hotseat-root > :is(#hs-order, #hs-notice) { display: none !important; }
+body.ol-paper.g-paper #hs-bar { min-height: 0; padding: 6px 10px; gap: 8px; }
+body.ol-paper.g-paper #hs-bar :is(label, .hs-phase) { color: var(--olp-muted); }
+body.ol-paper.g-paper #hs-bar .hs-tag { font-size: 18px; }
+body.ol-paper.g-paper #hs-bar select { min-height: 32px; padding: 3px 6px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); }
+body.ol-paper.g-paper #hs-bar .hs-button { min-height: 32px; padding: 3px 10px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); }
 
 /* ---------- 浮在战场上的：悬停预演只在预演时出来（挂在技能栏右上方）；评分、横幅、回合大字让开顶栏和抽屉 ---------- */
 body.ol-paper.g-paper .g-app > .pvbox { display: none; }

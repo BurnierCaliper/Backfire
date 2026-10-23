@@ -37,6 +37,8 @@
    *   text         顶栏最前面的模式名（modes）、吊牌上每个人的状态（status）、抽屉的竖标签……
    *   tools        「工具 ▾」下拉里的分组：每组一个小标题，ids = 旧顶栏里的按钮（下拉框住的是 <label> 就排整个 label）。
    *                没列在这里的按钮排在最后（以后顶栏多了按钮，下拉里照样有，不会丢）；hide = 只是字的那几块，挪到胶带上了，下拉里不再显示
+   *   extras       纸片画面的下拉里另加的（#339 要的：单局 / 跑团探索画面顶栏上的「图鉴」「规则」，战斗里也能翻）：
+   *                group 排在哪一组的最后、mode 图鉴打开哪一本（bestiary-ui.js · Bestiary.open；不给 = 默认那本），title 悬停说明（和单局顶栏的同一句）。离开纸片画面就拿掉
    *   art.targets  哪些面板贴哪种纸（paper-ui.js · dress） */
   const P = UI.make({
     bodyClass: "g-paper",
@@ -60,6 +62,12 @@
       { head: "其他", ids: ["g-sfx", "g-hd2d-toggle", "g-calc", "g-title"] }
     ],
     hide: ["g-round", "g-phasel", "g-weather", "g-clock", "g-enc-name", "g-log-open"],
+    extras: [
+      { id: "gp-bestiary", label: "图鉴", title: "图鉴：敌人、配置物和所有效果", group: "查看" },
+      { id: "gp-rules", label: "规则", title: "规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……", group: "查看", mode: "rules" }
+    ],
+    // 打开图鉴时按几人队算敌人血量（同单局顶栏：场上的角色数，夹在 2–4 里）
+    bestiaryParty: { min: 2, max: 4 },
     art: {
       targets: [
         ["#g-paper .olp-top", "tapebar"], ["#g-paper .olp-tag-card", "tag|tagon"], ["#g-paper .olp-tools-b", "board"], ["#g-paper .olp-menu-b", "boardy"], ["#g-paper .olp-move", "card"],
@@ -235,6 +243,14 @@
           if (!box || !top.contains(box)) return;
           keepStyle(box); box.style.order = String(n++); env.added.ordered.push(box); members.push(box);
         });
+        // 纸片画面另加的（图鉴、规则）：排在这一组最后，离开纸片画面就拿掉
+        (GPAPER.extras || []).filter(x => x.group === g.head).forEach(x => {
+          const b = env.doc.createElement("button");
+          b.type = "button"; b.className = "g-btn gp-extra"; b.id = x.id; b.textContent = x.label; b.title = x.title || "";
+          b.style.order = String(n++);
+          b.addEventListener("click", () => openBestiary(x.mode));
+          top.appendChild(b); env.added.heads.push(b); members.push(b);
+        });
         env.added.groups.push({ head: h, members });
       });
       // 只是字的那几块（挪到胶带上了）：记在 data-gp-hide 上（game.js 会整个改写 #g-clock 的 className，类名留不住）
@@ -372,6 +388,16 @@
       return { id: b.dataset.id, name: x ? x.name : "", face: x ? x.face : "", on: b.classList.contains("on"), down: !!p.dead, stunned: !!p.stunned && !p.dead, spent };
     });
     return soloSlots(list, { acting: !!(st && st.combatStarted && st.combatPhase === "player") || !(st && st.combatStarted) });
+  }
+
+  /** 图鉴 / 规则说明（bestiary-ui.js，单局顶栏的「图鉴」「规则」同一个入口）：按场上几名角色算敌人血量，副标题写这一局的模式 */
+  function openBestiary(mode) {
+    const B = root.Bestiary, st = typeof state !== "undefined" ? state : null, R = GPAPER.bestiaryParty;
+    if (!B || typeof B.open !== "function") return;
+    const heroes = st ? (st.units || []).filter(u => u && u.isPlayer && !u.weaponOf && !u.escort && !u._removed).length : R.max;
+    const o = { partySize: Math.max(R.min, Math.min(R.max, heroes || R.max)), sub: modeOf(readMode()) };
+    if (mode) o.mode = mode;
+    B.open(o);
   }
 
   /* ---------- 「工具 ▾」下拉（旧顶栏原地变的）、吊牌的 ⇅、镜头 ---------- */
