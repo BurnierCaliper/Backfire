@@ -572,9 +572,8 @@
     if (!info) return "";
     const k = money();
     const got = info.claimed.length ? `已领「${info.claimed.map(x => esc((Rogue.blueprintById(x) || {}).name || x)).join("」「")}」` : "";
-    const progress = info.done
-      ? `图纸都已领过${got ? "：" + got.slice(2) : ""}`
-      : (info.canClaim ? "可以领一张图纸" : `再升级 ${info.progress}/${info.need} 次可领下一张图纸`) + (got ? ` · ${got}` : "");
+    // 摘要行只放短进度（窄屏不折乱）；已领的图纸名放到展开后的说明里
+    const progress = info.done ? "图纸已领完" : info.canClaim ? `图纸 ${info.need}/${info.need} 可领` : `图纸 ${info.progress}/${info.need}`;
     const rows = info.needsIntro
       ? `<p class="r-hint">他不帮陌生人强化武器。</p><button class="g-btn" data-intro="${esc(id)}">给他看看你的武器</button>`
       : Rogue.smithOptions(run, id).map(o =>
@@ -587,7 +586,7 @@
         `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
     return `<details class="smith"${open || info.canClaim ? " open" : ""}>
       <summary><b>${esc(info.name)}</b><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
-      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}</p>
+      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}${got ? `<br>${got}` : ""}</p>
       ${claim}
       <div class="shop">${rows}</div>
       ${partShelf(id)}
