@@ -1553,15 +1553,14 @@
     GAME.setupBattle(level(), GAME.lastEncounter || null);
   }
   function backFromBattle() {
-    const midBattle = state.combatStarted && !GAME.ended;
-    // 还在半路的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人都停下作废（game.js · abandonBattle，#322）；
-    // 在这里（指令已经通过检查之后）才停：回不去的时候（房间暂停、不是主持人）战斗照常进行
-    if (GAME.abandonBattle) GAME.abandonBattle();
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
     // 没结算就回来（放弃这场战斗）：耐久、「长休一次」技能的使用记录等队伍档案也回到开战前（trpg.js · trpgAbandonBattle）；
     // 奎支、物品在下面重新摆队伍时按队伍记忆回滚
-    if (midBattle) trpgAbandonBattle(GAME.campaign);
+    if (state.combatStarted && !GAME.ended) trpgAbandonBattle(GAME.campaign);
+    // 还在半路的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人都停下作废（game.js · abandonBattle，#322）；
+    // 在这里（指令已经通过检查之后）才停：回不去的时候（房间暂停、不是主持人）战斗照常进行
+    if (GAME.abandonBattle) GAME.abandonBattle();
     TRPG.taskBattle = null;   // 没结算就回来：这场不算任务战斗
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
     // 先切回探索画面再布置下一场：否则布置时战斗画面还在，开战前的大字会弹出来盖在探索画面上

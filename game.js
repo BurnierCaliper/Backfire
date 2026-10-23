@@ -1519,7 +1519,7 @@
     // 新画面（HD-2D）：出手时镜头稍微推一下（远景 / 中景），推到位再出手（弹道才对得上铭牌）；演完拉回（hd2d-field.js · push / release）。
     // 减少动态效果、跳过时不推
     const pushMs = strike && field3d() && !G.sim ? HD2DField.push(strike.actorId, strike.targetId) : 0;
-    if (pushMs) { await wait(pushMs); if (gone()) return; strikeFrom = rectOf(strike.actorId); }
+    if (pushMs) { await wait(pushMs); strikeFrom = rectOf(strike.actorId); }
     const motions = [];
     if (strike) motions.push(strikeIn(strike));
     else if (lungeAtk) motions.push(lunge(meta.actorId, meta.targetId));
