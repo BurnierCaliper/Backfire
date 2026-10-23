@@ -53,7 +53,7 @@ test("完成任务得到赫心融合体；回到任务板（不会进首领战�
   assert.equal(run.stage, "board");
 });
 
-test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
+test("抽取机（30% 抽到角色）：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
   const { c, run, R, G } = fresh("G4");
   assert.equal(R.drawInfo(run).canDraw, false);
   c.bagAdd("heart_fusion", 30);
@@ -61,6 +61,7 @@ test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；�
   for (let i = 0; i < 30; i++) {
     const before = run.party.length + run.reserve.length;
     const r = R.drawHero(run);
+    if (r.kind !== "character") { assert.ok(["weapon_material", "craft_material"].includes(r.kind)); continue; }
     const h = run.party.concat(run.reserve).find(x => x.kit === r.kit);
     if (r.levelUp) { ups++; assert.ok(h.level >= 2); }
     else { joins++; assert.equal(run.party.length + run.reserve.length, before + 1); assert.equal(h.level, G.recruitLevel); }

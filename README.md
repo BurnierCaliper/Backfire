@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **长线养成抽取机：30% 角色 / 40% 武器材料 / 30% 制作材料，每抽附赠奎支；每日挑战每个给 1 个融合体、全完成额外 5 个**（作者批准；rogue.js · `drawMany`（新）/ `drawHero` / `drawRates`（新）/ `drawInfo` / `completeGrowthDailyTask`；rogue-data.js · `ROGUE_GACHA`（新）；rogue-commands.js 指令 `drawMany`、查询 `drawRates`；测试 tests/gacha-rates.test.js，tests/growth-mode.test.js 抽取那条）
+  - **以前**：每抽 1 个赫心融合体 100% 抽到角色（11 名角色等概率，满级的不会抽到；新角色 1 级入队，重复 +1 级）；所有角色满级后抽取机不能用。每日挑战每个完成给随机武器材料 + 1000 奎支，三个全完成额外 1 个融合体 + 1000 奎支。
+  - **现在**：每抽 30% 角色（原逻辑不变）/ 40% 武器升级材料（各档比例和每日挑战奖励同一张表 `ROGUE_GACHA.weaponMats`：金属 50 / 精炼合金 30 / 聚合材料 14 / 稀有晶体 4 / 赫心结晶 2）/ 30% 道具制作材料（items.js · `CRAFT_MATERIALS` 7 种等概率）。所有角色满级时角色那份按 40:30 分给两种材料（武器 4/7、制作 3/7），抽取机照常可用。每条结果带光色：角色金、赫心结晶金、稀有晶体紫、聚合材料蓝、精炼合金蓝、金属灰、制作材料一律蓝。每抽附赠奎支，**待定**：现在按光色（灰 100 / 蓝 150 / 紫 500 / 金 1000），开关 `ROGUE_GACHA.kuizhiMode` 改成 `"flat"` 就是固定 `kuizhiFlat.base`（100）+ 按光色的 `kuizhiFlat.extra`。没有保底。随机数仍按 `种子:draw:第几抽` 固定，`run.draws` 跟存档走。每日挑战每完成 1 个另给 1 个融合体，三个全完成的额外奖励从 1 个改成 5 个（1000 奎支不变）。
 - **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
   - **以前**：评价只看分数；分数线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000（和本场基准分混合），没有奖励克制或借天气的打法。
   - **现在**：统计我方主动发起的攻击（一次行动打几下、打几个人都算一次；协助攻击、借机 / 反击、持续伤害、连带伤害、环境不算），其中有克制或吃到天气增益（任一即可）的占一半及以上、且至少 1 次攻击时，胜利结算在速杀 / 无伤 / 遭遇战之后整场分数再 ×1.5，结算画面写「克制大师」。不管有没有达成，B / A / S / SS / SSS 的分数线都 ×1.15（向上取整到 10），C 线不变。
