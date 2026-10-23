@@ -311,3 +311,41 @@ test("补的休息点长休没吃食物，也没有食物的坚毅加成；模�
   }
   assert.ok(free >= 1); assert.equal(paid, 1);
 });
+
+/* ---------- 长休界面（rogue-ui.js · restPlanner）：补的休息点不让选吃什么 ---------- */
+test("长休界面：补的休息点不出「吃什么」下拉，写「不消耗」「没有食物加成」；模板原有的休息点照常让选", () => {
+  const vm = require("node:vm");
+  const src = require("fs").readFileSync(require("path").join(H.ROOT, "rogue-ui.js"), "utf8");
+  const start = src.indexOf("  function restPlanner()");
+  const end = src.indexOf("\n  const NODE_PANELS", start);
+  assert.ok(start >= 0 && end > start, "rogue-ui.js 里找不到 restPlanner");
+  const { c, R, run } = mainWithInserted();
+  R.acceptTask(run, "main");
+  c.bagAdd("food_gourmet", 20);
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const restSel = { food: {}, sleep: {}, spit: {}, ammo: {} };
+  const ctx = vm.createContext({ esc, restSel, ITEM_CATALOG: c.S.ITEM_CATALOG || {}, shpHidden: () => false,
+    query: (action, plan) => R[action](run, plan) });
+  vm.runInContext(src.slice(start, end) + "\nthis.restPlanner = restPlanner;", ctx);
+  let free = 0, paid = 0;
+  for (let g = 0; g < 10; g++) {
+    const n = walkTo(R, run, x => x.type === "rest");
+    if (!n) break;
+    const html = ctx.restPlanner();
+    if (n.noPay) {
+      free++;
+      assert.doesNotMatch(html, /data-rest-food/);
+      assert.doesNotMatch(html, /坚毅 \+\d+\/份/);
+      assert.match(html, /这里不吃自带的食物/);
+      assert.match(html, /<td>不消耗<\/td>/);
+      assert.match(html, /这里不消耗补给，也没有食物加成/);
+      assert.match(html, /data-rest-sleep/, "睡眠道具照常能选");
+    } else {
+      paid++;
+      assert.match(html, /data-rest-food/);
+      assert.match(html, /消耗：水/);
+    }
+    R.restAtNode(run, "long", { watch: R.watchOptions(run)[0].kit });
+  }
+  assert.ok(free >= 1); assert.equal(paid, 1);
+});

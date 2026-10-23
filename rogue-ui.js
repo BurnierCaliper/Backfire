@@ -334,8 +334,10 @@
       const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       // 龙哥 胶囊弹药+：排下一场开局的弹序
       const ammo = h.ammo != null ? `<br><small>下一场弹序</small> <select data-rest-ammo="${esc(h.kit)}">${(o.ammoOrders || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.ammo ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
-      return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
-        <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
+      // 补的休息点（need.free）：不耗补给、也没有食物加成，不让选吃什么
+      const eat = need.free ? "<small>这里不吃自带的食物</small>" : `<select data-rest-food="${esc(h.kit)}">${foods}</select>`;
+      return `<tr><td><b>${esc(h.name)}</b></td><td>${need.free ? "不消耗" : `${h.water} ml · ${h.food} 份`}</td>
+        <td>${eat}</td>
         <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select>${spit}${ammo}</td></tr>`;
     }).join("");
     const bad = (a, b) => (a > b ? "r-bad" : "");
@@ -349,7 +351,7 @@
     }).join(" · ");
     return `<div class="r-restplan"><h3 class="r-sub">长休安排</h3>
       <table><tr><th>角色</th><th>需要</th><th>吃</th><th>睡眠道具</th></tr>${rows}</table>
-      <p class="r-hint">消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}
+      <p class="r-hint">${need.free ? `这里不消耗补给，也没有食物加成${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}` : `消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}`}
         ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
   }
   const NODE_PANELS = {
