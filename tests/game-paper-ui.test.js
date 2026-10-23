@@ -666,7 +666,12 @@ const COST_WEATHERS = { none: "none", sand: "sand", acid: "rain", snow: "snow", 
 
 test("技能吊牌名字下面那行消耗（「行动 1」「附赠 1」）、「唤出」下面那行小字在纸上看得清：深色字（夜里浅色）、加粗，和纸面的对比度 ≥ 4.5（白天 / 夜里 × 常态 / 沙暴 / 下雨 / 雪 / 雾）——新画面原来的薄荷绿、浅黄在牛皮纸上几乎看不见", { timeout: 150000 }, async t => {
   const o = await soloPage(t); if (!o) return; const { page } = o;
-  await page.waitForFunction(() => !!document.querySelector("#g-app > .g-hud .skills .sk[data-olp-tex] .cost .ap") && !!document.querySelector("#g-app > .g-hud .summonbtn[data-olp-tex] small"), null, { timeout: 30000 });
+  // 主人截的是战斗中（轮到我方，技能能用）；开战前技能都灰着（淡到 .4）。开战：柯尔特的初始刀头选第一个，等「战斗开始」的大字收走、技能栏里有能用的技能
+  await page.evaluate(() => document.getElementById("g-start").click());
+  await page.waitForFunction(() => !!document.querySelector("#g-choice.show .opts button"), null, { timeout: 15000 });
+  await page.evaluate(() => document.querySelector("#g-choice.show .opts button").click());
+  await page.waitForFunction(() => state.combatStarted && GAME.depth === 0 && !document.querySelector("#g-choice.show, .phase-card") &&
+    !!document.querySelector("#g-app > .g-hud .skills .sk[data-olp-tex]:not([disabled]) .cost .ap") && !!document.querySelector("#g-app > .g-hud .summonbtn[data-olp-tex] small"), null, { timeout: 30000 });
   for (const time of ["day", "night"]) {
     if (time === "night") await page.evaluate(() => { state.light = "night"; document.getElementById("g-app").classList.add("is-night"); });
     for (const [w, paper] of Object.entries(COST_WEATHERS)) {
@@ -680,10 +685,11 @@ test("技能吊牌名字下面那行消耗（「行动 1」「附赠 1」）、�
         const summon = Object.keys(HD2DUI.UI.elements).concat([""]).map(k => { sb.style.setProperty("--el", k ? `var(--${k})` : "var(--sk-hazard, #f2c230)"); return Object.assign({ el: k || "无" }, look(small)); });
         if (keep) sb.style.setProperty("--el", keep); else sb.style.removeProperty("--el");
         return { cost: [...hud.querySelectorAll(".skills .sk .cost, .skills .sk .cost :is(.ap, .bn)")].map(look), aps: hud.querySelectorAll(".skills .sk .cost .ap").length,
-          bns: hud.querySelectorAll(".skills .sk .cost .bn").length, kraft: probe("--olp-kraft"), board: probe("--olp-board"), summon };
+          bns: hud.querySelectorAll(".skills .sk .cost .bn").length, live: hud.querySelectorAll(".skills .sk:not([disabled]) .cost").length, kraft: probe("--olp-kraft"), board: probe("--olp-board"), summon };
       });
       const tag = `${time} · ${w}`;
       assert.ok(r.aps > 0 && r.bns > 0, tag + "：「行动」「附赠」两种消耗都有：" + JSON.stringify([r.aps, r.bns]));
+      assert.ok(r.live > 0, tag + "：量的里面有能用的技能（战斗中）");
       for (const c of r.cost) {
         assert.ok(contrast(c.color, r.kraft) >= 4.5, `${tag}：消耗「${c.text}」的字 ${c.color} 在牛皮纸 ${r.kraft} 上对比度只有 ${contrast(c.color, r.kraft).toFixed(2)}`);
         assert.ok(c.weight >= 700, `${tag}：消耗「${c.text}」要加粗：${c.weight}`);
@@ -692,7 +698,8 @@ test("技能吊牌名字下面那行消耗（「行动 1」「附赠 1」）、�
         assert.ok(contrast(s.color, r.board) >= 4.5, `${tag}：「唤出」（${s.el}）下面那行「${s.text}」${s.color} 在纸板 ${r.board} 上对比度只有 ${contrast(s.color, r.board).toFixed(2)}`);
         assert.ok(s.weight >= 700, `${tag}：「唤出」下面那行要加粗：${s.weight}`);
       }
-      if (w === "none") await shot(page, "solo-paper-cost-" + time);
+      // 截图：换了配色以后纸纹在空闲时画（#321），画好之前还贴着上一套（夜里的浅色字压在白天的牛皮纸上，截出来像是看不清）——等这一套画好再拍
+      if (w === "none") { await page.waitForFunction(() => PaperUI.pending() === 0, null, { timeout: 30000 }); await settle(page); await shot(page, "solo-paper-cost-" + time); }
     }
   }
   assert.deepEqual(o.errors, []);

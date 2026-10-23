@@ -687,7 +687,8 @@ test("技能吊牌名字下面那行消耗（房主算好的「行动 1」「附
       assert.ok(contrast(s.color, r.board) >= 4.5, `${tag}：「唤出」（${s.el}）下面那行「${s.text}」${s.color} 在纸板 ${r.board} 上对比度只有 ${contrast(s.color, r.board).toFixed(2)}`);
       assert.ok(s.weight >= 700, `${tag}：「唤出」下面那行要加粗：${s.weight}`);
     }
-    if (weather === "none") await shot(page, "paper-cost-" + light);
+    // 截图：换了配色以后纸纹在空闲时画（#321），画好之前还贴着上一套（夜里的浅色字压在白天的牛皮纸上，截出来像是看不清）——等这一套画好再拍
+    if (weather === "none") { await page.waitForFunction(() => OnlinePaper.pending() === 0, null, { timeout: 30000 }); await settle(page); await shot(page, "paper-cost-" + light); }
   }
   assert.deepEqual(o.errors, []);
 });
