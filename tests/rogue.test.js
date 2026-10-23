@@ -476,7 +476,7 @@ test("诊所只在诊所节点或回城休整时能用", () => {
 
 module.exports = { autoplay };
 
-test("长休只在任务的休息点：每个任务正好一个休息点，不在第一站也不在最后一站；没有战前长休了", () => {
+test("长休只在任务的休息点：每个任务至少一个休息点（按小时补，tests/rest-spacing.test.js），不在第一站也不在最后一站；没有战前长休了", () => {
   const { run, R } = fresh(["kolt", "helu"], "RB1");
   assert.equal(R.restBeforeNode, undefined);
   assert.equal(R.canRestBefore, undefined);
@@ -485,8 +485,8 @@ test("长休只在任务的休息点：每个任务正好一个休息点，不�
     run.board.forEach(t => {
       if (t.hunt) return;   // 悬赏：路线不预先给出，一站一站往前走（tests/bounty.test.js）
       const rests = t.nodeTypes.map((x, j) => x === "rest" ? j : -1).filter(j => j >= 0);
-      assert.equal(rests.length, 1, t.nodeTypes.join(","));
-      assert.ok(rests[0] > 0 && rests[0] < t.nodeTypes.length - 1, t.nodeTypes.join(","));
+      assert.ok(rests.length >= 1, t.nodeTypes.join(","));
+      rests.forEach(j => assert.ok(j > 0 && j < t.nodeTypes.length - 1, t.nodeTypes.join(",")));
     });
   }
 });
@@ -710,8 +710,13 @@ test("检定节点只插在两场战斗之间，一个任务最多 2 个", () =>
       ty.forEach((x, k) => {
         if (x !== "check") return;
         seen += 1;
+        // 插检定时前后是战斗；之后按小时补的休息点（tests/rest-spacing.test.js）可能夹在中间
+        // 跳过休息点列，看两边最近的非休息点：必须是战斗
         const fight = (y) => y === "battle" || y === "elite";
-        assert.ok(k > 0 && fight(ty[k - 1]) && fight(ty[k + 1]), "检定前后都应是战斗：" + ty.join(","));
+        let a = k - 1, z = k + 1;
+        while (a >= 0 && ty[a] === "rest") a--;
+        while (z < ty.length && ty[z] === "rest") z++;
+        assert.ok(a >= 0 && z < ty.length && fight(ty[a]) && fight(ty[z]), "检定两边最近的非休息点都应是战斗：" + ty.join(","));
       });
     }
   }
@@ -930,7 +935,7 @@ test("检定记下每颗 d100（供画面播检定动画）：点数 ≤ 成功�
   }
 });
 
-test("路线图：第一列、休息点那列、最后一列只有一个节点；其余列 1–3 个；任何走法都正好经过一次休息点", () => {
+test("路线图：第一列、休息点那列、最后一列只有一个节点；其余列 1–3 个；任何走法都经过同样的休息点（至少一个）", () => {
   const { run, R } = fresh(["kolt", "helu"], "MAP1");
   let branchy = 0;
   for (let b = 0; b < 30; b++) {
@@ -943,8 +948,8 @@ test("路线图：第一列、休息点那列、最后一列只有一个节点�
       assert.equal(cols[cols.length - 1].length, 1);
       assert.ok(["battle", "elite"].includes(cols[cols.length - 1][0]));
       const restCols = cols.map((c, i) => c.includes("rest") ? i : -1).filter(i => i >= 0);
-      assert.equal(restCols.length, 1);
-      assert.equal(cols[restCols[0]].length, 1, "休息点那一列没有岔路");
+      assert.ok(restCols.length >= 1);
+      restCols.forEach(i => assert.equal(cols[i].length, 1, "休息点那一列没有岔路"));
       cols.forEach((c, i) => {
         assert.ok(c.length >= 1 && c.length <= 3);
         assert.equal(new Set(c).size, c.length, "同一列不重复");

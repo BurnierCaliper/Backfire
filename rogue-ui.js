@@ -87,7 +87,7 @@
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
     `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
-  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在角色抽取机里抽角色。` +
+  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在抽取机里抽取（角色 / 武器升级材料 / 制作材料）。` +
     `角色永久死亡后等级与武器等级清零并移出队伍，下次抽到从 1 级重新培养。`;
   function renderParty() {
     $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : growth.on ? "长线养成 · 选择初始小队" : "选择队伍";
@@ -274,14 +274,25 @@
     const bench = run.party.length > 1
       ? `<p class="r-hint">队伍里的人也可以先换到候补：${run.party.map(p => `<button class="g-btn small" data-swap-out-only="${esc(p.kit)}">${esc(Rogue.heroName(p.kit))} 下场</button>`).join(" ")}</p>` : "";
     const daily = typeof Rogue.growthDaily === "function" ? Rogue.growthDaily(run) : null;
-    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">每个完成：随机材料 + 1000 奎支；三个全完成：额外 1 个${esc(fusion)} 和 1000 奎支。</p>` : "";
-    return `<h2>角色抽取机</h2>
-      <p class="r-hint">投入 ${d.cost} 个${esc(fusion)}抽一名角色（每名角色机会相同）：新角色加入队伍（满 ${ROGUE_GROWTH.partyMax} 人进候补），抽到已有的角色 +1 级（${ROGUE_GROWTH.maxLevel} 级封顶）。手里有 <b>${d.fusion}</b> 个。</p>
+    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">${dailyRewardText(fusion)}</p>` : "";
+    return `<h2>抽取机</h2>
+      ${window.GachaUI ? GachaUI.panelHtml(d, fusion) : ""}
       <p class="r-hint">已有：${esc(owned)}</p>
-      <button class="g-btn r-main" id="r-draw" ${d.canDraw ? "" : "disabled"}>${d.canDraw ? "抽一次" : esc(d.why)}</button>
       ${dailyHtml}
       ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
       ${bench}`;
+  }
+  /** 每日挑战奖励说明：数字从 rogue-data.js · ROGUE_GACHA.dailyTaskFusion / dailyAllFusion 读 */
+  function dailyRewardText(fusion) {
+    const per = Number(ROGUE_GACHA.dailyTaskFusion) || 0, all = Number(ROGUE_GACHA.dailyAllFusion) || 0;
+    return `每个完成：随机武器材料${per > 0 ? ` + ${per} 个${esc(fusion)}` : ""} + 1000 奎支；三个全完成：额外${all > 0 ? ` ${all} 个${esc(fusion)} 和` : ""} 1000 奎支。`;
+  }
+  /** 抽取：单机直接跑规则拿到结果再播动画（联机单局没有长线养成，抽取机只在单机出现） */
+  function doDraw(n) {
+    let res;
+    try { res = dispatch({ type: "run", action: "drawMany", n }, { run }); } catch (e) { completeAction(null, e); return; }
+    completeAction(res.notes);
+    if (window.GachaUI) GachaUI.play(res);
   }
   function renderBoard() {
     if (run.growth) {
@@ -334,8 +345,10 @@
       const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       // 龙哥 胶囊弹药+：排下一场开局的弹序
       const ammo = h.ammo != null ? `<br><small>下一场弹序</small> <select data-rest-ammo="${esc(h.kit)}">${(o.ammoOrders || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.ammo ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
-      return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
-        <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
+      // 补的休息点（need.free）：不耗补给、也没有食物加成，不让选吃什么
+      const eat = need.free ? "<small>这里不吃自带的食物</small>" : `<select data-rest-food="${esc(h.kit)}">${foods}</select>`;
+      return `<tr><td><b>${esc(h.name)}</b></td><td>${need.free ? "不消耗" : `${h.water} ml · ${h.food} 份`}</td>
+        <td>${eat}</td>
         <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select>${spit}${ammo}</td></tr>`;
     }).join("");
     const bad = (a, b) => (a > b ? "r-bad" : "");
@@ -349,7 +362,7 @@
     }).join(" · ");
     return `<div class="r-restplan"><h3 class="r-sub">长休安排</h3>
       <table><tr><th>角色</th><th>需要</th><th>吃</th><th>睡眠道具</th></tr>${rows}</table>
-      <p class="r-hint">消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}
+      <p class="r-hint">${need.free ? `这里不消耗补给，也没有食物加成${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}` : `消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}`}
         ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
   }
   const NODE_PANELS = {
@@ -375,9 +388,9 @@
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
-            <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
+            <small>${wakeHtml(C.hours.longRest)} · ${plan.free ? "不消耗补给" : plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short" ${shortCan.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时<small>${shortCan.ok ? "" : esc(shortCan.why) + " · "}${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
-          <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
+          <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>${esc(Rogue.restSkipLabel(run))} · 不花时间</small></button>
         </div>`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
@@ -571,9 +584,9 @@
     const info = query("smithInfo", { smith: id });
     if (!info) return "";
     const k = money();
-    const progress = info.claimed
-      ? `已领图纸「${esc(Rogue.blueprintById(info.claimed).name)}」`
-      : info.canClaim ? "可以领一张图纸" : `在他这里升级 ${info.uses}/${info.need} 次可领图纸`;
+    const got = info.claimed.length ? `已领「${info.claimed.map(x => esc((Rogue.blueprintById(x) || {}).name || x)).join("」「")}」` : "";
+    // 摘要行只放短进度（窄屏不折乱）；已领的图纸名放到展开后的说明里
+    const progress = info.done ? "图纸已领完" : info.canClaim ? `图纸 ${info.need}/${info.need} 可领` : `图纸 ${info.progress}/${info.need}`;
     const rows = info.needsIntro
       ? `<p class="r-hint">他不帮陌生人强化武器。</p><button class="g-btn" data-intro="${esc(id)}">给他看看你的武器</button>`
       : Rogue.smithOptions(run, id).map(o =>
@@ -581,12 +594,12 @@
         <span class="s-have"></span>
         <span class="s-price">${o.max ? "满级" : o.cost}</span>
         <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost || (o.mats && !o.enough) ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
-    const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（只能挑一张）：</p>
+    const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（挑一张；领完计数归零，再升级满 ${info.need} 次可领下一张）：</p>
       <div class="r-choices">${info.blueprints.map(b =>
         `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
     return `<details class="smith"${open || info.canClaim ? " open" : ""}>
       <summary><b>${esc(info.name)}</b><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
-      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}</p>
+      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}${got ? `<br>${got}` : ""}</p>
       ${claim}
       <div class="shop">${rows}</div>
       ${partShelf(id)}
@@ -615,7 +628,7 @@
     const ids = run.smiths || [];
     if (!ids.length) return "";
     return `<h2>工匠</h2>
-      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${money()} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
+      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${money()} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸；领完计数归零，再升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次给下一张（不给重复的，都领完就不再计数）。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
       ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}
       ${partRows(ids[0])}`;
@@ -725,6 +738,7 @@
   function huntLine(t) {
     const h = t && t.hunt;
     if (!h || h.found == null) return "";
+    if (h.located && h.target && h.targetAfterRest) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>。已经连续赶了很久的路，先在前面的休息点歇一歇，下一站再去对付它（休息时目标不会跑）。</div>`;
     if (h.located && h.target) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>（血量、atk ×1.5，多占 1 枚代币）。击败它完成任务；从这一战撤退目标会逃走，任务失败。</div>`;
     const pips = (n, max, cls) => Array.from({ length: max }, (_, i) => `<i class="${i < n ? cls : ""}"></i>`).join("");
     return `<div class="t-hunt">线索 <span class="hunt-pips">${pips(h.found, h.need, "ok")}</span> ${h.found}/${h.need}
@@ -952,7 +966,8 @@
     });
     on("r-fight", fight);
     document.querySelectorAll("[data-parley]").forEach(b => { b.onclick = () => act({ action: "parley", kit: b.dataset.parley }); });
-    on("r-draw", () => act({ action: "drawHero" }));
+    on("r-draw", () => doDraw(1));
+    on("r-draw10", () => doDraw(10));
     body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
     body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });
     const pay = $("r-payer");

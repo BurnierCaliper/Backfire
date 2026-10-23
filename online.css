@@ -113,6 +113,10 @@ body.ol-has-side .ol-stage { right: 330px; }
 body.ol-has-side .ol-dock { right: 344px; }
 /* 主持人：战斗中选顺序的面板也不盖住右边的战斗记录 / 小队栏（窄屏时记录栏本来就是抽屉，不处理） */
 @media (min-width: 821px) { body.ol-host-online.ol-in-battle .hs-overlay { right: 320px; } }
+/* 主持人：战斗中选行动顺序、协助询问的卡片从战斗顶栏（game.css · .g-top，48px；窄屏 46px）下面开始，不盖住顶栏——
+ * 「探索环节」「撤退」随时点得到（#322：以前每回合选顺序时整个顶栏被盖住，点不到） */
+body.ol-host-online.ol-in-battle .hs-overlay:not(.hs-ask-mini) { top: calc(var(--hs-top-height, 0px) + 48px); }
+@media (max-width: 820px) { body.ol-host-online.ol-in-battle .hs-overlay:not(.hs-ask-mini) { top: calc(var(--hs-top-height, 0px) + 46px); } }
 /* 选行动顺序的面板不盖住右侧栏：选顺序时也能看记录、在小队里商量 */
 body.ol-has-side .hs-overlay { right: 330px; }
 .ol-side-tabs, .ol-host-tabs { display: flex; gap: 0; flex: none; border-bottom: 2px solid #4d4337; }
@@ -245,6 +249,10 @@ body.ol-has-side .ol-toast { right: 344px; }
 /* 技能栏贴在舞台底部：战场比一屏高时也不用每次往下翻去点技能 */
 .ol-battle .g-hud { position: sticky; bottom: 0; z-index: 8; }
 .ol-battle .pc.off { opacity: .6; }
+/* 只是在等主机回话才灰掉的按钮（online-battle.js 挂 .ob-wait，#317 追加）：先照常亮着，过 0.3 秒还没回来才变灰——主机回得快就不闪。
+   动画的值盖过 game.css / hd2d.css 里 [disabled] 的透明度；减少动态效果时也一样（只是晚一点变灰，不是动画） */
+.ob-wait:disabled { animation: ob-wait-dim .32s step-end forwards; }
+@keyframes ob-wait-dim { from { opacity: 1; } to { opacity: .4; } }
 .ol-battle .pc.mine .k { color: var(--gold, #f2c230); }
 .ol-battle .hint .g-btn.small { margin-left: 6px; height: 26px; }
 .ol-battle .unit-wrap { position: relative; }

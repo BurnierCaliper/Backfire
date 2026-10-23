@@ -91,7 +91,8 @@ test("#321 场景（hd2d-scene.js）每一帧先问 HD2DPace.due 再画：信号
   const sig = /const sig = \{([^}]*)\};/.exec(frame);
   assert.ok(sig, "这一刻的信号");
   assert.deepEqual(sig[1].split(",").map(s => s.split(":")[0].trim()).sort(), ["flash", "fx", "motion", "moved", "particles", "shake", "storm", "tween", "woke"]);
-  assert.match(sig[1], /fx: !!\(options\.busy && options\.busy\(\)\)/, "演出在播：外面告诉");
+  assert.match(sig[1], /fx: sliding \|\| !!\(options\.busy && options\.busy\(\)\)/, "演出在播：外面告诉，或者铭牌在换区滑动、地台在闪（#330）");
+  assert.match(frame, /let sliding = zoneFlashes\.length > 0;\s*if \(!sliding\) state\.plates\.forEach\(p => \{ if \(p\.slide\) sliding = true; \}\);/, "滑动中的铭牌、在闪的地台都算");
   assert.match(sig[1], /moved: camMoved\(\)/, "镜头和上一次画的时候比动了没有");
   assert.match(sig[1], /particles: !!state\.particles/);
   assert.match(sig[1], /woke: t < wakeUntil/);

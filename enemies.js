@@ -3298,7 +3298,7 @@ const RACE_PERKS = {
   "鼠类人·鼠": { fieldCut: true, text: "环境适应：场地伤害、冻土击破 50% 概率免疫" },
   "牛类人·马": { firstBonus: true, text: "千里马：第一回合 +1 附赠" },
   "兽人·狼":   { hunt: true, text: "追猎本能：附赠，对一个敌人施加紧追" },
-  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破" },
+  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破；每回合最多一次，晕眩 / 失衡时不发作（打出失衡后接着来的协助攻击也算这次失衡）" },
   "兽人·蜥蜴": { spit: true, energyUp: true, text: "吐酸：附赠，近距 1×atk 酸，每场一次；鳞片（缺陷）：受能量伤害 +25%" },
   "兽人·猫":   { breakCap: true, distract: true, text: "灵巧：一回合最多失去 2 架势；注意力涣散（缺陷）：不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%" },
   "兽人·熊":   { text: "重装操作、嗜睡（战斗里不生效，只记在资料里）" }
@@ -3436,33 +3436,75 @@ function raceNoteAttack(a, t) {
   } else a.raceFocus = { id: t.id, round: now, streak: 1 };
 }
 
-/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用 */
+/** 易怒蛮牛「一击」的暂存：dealTo 期间（depth > 0）受伤只记下来，等这一击（主伤害 + 高压场地等连带伤害）全部结算完再判。
+ *  这一击里任何一段把它打进失衡 / 晕眩（含首领立刻恢复架势的 result.broke），整击都不发作、也不占这回合的次数。
+ *  只是结算过程中的临时值，不进 state（不进存档 / 撤销） */
+var RAGE_HOLD = { depth: 0, pending: [], assistOf: null };
+
+function rageBlocked(target, result) {
+  // 首领架势规则的精英牛被打进失衡、立刻恢复后，finishAssist 正在结算的、以这只牛为目标的那次协助攻击里打到它的每一下
+  // （含冷气注射等不带 assist 的连带伤害）都算这次失衡的一部分，和 lv 5 的牛一样不发作。
+  // 不看 flags.assist / _bossAssistWindow：窗口可能没人关，全反击 / 防守反击 / 支援也带 assist
+  const assistOfBreak = !!(RAGE_HOLD.assistOf && RAGE_HOLD.assistOf === target);
+  return !!(target.stunned || (!target.noPosture && Number(target.def) <= 0) || (result && result.broke) || assistOfBreak);
+}
+
+/** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用。
+ *  每回合最多一次（raceRageUsed，beginRound 清掉）；晕眩 / 失衡时不发作；dealTo 里的伤害等整击结算完再判（raceRageFlush） */
 function raceAfterHurt(target, result, attacker, notes) {
   const p = enemyRacePerk(target);
-  if (!p || !p.rage || target.dead || target._rageBusy || target.hidden) return;
+  if (!p || !p.rage || target.dead || target.hidden) return;
   if (!((Number(result && result.total) || 0) > 0 || (Number(result && result.shpDealt) || 0) > 0)) return;
+  if (RAGE_HOLD.depth > 0) {
+    let rec = RAGE_HOLD.pending.find(r => r.target === target);
+    if (!rec) RAGE_HOLD.pending.push(rec = { target, broke: false });
+    if (rageBlocked(target, result)) rec.broke = true;
+    return;
+  }
+  if (rageBlocked(target, result)) return;
+  raceRageGo(target, notes);
+}
+
+/** 暂存期间别的结算（bossQuickRecover：纯击破那一段打进失衡、首领立刻恢复）告诉暂存「这只牛这一击打出了失衡」。只管当前这一击 */
+function raceRageMarkBroke(u) {
+  if (RAGE_HOLD.depth <= 0 || !u) return;
+  let rec = RAGE_HOLD.pending.find(r => r.target === u);
+  if (!rec) RAGE_HOLD.pending.push(rec = { target: u, broke: false });
+  rec.broke = true;
+}
+
+/** 最外层 dealTo 结束：判暂存的易怒蛮牛。返回要追加到这一击日志的行 */
+function raceRageFlush() {
+  const list = RAGE_HOLD.pending;
+  RAGE_HOLD.pending = [];
+  const notes = [];
+  list.forEach(r => { if (!r.broke && !rageBlocked(r.target)) raceRageGo(r.target, notes); });
+  return notes;
+}
+
+function raceRageGo(target, notes) {
+  if (target.dead || target.hidden || target.raceRageUsed) return;
   const max = totalMaxHp(target);
   if (!(max > 0) || totalHp(target) >= max * RACE_PERK.rageHpPct) return;
-  target._rageBusy = true;
-  try {
-    notes.push(`易怒蛮牛：${target.name} 血量低于 ${Math.round(RACE_PERK.rageHpPct * 100)}%，受伤后失控！`);
-    target.bonus = 0;
-    target.raceNoBonus = true;   // 下个敌人回合的附赠也没了（refreshEnemyEconomy 读）
-    const from = Number(target.zone);
-    const ns = zoneNeighbors(from).slice();
-    for (let i = ns.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ns[i], ns[j]] = [ns[j], ns[i]]; }
-    for (const z of ns) {
-      doMove(target, z, { free: true, forced: true });
-      if (Number(target.zone) !== from) break;
-    }
-    if (Number(target.zone) === from) notes.push(`${target.name} 没有路可冲，原地发狂。`);
-    const pool = hostilesOf(target).filter(x => Number(x.zone) === Number(target.zone) && !x.kind && !x.isProp && !(typeof isDownProtected === "function" && isDownProtected(x)));
-    if (pool.length) {
-      const v = pool[Math.floor(Math.random() * pool.length)];
-      notes.push(`${target.name} 不受控地冲撞 ${v.name}。`);
-      dealBreak(v, RACE_PERK.rageBreak, "physical", notes, "易怒蛮牛冲撞", { by: target });
-    } else notes.push(`${target.name} 冲进 ${target.zone} 区，没有撞到人。`);
-  } finally { target._rageBusy = false; }
+  // 每回合（整轮）最多发作一次：beginRound 清 raceRageUsed
+  target.raceRageUsed = true;
+  notes.push(`易怒蛮牛：${target.name} 血量低于 ${Math.round(RACE_PERK.rageHpPct * 100)}%，受伤后失控！`);
+  target.bonus = 0;
+  target.raceNoBonus = true;   // 下个敌人回合的附赠也没了（refreshEnemyEconomy 读）
+  const from = Number(target.zone);
+  const ns = zoneNeighbors(from).slice();
+  for (let i = ns.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ns[i], ns[j]] = [ns[j], ns[i]]; }
+  for (const z of ns) {
+    doMove(target, z, { free: true, forced: true });
+    if (Number(target.zone) !== from) break;
+  }
+  if (Number(target.zone) === from) notes.push(`${target.name} 没有路可冲，原地发狂。`);
+  const pool = hostilesOf(target).filter(x => Number(x.zone) === Number(target.zone) && !x.kind && !x.isProp && !(typeof isDownProtected === "function" && isDownProtected(x)));
+  if (pool.length) {
+    const v = pool[Math.floor(Math.random() * pool.length)];
+    notes.push(`${target.name} 不受控地冲撞 ${v.name}。`);
+    dealBreak(v, RACE_PERK.rageBreak, "physical", notes, "易怒蛮牛冲撞", { by: target });
+  } else notes.push(`${target.name} 冲进 ${target.zone} 区，没有撞到人。`);
 }
 
 /** 种族带来的附赠技能（enemySkillList 追加）。只有敌人有：角色有自己的技能 */

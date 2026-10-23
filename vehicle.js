@@ -32,7 +32,7 @@ const VEHICLES = {
     cover: { chance: 0.4, openChance: 1, openDr: 0.25 },   // 代挡概率；张开掩体时的代挡概率、堡垒受伤减免
     ram: { mult: 0.75, baseBreak: 2 },         // 驾驶员撞击（附赠：移动一个区，然后撞一个单位）
     cannon: { range: 2, mult: 1, baseBreak: 1, burnChance: 0.5, burn: 1 },   // 开炮：距离 range 以内，mult×atk + 开炮骰 火
-    burn: { mult: 0.5, burn: 1 },              // 焚烧：同区所有敌对单位
+    burn: { mult: 0.5, burnChance: 0.35, burn: 1 },   // 焚烧：同区所有敌对单位，每个被打的单位各掷一次 35% 灼烧
     blast: { mult: 1, burn: 1, ejectMult: 2, ejectBurn: 1 }   // 殉爆：同区所有单位；车里的人再吃 ejectMult×atk
   }
 };
@@ -433,7 +433,7 @@ function vehicleRideSkills(u) {
   const c = VEHICLES[p.kind];
   const out = [
     { id: "veh_fire", name: "开炮", hint: `距离${c.cannon.range}以内 · ${c.cannon.mult}atk + 1d${p.veh.dieSides} 火 ${c.cannon.baseBreak}击破 · ${Math.round(c.cannon.burnChance * 100)}% 灼烧 ${c.cannon.burn}` },
-    { id: "veh_burn", name: "焚烧", hint: `同区所有敌对单位 ${c.burn.mult}atk 火 · 灼烧 ${c.burn.burn}` }
+    { id: "veh_burn", name: "焚烧", hint: `同区所有敌对单位 ${c.burn.mult}atk 火 · 每人各 ${Math.round(c.burn.burnChance * 100)}% 灼烧 ${c.burn.burn}` }
   ];
   if (u.vehMerged) {
     out.push({ id: "veh_cover", name: "张开掩体", hint: `到驾驶员下次行动前：同区同阵营代挡 ${Math.round(c.cover.openChance * 100)}% · 堡垒受伤 −${Math.round(c.cover.openDr * 100)}%` });
@@ -548,7 +548,11 @@ function runVehicleSkill(id, a, t, hitOne, lines, needT) {
   if (k === "veh_burn") {
     const foes = (state.units || []).filter(u => vehicleHostile(a, u) && Number(u.zone) === Number(a.zone));
     if (!foes.length) { lines.push(`${a.zone} 区没有敌对的单位。`); return true; }
-    foes.forEach(u => hitOne(a, u, { atk, mult: c.burn.mult, element: "fire", baseBreak: 0, atkRange: "any", flags: { action: true, aoe: true }, onConnect: { burn: c.burn.burn } }));
+    // 每个被打的单位各掷一次灼烧（Math.random = 游戏装好的种子随机数，回放 / 联机同种子结果一样）
+    foes.forEach(u => {
+      const burn = Math.random() < c.burn.burnChance;
+      hitOne(a, u, { atk, mult: c.burn.mult, element: "fire", baseBreak: 0, atkRange: "any", flags: { action: true, aoe: true }, onConnect: burn ? { burn: c.burn.burn } : null });
+    });
     return true;
   }
   lines.push("未实现的载具招式：" + id);
