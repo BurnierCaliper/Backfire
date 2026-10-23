@@ -1274,6 +1274,13 @@
       confirmBox.querySelector('[data-confirm="yes"]')?.focus({ preventScroll: true });
       return new Promise(resolve => { confirmResolve = resolve; });
     }
+    /** 暂停页面的「离开房间 / 离开并保存」：确认了才走和房间面板底下同一个 api.leave() */
+    async function leaveAsk() {
+      const c = global.PauseMenu ? global.PauseMenu.CONFIG.items.leave : null;
+      if (!c || !view.active) return;
+      const host = !!view.isHost;
+      if (await askConfirm(host ? c.hostConfirmTitle : c.confirmTitle, host ? c.hostConfirmText : c.confirmText, host ? c.hostLabel : c.label, c.cancel)) await call(() => api.leave());
+    }
     function closeConfirm(ok) {
       confirmBox.hidden = true; confirmBox.innerHTML = "";
       const r = confirmResolve; confirmResolve = null; if (r) r(!!ok);
@@ -1420,6 +1427,11 @@
         pressed: () => !!(global.Sfx && global.Sfx.enabled()),
         label: () => { const c = global.PauseMenu.CONFIG.items.sfx; return global.Sfx && global.Sfx.enabled() ? c.on : c.off; },
         run: () => { const S = global.Sfx; if (!S) return; S.setEnabled(!S.enabled()); if (S.enabled()) S.play("physical"); } }),
+      // 离开房间 / 离开并保存（主持人）：每个画面都直接看得见，不用先进「消息与成员」；点了先确认（游戏内确认框）
+      global.PauseMenu.register({ id: "leave", visible: () => !!view.active,
+        label: () => { const c = global.PauseMenu.CONFIG.items.leave; return view.isHost ? c.hostLabel : c.label; },
+        hint: () => { const c = global.PauseMenu.CONFIG.items.leave; return view.isHost ? c.hostHint : c.hint; },
+        run: () => leaveAsk() }),
       // 玩家选着技能、正在选目标、战场上有要点选的询问：Esc 留给战场取消（online-battle.js），不开菜单
       global.PauseMenu.addBlocker(() => !!(view.active && !view.isHost && view.screen === "battle" && (request?.skill || fieldAsk()))),
       // 纸片画面（#308）的「工具 ▾」下拉、⇅ 点开的按钮开着：Esc 先收它们

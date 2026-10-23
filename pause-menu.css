@@ -41,3 +41,6 @@
 @media (prefers-reduced-motion: reduce) { .pm-dot.pm-pop { animation: none; } }
 /* 联机时顶栏里的按钮收起来，用 #online-dock 里的那一个（主持人在任何画面都找得到，不出两个） */
 body.pm-online .pm-open:not(.ol-button) { display: none !important; }
+/* 离开房间 / 离开并保存（联机）：排在最后，和别的项隔开一点，字是红的，免得误点 */
+.pm-item[data-pause-item="leave"] { margin-top: 6px; }
+.pm-item[data-pause-item="leave"] b { color: var(--sk-alert, #ff7a5c); }

@@ -241,6 +241,36 @@ test("D3 display: paused connection disables action and reconnect leaves the dis
   assert.deepEqual(o.errors, []);
 });
 
+test("暂停页面直接有「离开房间」（主持人是「离开并保存」）：大厅、探索、战斗、断线重连中都看得见；点了先确认，「留下」不走，确认才离开", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  const row = () => page.evaluate(() => PauseMenu.list().find(r => r.id === "leave") || null);
+  for (const screen of ["lobby", "exploration", "battle", "ended"]) {
+    await player(page, { screen });
+    const r = await row();
+    assert.ok(r, screen + "：菜单里有离开");
+    assert.equal(r.label, "离开房间");
+  }
+  await player(page, { screen: "battle", status: { connected: false, hostOnline: false, paused: true, roster: [] } });
+  assert.ok(await row(), "断线重连中也能离开");
+  const list = await page.evaluate(() => PauseMenu.list().map(r => r.id));
+  assert.equal(list[list.length - 1], "leave", "排在最后");
+  // 点了先弹确认框；「留下」不离开
+  await menuItem(page, "leave");
+  await page.waitForSelector("#online-confirm:not([hidden])");
+  assert.match(await page.locator("#online-confirm").innerText(), /离开房间？/);
+  await page.click('#online-confirm [data-confirm="no"]');
+  assert.equal((await calls(page)).filter(c => c.kind === "leave").length, 0, "留下 = 不离开");
+  await menuItem(page, "leave");
+  await page.click('#online-confirm [data-confirm="yes"]');
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "leave"));
+  assert.equal((await calls(page)).filter(c => c.kind === "leave").length, 1);
+  assert.equal(await row(), null, "离开以后（不在房间里）没有这一项");
+  // 主持人：叫「离开并保存」
+  await page.evaluate(() => fixture.set({ active: true, isHost: true, identity: { id: "gm" }, screen: "exploration" }));
+  assert.equal((await row()).label, "离开并保存");
+  assert.deepEqual(o.errors, []);
+});
+
 test("联机跑团主持人：大厅里勾选队员换人；探索时菜单里有「角色分配」入口（#298）；战斗中说明不能改", async t => {
   const o = await open(t); if (!o) return; const { page } = o;
   await page.evaluate(() => {
