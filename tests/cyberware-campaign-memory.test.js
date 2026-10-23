@@ -24,6 +24,7 @@ const snap = u => plain({ cw: u.cyberware, over: u.cyberOverinstall, layers: u.l
 const kolt = c => c.findKit("kolt", c.S.state.units);
 
 function install(c) {
+  kolt(c).level = 5;   // #315：5 级起才能在诊所装义体（等级跟着队伍记忆 / 存档走）
   c.trpgCyberwareInstall("kolt", "example_t5_melee");
   const u = kolt(c);
   u.cyberOverinstall = true;

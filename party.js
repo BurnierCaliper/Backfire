@@ -576,7 +576,7 @@ function heroProfile(kit) { return HERO_PROFILES[kit] || null; }
  *   softFail  检定失败往往不会撞上最严重的后果（鼠 · 环境适应）：受伤减半 */
 const RACE_CHECK_PERKS = {
   "人类":      { reroll: true, text: "迎难直上：失败后重掷一次" },
-  "猫类人-猫": { adv: ["侦察", "躲藏"], text: "夜视：潜行 / 侦察类检定优势" },
+  "猫类人-猫": { adv: ["侦察", "躲藏"], text: "夜视：侦察 / 躲藏类检定优势" },
   "鼠类人-鼠": { softFail: true, text: "环境适应：检定失败受伤减半" },
   "鼠类人-兔": { adv: ["调查类"], text: "听觉敏锐：调查类检定优势" },
   "牛类人-牛": { lowHpDis: true, text: "血量低于一半时检定劣势" },
