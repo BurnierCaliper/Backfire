@@ -30,6 +30,7 @@
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  *   HD2DField.packetView(pv, { OB, OV })                    联机玩家收到的那一份 → 画面用的（纯函数，#289）
+ *   HD2DField.quality(storage) / setQuality(choice, storage) / levelOf(choice, dropped) / nextQuality(choice)   画质（#321，见 FIELD.quality；读写都包 try/catch）
  * 页面（game.js 调）：on() / view(snaps) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
  *   联机玩家（online-ui.js 调，#289）：attach(spec) → 把手 { on, view, actor, marks, play, skip }；detach(spec)。spec 见下面的「画面挂在哪」
  *   攻击演出（#283）：numbers(list) 弹纸片风数字 / paper(id) 打中那一下的纸片感 / unpaper() 画布复原 / push(出手的, 目标) 推镜头（返回要等的毫秒，不推 = 0）/ release() 拉回
@@ -43,13 +44,17 @@
   /* ---------- 配置 ----------
    *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
-   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
+   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera / HD2DPace，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
    *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
    *                            全用普通脚本，直接双击打开 game.html（file://）也能开新画面——浏览器不让 file:// 加载 ES 模块
    *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
    *                            名字、状态、实际 ATK 这些用这一刻的战斗状态投影出来的
    *   pad                      取景时让开战场上沿的首领机制横幅 / 援军倒计时、下沿的镜头按钮，再多留几像素
-   *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」 */
+   *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」
+   *   quality                  画质（#321：联机玩家那边新画面更卡、操作延迟更大）。暂停页面里那一项（字在 pause-menu.js 的 PAUSE_MENU.items.quality）点一下换下一档，
+   *                            单机 / 联机同一个本机设置：storageKey 本机记住的键（存 choices 里的一个）、choices 点一下按这个顺序换、dflt 没记过时用哪个；
+   *                            levels 每一档交给场景的（hd2d-scene.js · setQuality：pixelRatio 像素比上限、bokeh 景深、bloom 泛光；低 = 像素比最多 1、不加景深和泛光）；
+   *                            auto「自动」：先用 from 那一档，满帧画时一直卡（hd2d-pace.js 量的帧时间，场景叫 onSlow）就降到 to——只降一次，这一次打开页面都用它，不记在本机 */
   const FIELD = {
     storageKey: "backfire-hd2d-field",
     defaultOn: false,
@@ -58,12 +63,18 @@
     text: {
       fail: "新画面打不开（这个浏览器用不了 WebGL：{0}），先用旧画面"
     },
-    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
+    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-pace.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
     scene: "hd2d-scene.bundle.js",
     sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
-    drag: 5
+    drag: 5,
+    quality: {
+      storageKey: "backfire-hd2d-quality",
+      choices: ["auto", "high", "low"], dflt: "auto",
+      levels: { high: { pixelRatio: 2, bokeh: true, bloom: true }, low: { pixelRatio: 1, bokeh: false, bloom: false } },
+      auto: { from: "high", to: "low" }
+    }
   };
   /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
    * 主人：「在远景情况下如果还继续缩小，就会变回之前的战斗画面，具体是镜头上升到正上方然后一阵白色云雾后切换成之前的战斗画面」。
@@ -108,6 +119,35 @@
       storage.setItem(FIELD.storageKey, on ? "on" : "off");
       return true;
     } catch (e) { return false; }
+  }
+
+  /* ---------- 画质（#321，数值在 FIELD.quality）---------- */
+  /** 本机记着的画质（FIELD.quality.choices 里的一个）；没记过、记了认不得的、读不了都按 dflt（自动） */
+  function quality(storage) {
+    const Q = FIELD.quality;
+    try {
+      const v = storage ? storage.getItem(Q.storageKey) : null;
+      return Q.choices.includes(v) ? v : Q.dflt;
+    } catch (e) { return Q.dflt; }
+  }
+  /** 记住画质；认不得的、存不了（隐私模式、存满了）不报错，返回 false */
+  function setQuality(choice, storage) {
+    try {
+      if (!storage || !FIELD.quality.choices.includes(choice)) return false;
+      storage.setItem(FIELD.quality.storageKey, choice);
+      return true;
+    } catch (e) { return false; }
+  }
+  /** 这一刻用哪一档（FIELD.quality.levels 的键）：选了高 / 低就是它；自动 = auto.from，这一次打开页面卡过（dropped）就是 auto.to */
+  function levelOf(choice, dropped) {
+    const Q = FIELD.quality;
+    if (choice === "auto" || !own(Q.levels, choice)) return dropped ? Q.auto.to : Q.auto.from;
+    return choice;
+  }
+  /** 暂停页面里点一下换到的下一档（按 FIELD.quality.choices 的顺序，转一圈） */
+  function nextQuality(choice) {
+    const c = FIELD.quality.choices, i = c.indexOf(choice);
+    return c[(i + 1) % c.length];
   }
 
   /* ---------- 画面用的数据（纯函数）---------- */
@@ -261,6 +301,8 @@
   const S = { want: false, loading: null, create: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false, hud: null };
   const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
   const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null, toggle: null, home: null };
+  /** 画质（#321）：choice 这一次打开页面在暂停页面里选过的（存不了也照它；null = 照本机记着的）、dropped「自动」一直卡、已经降过一档（这一次打开页面都用低的） */
+  const QS = { choice: null, dropped: false };
   let keysBound = false;
   /** 这个脚本所在的目录（hd2d/）：开了以后从这里加载布局、场景 */
   let BASE = "hd2d/";
@@ -299,8 +341,8 @@
   };
   let host = SOLO;
 
-  /** 页面加载完（game.js 的 boot 之后）接上开关、战场上的滚轮；本机记着开就直接打开（刚打开页面，不播转场）。
-   *  opts（测试用）：doc / storage / load / hint 换成假的，reduced()（减少动态效果）/ wait(秒, fn)（计时器）/ now()（秒）也能换 */
+  /** 页面加载完（game.js 的 boot 之后）接上开关、战场上的滚轮、暂停页面里的「画质」（#321）；本机记着开就直接打开（刚打开页面，不播转场）。
+   *  opts（测试用）：doc / storage / load / hint 换成假的，reduced()（减少动态效果）/ wait(秒, fn)（计时器）/ now()（秒）/ pauseMenu（暂停页面）也能换 */
   function boot(opts) {
     opts = opts || {};
     stopMist();
@@ -309,6 +351,7 @@
     host = SOLO;
     S.want = false; S.loading = null; S.broken = false;
     T.gesture = null;
+    QS.choice = null; QS.dropped = false;
     env.doc = opts.doc || root.document || null;
     env.storage = opts.storage !== undefined ? opts.storage : storageOf();
     env.load = opts.load || loadModules;
@@ -326,6 +369,7 @@
     // 战场上的滚轮在捕获阶段先过这里（比新画面场景自己的滚轮先看到）：转场中不理、旧画面往前滚转到新画面
     bindWheel(env.doc.getElementById("g-field"));
     if (env.doc === root.document && !keysBound && typeof root.addEventListener === "function") { keysBound = true; root.addEventListener("keydown", onKey); }
+    registerQuality(opts.pauseMenu || root.PauseMenu);
     paintToggle();
     if (enabled(env.storage)) start();
   }
@@ -548,6 +592,8 @@
     try {
       const input = h.input();
       S.sc = create(stage, Object.assign({
+        // 画质（#321）：这一刻的那一档；有演出在播时照常满帧画（静止时场景自己降帧）；「自动」一直卡就降一档
+        quality: FIELD.quality.levels[qualityLevel()], busy: fxBusy, onSlow,
         onCameraChange: syncCam,
         onPortraitChange: () => { if (S.sc) paint(true); },
         onViewChange: () => { if (S.sc) paint(true); },
@@ -699,6 +745,47 @@
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
     const K = root.HD2DCamera.CAMERA.keys;
     if ((e.key === K.prev || e.key === K.next) && S.sc.tier !== "far") { e.preventDefault(); S.sc.stepZone(e.key === K.prev ? -1 : 1); }
+  }
+
+  /* ---------- 画质、演出在播（#321）----------
+   * 暂停页面里的「画质」：点一下按 FIELD.quality.choices 换下一档（自动 → 高 → 低），菜单不收起；记在本机（存不了也照这一次选的），单机 / 联机同一个。
+   * 新画面开着时才有这一项（关着时画质用不上）。字在 pause-menu.js 的 PAUSE_MENU.items.quality。只换这台电脑上的画面，不碰战斗状态、不发给别人 */
+  /** 现在选的（这一次打开页面选过的优先，不然本机记着的） */
+  const qualityChoice = () => (QS.choice != null ? QS.choice : quality(env.storage));
+  /** 这一刻用哪一档（FIELD.quality.levels 的键） */
+  const qualityLevel = () => levelOf(qualityChoice(), QS.dropped);
+  /** 演出在播（场景按需渲染时看它：播着就照常满帧画）：整包演出（hd2d-play.js：联机玩家、原型）、单机的出招演出 / 敌人行动（game.js 的 G.depth） */
+  function fxBusy() {
+    if (root.HD2DPlay && root.HD2DPlay.busy) return true;
+    return host === SOLO && !!(root.GAME && root.GAME.depth > 0);
+  }
+  /** 场景量到一直卡（hd2d-pace.js · meter）：选的是「自动」、还没降过 → 降一档（这一次打开页面都用它，不记在本机）；选了高 / 低就不管 */
+  function onSlow() {
+    if (qualityChoice() !== "auto" || QS.dropped) return;
+    QS.dropped = true;
+    applyQuality();
+  }
+  /** 画质换到这一刻的那一档（场景是旧的、没有 setQuality 就算了），暂停页面的字跟着换 */
+  function applyQuality() {
+    if (S.sc && typeof S.sc.setQuality === "function") S.sc.setQuality(FIELD.quality.levels[qualityLevel()]);
+    if (root.PauseMenu && typeof root.PauseMenu.refresh === "function") root.PauseMenu.refresh();
+  }
+  /** 暂停页面里点「画质」：换下一档、记在本机，马上用上 */
+  function cycleQuality() {
+    QS.choice = nextQuality(qualityChoice());
+    setQuality(QS.choice, env.storage);
+    applyQuality();
+  }
+  /** 「画质」那一项写什么（PAUSE_MENU.items.quality）：自动卡过、降了一档时另写一句 */
+  function qualityLabel(PM) {
+    const words = PM.CONFIG && PM.CONFIG.items && PM.CONFIG.items.quality, c = qualityChoice();
+    if (!words) return c;
+    return c === "auto" && QS.dropped ? words.autoLow : words[c] || words.label;
+  }
+  /** 在暂停页面登记「画质」（同一个 id 再登记会换掉旧的：重新 boot 也只有一项）；没有暂停页面（Node 里、原型页）就算了 */
+  function registerQuality(PM) {
+    if (!PM || typeof PM.register !== "function") return;
+    PM.register({ id: "quality", stay: true, visible: () => !!S.want, label: () => qualityLabel(PM), run: cycleQuality });
   }
 
   /* ---------- game.js 调的（单机；联机玩家的画面挂着时不管，快照照样记着）---------- */
@@ -877,7 +964,7 @@
     if (S.push && root.HD2DFx && root.HD2DPlay) S.push.release(root.HD2DFx.FX.push.out * root.HD2DPlay.clock);
   }
 
-  const api = { FIELD, MIST, enabled, setEnabled, viewState, packetView, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach };
+  const api = { FIELD, MIST, enabled, setEnabled, quality, setQuality, levelOf, nextQuality, viewState, packetView, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

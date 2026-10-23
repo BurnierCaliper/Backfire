@@ -402,13 +402,18 @@ test("白天 / 夜晚 / 沙暴：浮着的面板（顶栏、技能栏、队伍�
   assert.deepEqual(o.errors, []);
 });
 
-test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是图片文件），同一个尺寸只画一次；夜里换一套；减少动态效果时开合不做动画", { timeout: 60000 }, async t => {
+test("纸片美术：面板贴上程序生成的纸纹（toBlob 编码的 blob: 地址，不是图片文件），同一档只画一次；夜里换一套；减少动态效果时开合不做动画", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await page.emulateMedia({ reducedMotion: "reduce" });
   await asPlayer(page);
-  await page.waitForFunction(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-paper .olp-tag-card", ".ol-battle .endturn"].every(s => { const el = document.querySelector(s); return el && el.dataset.olpTex; }));
-  const tex = await page.evaluate(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-side"].map(s => { const el = document.querySelector(s); return [el.dataset.olpTex, el.style.getPropertyValue("--olp-tex").slice(0, 27)]; }));
-  assert.deepEqual(tex, [["tapebar", 'url("data:image/png;base64,'], ["dock", 'url("data:image/png;base64,'], ["kraft", 'url("data:image/png;base64,'], ["kraft", 'url("data:image/png;base64,']], "顶栏胶带、技能栏、队伍牛皮纸、抽屉的竖标签");
+  // 纹理挪到空闲时画（#321）：等它们都贴上
+  await page.waitForFunction(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-paper .olp-tag-card", ".ol-battle .endturn", "#online-side"].every(s => { const el = document.querySelector(s); return el && el.dataset.olpTex; }));
+  const tex = await page.evaluate(() => ["#online-paper .olp-top", ".ol-battle > .g-hud", ".hd2d-party", "#online-side"].map(s => { const el = document.querySelector(s); return [el.dataset.olpTex, el.style.getPropertyValue("--olp-tex").slice(0, 10)]; }));
+  assert.deepEqual(tex, [["tapebar", 'url("blob:'], ["dock", 'url("blob:'], ["kraft", 'url("blob:'], ["kraft", 'url("blob:']], "顶栏胶带、技能栏、队伍牛皮纸、抽屉的竖标签");
+  // blob: 地址真的读得出一张图（和纹理一样大：那一档 + 撕边外的影子）
+  const img = await page.evaluate(() => new Promise(r => { const el = document.querySelector(".ol-battle > .g-hud"), url = /url\("(.*)"\)/.exec(el.style.getPropertyValue("--olp-tex"))[1], i = new Image(); i.onload = () => r({ w: i.naturalWidth, h: i.naturalHeight, want: OnlinePaper.texSpec("dock", el.offsetWidth, el.offsetHeight, { time: document.body.dataset.olpTime, weather: document.body.dataset.olpWeather }), pad: OnlinePaper.PAPER.art.pad }); i.onerror = () => r(null); i.src = url; }));
+  assert.ok(img, "读得出来");
+  assert.deepEqual([img.w, img.h], [img.want.w + 2 * img.pad, img.want.h + 2 * img.pad], "按那一档的大小画");
   assert.equal(await page.evaluate(() => document.querySelector("#online-paper .olp-tag.on .olp-tag-card").dataset.olpTex), "tagon", "当前行动的吊牌换青色那一种");
   // 纸纹那一层铺满整块面板（比面板四边多出撕边外的影子），不是一条细线
   const sheet = await page.evaluate(() => { const el = document.querySelector(".ol-battle > .g-hud"), cs = getComputedStyle(el, "::before"); return { h: parseFloat(cs.height), panel: el.offsetHeight }; });
@@ -416,8 +421,8 @@ test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是�
   // 「结束行动」是纸板 + 喷漆字：不再垫 skin.css 的那块喷漆色块（字和底不能是一个颜色）
   const end = await page.evaluate(() => { const el = document.querySelector(".ol-battle .endturn"); return { tex: el.dataset.olpTex, before: getComputedStyle(el, "::before").display }; });
   assert.deepEqual(end, { tex: "board", before: "none" });
-  // 同一个尺寸、同一套配色只画一次（第二次从缓存拿，一模一样）
-  const same = await page.evaluate(() => { const th = { time: "day", weather: "none" }, a = OnlinePaper.texture(document, "card", 123, 45, th), t0 = performance.now(), b = OnlinePaper.texture(document, "card", 123, 45, th); return { same: a === b, fast: performance.now() - t0 < 2, png: a.startsWith("data:image/png") }; });
+  // 同一档、同一套配色只画一次（第二次从缓存拿，一模一样；123 × 45 和 123 × 47 是同一档）
+  const same = await page.evaluate(() => { const th = { time: "day", weather: "none" }, a = OnlinePaper.texture(document, "card", 123, 45, th), t0 = performance.now(), b = OnlinePaper.texture(document, "card", 123, 47, th); return { same: a === b, fast: performance.now() - t0 < 2, png: /^(data:image\/png|blob:)/.test(a) }; });
   assert.deepEqual(same, { same: true, fast: true, png: true });
   // 斑驳遮罩（印章、喷漆）
   assert.match(await page.evaluate(() => document.body.style.getPropertyValue("--olp-grit")), /^url\("data:image\/png/);
@@ -431,6 +436,46 @@ test("纸片美术：面板贴上程序生成的纸纹（data: 地址，不是�
   const motion = await page.evaluate(() => ["#online-side", ".ol-battle > .g-hud", ".hd2d-party", "#online-paper .olp-tools"].map(s => { const cs = getComputedStyle(document.querySelector(s)); return cs.transitionDuration + "/" + cs.animationName; }));
   assert.ok(motion.every(m => /^0s(, 0s)*\/none$/.test(m)), "没有动画：" + motion);
   await shot(page, "paper-step3-night");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#321 选技能 / 取消：技能栏变高又变矮，纸纹照旧是那一张、一张都不画、不叫同步的 toDataURL；大小差太多才画新的——不在 dress 里画（不堵主线程），空闲时画好再换上，画好之前照旧贴着上一张", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await asPlayer(page);
+  await page.waitForFunction(() => { const h = document.querySelector(".ol-battle > .g-hud"); return !!h && h.dataset.olpTex === "dock" && (typeof OnlinePaper.pending !== "function" || OnlinePaper.pending() === 0); }, null, { timeout: 30000 });
+  // 量：画了几张纹理（getContext）、同步编码了几次（toDataURL）
+  await page.evaluate(() => {
+    window.__paint = { ctx: 0, data: 0 };
+    const P = HTMLCanvasElement.prototype, g = P.getContext, d = P.toDataURL;
+    P.getContext = function (...a) { __paint.ctx++; return g.apply(this, a); };
+    P.toDataURL = function (...a) { __paint.data++; return d.apply(this, a); };
+  });
+  const dock = () => page.evaluate(() => { const h = document.querySelector(".ol-battle > .g-hud"); return { h: h.offsetHeight, tex: h.style.getPropertyValue("--olp-tex"), paint: Object.assign({}, __paint) }; });
+  const before = await dock();
+  await page.click(".ol-battle .skills .sk");                         // 选一个技能：技能栏多出选目标的提示，变高
+  await page.waitForFunction(h => document.querySelector(".ol-battle > .g-hud").offsetHeight !== h, before.h);
+  await page.waitForTimeout(400);                                       // 比 settle + 空闲长：要画的话早该画了
+  const picked = await dock();
+  await page.keyboard.press("Escape");                                  // 取消：变回去
+  await page.waitForFunction(h => document.querySelector(".ol-battle > .g-hud").offsetHeight === h, before.h);
+  await page.waitForTimeout(400);
+  const back = await dock();
+  assert.notEqual(picked.h, before.h, "选技能时技能栏高度变了：" + before.h + " → " + picked.h);
+  assert.deepEqual([picked.tex, back.tex], [before.tex, before.tex], "一直是那一张纹理");
+  assert.deepEqual(back.paint, { ctx: 0, data: 0 }, "一张都没画、没有同步编码");
+  // 差太多（技能栏高出一大截）：dress 那一下不画，记下缺的；空闲时画好（blob: 地址）再换上
+  const big = await page.evaluate(() => {
+    const h = document.querySelector(".ol-battle > .g-hud"), was = h.style.getPropertyValue("--olp-tex"), n = __paint.ctx;
+    h.style.minHeight = h.offsetHeight + 260 + "px";
+    OnlinePaper.dress(document, null, { time: document.body.dataset.olpTime, weather: document.body.dataset.olpWeather });
+    return { painted: __paint.ctx - n, pending: typeof OnlinePaper.pending === "function" ? OnlinePaper.pending() : 0, same: h.style.getPropertyValue("--olp-tex") === was, was };
+  });
+  assert.deepEqual([big.painted, big.same], [0, true], "dress 里不画，先照旧贴着上一张");
+  assert.ok(big.pending >= 1, "记下缺这一档");
+  await page.waitForFunction(was => document.querySelector(".ol-battle > .g-hud").style.getPropertyValue("--olp-tex") !== was, big.was, { timeout: 10000 });
+  const after = await dock();
+  assert.match(after.tex, /^url\("blob:/);
+  assert.ok(after.paint.ctx > 0 && after.paint.data === 0, "空闲时画的、toBlob 编码：" + JSON.stringify(after.paint));
   assert.deepEqual(o.errors, []);
 });
 

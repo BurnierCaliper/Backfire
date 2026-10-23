@@ -248,6 +248,155 @@ test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 
   assert.equal(P.PAPER.bodyClass, "ol-paper");
 });
 
+/* ---------- #321：纸纹按尺寸分档缓存、缺的挪到空闲时画（不堵主线程） ---------- */
+/** 假网页：canvas 记下画了几张（createElement("canvas")）、toBlob / toDataURL 各叫了几次；toBlob 同步回一个真的 Blob（URL.createObjectURL 认它） */
+function paperDoc() {
+  const log = { canvases: 0, blobs: 0, dataUrls: 0 }, els = new Map();
+  const ctx2d = () => new Proxy({}, {
+    get: (t, k) => k === "createImageData" ? (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) })
+      : k === "createRadialGradient" ? () => ({ addColorStop() {} })
+      : k in t ? t[k] : () => {},
+    set: (t, k, v) => { t[k] = v; return true; }
+  });
+  const doc = {
+    createElement(tag) {
+      if (tag !== "canvas") return {};
+      log.canvases++;
+      return { width: 0, height: 0, getContext: () => ctx2d(),
+        toBlob(cb) { log.blobs++; cb(new Blob(["png"], { type: "image/png" })); },
+        toDataURL() { log.dataUrls++; return "data:image/png;base64,AAAA"; } };
+    },
+    querySelectorAll(sel) {
+      if (sel === "[data-olp-tex]") return [...els.values()].flat().filter(e => e.dataset.olpTex);
+      return els.get(sel) || [];
+    }
+  };
+  /** 一块面板：sel 选择器、w × h 大小（之后改 el.offsetWidth / offsetHeight 就是变了大小） */
+  const panel = (sel, w, h) => {
+    const el = { offsetWidth: w, offsetHeight: h, isConnected: true, dataset: {}, vars: {}, style: { setProperty(k, v) { el.vars[k] = v; } }, closest: () => null };
+    els.set(sel, (els.get(sel) || []).concat([el]));
+    return el;
+  };
+  return { doc, log, panel };
+}
+const texUrl = el => (/^url\("(.*)"\)$/.exec(el.vars["--olp-tex"] || "") || [])[1] || "";
+
+test("#321 纸纹按尺寸分档：宽高各自往上取到一档（越小档越细，24 像素以上的面板拉伸不超过 1/8）；同一档同一个键；技能栏 976 × 235 ↔ 976 × 288 互相「合适」（差不到 reuse），差太多、换了种类 / 配色就不合适", () => {
+  const A = P.PAPER.art;
+  assert.deepEqual(A.bucket, { steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 }, "档在配置表里");
+  assert.deepEqual([28, 29, 44, 120, 121, 150, 235, 240, 241, 288, 300, 976, 1024, 1025].map(P.bucket), [28, 32, 44, 120, 128, 160, 240, 240, 256, 288, 320, 1024, 1024, 1088]);
+  for (const v of [24, 25, 31, 60, 63, 64, 65, 127, 129, 200, 255, 257, 400, 511, 513, 700, 1025, 1500]) {
+    assert.ok(P.bucket(v) >= v && P.bucket(v) / v < 1.125, `${v} → ${P.bucket(v)}：只往上取、拉伸不超过 1/8（不算撕边外的影子，最紧的那种）`);
+  }
+  const day = { time: "day", weather: "none" };
+  assert.equal(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 990, 229, day).key, "同一档：同一张纹理");
+  assert.notEqual(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 976, 288, day).key);
+  assert.notEqual(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 976, 235, { time: "night", weather: "none" }).key, "换了配色：另一张");
+  assert.deepEqual([P.texSpec("dock", 976, 235, day).w, P.texSpec("dock", 976, 235, day).h], [1024, 240], "按档的大小画");
+  assert.equal(P.texSpec("nope", 10, 10, day), null);
+  assert.equal(P.texSpec("dock", 0, 10, day), null);
+  // 合适：同一种纸、同一套配色，宽高（连撕边外的影子）各自差不到 reuse
+  const at = (w, h, th) => Object.assign(P.texSpec("dock", w, h, th || day), {});
+  assert.equal(A.reuse, 0.25);
+  assert.ok(P.fits(at(976, 235), "dock", "day|none", 976, 288), "选了技能变高：照旧用 235 那张");
+  assert.ok(P.fits(at(976, 288), "dock", "day|none", 976, 235), "取消技能变矮：照旧用 288 那张");
+  assert.ok(!P.fits(at(976, 235), "dock", "day|none", 976, 400), "差太多：另画一张");
+  assert.ok(!P.fits(at(976, 235), "kraft", "day|none", 976, 235), "种类不一样");
+  assert.ok(!P.fits(at(976, 235), "dock", "night|none", 976, 235), "配色不一样");
+  assert.ok(!P.fits(null, "dock", "day|none", 976, 235));
+});
+
+test("#321 dress：缺的那一档不在 dress 里画（不堵主线程），等 flush / 空闲时画，用 toBlob + URL.createObjectURL（不用 toDataURL）；技能栏高度在 235 ↔ 288 之间跳不重画；同一档的新面板直接从缓存贴；差太多才画新的，画好之前照旧贴着上一张", () => {
+  const { doc, log, panel } = paperDoc(), th = { time: "day", weather: "sand" }, T = [["#dock", "dock"], ["#dock2", "dock"]];
+  const dock = panel("#dock", 976, 235);
+  assert.equal(P.dress(doc, T, th), 0, "第一次：缓存里没有，这一下什么都不贴");
+  assert.equal(log.canvases, 0, "dress 里不画（选技能 / 取消时不卡）");
+  assert.equal(P.pending(), 1, "记下缺这一档");
+  assert.equal(P.dress(doc, T, th), 0);
+  assert.equal(P.pending(), 1, "再刷新一次还是那一档：不重复排");
+  assert.equal(P.flush(), 1);
+  assert.equal(P.pending(), 0);
+  assert.equal(log.canvases, 2, "画了一张（一张大的 + 算折面的小画布）");
+  assert.deepEqual([log.blobs, log.dataUrls], [1, 0], "toBlob 编码，不用同步的 toDataURL");
+  const first = texUrl(dock);
+  assert.match(first, /^blob:/, "URL.createObjectURL 拿的地址：" + first);
+  assert.equal(dock.dataset.olpTex, "dock");
+  assert.equal(dock.vars["--olp-pad"], P.PAPER.art.pad + "px");
+  // 选技能 / 取消：高度 235 → 288 → 235 → 288，一直是这一张，不画
+  for (const h of [288, 235, 288, 241, 290]) {
+    dock.offsetHeight = h;
+    P.dress(doc, T, th);
+    assert.equal(texUrl(dock), first, `高度 ${h}：还是那一张`);
+  }
+  P.flush();
+  assert.deepEqual([log.canvases, P.pending()], [2, 0], "一张都没再画");
+  // 同一档的另一块面板（980 × 239 和 976 × 235 是同一档）：直接从缓存贴
+  const dock2 = panel("#dock2", 980, 239);
+  assert.equal(P.dress(doc, T, th), 1, "马上贴上");
+  assert.equal(texUrl(dock2), first);
+  assert.equal(log.canvases, 2);
+  // 差太多（高 400）：记下缺新的一档；画好之前照旧贴着上一张
+  dock.offsetHeight = 400;
+  assert.equal(P.dress(doc, T, th), 0);
+  assert.equal(texUrl(dock), first, "新的画好之前照旧贴着上一张");
+  assert.equal(P.pending(), 1);
+  P.flush();
+  assert.equal(log.canvases, 4, "画了新的一张");
+  assert.notEqual(texUrl(dock), first);
+  assert.match(texUrl(dock), /^blob:/);
+  assert.equal(texUrl(dock2), first, "别的面板不动");
+  // 面板不在了 / 又变回合适的大小：排着的那一张不画
+  dock.offsetHeight = 700;
+  P.dress(doc, T, th);
+  dock.offsetHeight = 400;
+  P.dress(doc, T, th);
+  assert.equal(P.flush(), 1, "排着一张");
+  assert.equal(log.canvases, 4, "没人要了：不画");
+  // 没有 toBlob（旧浏览器）：照样画好（toDataURL），也是在 flush / 空闲时
+  const old = paperDoc();
+  old.doc.createElement = (orig => tag => { const c = orig(tag); delete c.toBlob; return c; })(old.doc.createElement);
+  const p = old.panel("#p", 130, 50);
+  P.dress(old.doc, [["#p", "card"]], th);
+  assert.equal(old.log.canvases, 0);
+  P.flush();
+  assert.match(texUrl(p), /^data:image\/png/);
+});
+
+test("#321 窗口拖着缩放：缺的纹理等大小停下来（PAPER.art.settle 毫秒没有再缺新的）才画，中间那些尺寸不画；没有 requestIdleCallback 就 setTimeout，一次一张", async () => {
+  const A = P.PAPER.art, keep = A.settle;
+  A.settle = 30;
+  try {
+    const { doc, log, panel } = paperDoc(), th = { time: "night", weather: "snow" }, T = [["#top", "tapebar"]];
+    const top = panel("#top", 600, 44);
+    for (let w = 600; w <= 1500; w += 150) {   // 一路拉宽：每一下都差太多
+      top.offsetWidth = w;
+      P.dress(doc, T, th);
+      await new Promise(r => setTimeout(r, 5));
+    }
+    assert.equal(log.canvases, 0, "还在拖：一张都没画");
+    await new Promise(r => setTimeout(r, A.settle + 60));
+    assert.equal(log.canvases, 2, "停下来以后只画最后那个大小");
+    assert.equal(P.pending(), 0);
+    assert.equal(P.texSpec("tapebar", 1500, 44, th).w, P.bucket(1500));
+    assert.match(texUrl(top), /^blob:/);
+  } finally { A.settle = keep; }
+});
+
+test("#321 缓存最多 PAPER.art.cache 张：从最久没用的扔，页面上还贴着的不扔；扔掉的 blob: 地址交还给浏览器（URL.revokeObjectURL）", () => {
+  const A = P.PAPER.art, keep = A.cache, revoke = URL.revokeObjectURL, gone = [];
+  A.cache = 3;
+  URL.revokeObjectURL = u => { gone.push(u); return revoke.call(URL, u); };
+  try {
+    const { doc, panel } = paperDoc(), th = { time: "night", weather: "fog" }, T = [["#a", "receipt"]];
+    const a = panel("#a", 100, 100);
+    const urls = [];
+    for (const w of [100, 200, 400, 800, 1600]) { a.offsetWidth = w; P.dress(doc, T, th); P.flush(); urls.push(texUrl(a)); }   // 每一下都差太多
+    assert.equal(new Set(urls).size, 5, "五个大小、五张");
+    assert.ok(urls.slice(0, 2).every(u => gone.includes(u)), "最久没用的两张扔掉、交还了");
+    assert.ok(!gone.includes(urls[4]), "页面上贴着的不扔");
+  } finally { A.cache = keep; URL.revokeObjectURL = revoke; }
+});
+
 test("新加的 HTML 里没有坚毅生命：顶栏、吊牌、下拉只拿传进来的公开字段", () => {
   const all = P.shellHtml() + P.topHtml({ room: "R", turnNo: 1, weather: "常态", cams: [{ label: "远" }] }) + P.tagsHtml([{ index: 0, actor: "a", name: "甲", owner: "p" }]);
   assert.doesNotMatch(all, /shp|坚毅/);

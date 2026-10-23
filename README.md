@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面不再卡：纸纹按尺寸分档缓存、挪到空闲时画；3D 战场静止时降帧；暂停页面加「画质」（自动 / 高 / 低）**（主人反馈：联机模式下队友看到的画面比以前更卡、操作延迟更大，issue #321；online-paper.js · `PAPER.art` 的 `bucket` / `reuse` / `settle` / `idle` / `slice`，`bucket` / `texSpec` / `fits` / `texture` / `paintTex` / `dress` / `need` / `flush` / `pending`；新增 hd2d/hd2d-pace.js（`PACE`，`busy` / `due` / `meter`）；hd2d/hd2d-scene.js · `QUALITY`、`CAM.still`、`frame` / `applyPixels` / `resize` / `wake` / `camMoved`、`sc.setQuality` / `sc.drawn`；hd2d/hd2d-field.js · `FIELD.scripts` 加 hd2d-pace.js、`FIELD.quality`，`quality` / `setQuality` / `levelOf` / `nextQuality`，`fxBusy` / `onSlow` / `registerQuality`；pause-menu.js · `PAUSE_MENU.items.quality` / `order`；prototypes/hd2d/index.html 加载 hd2d-pace.js、给场景 `busy`；测试：tests/online-paper.test.js（#321 四条）、tests/online-paper-ui.test.js（「纸片美术」改成 blob: 地址，新增「选技能 / 取消」一条）、新增 tests/hd2d-pace.test.js、tests/hd2d-quality.test.js，tests/hd2d-layout.test.js 原型页的脚本顺序加上 hd2d-pace.js）
+  - **以前**：
+    - 纸片画面的纸纹按面板的**精确宽高**缓存。选技能 / 取消时技能栏高度在 976 × 235 ↔ 976 × 288 之间变，每变出一个新高度就当场重画一张纸纹、再同步 `toDataURL` 编码（无界面浏览器里两次加起来把主线程堵了约 6.7 秒；真机少很多，也是卡一下）。`actionMenu` 来回本身只有 25–80 毫秒，不是网络慢。
+    - 3D 战场每个 rAF 都画：像素比最高 2，后期有景深 / 泛光 / 热浪 / 调色，画面静止时也一直满负荷。
+    - 没有画质选项。
+  - **现在**：
+    - **纸纹**：宽高各自往上取到一档（不到 64 像素按 4 像素一档、不到 128 按 8、不到 256 按 16、不到 512 按 32、再大按 64；24 像素以上的面板拉伸不超过 1/8），同一档、同一套配色只画一张，CSS 照旧拉到面板的实际大小。已经贴着的那张和面板现在的大小差不到 25%（宽高各自比，连撕边外的影子）就接着用：技能栏 235 ↔ 288 一直是同一张，一张都不重画；新面板也先找缓存里差不到 25% 的那张。缺的那一档不在 `dress`（每次画完都叫）里画：先照旧贴着上一张，等 160 毫秒没有再缺新的（拖着窗口缩放时中间那些尺寸不画）才挪到浏览器空闲时画（`requestIdleCallback`，最多等 600 毫秒；没有就 `setTimeout`，一次一张），画完 `toBlob` 交给浏览器编码、`URL.createObjectURL` 拿地址；缓存最多 48 张，扔掉的（页面上还贴着的不扔）把 blob: 地址交还给浏览器。数值都在 `PAPER.art`。
+    - **3D 战场按需渲染**（hd2d-pace.js）：每一帧先问画不画——有演出在播（单机看 game.js 的 `G.depth`，联机玩家 / 原型看 hd2d-play.js 的 `busy`）、镜头在动（换段 / 推镜头 / 转场的过渡，拖动和它的惯性）、天气粒子在飞（沙 / 雨 / 雪 / 热浪……）、打雷（闪光、镜头抖）、刚变过（铭牌、标记、选中、换行动的人、窗口、画质……之后 0.6 秒）时照常满帧；都没有时一秒只画 12 帧（行动光圈、选中框、飘浮物、灯闪、胶片颗粒照样走）；系统开了「减少动态效果」又静止（雷鸣除外，雷要按时间数）：一帧都不画，等下一次变。数值在 `PACE`。
+    - **画质**（暂停页面里的「画质」，新画面开着时才有；单机 / 联机同一个本机设置，记在 localStorage，读写都包 try/catch，存不了也照这一次选的）：点一下按 自动 → 高 → 低 换，菜单不收起，马上换上。低 = 像素比最高 1、关掉景深和泛光；高 = 和以前一样；自动 = 先用高，满帧画时（开场 4 秒以后）每攒 3 秒算一次平均，一帧超过 42 毫秒就降到低（只降一次，这一次打开页面都用低的，不记在本机），菜单上写「画质 自动（太卡，已降到低）」。数值在 `FIELD.quality`、`PACE.slow`。
+    - 玩家看到的数据不变：照旧只走 online-view.js 的白名单，坚毅生命一个字都不碰；这些只换这台电脑上的画面，不发给别人。
+    - **hd2d/hd2d-scene.js 改了，场景包 hd2d/hd2d-scene.bundle.js 要重新打（`npm run build:hd2d`）**；还没重新打包时（或者浏览器缓存里还是旧的场景包），画质换不了、照旧每帧画，不报错。
+
 - **联机：暂停页面直接有「离开房间」（主持人是「离开并保存」），点了先确认**（主人反馈：新的暂停页面以后找不到离开房间的按钮；pause-menu.js · PAUSE_MENU.items.leave / order、pause-menu.css；online-ui.js · 登记 leave 项、leaveAsk；测试 tests/online-ui.test.js「暂停页面直接有「离开房间」」）
   - **以前**：#298 把顶上的「房间」按钮收进暂停页面以后，「离开房间 / 离开并保存」只在「菜单 → 消息与成员」打开的面板最底下，要点两层才看得到，玩家以为没法离开房间。
   - **现在**：联机时（大厅、探索、战斗、结算，断线重连中也算）菜单最后一项就是「离开房间」（主持人显示「离开并保存」），红字、和上面隔开一点；点了先弹游戏内确认框（「留下」不走），确认后走和面板底下同一个 api.leave()。面板底下的按钮照旧保留。其余 #298 / #308 收起来的按钮（克制表、主持人工具、角色分配、大厅、地图、战绩、角色资料 / 武器 / 背包、聊天）逐个对过，都还有入口。

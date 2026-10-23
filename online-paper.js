@@ -19,6 +19,9 @@
  *     isOpen(name, storage, dflt) / setOpen(name, open, storage)   各块的收起 / 展开（读写都包 try/catch）
  *     dockAuto(o) / phoneVars()             手机竖屏（#311）：技能栏这一刻该开着还是收着（没手动点过时轮到你展开）/ 技能栏最多多高
  *     themeOf({ light, night, weather }) / themeVars(theme)          白天 / 夜晚 / 天气 → 面板的配色（CSS 变量）
+ *     bucket(v) / texSpec(kind, w, h, theme) / fits(tex, kind, th, w, h)   纸纹按尺寸分档（#321）：一边往上取到哪一档 / 这块面板要哪一张 / 一张纹理贴上去合不合适
+ *     texture(doc, kind, w, h, theme)       同步拿一张纸纹（缓存里有这一档就给，没有现画；测试、兜底用）
+ *     dress(doc, targets, theme) / flush() / pending()   给面板贴纸纹（缺的那一档挪到空闲时画，见 need）/ 马上画完缺的（测试用）/ 还有几张没画好
  *     shellHtml()                           骨架：顶栏、「工具 ▾」下拉、吊牌、提示各占一块（分开重画）
  *     topHtml(info)                         顶栏
  *     tagsHtml(slots, o)                    行动顺序吊牌
@@ -114,12 +117,20 @@
       snow: { tint: "#e6f1ff", mix: 0.28, edge: "inset 0 0 14px rgba(255, 255, 255, .95)" },
       fog: { tint: "#9b9b9b", mix: 0.3, edge: "inset 0 0 22px rgba(170, 170, 170, .55)", fade: 0.22 }
     },
-    /* 纸片美术（第 3 步）：纹理照 docs/ui-paper/mock.html 用程序生成（crumple 揉皱的折面 + 折痕 + 纤维、rough 撕边、grit 斑驳），按尺寸缓存，不放图片文件。
+    /* 纸片美术（第 3 步）：纹理照 docs/ui-paper/mock.html 用程序生成（crumple 揉皱的折面 + 折痕 + 纤维、rough 撕边、grit 斑驳），按尺寸分档缓存，不放图片文件。
      *   pad        纹理比面板四边多出来的像素（画撕边外面的影子）
      *   shadow     不均匀的影子：两层（偏移、模糊、浓淡）
      *   scale      折面按几分之一的大小算（再放大、糊一点，和样稿一样）；pixels 算的像素最多这么多（大面板自动再缩）
      *   facet      折面数按面积算（审查：大面板的折面被放大成一块块「碎地砖」）：每 area 平方像素一块，至少是这种纸的 facets，最多 max 块（防止太慢）
-     *   cache      最多记多少张（同一个尺寸、同一套配色只画一次）
+     *   cache      最多记多少张（同一档、同一套配色只画一次；页面上还贴着的不扔）
+     *   bucket     分档（#321）：纹理按宽高各自往上取到的那一档画，CSS 再拉到面板的实际大小（online-paper.css 的 100% 100%）。
+     *              不到 steps 里第一个数的按第二个数一档（面板越小档越细：24 像素以上的拉伸不超过 1/8），更大的按 big 一档
+     *   reuse      已经贴着纹理的面板变了大小（技能栏选技能 / 取消时高度在 235 ↔ 288 之间跳）：和那张纹理差不到这么多（宽高各自比，连撕边外的影子）
+     *              就接着用、不重画；新面板也先找缓存里差不到这么多的那张。都没有才画新的
+     *   settle     缺的纹理等这么久（毫秒）没有再缺新的才开始画：拖着窗口缩放时中间那些尺寸不画（防抖）
+     *   idle       画纹理挪到浏览器空闲的时候（requestIdleCallback），最多等这么久（毫秒）；画完 toBlob 交给浏览器编码、URL.createObjectURL 拿地址
+     *              （以前是同步的 toDataURL：选个技能主线程堵好几秒）。新的画好之前面板照旧贴着上一张（拉伸一点）
+     *   slice      一次空闲里画完一张，空闲时间还剩这么多毫秒以上就接着画下一张，不然等下一次空闲
      *   kinds      每种纸：color 用配色表里的哪个颜色、facets 小纸片至少几块折面 / amp / crease / grain 褶皱、jag 边缘毛多少、torn 哪几条边是撕的（更毛）、
      *              corrugated 瓦楞纸的竖纹、flat 按钮那种不画撕边和影子（直接当底图）、zig 底边是锯齿撕口（收据撕下来的那一头：每 step 像素一个齿、齿深 depth）
      *   weather    天气在纸上加的：沙暴撒沙粒（每多少像素一粒）、下雨几块深色水渍、雪边上一层霜、雾蒙一层灰
@@ -128,6 +139,8 @@
       pad: 8,
       shadow: [{ x: 2, y: 5, blur: 7, a: 0.42 }, { x: -1, y: 1, blur: 2, a: 0.22 }],
       scale: 0.5, pixels: 90000, cache: 48,
+      bucket: { steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 },
+      reuse: 0.25, settle: 160, idle: 600, slice: 10,
       facet: { area: 1200, max: 320 },
       kinds: {
         tapebar: { color: "tape", facets: 30, amp: 0.05, crease: 0.12, grain: 0.05, jag: 2, torn: { left: 6, right: 6 } },
@@ -233,8 +246,8 @@
     return out;
   }
 
-  /* ---------- 纸片美术（第 3 步）：照 mock.html 程序生成的纹理，按尺寸缓存 ---------- */
-  /** 同一个种子总是同一串随机数（Park–Miller，和 mock.html 一样）：同一个尺寸的纸每次画出来一样 */
+  /* ---------- 纸片美术（第 3 步）：照 mock.html 程序生成的纹理，按尺寸分档缓存（#321） ---------- */
+  /** 同一个种子总是同一串随机数（Park–Miller，和 mock.html 一样）：同一档的纸每次画出来一样 */
   function rng(seed) { let s = (Math.abs(Math.floor(seed)) % 2147483646) + 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; }
   const hash = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.codePointAt(0); h = Math.imul(h, 16777619); } return h >>> 0; };
   /** 撕边（mock.html · rough）：w × h 的纸四条边按步长往里随机缩一点，torn 的那几条边更毛、更碎；返回多边形的点 [[x, y]]（左上角是 0, 0） */
@@ -280,31 +293,100 @@
       return { d1, d2, i1 };
     };
   }
-  const texCache = new Map();
-  /** 这一张纸的纹理（data: 地址）：kind = PAPER.art.kinds 里的一种，w × h 面板的大小，theme = { time, weather }。
-   *  同一个尺寸、同一套配色只画一次（记 PAPER.art.cache 张）；没有 canvas（Node 里）返回空字符串。
-   *  画法（mock.html · crumple）：几块折面（Voronoi）明暗不同、折痕处一道亮一道暗、撒纤维噪点；瓦楞纸加竖纹；撕边外面画两层不均匀的影子；天气再加一层 */
-  function texture(doc, kind, w, h, theme) {
-    const A = PAPER.art, K = A.kinds[kind];
-    w = Math.round(w); h = Math.round(h);
-    if (!K || !doc || typeof doc.createElement !== "function" || !(w > 0) || !(h > 0)) return "";
+  /** 分档（#321）：一边的尺寸往上取到一档（PAPER.art.bucket：不到 steps[i][0] 像素按 steps[i][1] 像素一档，更大的按 big 一档） */
+  function bucket(v) {
+    const B = PAPER.art.bucket, n = Math.max(1, Math.ceil(Number(v) || 0));
+    const row = B.steps.find(([below]) => n < below), step = row ? row[1] : B.big;
+    return Math.ceil(n / step) * step;
+  }
+  const themeKey = (th) => (th ? (th.time || "day") + "|" + (th.weather || "none") : "day|none");
+  /** w × h 的面板贴这种纸要哪一张纹理：{ key 缓存的键, kind, w, h 那一档的大小, th 配色的键, theme, base 纸的底色 }；种类认不得、没有大小 → null */
+  function texSpec(kind, w, h, theme) {
+    const K = PAPER.art.kinds[kind];
+    if (!K || !(w > 0) || !(h > 0)) return null;
     theme = theme || { time: "day", weather: "none" };
-    const vars = themeVars(theme), base = vars["--olp-" + kebab(K.color)] || "#cccccc";
-    const key = [kind, w, h, theme.time, theme.weather, base].join("|");
-    if (texCache.has(key)) { const v = texCache.get(key); texCache.delete(key); texCache.set(key, v); return v; }
-    const pad = K.flat ? 0 : A.pad, W = w + 2 * pad, H = h + 2 * pad, rnd = rng(hash(key));
-    const out = doc.createElement("canvas");
-    if (!out || typeof out.getContext !== "function") return "";
+    const base = themeVars(theme)["--olp-" + kebab(K.color)] || "#cccccc", bw = bucket(w), bh = bucket(h), th = themeKey(theme);
+    return { key: [kind, bw, bh, th, base].join("|"), kind, w: bw, h: bh, th, theme, base };
+  }
+  /** 一张纹理（tex = { kind, th, w, h }，按那一档的大小画的）贴到 w × h 的面板上合不合适：同一种纸、同一套配色，
+   *  宽高（连撕边外的影子）各自差不到 PAPER.art.reuse（CSS 拉伸这么一点看不出来） */
+  function fits(tex, kind, th, w, h) {
+    if (!tex || tex.kind !== kind || tex.th !== th || !PAPER.art.kinds[kind]) return false;
+    const pad = PAPER.art.kinds[kind].flat ? 0 : PAPER.art.pad, r = 1 + PAPER.art.reuse;
+    const ok = (a, b) => { const q = (a + 2 * pad) / (b + 2 * pad); return q <= r && q >= 1 / r; };
+    return ok(w, tex.w) && ok(h, tex.h);
+  }
+
+  /* 缓存：键 → { key, kind, th, w, h, url }。Map 的先后就是最近用过的先后（用到就挪到最后），超过 PAPER.art.cache 张从最久没用的扔，页面上还贴着的不扔；
+   * 扔掉的 blob: 地址交还给浏览器（URL.revokeObjectURL） */
+  const texCache = new Map();
+  function cacheGet(key) {
+    const v = texCache.get(key);
+    if (v) { texCache.delete(key); texCache.set(key, v); }
+    return v || null;
+  }
+  /** 缓存里有没有一张合适的（fits），挑大小最接近的那张 */
+  function cacheFit(kind, th, w, h) {
+    let best = null, gap = Infinity;
+    texCache.forEach(v => {
+      if (!fits(v, kind, th, w, h)) return;
+      const d = Math.abs(Math.log(v.w / w)) + Math.abs(Math.log(v.h / h));
+      if (d < gap) { gap = d; best = v; }
+    });
+    return best ? cacheGet(best.key) : null;
+  }
+  function cachePut(doc, spec, url) {
+    const v = { key: spec.key, kind: spec.kind, th: spec.th, w: spec.w, h: spec.h, url };
+    texCache.delete(spec.key); texCache.set(spec.key, v);
+    if (texCache.size > PAPER.art.cache) {
+      const used = new Set();
+      try { doc.querySelectorAll("[data-olp-tex]").forEach(el => { if (el.__olpTex) used.add(el.__olpTex.url); }); } catch (e) { /* 量不了就都当没在用 */ }
+      for (const [k, old] of texCache) {
+        if (texCache.size <= PAPER.art.cache) break;
+        if (used.has(old.url) || k === spec.key) continue;
+        texCache.delete(k);
+        revoke(old.url);
+      }
+    }
+    return v;
+  }
+  const urlApi = () => (typeof URL !== "undefined" && URL && typeof URL.createObjectURL === "function" ? URL : null);
+  function revoke(url) {
+    const U = urlApi();
+    if (U && typeof U.revokeObjectURL === "function" && /^blob:/.test(url)) { try { U.revokeObjectURL(url); } catch (e) { /* 已经交还过了 */ } }
+  }
+  function dataUrl(c) { try { return c.toDataURL(); } catch (e) { return ""; } }
+
+  /** 同步拿一张纹理（测试、兜底用）：kind = PAPER.art.kinds 里的一种，w × h 面板的大小，theme = { time, weather }。
+   *  缓存里有这一档就给（同一档、同一套配色只画一次），没有就现画一张（data: 地址）。没有 canvas（Node 里）返回空字符串。
+   *  面板上贴纹理走 dress：缺的那一档挪到空闲时画，不堵主线程 */
+  function texture(doc, kind, w, h, theme) {
+    if (!doc || typeof doc.createElement !== "function") return "";
+    const spec = texSpec(kind, Math.round(w), Math.round(h), theme);
+    if (!spec) return "";
+    const hit = cacheGet(spec.key);
+    if (hit) return hit.url;
+    const c = paintTex(doc, spec), url = c ? dataUrl(c) : "";
+    if (url) cachePut(doc, spec, url);
+    return url;
+  }
+  /** 画一张纸（spec = texSpec(…)：按那一档的大小画）：返回画好的 canvas；没有 canvas（Node 里）返回 null。
+   *  画法（mock.html · crumple）：几块折面（Voronoi）明暗不同、折痕处一道亮一道暗、撒纤维噪点；瓦楞纸加竖纹；撕边外面画两层不均匀的影子；天气再加一层 */
+  function paintTex(doc, spec) {
+    const A = PAPER.art, K = A.kinds[spec.kind], w = spec.w, h = spec.h, theme = spec.theme, base = spec.base;
+    const pad = K.flat ? 0 : A.pad, W = w + 2 * pad, H = h + 2 * pad, rnd = rng(hash(spec.key));
+    const out = doc && typeof doc.createElement === "function" ? doc.createElement("canvas") : null;
+    if (!out || typeof out.getContext !== "function") return null;
     out.width = W; out.height = H;
     const g = out.getContext("2d");
-    if (!g) return "";
+    if (!g) return null;
     // 折面：按 scale 算（大面板再缩），放大时糊一点
     let sc = A.scale;
     if (w * h * sc * sc > A.pixels) sc = Math.sqrt(A.pixels / (w * h));
     const sw = Math.max(8, Math.round(w * sc)), sh = Math.max(8, Math.round(h * sc));
     const small = doc.createElement("canvas"); small.width = sw; small.height = sh;
     const sx = small.getContext("2d"), img = sx.createImageData(sw, sh), d = img.data, c0 = rgbOf(base) || [204, 204, 204];
-    const pts = Array.from({ length: facetCount(kind, w, h) }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 })), near = nearest2(pts, sw, sh);
+    const pts = Array.from({ length: facetCount(spec.kind, w, h) }, () => ({ x: rnd() * sw, y: rnd() * sh, l: rnd() * 2 - 1 })), near = nearest2(pts, sw, sh);
     for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
       const { d1, d2, i1 } = near(x, y);
       const gap = Math.sqrt(d2) - Math.sqrt(d1);
@@ -338,11 +420,86 @@
     if (Wx.veil) { g.fillStyle = `rgba(150, 150, 150, ${Wx.veil})`; g.fillRect(pad, pad, w, h); }
     g.restore();
     if (Wx.frost) { g.save(); path(); g.clip(); g.shadowColor = "rgba(255, 255, 255, .95)"; g.shadowBlur = Wx.frost * 2; g.strokeStyle = "rgba(255, 255, 255, .8)"; g.lineWidth = Wx.frost; path(); g.stroke(); g.restore(); }
-    let url = "";
-    try { url = out.toDataURL(); } catch (e) { url = ""; }
-    texCache.set(key, url);
-    while (texCache.size > A.cache) texCache.delete(texCache.keys().next().value);
-    return url;
+    return out;
+  }
+
+  /* 缺的纹理（#321）：dress 发现缺哪一档先记在 want 里（键 → { doc, spec, els 等这一张的面板 }）；PAPER.art.settle 毫秒里没有再缺新的才排进队（queue），
+   * 浏览器空闲时画（requestIdleCallback，最多等 PAPER.art.idle 毫秒）：先画一张，空闲时间还剩 PAPER.art.slice 毫秒以上就接着画下一张，不然等下一次空闲；
+   * 没有 requestIdleCallback 就 setTimeout，一次一张。画完 toBlob → URL.createObjectURL（编码交给浏览器，不堵主线程；没有 toBlob 就 toDataURL），
+   * 放进缓存，还在等它的面板贴上（encoding = 正在编码的）。画之前、编码完都再看一眼面板还在不在页面上、要的还是不是这一档
+   * （窗口又变了、重画了、大小又回到合适的那张）：没人要了就不画、不贴 */
+  const want = new Map(), queue = [], encoding = new Set();
+  let settleTimer = null, scheduled = false, flushing = false;
+  const later = (fn, ms) => (typeof setTimeout === "function" ? setTimeout(fn, ms) : null);
+  function onIdle(fn) {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(fn, { timeout: PAPER.art.idle });
+    else later(() => fn(null), 0);
+  }
+  /** 记下这块面板缺这一档：同一档的面板一起等；新缺了一档才重新数 settle（每次画面刷新都会叫 dress，缺的还是那几档不算「又变了」） */
+  function need(doc, spec, el) {
+    const same = j => j.spec.key === spec.key;
+    const job = want.get(spec.key) || queue.find(same) || [...encoding].find(same);
+    if (job) { job.els.add(el); return; }
+    want.set(spec.key, { doc, spec, els: new Set([el]) });
+    if (settleTimer != null && typeof clearTimeout === "function") clearTimeout(settleTimer);
+    settleTimer = later(() => { settleTimer = null; want.forEach(j => queue.push(j)); want.clear(); pump(); }, PAPER.art.settle);
+  }
+  /** 还在等这一张的面板：还在页面上、要的还是这一档 */
+  const waiting = (job) => [...job.els].filter(el => el.isConnected !== false && el.__olpWant === job.spec.key);
+  /** 排着的等浏览器空闲时画 */
+  function pump() {
+    if (scheduled || flushing || !queue.length) return;
+    scheduled = true;
+    onIdle((deadline) => {
+      scheduled = false;
+      if (flushing) return;
+      const more = () => queue.length > 0 && !!deadline && typeof deadline.timeRemaining === "function" && deadline.timeRemaining() > PAPER.art.slice;
+      if (queue.length) run(queue.shift());
+      while (more()) run(queue.shift());
+      pump();
+    });
+  }
+  /** 画一张、交给浏览器编码，编码完放进缓存、贴到还在等它的面板上；没人要了就不画 */
+  function run(job) {
+    if (!job || !waiting(job).length) return;
+    const c = paintTex(job.doc, job.spec);
+    if (!c) return;
+    encoding.add(job);
+    encode(c, (url) => {
+      encoding.delete(job);
+      if (!url) return;
+      const tex = cachePut(job.doc, job.spec, url);
+      waiting(job).forEach(el => apply(el, tex));
+    });
+  }
+  /** canvas → 地址：有 toBlob、URL.createObjectURL 就用（编码交给浏览器，不堵主线程），不然 toDataURL */
+  function encode(c, cb) {
+    const U = urlApi();
+    if (U && typeof c.toBlob === "function") {
+      try {
+        c.toBlob(b => { let url = ""; try { url = b ? U.createObjectURL(b) : ""; } catch (e) { url = ""; } cb(url || dataUrl(c)); });
+        return;
+      } catch (e) { /* toBlob 用不了：走下面 */ }
+    }
+    cb(dataUrl(c));
+  }
+  /** 马上把缺的都画完（测试用）：不等 settle、不等空闲；toBlob 是同步回来的就编码完、贴上再返回。返回这一次处理了几张（没人要了、不画的也算） */
+  function flush() {
+    if (settleTimer != null && typeof clearTimeout === "function") clearTimeout(settleTimer);
+    settleTimer = null;
+    want.forEach(j => queue.push(j)); want.clear();
+    let n = 0;
+    flushing = true;
+    try { while (queue.length) { n++; run(queue.shift()); } } finally { flushing = false; }
+    return n;
+  }
+  /** 还有几张纹理没画好（等着的、排着的、正在编码的） */
+  function pending() { return want.size + queue.length + encoding.size; }
+  /** 给面板贴上一张纹理 */
+  function apply(el, tex) {
+    el.__olpTex = tex; el.__olpWant = null; el.dataset.olpTex = tex.kind;
+    el.style.setProperty("--olp-tex", `url("${tex.url}")`);
+    el.style.setProperty("--olp-pad", (PAPER.art.kinds[tex.kind].flat ? 0 : PAPER.art.pad) + "px");
   }
   /** 印章、喷漆的斑驳遮罩（mock.html · grit）：一块黑底挖几个小洞；只一点点（PAPER.art.grit），字一定要清楚。每个页面只画一次 */
   let gritUrl = null;
@@ -359,24 +516,27 @@
   }
   /**
    * 给纸片画面里的面板贴上纹理（online-ui.js 每次画完、窗口变了叫）：targets = [[选择器, 纸的种类]]，theme = 这一套配色。
-   * 每个面板记着上一次贴的（种类 + 尺寸 + 配色）：没变就不动；变了从缓存拿（没有才画）。纹理写成 --olp-tex（online-paper.css 用：
-   * 面板挂在 ::before 上、按钮直接当底图），面板上加 data-olp-tex = 种类。看不见的（宽 0）先不贴
+   * 每个面板记着现在贴的那一张（种类 + 那一档的大小 + 配色）：还合适（fits：大小差不到 PAPER.art.reuse）就不动；不合适了先从缓存拿
+   * （这一档，或者差不到 reuse 的那张），都没有才记下缺这一档，等大小停下来、浏览器空闲时画（need）——新的画好之前照旧贴着上一张。
+   * 纹理写成 --olp-tex（online-paper.css 用：面板挂在 ::before 上、按钮直接当底图），面板上加 data-olp-tex = 种类。看不见的（宽 0）先不贴。
+   * 返回这一次马上贴上的块数
    */
   function dress(doc, targets, theme) {
     if (!doc || typeof doc.querySelectorAll !== "function") return 0;
     let n = 0;
+    const th = themeKey(theme);
     (targets || PAPER.art.targets).forEach(([sel, kind]) => doc.querySelectorAll(sel).forEach(el => {
       const w = el.offsetWidth, h = el.offsetHeight;
       if (!(w > 0) || !(h > 0)) return;
       // 「tag|tagon」：当前行动的那一格（.olp-tag.on）用后一种
-      const k = kind.includes("|") ? kind.split("|")[el.closest && el.closest(".olp-tag.on") ? 1 : 0] : kind, key = [k, w, h, theme && theme.time, theme && theme.weather].join("|");
-      if (el.__olpTex === key) return;
-      const url = texture(doc, k, w, h, theme);
-      if (!url) return;
-      el.__olpTex = key; el.dataset.olpTex = k;
-      el.style.setProperty("--olp-tex", `url("${url}")`);
-      el.style.setProperty("--olp-pad", (PAPER.art.kinds[k].flat ? 0 : PAPER.art.pad) + "px");
-      n++;
+      const k = kind.includes("|") ? kind.split("|")[el.closest && el.closest(".olp-tag.on") ? 1 : 0] : kind;
+      if (fits(el.__olpTex, k, th, w, h)) { el.__olpWant = null; return; }
+      const spec = texSpec(k, w, h, theme);
+      if (!spec) return;
+      const hit = cacheGet(spec.key) || cacheFit(k, th, w, h);
+      if (hit) { apply(el, hit); n++; return; }
+      el.__olpWant = spec.key;
+      need(doc, spec, el);
     }));
     return n;
   }
@@ -553,6 +713,6 @@
     return true;
   }
 
-  return { PAPER, active, isOpen, setOpen, dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, dress, shellHtml, topHtml, toolsHtml, tagsHtml,
+  return { PAPER, active, isOpen, setOpen, dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, texSpec, fits, texture, grit, dress, flush, pending, shellHtml, topHtml, toolsHtml, tagsHtml,
     receiptLine, receiptGroups, receiptHtml, noteColor, readMoves, pressMove, readCam, pressCam };
 });

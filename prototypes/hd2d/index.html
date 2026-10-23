@@ -207,6 +207,8 @@ window.GAME_MODE = true;
 <!-- 技能栏 / 队伍栏的收起 / 展开（记在本机）、头像要的公开资料：和正式画面的新画面同一份（#297） -->
 <script src="../../hd2d/hd2d-shell.js"></script>
 <script src="../../hd2d/hd2d-camera.js"></script>
+<!-- 什么时候画一帧（#321）：画面静止时降帧，有演出 / 镜头在动 / 天气粒子时满帧；场景模块加载前要有它（正式画面同一份） -->
+<script src="../../hd2d/hd2d-pace.js"></script>
 <script src="../../hd2d/hd2d-fx.js"></script>
 <!-- 演示出招的房主那边（用规则结算一次普通攻击）：只有原型用，留在原型目录 -->
 <script src="hd2d-host.js"></script>
@@ -591,7 +593,8 @@ function boot() {
     camera: { tier: params.get("cam"), zone: params.get("zone") },   // ?cam=near&zone=3：开场就是近景看 3 区
     onCameraChange: syncCamera,
     onPortraitChange() { if (sc && st) repaint(true); },
-    onViewChange() { if (sc && st) reinset(true); }      // 窗口大小变了：按新画面重排铭牌、镜头回到这一段的位置
+    onViewChange() { if (sc && st) reinset(true); },     // 窗口大小变了：按新画面重排铭牌、镜头回到这一段的位置
+    busy: () => !!HD2DPlay.busy                          // 演出在播：照常满帧画（#321；画面静止时场景自己降帧）
   });
   // 天气的 2D 层（#240）：3D 画布之上、铭牌之下。酸雨的涟漪按这一刻的镜头落在地台上（lens / view），雷鸣闪白时跟着淡掉（flash）
   wfx = WX.create($("stage"), { lens: () => HD2DFx.lens(sc.lensNow()), view: () => sc.view(), flash: () => sc.flash });
