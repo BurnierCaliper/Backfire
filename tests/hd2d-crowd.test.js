@@ -7,12 +7,14 @@
 //   · 场景（hd2d-scene.js）：紧凑卡的铭牌加 .compact、量大小时量完整的卡、平移不再把看的那一点的高度夹在 2 以下；样式（hd2d.css）只留名字 + 血量数字、血条、架势 + 状态图标；
 //   · 单机、联机玩家用同一套布局 / 镜头（这里用联机玩家那条路：投影 → packetView 的卡片快照），交给场景的数据里没有坚毅生命。
 // 都是纯函数，Node 里跑（布局 hd2d-layout.js、镜头 hd2d-camera.js；场景里那几段从源码抠出来放进小 DOM 里跑）；WebGL 画面由仓库主人看。
+// 最后一条在真浏览器里量紧凑卡画出来多大（有 Playwright 用它；没有时 Linux 上用机器自带的 Chrome（tests/cdp-browser.js）；都没有跳过）。
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
+const { execSync } = require("child_process");
 const H = require("./headless");
 const HP = require("./hd2d-paths");
 const MD = require("./mini-dom");
@@ -269,4 +271,85 @@ test("挤的区换紧凑卡、缩小以后，交给场景的数据（卡片快�
     no(p.crowd, tier + " 的挤法");
     lay.units.forEach(u => no({ compact: p.plates[u.id].compact, scale: p.plates[u.id].scale, big: p.plates[u.id].big }, tier + " " + u.id));
   });
+});
+
+/* ---------- 6. 浏览器：紧凑卡真的画成配置的大小 ---------- */
+function playwright() {
+  try { return require("playwright"); } catch (_) { /* 没装在本地 */ }
+  try { return require(path.join(execSync("npm root -g", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(), "playwright")); } catch (_) { /* 也没装在全局 */ }
+  return null;
+}
+let browser = null, skipWhy = "";
+test.before(async () => {
+  try {
+    const pw = playwright();
+    browser = pw ? await pw.chromium.launch() : await require("./cdp-browser").launch();
+    if (!browser) skipWhy = "没装 Playwright，也没有能用的 Chrome，跳过画面测试";
+  } catch (e) {
+    if (process.env.REQUIRE_UI === "1") throw e;
+    browser = null; skipWhy = "浏览器启动失败，跳过画面测试：" + String(e.message).split("\n")[0];
+  }
+});
+test.after(async () => { if (browser) await browser.close(); });
+
+test("浏览器：紧凑卡（旧画面的白卡 + hd2d.css 的 .compact）真的画成 CONFIG.card.crowd.compact 的大小（布局按这个尺寸排、算抬高），只留名字 + 血量数字、血条、架势 + 状态图标；鼠标停上去（.hover）是完整的卡", { timeout: 120000 }, async (t) => {
+  if (!browser) { t.skip(skipWhy); return; }
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  t.after(() => context.close());
+  const page = await context.newPage(), errors = [];
+  page.on("pageerror", e => errors.push(e.message));
+  await page.setContent('<!doctype html><html><head><meta charset="utf-8"></head><body><div class="hd2d-field hd2d-theme" style="position:relative;width:1200px;height:700px"><div id="labels" class="hd2d-labels"></div></div></body></html>');
+  for (const f of ["game.css", "skin.css", "hud-icons.css", "hd2d/hd2d.css"]) await page.addStyleTag({ path: path.join(HP.ROOT, f) });
+  for (const f of ["icons.js", "hud-icons.js", "unit-card.js"]) await page.addScriptTag({ path: path.join(HP.ROOT, f) });
+  const KC = K.crowd.compact;
+  const out = await page.evaluate((cfg) => {
+    const host = document.getElementById("labels");
+    host.style.setProperty("--kh", cfg.h + "px");
+    // 敌人（两个状态徽章 + 两个写字的状态）、我方（耐久、资源小字、失衡）、架势很多 + 三个徽章 + 高能的敌人
+    const snaps = [
+      { id: "a", name: "机器人看守(剑)", level: 2, atk: 14, isPlayer: false, layers: [{ type: "armor", cur: 12, max: 12 }, { type: "flesh", cur: 20, max: 26 }], def: 3, defMax: 5, ap: 2, apMax: 2, bonus: 1, bonusMax: 1, status: "聚焦 · 掩护", badges: [{ key: "burn", stack: 2, title: "灼烧" }, { key: "shock", stack: 1, title: "感电" }] },
+      { id: "b", name: "柯尔特", level: 5, atk: 22, isPlayer: true, layers: [{ type: "flesh", cur: 31, max: 40 }], def: 2, defMax: 4, ap: 1, apMax: 2, bonus: 0, bonusMax: 1, status: "", badges: [], res: "刀头 2", dur: { cur: 3, max: 5, name: "破甲锤" }, stunned: true },
+      { id: "c", name: "强盗头子", level: 1, atk: 9, isPlayer: false, layers: [{ type: "shield", cur: 5, max: 8 }, { type: "flesh", cur: 18, max: 18 }], def: 12, defMax: 12, ap: 2, apMax: 2, bonus: 1, bonusMax: 1, status: "高能 · 鼓舞", badges: [{ key: "high", stack: 1, title: "高能" }, { key: "inspire", stack: 1, title: "鼓舞" }, { key: "advantage", stack: 1, title: "优势" }], highEnergy: 6 }
+    ];
+    const shown = (el) => !!el && getComputedStyle(el).display !== "none" && el.getBoundingClientRect().width > 0;
+    const res = [];
+    [cfg.w, cfg.narrowW].forEach(kw => snaps.forEach(s => [false, true].forEach(hover => {
+      host.style.setProperty("--kw", kw + "px");
+      const el = document.createElement("div");
+      el.className = "hd2d-plate card compact" + (hover ? " hover" : "");
+      el.innerHTML = '<div class="pl-in"><div class="pl-bob"></div></div>';
+      host.appendChild(el);
+      const c = UnitCard.create(s);
+      UnitCard.update(c, s, { quiet: true });
+      el.querySelector(".pl-bob").appendChild(c.wrap);
+      const u = c.unit, box = u.getBoundingClientRect();
+      const inside = (sel) => { const r = u.querySelector(sel).getBoundingClientRect(); return r.left >= box.left - 0.5 && r.right <= box.right + 0.5 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5; };
+      res.push({
+        id: s.id, kw, hover, w: c.wrap.offsetWidth, h: c.wrap.offsetHeight,
+        on: ["u-name", "u-lv", "u-atk", "hpn", "u-hp", "u-def", "u-status", "u-econ", "u-res", "u-dur"].filter(k => shown(u.querySelector("." + k))),
+        inside: ["u-name", "hpn", "u-hp", "u-def"].filter(k => shown(u.querySelector("." + k)) && !inside("." + k)),
+        nameW: u.querySelector(".u-name").getBoundingClientRect().width, hpn: u.querySelector(".hpn").textContent
+      });
+      el.remove();
+    })));
+    return res;
+  }, { w: KC.w, narrowW: KC.narrowW, h: KC.h });
+  assert.equal(out.length, 12);
+  out.forEach(r => {
+    const tag = r.id + "（--kw " + r.kw + "）" + (r.hover ? " 停上去" : "");
+    if (r.hover) {
+      assert.ok(r.w > r.kw && r.h > KC.h, tag + "：完整的卡（" + r.w + "×" + r.h + "）");
+      assert.ok(r.on.includes("u-lv"), tag + "：等级又出来了");
+      return;
+    }
+    assert.equal(r.w, r.kw, tag + "：宽 = 布局按的紧凑卡宽");
+    assert.equal(r.h, KC.h, tag + "：高 = CONFIG.card.crowd.compact.h");
+    ["u-name", "hpn", "u-hp", "u-def"].forEach(k => assert.ok(r.on.includes(k), tag + "：留着 ." + k));
+    ["u-lv", "u-atk", "u-econ", "u-res", "u-dur"].forEach(k => assert.ok(!r.on.includes(k), tag + "：收起 ." + k));
+    if (r.id !== "b") assert.ok(r.on.includes("u-status"), tag + "：状态图标那一行在");
+    assert.deepEqual(r.inside, [], tag + "：名字、血量数字、血条、架势都在卡里面");
+    assert.ok(r.nameW > 20, tag + "：名字有地方写");
+    assert.match(r.hpn, /^\d+\/\d+$/, tag + "：血量数字");
+  });
+  assert.deepEqual(errors, []);
 });
