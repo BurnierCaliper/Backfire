@@ -32,10 +32,14 @@
       room: { label: "消息与成员", hint: "房间码、成员、私信、重新连接 / 离开" },
       lobby: { label: "大厅", hint: "房间大厅：成员和大厅交流" },
       // 音效开关（#304，联机玩家；online-ui.js 登记）：和单机顶栏的「音效」按钮同一个本机开关（sfx.js 的 localStorage 键）
-      sfx: { label: "音效", on: "音效 开", off: "音效 关", hint: "打中、击倒、轮到你的提示音……只影响这台电脑" }
+      sfx: { label: "音效", on: "音效 开", off: "音效 关", hint: "打中、击倒、轮到你的提示音……只影响这台电脑" },
+      // 离开房间（联机；online-ui.js 登记）：#298 把它收进「消息与成员」面板最底下以后玩家找不到，单独放一项（点了先确认）
+      leave: { label: "离开房间", hostLabel: "离开并保存", hint: "回到标题页；之后可以用「回到房间」再进来", hostHint: "保存这场跑团，回到标题页",
+        confirmTitle: "离开房间？", confirmText: "你会回到标题页，房间里的人照常继续。\n之后可以在标题页点「回到房间」再进来。",
+        hostConfirmTitle: "离开并保存？", hostConfirmText: "会先保存这场跑团，然后你回到标题页；你不在的时候玩家那边会暂停。", cancel: "留下" }
     },
     // 先后（小的在前）；没写的排在最后
-    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70 },
+    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70, leave: 90 },
     // 教程（#263）：教程页挂出 window.Tutorial.open() 后这一项才出现。#263 的入口名不一样就改这一行
     tutorial: { global: "Tutorial", method: "open" },
     // Esc / 菜单按钮在这些画面里有效（<body data-screen>）；联机时（主持人、玩家）在哪个画面都有效

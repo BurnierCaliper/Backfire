@@ -20,6 +20,8 @@ function setup(opt) {
   if (opt.examples !== false) vm.runInContext("cyberwareLoadExamples()", c);
   const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed: "CWUI" });
   run.stage = "camp";
+  // #315：5 级起才能在诊所装 / 拆义体。柯尔特 5 级：原生命上限 56，示例义体占 5/56 + 15% ≈ 23.9%，上限 70%
+  run.party.forEach(h => { h.level = opt.level || 5; });
   c.S.state.kuizhi = opt.money != null ? opt.money : 100000;
   c.CyberwareUI.reset();
   const U = c.CyberwareUI;
@@ -52,7 +54,7 @@ test("目录：示例出现在可安装列表，有价格、说明、安装后�
   assert.match(row, /【示例】5级近战攻击义体/);
   assert.match(row, /3000/);
   assert.match(row, /示例条目，内容未设计。/);
-  assert.match(row, /安装后改造率 <b class="cw-after">40%<\/b>/);
+  assert.match(row, /安装后改造率 <b class="cw-after">23\.9%<\/b>/);
   assert.match(row, /冲突标签「arm」/);
   assert.doesNotMatch(row, /disabled/);
   assert.match(html, /还没有安装义体。/);
@@ -70,7 +72,7 @@ test("装不了的：按钮灰掉并写原因（超上限没专长 / 奎支不�
   let row = shopRow(U.html(model()), "example_t5_melee");
   assert.match(row, /disabled/); assert.match(row, /奎支不够/);
   c.S.state.kuizhi = 100000;
-  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false };
+  run.party[0].cyber = { armor: 30, shield: 0, sand: 0, spirit: false };
   row = shopRow(U.html(model()), "example_t5_melee");
   assert.match(row, /disabled/); assert.match(row, /超出改造率上限（需要专长才能过度安装）/);
 });
@@ -81,7 +83,7 @@ test("确认步骤：点安装先出预览（费用、改造率前后、上限�
   const html = U.html(model());
   assert.match(html, /确认安装：【示例】5级近战攻击义体/);
   assert.match(html, /费用 <b>3000<\/b>/);
-  assert.match(html, /<b>0%<\/b> → <b class="cw-after">40%<\/b> \/ 上限 70%/);
+  assert.match(html, /<b>0%<\/b> → <b class="cw-after">23\.9%<\/b> \/ 上限 70%/);
   assert.doesNotMatch(html, /cw-heavy"/);
   const cmd = JSON.parse(html.match(/data-cw-cmd="([^"]+)"[^>]*>确认安装/)[1].replace(/&quot;/g, '"'));
   assert.deepEqual(cmd, { action: "installCyberware", kit: "kolt", id: "example_t5_melee" });
@@ -92,7 +94,7 @@ test("确认步骤：点安装先出预览（费用、改造率前后、上限�
 
 test("过度安装：只有能过度安装时才能确认，并醒目显示「这会给身体带来极大负担。」", () => {
   const { c, run, U, model } = setup();
-  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false };
+  run.party[0].cyber = { armor: 30, shield: 0, sand: 0, spirit: false };
   U.state.confirm = "example_t5_melee";
   let html = U.html(model());
   assert.match(html, new RegExp(`<p class="cw-heavy" role="alert">⚠ ${HEAVY}</p>`));
@@ -111,7 +113,7 @@ test("已安装：列表 + 拆除按钮写拆除费；拆除可逆", () => {
   c.Rogue.installCyberware(run, "kolt", "example_t5_melee");
   const html = U.html(model());
   assert.match(html, /cw-row on[\s\S]*【示例】5级近战攻击义体[\s\S]*拆除<small>1000 奎支<\/small>/);
-  assert.match(html, /义体 40%/);
+  assert.match(html, /义体 23\.9%/);
   assert.match(html, /义体在持续消耗你的精神。/);
   assert.match(html, /目录里的义体都装上了。/);
   noShp(html);
@@ -132,7 +134,7 @@ test("本机：query(\"cyberwarePreview\") 未知 id 给 ok:false，确认框照
 
 test("过度安装专长 overinstall（featHas）也能放开", () => {
   const { run, U, model } = setup();
-  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false };
+  run.party[0].cyber = { armor: 30, shield: 0, sand: 0, spirit: false };
   run.party[0].feats = (run.party[0].feats || []).concat(["overinstall"]);
   const m = model();
   if (!m.packet.view.canOverinstall) return;   // 专长挂在别的字段上时只看 cyberOverinstall 那条
@@ -155,7 +157,7 @@ test("联机：viewModel 读 heroes[] 的 purse / previews（不在界面里猜�
   U.state.confirm = "example_t5_melee";
   let html = U.html(m);
   assert.match(html, /5000 奎支<\/small>/); assert.match(html, /800 奎支<\/small>/);
-  assert.match(html, /<b>0%<\/b> → <b class="cw-after">40%<\/b> \/ 上限 70%/);
+  assert.match(html, /<b>0%<\/b> → <b class="cw-after">23\.9%<\/b> \/ 上限 70%/);
   assert.match(html, /确认安装<\/button>/);
   noShp(html);
   // 切到钱不够的人：按钮灰掉
@@ -163,7 +165,7 @@ test("联机：viewModel 读 heroes[] 的 purse / previews（不在界面里猜�
   html = U.html(U.viewModel(projected));
   assert.match(html, /奎支不够/);
   // 过度安装：heavy 警告来自房主的预览
-  run.party[0].cyber = { armor: 8, shield: 0, sand: 0, spirit: false }; run.party[0].cyberOverinstall = true;
+  run.party[0].cyber = { armor: 30, shield: 0, sand: 0, spirit: false }; run.party[0].cyberOverinstall = true;
   U.state.kit = "kolt"; U.state.confirm = "example_t5_melee";
   html = U.html(U.viewModel(onlinePacket(c, run, ["kolt"], { kolt: 5000 })));
   assert.match(html, new RegExp(`<p class="cw-heavy" role="alert">⚠ ${HEAVY}</p>`));
