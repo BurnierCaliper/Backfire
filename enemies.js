@@ -612,9 +612,9 @@ function enemySkillListBase(u) {
   return common.concat(list, ground);
 }
 
-/** 活沙被杀死时吸收的：四足 / 人形 / 大沙灵，以及沙漠生物阵营（沙鱼，作者 10/19 定）。
+/** 活沙被杀死时吸收的：四足 / 人形 / 大沙灵 / 扬尘体（#365），以及沙漠生物阵营（沙鱼，作者 10/19 定）。
  *  中立生物（尘虫、管虫）不算；只吸收还在场上、活着的（逃走 / 被移出战场的、刚被打死还没清出场的不算） */
-const LIVESAND_FEED_KITS = ["sand_beast", "sand_human", "bigsand"];
+const LIVESAND_FEED_KITS = ["sand_beast", "sand_human", "bigsand", "dustbody"];
 const LIVESAND_FEED_FACTIONS = ["沙漠生物"];
 function livingSandAllies(exceptId) {
   return (state.units || []).filter(u =>
