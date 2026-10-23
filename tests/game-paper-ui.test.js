@@ -553,7 +553,7 @@ test("战斗记录是一长条热敏收据（和联机同一套字、分隔线�
   assert.deepEqual(o.errors, []);
 });
 
-/** 纸片画面里看得见的几块（打开「工具 ▾」、拉开抽屉、预演框亮着）和它们的 ::before 这一刻算出来的样子；动画都停在第 0 帧（呼吸发光的影子不随时间变） */
+/** 纸片画面里看得见的几块（打开「工具 ▾」、拉开抽屉、预演框亮着）和它们的 ::before 这一刻算出来的样子（动画、过渡怎么量见下面的 looks） */
 const PAPER_PARTS = {
   tools: "#g-app > .g-top", toolBtn: "#g-app > .g-top #g-stats", toolOff: "#g-app > .g-top #g-undo", select: "#g-weather-sel",
   hud: "#g-app > .g-hud", sk: "#g-app > .g-hud .skills .sk", skNm: "#g-app > .g-hud .skills .sk .nm", skKey: "#g-app > .g-hud .skills .sk .key", skCost: "#g-app > .g-hud .skills .sk .cost",
@@ -563,19 +563,39 @@ const PAPER_PARTS = {
   pv: "#g-app > .pvbox", pvH: "#g-app > .pvbox h4", pvLn: "#g-app > .pvbox .ln", party: "#g-app > .g-hud .hd2d-party", pm: "#g-app > .g-hud .hd2d-party .pm"
 };
 const PAPER_PROPS = ["color", "background-color", "background-image", "border-top-color", "border-top-style", "border-top-width", "box-shadow", "animation-name", "text-shadow", "opacity", "filter"];
-const looks = (page, parts) => page.evaluate(([parts, props]) => {
-  document.getAnimations().forEach(a => { a.pause(); a.currentTime = 0; });
-  const out = {};
-  Object.entries(parts).forEach(([k, sel]) => {
-    const el = document.querySelector(sel);
+/** 量的时候临时加上：所有 CSS 动画、过渡都停掉（量完拿掉，CSS 自己重新起动画） */
+const STILL_CSS = "*, *::before, *::after { animation: none !important; transition: none !important; }";
+/**
+ * 这几块这一刻的样子。动画只比「套的是哪个」：animation-name（元素、::before），和元素身上真有的 CSS 动画（CSSAnimation；比 animation-name 多出来的，
+ * 就是 CSS 已经不要了、却没取消、还套在上面的）；别的属性在临时停掉所有动画、过渡的时候量（底下的样子，不随时间变）。
+ * 以前是 getAnimations() 全部 pause()、currentTime = 0，定在第 0 帧量：被脚本暂停过的 CSS 动画就不再全归 CSS 管——
+ * 有的 Chromium（主人那边 Playwright 的）换天气拿掉 animation-name 时不取消它，下一次整块重算样式（开 / 关纸片画面）又把定住的那一帧套回来，
+ * 上一轮微光的呼吸光（wfxGlowUi / wfxGlowBtn 第 0 帧）就带进了「沙暴」那一轮的旧顶栏、按钮（#339）。游戏自己不拿脚本动 CSS 的动画
+ */
+const looks = (page, parts) => page.evaluate(([parts, props, still]) => {
+  // 脚本自己起的动画（el.animate：game.js 的镜头拉近这些）照旧定在第 0 帧；CSS 的动画、过渡不碰
+  document.getAnimations().filter(a => !(a instanceof CSSAnimation || a instanceof CSSTransition)).forEach(a => { a.pause(); a.currentTime = 0; });
+  const out = {}, found = Object.entries(parts).map(([k, sel]) => [k, document.querySelector(sel)]);
+  found.forEach(([k, el]) => {
     if (!el) { out[k] = "（没有）"; return; }
-    const cs = getComputedStyle(el), bs = getComputedStyle(el, "::before");
-    props.forEach(p => { out[k + " " + p] = cs.getPropertyValue(p); });
-    // 图片地址只比「有几张」：纸纹是程序画的 PNG（#321 起是 blob: 地址）；旧皮肤相位天气的波纹（weather-fx.js）过一会儿会从 SVG 换成画好的 PNG，和纸片无关
-    ["content", "filter", "animation-name", "background-image", "clip-path"].forEach(p => { out[k + "::before " + p] = bs.getPropertyValue(p).replace(/url\("(?:data|blob):[^"]*"\)/g, 'url("图…")'); });
+    out[k + " animation-name"] = getComputedStyle(el).animationName;
+    out[k + "::before animation-name"] = getComputedStyle(el, "::before").animationName;
+    out[k + " CSS 动画"] = el.getAnimations().filter(a => a instanceof CSSAnimation).map(a => a.animationName).sort().join(", ");
   });
+  const css = document.createElement("style");
+  css.textContent = still;
+  document.head.appendChild(css);
+  try {
+    found.forEach(([k, el]) => {
+      if (!el) return;
+      const cs = getComputedStyle(el), bs = getComputedStyle(el, "::before");
+      props.forEach(p => { if (p !== "animation-name") out[k + " " + p] = cs.getPropertyValue(p); });
+      // 图片地址只比「有几张」：纸纹是程序画的 PNG（#321 起是 blob: 地址）；旧皮肤相位天气的波纹（weather-fx.js）过一会儿会从 SVG 换成画好的 PNG，和纸片无关
+      ["content", "filter", "background-image", "clip-path"].forEach(p => { out[k + "::before " + p] = bs.getPropertyValue(p).replace(/url\("(?:data|blob):[^"]*"\)/g, 'url("图…")'); });
+    });
+  } finally { css.remove(); }
   return out;
-}, [parts, PAPER_PROPS]);
+}, [parts, PAPER_PROPS, STILL_CSS]);
 const diffOf = (a, b) => Object.keys(a).filter(k => a[k] !== b[k]).map(k => `${k}: ${a[k]} ≠ ${b[k]}`);
 /** 换天气（旧顶栏的下拉框，同一个处理：game.js 换 state.weather、#g-app[data-weather]） */
 const setWeather = (page, w) => page.evaluate(w => { const s = document.getElementById("g-weather-sel"); s.value = w; s.dispatchEvent(new Event("change", { bubbles: true })); }, w);
