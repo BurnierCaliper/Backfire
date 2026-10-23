@@ -2,7 +2,7 @@
  * 和单人 / 跑团的战斗画面一样：战场上是同一套单位卡（unit-card.js），底下是队伍栏、角色仪表、技能栏、结束回合；
  * 选了技能以后在战场上直接点目标（单位卡 / 区域），分步里的其他选项排在提示栏里。
  * 规则和预演都在主机上：这里只画主机发来的展示数据（online-view.js 的投影），点选通过回调交给 online-ui.js 去问主机。
- *   const b = OnlineBattle.create({ onUnit, onZone, onSkill, onOption, onCancel, onEnd })
+ *   const b = OnlineBattle.create({ onUnit, onZone, onSkill, onOption, onCancel, onEnd })（onUnit 收到的 id：单位 id、配置物 prop:…、两区之间的间隔 gap:…）
  *   b.el → 挂到页面上；b.update(data, ui)：data 是展示用的战场，ui 是 { mine, current, acting, menu, skills, armed, hint, busy }
  * 新画面开着时（#297，hd2d/hd2d-shell.js 给这里的 .g-hud 换上了新外壳）：技能按钮、队伍栏画成原型那一套，唤出 / 收回武器人单独做成大按钮（Q）；
  * 按钮、点击、悬停、快捷键还是这里的那一份，关着时一点没变 */
@@ -390,6 +390,10 @@
       if (op && !op.disabled) { if (cb.onOption) cb.onOption(Number(op.dataset.obOpt)); return; }
       const b = t.closest("[data-ob]");
       if (b && !b.disabled) { if (b.dataset.ob === "cancel" && cb.onCancel) cb.onCancel(); if (b.dataset.ob === "end" && cb.onEnd) cb.onEnd(); return; }
+      // 两区之间的间隔（危墙、驻波墙……）：和新画面点地台之间那一块、本机画面点竖条一样当成点了「gap:…」——
+      // 选目标时打得到的墙照旧是选它，不选目标时打开它的详情面板（online-ui.js · battleCb.onUnit）
+      const gp = t.closest(".g-gap[data-key]");
+      if (gp) { if (cb.onUnit) cb.onUnit("gap:" + gp.dataset.key); return; }
       const z = t.closest(".g-zone");
       if (z && z.classList.contains("is-move-target") && cb.onZone) { cb.onZone(Number(z.dataset.num)); return; }
     });

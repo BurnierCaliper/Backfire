@@ -10,6 +10,21 @@
 .hi-badge .hi-stack { position: absolute; right: -5px; bottom: -4px; min-width: 13px; height: 13px; padding: 0 2px; border-radius: 7px;
   background: #0d0b09; border: 1px solid #c99a46; color: #f1e6cf; font: 700 9px/11px "Oxanium", system-ui, sans-serif; text-align: center; }
 .hi-badges { display: inline-flex; flex-wrap: wrap; gap: 4px 5px; align-items: center; }
+/* 单位卡上的徽章只排一行（unit-card.js · BADGE_ROW / fitBadges，作者 10/20 定）：放不下的收进最后的「+N」，卡片不再跟着效果变高。
+ * 有徽章的卡：行动点单独一行，徽章那一行占满卡片的宽度（和行动点挤在一行只放得下两三个）；右边、下边留的内边距给层数小圆标（它伸出图标外面） */
+.u-foot .u-status { min-width: 0; flex: 1 1 auto; }
+.u-foot:has(.hi-row) { flex-wrap: wrap; row-gap: 3px; }
+.u-foot:has(.hi-row) .u-status { flex-basis: 100%; }
+.hi-badges.hi-row { position: relative; flex: 0 0 auto; flex-wrap: nowrap; max-width: 100%; min-width: 0; overflow: hidden; padding: 2px 6px 4px 0; margin: -2px 0 -4px; }
+.hi-badges.hi-row > .hi-off { display: none; }
+/* 区里挤（单位卡缩小，game.js / online-battle.js · fitZones 的 dense-2 / dense-3）时图标也小一号，一行多放一个 */
+:is(.g-zone.dense-2, .g-zone.dense-3) .hi-badges.hi-row { gap: 4px; }
+:is(.g-zone.dense-2, .g-zone.dense-3) .hi-badges.hi-row .hi-svg { width: 19px; height: 19px; }
+.hi-more { flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 3px; border: 1px solid #c99a46; background: #0d0b09; color: #ffd27a;
+  font: 800 11px/1 "Oxanium", system-ui, sans-serif; cursor: help; }
+.hi-more[hidden] { display: none; }
+/* 「+N」跟着图标的大小：挤的区里图标 19 像素（新画面的紧凑卡在 hd2d.css 里再小一号） */
+:is(.g-zone.dense-2, .g-zone.dense-3) .hi-more { height: 18px; }
 
 /* 生效：图标放大一下 + 用自己的颜色发光 */
 .hi-badge.hi-proc .hi-svg { animation: hi-proc .75s cubic-bezier(.2, .9, .3, 1.3); }
@@ -66,29 +81,54 @@
   background: #2a231c; color: #f1e6cf; border: 2px solid #0d0b09; box-shadow: 4px 5px 0 rgba(0, 0, 0, .5);
   padding: 8px 12px 10px; font-size: 12.5px; line-height: 1.55; }
 .unit-tip.show { display: block; }
-.unit-tip .ut-top { display: flex; align-items: baseline; gap: 10px; }
-.unit-tip .ut-top b { font-size: 15px; font-weight: 800; }
-.unit-tip .ut-top span, .unit-tip .ut-kicker { color: #b3a487; font-size: 12px; }
-.unit-tip .ut-kicker { letter-spacing: .06em; }
-.unit-tip .ut-desc { margin: 4px 0 0; }
+/* 说明的内容：悬停说明和联机的单位详情面板（.ut-panel，下面）共用 */
+:is(.unit-tip, .ut-panel) .ut-top { display: flex; align-items: baseline; gap: 10px; }
+:is(.unit-tip, .ut-panel) .ut-top b { font-size: 15px; font-weight: 800; }
+:is(.unit-tip, .ut-panel) .ut-top span, :is(.unit-tip, .ut-panel) .ut-kicker { color: #b3a487; font-size: 12px; }
+:is(.unit-tip, .ut-panel) .ut-kicker { letter-spacing: .06em; }
+:is(.unit-tip, .ut-panel) .ut-desc { margin: 4px 0 0; }
 /* 分阶段的首领 / 精英：现在是哪个阶段（能力只列这一阶段的） */
-.unit-tip .ut-stage { margin: 4px 0 0; color: #b3a487; font-size: 12px; }
-.unit-tip .ut-stage b { color: #ffd27a; font-weight: 700; }
-.unit-tip ul { margin: 4px 0 0; padding-left: 16px; }
-.unit-tip .ut-list li { color: #d8ccb4; }
-.unit-tip .ut-h { margin-top: 8px; padding-top: 6px; border-top: 1px solid #4d4337; color: #c99a46; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
-.unit-tip .ut-effects { list-style: none; padding: 0; display: grid; gap: 4px; }
-.unit-tip .ut-effects li { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: start; }
+:is(.unit-tip, .ut-panel) .ut-stage { margin: 4px 0 0; color: #b3a487; font-size: 12px; }
+:is(.unit-tip, .ut-panel) .ut-stage b { color: #ffd27a; font-weight: 700; }
+:is(.unit-tip, .ut-panel) ul { margin: 4px 0 0; padding-left: 16px; }
+:is(.unit-tip, .ut-panel) .ut-list li { color: #d8ccb4; }
+:is(.unit-tip, .ut-panel) .ut-h { margin-top: 8px; padding-top: 6px; border-top: 1px solid #4d4337; color: #c99a46; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+:is(.unit-tip, .ut-panel) .ut-effects { list-style: none; padding: 0; display: grid; gap: 4px; }
+:is(.unit-tip, .ut-panel) .ut-effects li { display: grid; grid-template-columns: auto 1fr; column-gap: 6px; align-items: start; }
 /* 内容多：加宽，效果排两栏；还放不下就在浮窗里滚动（unit-tip.js · show），底下贴一行提示 */
 .unit-tip.ut-wide .ut-effects { grid-template-columns: 1fr 1fr; column-gap: 14px; align-items: start; }
 .unit-tip.ut-wide .ut-effects li { align-content: start; }
 .unit-tip .ut-more { position: sticky; bottom: -10px; margin: 6px -12px -10px; padding: 4px 12px; background: #3a2f22; color: #ffd27a; font-size: 11.5px; text-align: center; border-top: 1px solid #4d4337; }
-.unit-tip .ut-mechs { list-style: none; padding: 0; display: grid; gap: 3px; }
-.unit-tip .ut-mechs li { color: #ffd9c9; }
-.unit-tip .ut-mechs li b { color: #ff8a7a; margin-right: 2px; }
-.unit-tip .ut-mech-h { margin-top: 6px; color: #ff8a7a; }
-.unit-tip .ut-effects li > svg { width: 18px; height: 18px; grid-row: span 2; margin-top: 1px; }
-.unit-tip .ut-effects li > b { font-weight: 700; }
-.unit-tip .ut-effects li > span { grid-column: 2; color: #d8ccb4; }
-.unit-tip .ut-effects li:not(:has(> svg)) > span { grid-column: 1 / -1; }
-.unit-tip .ut-none { margin: 4px 0 0; color: #9a8c74; }
+:is(.unit-tip, .ut-panel) .ut-mechs { list-style: none; padding: 0; display: grid; gap: 3px; }
+:is(.unit-tip, .ut-panel) .ut-mechs li { color: #ffd9c9; }
+:is(.unit-tip, .ut-panel) .ut-mechs li b { color: #ff8a7a; margin-right: 2px; }
+:is(.unit-tip, .ut-panel) .ut-mech-h { margin-top: 6px; color: #ff8a7a; }
+:is(.unit-tip, .ut-panel) .ut-effects li > svg { width: 18px; height: 18px; grid-row: span 2; margin-top: 1px; }
+:is(.unit-tip, .ut-panel) .ut-effects li > b { font-weight: 700; }
+:is(.unit-tip, .ut-panel) .ut-effects li > span { grid-column: 2; color: #d8ccb4; }
+:is(.unit-tip, .ut-panel) .ut-effects li:not(:has(> svg)) > span { grid-column: 1 / -1; }
+:is(.unit-tip, .ut-panel) .ut-none { margin: 4px 0 0; color: #9a8c74; }
+/* 简短版（联机的悬停说明，unit-tip.js · html 的 brief，作者 10/20 定）：效果只写名字、排成小标签；末尾一行提示点一下单位看全部 */
+.unit-tip .ut-chips { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 5px; }
+.unit-tip .ut-chips li { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px 1px 3px; background: #3a2f22; border: 1px solid #4d4337; line-height: 1.4; }
+.unit-tip .ut-chips li > svg { width: 16px; height: 16px; }
+.unit-tip .ut-chips li > b { font-weight: 700; }
+.unit-tip .ut-chips .ut-chips-more { padding: 1px 6px; color: #ffd27a; font-weight: 800; }
+.unit-tip .ut-open { margin: 8px -12px -10px; padding: 4px 12px; background: #3a2f22; color: #ffd27a; font-size: 11.5px; text-align: center; border-top: 1px solid #4d4337; }
+/* 单位详情面板（联机：不在选目标时点一下单位，online-ui.js · openDetail）：完整的说明，能点、能滚；跟着战场刷新，✕ / Esc / 再点同一个收起。
+ * 桌面靠右（热座栏下面，盖住的是右侧栏、不挡战场中间），手机贴底（底下留出「回到…」按钮那么高，最后几行不被它挡住）。
+ * 层级：在战场、右侧栏之上，在纸片画面的顶栏 / 吊牌 /「工具 ▾」、悬停说明、热座栏的询问和各种弹窗之下 */
+.ut-panel { position: fixed; z-index: 49; top: calc(var(--hs-top-height, 56px) + 56px); right: 12px; width: min(380px, calc(100vw - 24px));
+  max-height: calc(100vh - var(--hs-top-height, 56px) - 72px); overflow: hidden auto; overscroll-behavior: contain;
+  padding: 10px 12px 10px; background: #2a231c; color: #f1e6cf; border: 2px solid #0d0b09; box-shadow: 4px 5px 0 rgba(0, 0, 0, .5); font-size: 12.5px; line-height: 1.55; }
+.ol-ui.ut-panel { font: 12.5px/1.55 var(--sk-body, sans-serif); color: #f1e6cf; }   /* 联机界面的 .ol-ui 默认 14px，这里照悬停说明的字号 */
+.ut-panel[hidden] { display: none; }
+.ut-panel .ut-close { float: right; margin: -4px -6px 4px 10px; width: 30px; height: 30px; padding: 0; border: 2px solid #0d0b09; background: #4d4337; color: #f1e6cf;
+  font-size: 16px; font-weight: 800; line-height: 1; cursor: pointer; }
+.ut-panel .ut-close:hover, .ut-panel .ut-close:focus-visible { background: #c99a46; color: #0d0b09; }
+/* 纸片画面（#308）：顶栏和吊牌下面，让开右边缘的「记录 · 聊天」竖标签和底下的技能栏 */
+body.ol-paper .ut-panel { top: var(--olp-under, 100px); right: calc(var(--olp-edge, 14px) + 44px);
+  max-height: max(220px, calc(100vh - var(--olp-under, 100px) - var(--olp-dock-h, 190px) - 24px)); }
+@media (max-width: 760px) {
+  .ut-panel, body.ol-paper .ut-panel { top: auto; bottom: 0; left: 0; right: 0; width: auto; max-height: 62vh; border-width: 2px 0 0; box-shadow: 0 -4px 0 rgba(0, 0, 0, .45); padding-bottom: 72px; }
+}

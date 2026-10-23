@@ -244,6 +244,8 @@
 .hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) :is(.u-status, .hi-badges) { flex-wrap: nowrap; }
 .hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) .u-status .chip { line-height: 14px; padding: 0 3px; }
 .hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) .hi-badge .hi-svg { width: 15px; height: 15px; }
+/* 一行放不下的收进「+N」（unit-card.js · fitBadges，hud-icons.css）：跟着图标小一号，放得进这一行 16 像素高 */
+.hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) .hi-more { height: 15px; padding: 0 2px; font-size: 10px; }
 .hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) :is(.u-lv, .u-atk, .shpn, .u-dur, .u-econ, .u-res) { display: none !important; }
 .hd2d-plate.card.compact:not(.hover):not(:focus-within) .unit:not(.prop):not(.mini) .u-flag { top: auto; bottom: 4px; right: 7px; font-size: 11px; line-height: 14px; }
 .hd2d-plate.card.compact.hover, .hd2d-plate.card.compact:focus-within { z-index: 2147482000 !important; }

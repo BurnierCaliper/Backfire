@@ -2,7 +2,7 @@
 // 只实现测试里用到的那几个 Playwright 接口：
 //   browser.newContext({ viewport, isMobile, hasTouch }) / context.newPage() / context.close() / browser.close()
 //   context.addInitScript(fn) / page.addInitScript(fn)（每次打开页面之前先跑：tests/old-screen.js 用它在页面加载前记着「新画面 关」，#339）
-//   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / focus / fill / keyboard.press /
+//   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / hover / mouse.move / focus / fill / keyboard.press /
 //   waitForFunction / waitForSelector / waitForTimeout / isVisible / locator(sel).count / innerText / evaluate / click / on("pageerror")
 // 只在 Linux（GitHub 上跑测试的机器自带 Chrome）或者用环境变量 CHROME_PATH 指定了 Chrome 时才用；
 // 别的情况（Windows / Mac 没装 Playwright）返回 null，测试照旧跳过。要 Node 22 自带的 WebSocket。
@@ -53,6 +53,8 @@ class Page {
   constructor(conn, sessionId) {
     this.conn = conn; this.sessionId = sessionId; this.handlers = {}; this.onLoad = null;
     this.keyboard = { press: key => this.pressKey(key), type: text => this.send("Input.insertText", { text: String(text) }) };
+    // 鼠标移到某一点（同 Playwright 的 page.mouse.move）：会触发 mouseover / mouseout，悬停说明就是这样弹出、收起的
+    this.mouse = { move: (x, y) => this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }) };
     this.off = conn.on(msg => {
       if (msg.sessionId !== sessionId) return;
       if (msg.method === "Runtime.exceptionThrown") {
@@ -121,6 +123,18 @@ class Page {
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
     await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1 });
     await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount: 1 });
+  }
+  /** 鼠标停到元素中心（滚进画面；同 Playwright 的 page.hover），被别的东西盖住就等一会儿再试 */
+  async hover(selector, opt = {}) {
+    const end = Date.now() + (opt.timeout || 5000);
+    let p = null;
+    for (;;) {
+      p = await this.point(selector);
+      if (p && p.hit) break;
+      if (Date.now() > end) throw new Error(`hover：${selector} ${p ? "被别的东西盖住了" : "不存在或看不见"}`);
+      await sleep(50);
+    }
+    await this.mouse.move(p.x, p.y);
   }
   /** page.press(selector, key)：先把焦点放到这个元素上再按 */
   async press(selector, key) { await this.focus(selector); return this.pressKey(key); }

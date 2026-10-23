@@ -6,7 +6,9 @@
  * 首领机制（FF14 式）：被点名的人头上一个贴纸图标（角上的大数字 = 还有几回合），首领头上是它正在读条的机制，
  * 悬停 / 触屏点一下看说明；铭牌上不写机制名字、不画边框。新点名的那一下图标「啪」地弹出来、响一声（MECH_ALERT）。
  *   UnitCard.paintTowers(zone, towers, { sim })  → 踩塔：区名旁边的图标 + 地面上的一圈
- *   UnitCard.paintBanner(field, snaps)  → 战场正上方的机制横幅（红字白描边，剩余回合少的在上面），和援军倒计时摞在 topStack(field) 里 */
+ *   UnitCard.paintBanner(field, snaps)  → 战场正上方的机制横幅（红字白描边，剩余回合少的在上面），和援军倒计时摞在 topStack(field) 里
+ * 身上效果的徽章只排一行（作者 10/20 定，BADGE_ROW）：要紧的排前面（orderBadges），一行放不下的收进「+N」（fitBadges，悬停「+N」写着收起的是哪些）；
+ * 卡片换了宽度（区里挤了缩小、窗口变了、新画面的紧凑卡展开……）自己重新量 */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -77,6 +79,14 @@
     easing: "ease-out",
     frames: [{ at: 0, scale: 0.2, y: 14, alpha: 0 }, { at: 0.45, scale: 1.34, y: -2, alpha: 1 }, { at: 0.72, scale: 0.9, y: 0, alpha: 1 }, { at: 1, scale: 1, y: 0, alpha: 1 }],
     burst: { from: 0.5, to: 1.9, alpha: 0.9 }
+  };
+  // 效果徽章只排一行（作者 10/20 定）：以前一区单位多、效果多时，卡片缩到最小、图标换成四五行，同区的卡要滚动才看得到。
+  //   first：排在最前面的（数字小的在前；同一个数字、没写的照 hud-icons.js · unitBadges 的顺序）：晕眩标记、休眠 / 下潜 / 下陷、高能、蓄能
+  //   more(n)：一行放不下时最后那个「+N」；tip(名字)：悬停「+N」写的收起来的是哪些
+  const BADGE_ROW = {
+    first: { stunMark: 0, dormant: 1, submerged: 1, sink: 1, high: 2, store: 3 },
+    more: n => "+" + n,
+    tip: names => "还有：" + names.join("、")
   };
 
   // 首领机制的倒计时文字（头顶图标的说明、单位的悬停说明、踩塔、横幅共用）
@@ -360,6 +370,81 @@
     field._topPad = pad;
   }
 
+  /* ---------- 效果徽章只排一行（BADGE_ROW） ---------- */
+  /** 要紧的排前面（BADGE_ROW.first），其余照原来的顺序 */
+  function orderBadges(list) {
+    const first = BADGE_ROW.first, rank = k => (Object.prototype.hasOwnProperty.call(first, k) ? first[k] : 100);
+    return (list || []).map((b, i) => ({ b, i, r: rank(b && b.key) })).sort((x, y) => (x.r - y.r) || (x.i - y.i)).map(x => x.b);
+  }
+  /** 「+N」悬停写的名字：图标的名字 + 层数（「灼烧 3」「晕眩标记 1/2」） */
+  function badgeName(b) {
+    const st = b.querySelector(".hi-stack");
+    return (b.getAttribute("aria-label") || "") + (st && st.textContent ? " " + st.textContent : "");
+  }
+  /** 量一行放不放得下，放不下的徽章收进「+N」。量的是画出来的宽度：scopes 是卡片 / 整个战场（一个或一串），里面所有的徽章行一起量——
+   *  先全部摆出来，再一次量完、一次收起（不一行一行地反复排版）。还没画出来（宽 0）的不动 */
+  function fitBadges(scopes) {
+    const rows = [];
+    [].concat(scopes || []).forEach(scope => {
+      if (!scope || typeof scope.querySelectorAll !== "function") return;
+      scope.querySelectorAll(".hi-badges.hi-row").forEach(row => {
+        const kids = [...row.children];
+        rows.push({ row, items: kids.filter(x => x.classList.contains("hi-badge")), more: kids.find(x => x.classList.contains("hi-more")) || null });
+      });
+    });
+    // 1. 全部摆出来
+    rows.forEach(r => {
+      r.items.forEach(b => { if (b.classList.contains("hi-off")) b.classList.remove("hi-off"); });
+      if (r.more && !r.more.hidden) { r.more.hidden = true; r.more.textContent = ""; r.more.removeAttribute("title"); r.more.removeAttribute("aria-label"); }
+    });
+    // 2. 量：哪几行放不下（右边留的内边距是给层数小圆标的，它伸出图标外面，不算能用的宽度）
+    const css = typeof getComputedStyle === "function" ? getComputedStyle : null;
+    const over = rows.filter(r => {
+      if (!r.items.length || !r.more) return false;
+      const cs = css ? css(r.row) : null;
+      r.width = r.row.clientWidth - (cs ? parseFloat(cs.paddingRight) || 0 : 0);
+      r.gap = cs ? parseFloat(cs.columnGap) || 0 : 0;
+      r.rights = r.items.map(b => b.offsetLeft + b.offsetWidth);
+      return r.width > 0 && r.rights[r.rights.length - 1] > r.width + 0.5;
+    });
+    if (!over.length) return;
+    // 3. 放不下的先摆出「+N」量它多宽，4. 再收起放不下的那几个
+    over.forEach(r => { r.more.hidden = false; r.more.textContent = BADGE_ROW.more(r.items.length); });
+    over.forEach(r => { r.room = r.width - r.more.offsetWidth - r.gap; });
+    over.forEach(r => {
+      let keep = r.items.length;
+      while (keep > 0 && r.rights[keep - 1] > r.room + 0.5) keep--;
+      const off = r.items.slice(keep);
+      off.forEach(b => b.classList.add("hi-off"));
+      const tip = BADGE_ROW.tip(off.map(badgeName).filter(Boolean));
+      r.more.textContent = BADGE_ROW.more(off.length);
+      r.more.title = tip;
+      r.more.setAttribute("aria-label", tip);
+    });
+  }
+  /** 下一帧再量（同一帧里画了好几张卡只量一次）；没有画面（Node 里）就不量 */
+  let fitQueue = null;
+  function fitBadgesSoon(scope) {
+    if (!scope || typeof requestAnimationFrame !== "function") return;
+    if (fitQueue) { fitQueue.add(scope); return; }
+    fitQueue = new Set([scope]);
+    requestAnimationFrame(() => { const list = [...fitQueue]; fitQueue = null; fitBadges(list); });
+  }
+  /** 这张卡的宽度变了（区里挤了缩小一级、窗口变了、新画面的紧凑卡被鼠标停上去展开……）：重新量。每张卡自己一个，卡拿掉了跟着回收 */
+  function watchBadges(c) {
+    if (typeof ResizeObserver !== "function") return;
+    const box = c.unit.querySelector(".u-status");
+    if (!box) return;
+    let w = -1;
+    c.badgeWatch = new ResizeObserver(entries => {
+      const now = Math.round(entries[entries.length - 1].contentRect.width);
+      if (now === w) return;
+      w = now;
+      if (box.querySelector(".hi-badges.hi-row")) fitBadgesSoon(c.wrap);
+    });
+    c.badgeWatch.observe(box);
+  }
+
   function create(s) {
     const wrap = el("div", "unit-wrap");
     wrap.dataset.id = s.id;
@@ -379,6 +464,7 @@
     wrap.append(mechs, intents, unit, flash, tag);
     bindTips();
     const c = { id: s.id, wrap, unit, flash, tag, intents, mechs, segs: [], pips: [], layersKey: "", prev: null };
+    watchBadges(c);
     return c;
   }
 
@@ -531,21 +617,29 @@
     const highChip = icons ? "" : isHigh ? `<span class="chip">高能${s.highEnergy > 0 ? " " + s.highEnergy : ""}</span>`
       : s.highEnergy > 0 ? `<span class="chip">蓄能 ${s.highEnergy}</span>` : "";
     // 有图标的状态画成徽章（hud-icons.js），没有图标的（聚焦、掩护、首领阶段……）还是写字
-    // （首领机制不在这一行：画成头顶的图标，见上面的 c.mechs）
-    const badges = icons ? (s.badges || []) : [];
+    // （首领机制不在这一行：画成头顶的图标，见上面的 c.mechs）。
+    // 徽章只排一行（BADGE_ROW）：要紧的排前面，放不下的收进最后的「+N」（fitBadges 量过才知道放得下几个）；全部效果看悬停说明（联机：点单位开详情面板）
+    const badges = icons ? orderBadges(s.badges || []) : [];
     const badgeKey = badges.map(b => b.key + ":" + b.stack).join("|");
-    q(".u-status").innerHTML = highChip + (badges.length ? `<span class="hi-badges">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}</span>` : "") + (s.status
-      ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
-      : "");
+    const statusBox = q(".u-status");
+    // 中立生物的迷你名牌：只挂几个小标签（失衡 / 摊平 / 已发现）
+    const statusHtml = s.neutral ? (s.neutralTags || []).map(t => `<span class="chip m-${esc(t.key)}">${esc(t.text)}</span>`).join("")
+      : highChip + (badges.length ? `<span class="hi-badges hi-row">${badges.map(b => HudIcons.badge(b.key, b.stack, b.title)).join("")}<span class="hi-more" hidden></span></span>` : "") + (s.status
+        ? s.status.split(" · ").filter(t => t && t !== "无状态" && !/^高能/.test(t) && !(icons && HudIcons.covered(t))).map(t => `<span class="chip">${esc(t)}</span>`).join("")
+        : "");
+    // 和上次一样就不重画（量好的「+N」、正在生效的动画都留着）；换了就下一帧重新量这一行放得下几个
+    if (c.statusHtml !== statusHtml) {
+      statusBox.innerHTML = statusHtml;
+      c.statusHtml = statusHtml;
+      if (badges.length && !s.neutral) fitBadgesSoon(c.wrap);
+    }
     // 新挂上的、层数变了的徽章：生效一下（放大 + 发光）
-    if (icons && c.prev && c.prevBadges !== badgeKey && !(opts && opts.sim)) {
+    if (icons && !s.neutral && c.prev && c.prevBadges !== badgeKey && !(opts && opts.sim)) {
       const before = {};
       (c.prev.badges || []).forEach(b => { before[b.key] = String(b.stack); });
-      badges.forEach(b => { if (before[b.key] !== String(b.stack)) HudIcons.procIn(q(".u-status"), b.key); });
+      badges.forEach(b => { if (before[b.key] !== String(b.stack)) HudIcons.procIn(statusBox, b.key); });
     }
     c.prevBadges = badgeKey;
-    // 中立生物的迷你名牌：只挂几个小标签（失衡 / 摊平 / 已发现）
-    if (s.neutral) q(".u-status").innerHTML = (s.neutralTags || []).map(t => `<span class="chip m-${esc(t.key)}">${esc(t.text)}</span>`).join("");
     // 有耐久条时，资源文字里的「耐久 N」就不重复写了
     const resText = s.dur ? String(s.res || "").split(" · ").filter(t => !/^耐久 /.test(t)).join(" · ") : (s.res || "");
     q(".u-res").textContent = resText;
@@ -563,7 +657,8 @@
     create, update, headOf, sumCur, sumMax, mechLeft, mechLines, towerTip,
     MECH_ICON, mechN, mechLast, mechTip, mechTipHtml, mechIcon, mechIconsHtml, towerMarkHtml, paintTowers,
     MECH_ALERT, mechFresh, alertNew,
-    topStack, paintBanner, fitTop, bannerItems, bannerText, hideTip
+    topStack, paintBanner, fitTop, bannerItems, bannerText, hideTip,
+    BADGE_ROW, orderBadges, fitBadges
   };
   root.UnitCard = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
