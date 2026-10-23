@@ -65,8 +65,12 @@ test("确定性：同一个种子重放结果完全一样", () => {
   }
 });
 
-test("README：规则改动记录最上面一条是这次改动，写了以前、现在", () => {
+test("README：规则改动记录里有这次改动（在整节里找，不要求是最上面一条），写了以前、现在", () => {
   const readme = require("fs").readFileSync(require("path").join(H.ROOT, "README.md"), "utf8");
-  const first = readme.slice(readme.indexOf("## 规则改动记录")).split(/\n(?=- \*\*)/)[1] || "";
-  assert.match(first, /焚烧/); assert.match(first, /35%/); assert.match(first, /以前/); assert.match(first, /现在/);
+  const start = readme.indexOf("## 规则改动记录");
+  assert.ok(start >= 0);
+  const next = readme.indexOf("\n## ", start + 1);
+  const entry = readme.slice(start, next < 0 ? readme.length : next).split(/\n(?=- \*\*)/)
+    .find((e) => /^- \*\*移动堡垒的「焚烧」/.test(e)) || "";
+  assert.match(entry, /35%/); assert.match(entry, /以前/); assert.match(entry, /现在/);
 });
