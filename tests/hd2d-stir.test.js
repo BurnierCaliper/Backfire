@@ -115,8 +115,10 @@ test("布局：下潜的中立生物不进站位，一个区一份 stirs（×3�
   used.forEach(f => assert.ok(allowed.has(f), `stirOf 读了白名单里没有的字段 u.${f}`));
   // 旧画面：只折叠 neutral && submerged（埋伏的沙鱼这些照旧画卡）
   const g = read("game.js");
-  assert.match(g, /if \(s\.hidden \|\| \(s\.neutral && s\.submerged && !s\.dead\)\) \{   \/\/ 下潜的中立生物：不画名牌/);
-  assert.match(g, /const list = snaps\.filter\(s => s\.neutral && s\.submerged && !s\.dead && !s\.hidden && Number\(s\.zone\) === zone\);/);
+  // #360 把判断收成 inSandStir（同一个条件），两处都用它
+  assert.match(g, /const inSandStir = \(s\) => !!\(s && s\.neutral && s\.submerged && !s\.dead && !s\.hidden\);/);
+  assert.match(g, /if \(s\.hidden \|\| inSandStir\(s\)\) \{   \/\/ 下潜的中立生物：不画名牌/);
+  assert.match(g, /const list = snaps\.filter\(s => inSandStir\(s\) && Number\(s\.zone\) === zone\);/);
 });
 
 test("标记里写什么、摆在哪（纯函数）：同旧画面的字（沙纹图标、×N、名字迁徙中 · 点开看看；每只一行、底下一句说明）；挂在左角下面、压到卡换右角、左角不在画面里换右角、都不在画面里藏起来、收在界面里面", () => {
