@@ -87,7 +87,7 @@
   const SOLO_TIP = `先点一名角色当主角，再挑 ${ROGUE_SOLO.partners} 名伙伴（战斗里用「支援」叫他们登场打协助攻击），最后选一个第二副职责。` +
     `单人模式：每回合 ${ROGUE_SOLO.apPerRound} 行动点，能给自己协助格挡、接自己打出的失衡；每场胜利额外 +${ROGUE_SOLO.battleXp} 经验，` +
     `每 ${ROGUE_SOLO.attrEvery} 级多一次六维属性，每 ${ROGUE_SOLO.role2Every} 级从第二副职责里多学一个技能。`;
-  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在角色抽取机里抽角色。` +
+  const GROWTH_TIP = `挑 ${ROGUE_GROWTH.startParty} 名角色组成初始小队。独立存档，没有期限和首领。每天获得赫心融合体，在抽取机里抽取（角色 / 武器升级材料 / 制作材料）。` +
     `角色永久死亡后等级与武器等级清零并移出队伍，下次抽到从 1 级重新培养。`;
   function renderParty() {
     $("party-title").textContent = solo.on ? "单人模式 · 选择主角与伙伴" : growth.on ? "长线养成 · 选择初始小队" : "选择队伍";
@@ -274,14 +274,25 @@
     const bench = run.party.length > 1
       ? `<p class="r-hint">队伍里的人也可以先换到候补：${run.party.map(p => `<button class="g-btn small" data-swap-out-only="${esc(p.kit)}">${esc(Rogue.heroName(p.kit))} 下场</button>`).join(" ")}</p>` : "";
     const daily = typeof Rogue.growthDaily === "function" ? Rogue.growthDaily(run) : null;
-    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">每个完成：随机材料 + 1000 奎支；三个全完成：额外 1 个${esc(fusion)} 和 1000 奎支。</p>` : "";
-    return `<h2>角色抽取机</h2>
-      <p class="r-hint">投入 ${d.cost} 个${esc(fusion)}抽一名角色（每名角色机会相同）：新角色加入队伍（满 ${ROGUE_GROWTH.partyMax} 人进候补），抽到已有的角色 +1 级（${ROGUE_GROWTH.maxLevel} 级封顶）。手里有 <b>${d.fusion}</b> 个。</p>
+    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">${dailyRewardText(fusion)}</p>` : "";
+    return `<h2>抽取机</h2>
+      ${window.GachaUI ? GachaUI.panelHtml(d, fusion) : ""}
       <p class="r-hint">已有：${esc(owned)}</p>
-      <button class="g-btn r-main" id="r-draw" ${d.canDraw ? "" : "disabled"}>${d.canDraw ? "抽一次" : esc(d.why)}</button>
       ${dailyHtml}
       ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
       ${bench}`;
+  }
+  /** 每日挑战奖励说明：数字从 rogue-data.js · ROGUE_GACHA.dailyTaskFusion / dailyAllFusion 读 */
+  function dailyRewardText(fusion) {
+    const per = Number(ROGUE_GACHA.dailyTaskFusion) || 0, all = Number(ROGUE_GACHA.dailyAllFusion) || 0;
+    return `每个完成：随机武器材料${per > 0 ? ` + ${per} 个${esc(fusion)}` : ""} + 1000 奎支；三个全完成：额外${all > 0 ? ` ${all} 个${esc(fusion)} 和` : ""} 1000 奎支。`;
+  }
+  /** 抽取：单机直接跑规则拿到结果再播动画（联机单局没有长线养成，抽取机只在单机出现） */
+  function doDraw(n) {
+    let res;
+    try { res = dispatch({ type: "run", action: "drawMany", n }, { run }); } catch (e) { completeAction(null, e); return; }
+    completeAction(res.notes);
+    if (window.GachaUI) GachaUI.play(res);
   }
   function renderBoard() {
     if (run.growth) {
@@ -955,7 +966,8 @@
     });
     on("r-fight", fight);
     document.querySelectorAll("[data-parley]").forEach(b => { b.onclick = () => act({ action: "parley", kit: b.dataset.parley }); });
-    on("r-draw", () => act({ action: "drawHero" }));
+    on("r-draw", () => doDraw(1));
+    on("r-draw10", () => doDraw(10));
     body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
     body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });
     const pay = $("r-payer");

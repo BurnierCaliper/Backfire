@@ -253,7 +253,7 @@ const Rogue = (function () {
       // 每天的赫心融合体从「过了一天」开始发：开局当天不发（开局抽不了，靠完成任务 / 过天获得）
       run.lastFusionDay = Number(run.day) || 1;
       grantDailyFusion(run);
-      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在抽取机里抽取。`);
       makeBoard(run);
       return;
     }
@@ -2717,7 +2717,7 @@ const Rogue = (function () {
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     if (run.growth && G().fusionPerTask > 0) {
       bagAdd(G().fusionItem, G().fusionPerTask);
-      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去角色抽取机抽角色。`);
+      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去抽取机抽取。`);
     }
     const ei = escortInfo(run, t);
     if (ei && ei.intact) {
@@ -2762,7 +2762,7 @@ const Rogue = (function () {
    * 每天按日期种子刷 3 个：1 个角色任务 + 2 个通用任务。
    * 角色任务：从持有角色里随机挑一个，用该角色完成 1 次指定类型的任务。
    * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
-   * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
+   * 每个完成：随机武器材料 + 1 个赫心融合体 + 1000 奎支；三个全完成：额外 5 个赫心融合体（ROGUE_GACHA.dailyTaskFusion / dailyAllFusion）。 */
   const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
   const GROWTH_CHAR_TASKS = [
     { id: "char_task", name: (n) => `${n} 完成任务`, desc: (n, type) => `使用 ${n} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` },
@@ -2881,22 +2881,20 @@ const Rogue = (function () {
     if (!task || task.done) return;
     task.done = true;
     task.progress = task.target;
-    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶
-    const roll = Math.random();
-    const mat = roll < 0.50 ? "mat_metal"
-      : roll < 0.80 ? "mat_alloy"
-      : roll < 0.94 ? "mat_polymer"
-      : roll < 0.98 ? "mat_crystal"
-      : "mat_heart";
+    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶（ROGUE_GACHA.weaponMats，抽取机共用这张表）
+    const mat = rollWeaponMat(Math.random());
+    const fName = (ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体";
+    const per = gachaCfg().dailyTaskFusion, bonus = gachaCfg().dailyAllFusion;
     bagAdd(mat, 1);
+    if (per > 0) bagAdd(G().fusionItem, per);
     state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1${per > 0 ? `、${fName}×${per}` : ""} 和 1000 奎支。`);
     const all = run.growthDaily.tasks.every(t => t.done);
     if (all && !run.growthDaily.allDone) {
       run.growthDaily.allDone = true;
-      bagAdd(G().fusionItem, 1);
+      if (bonus > 0) bagAdd(G().fusionItem, bonus);
       state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1 和 1000 奎支。`);
+      notes.push(`三个每日挑战全部完成：额外获得 ${bonus > 0 ? `${fName}×${bonus} 和 ` : ""}1000 奎支。`);
     }
   }
 function advanceDays(run, n) {
@@ -3070,11 +3068,39 @@ function advanceDays(run, n) {
     return out;
   }
 
-  /* ---------- 长线养成：角色抽取机、候补 ---------- */
+  /* ---------- 长线养成：抽取机、候补 ---------- */
   function requireGrowth(run) {
     if (!run || !run.growth) throw new Error("只有长线养成有这个");
   }
-  /** 抽取机的状态：{ fusion, cost, canDraw, why, pool: [{ kit, name, owned, level }] } */
+  /* 抽取机概率表：数字只在 rogue-data.js · ROGUE_GACHA 一处 */
+  const gachaCfg = () => ROGUE_GACHA;
+  /** 按武器材料表（每日挑战同一张）把 [0,1) 的 roll 换成材料 id */
+  function rollWeaponMat(roll) {
+    const t = gachaCfg().weaponMats, sum = t.reduce((a, m) => a + m.w, 0);
+    let acc = 0;
+    for (const m of t) { acc += m.w / sum; if (roll < acc) return m.id; }
+    return t[t.length - 1].id;
+  }
+  function craftMatIds() {
+    const c = gachaCfg().craftMats;
+    if (Array.isArray(c) && c.length) return c.slice();
+    return (typeof CRAFT_MATERIALS !== "undefined" ? CRAFT_MATERIALS : []).map(m => m.id);
+  }
+  function gachaKuizhi(light) {
+    const g = gachaCfg();
+    if (g.kuizhiMode === "flat") return (Number(g.kuizhiFlat.base) || 0) + (Number((g.kuizhiFlat.extra || {})[light]) || 0);
+    return Number(g.kuizhiByLight[light]) || 0;
+  }
+  /** 这一抽的大类概率：{ hero, weapon, craft }（所有角色满级时 hero 那份按比例分给两种材料） */
+  function drawRates(run) {
+    const sh = gachaCfg().share;
+    const all = run ? run.party.concat(run.reserve || []) : [];
+    const maxed = !!run && heroPool().every(c => { const h = all.find(x => x.kit === c.kit); return h && (h.level || 1) >= G().maxLevel; });
+    if (!maxed) return { hero: sh.hero, weapon: sh.weapon, craft: sh.craft };
+    const rest = sh.weapon + sh.craft;
+    return { hero: 0, weapon: sh.weapon / rest, craft: sh.craft / rest };
+  }
+  /** 抽取机的状态：{ fusion, cost, canDraw, why, allMaxed, rates, pool: [{ kit, name, owned, level }] } */
   function drawInfo(run) {
     requireGrowth(run);
     const fusion = bagCount(G().fusionItem);
@@ -3083,46 +3109,85 @@ function advanceDays(run, n) {
       const h = all.find(x => x.kit === c.kit);
       return { kit: c.kit, name: c.name, owned: !!h, level: h ? h.level || 1 : 0 };
     });
+    const allMaxed = pool.every(p => p.owned && p.level >= G().maxLevel);
     const why = run.stage !== "board" ? "回到任务板前才能用抽取机"
-      : fusion < G().drawCost ? `${ITEM_CATALOG[G().fusionItem].name}不够（要 ${G().drawCost}，有 ${fusion}）`
-      : pool.every(p => p.owned && p.level >= G().maxLevel) ? "所有角色都满级了" : null;
-    return { fusion, cost: G().drawCost, canDraw: !why, why, pool };
+      : fusion < G().drawCost ? `${ITEM_CATALOG[G().fusionItem].name}不够（要 ${G().drawCost}，有 ${fusion}）` : null;
+    return { fusion, cost: G().drawCost, canDraw: !why, why, allMaxed, rates: drawRates(run), pool };
   }
-  /** 抽一次：所有角色等概率；新角色入队（满员进候补），已有的角色 +1 级（满级的不会抽到） */
-  function drawHero(run) {
-    const info = drawInfo(run);
-    if (!info.canDraw) throw new Error(info.why);
-    const cand = info.pool.filter(p => !(p.owned && p.level >= G().maxLevel)).map(p => p.kit);
-    run.draws = (run.draws || 0) + 1;
-    const kit = withRng(`${run.seed}:draw:${run.draws}`, () => pick(cand));
-    bagAdd(G().fusionItem, -G().drawCost);
-    const notes = [`投入 ${ITEM_CATALOG[G().fusionItem].name}×${G().drawCost}，抽取机吐出了……${heroName(kit)}！`];
+  /** 抽到角色：新角色入队（满员进候补），已有的 +1 级 */
+  function applyHeroDraw(run, kit, notes) {
     const h = run.party.concat(run.reserve || []).find(x => x.kit === kit);
     if (h) {
       const from = h.level || 1;
       h.level = from + 1;
       notes.push(`已经有 ${heroName(kit)} 了：${heroName(kit)} 升到 ${h.level} 级。`);
       queueLevelRewards(h, from, h.level, notes, run);
-    } else {
-      // 以前永久死亡过的角色：从 1 级重新开始
-      const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
-      const startLv = wasDead ? 1 : G().recruitLevel;
-      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
-      if (wasDead) {
-        notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
-        const di = run.deadKits.indexOf(kit);
-        if (di >= 0) run.deadKits.splice(di, 1);
-      }
-      if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
-      if (run.party.length < G().partyMax) {
-        run.party.push(nh);
-        notes.push(`${heroName(kit)} 加入队伍（${nh.level} 级）。`);
-      } else {
-        run.reserve.push(nh);
-        notes.push(`${heroName(kit)} 加入候补（队伍已满 ${G().partyMax} 人，任务板前可以换上场）。`);
-      }
+      return { levelUp: true, level: h.level };
     }
-    return { kit, levelUp: !!h, notes: logAll(run, notes) };
+    // 以前永久死亡过的角色：从 1 级重新开始
+    const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
+    const startLv = wasDead ? 1 : G().recruitLevel;
+    const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
+    if (wasDead) {
+      notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
+      const di = run.deadKits.indexOf(kit);
+      if (di >= 0) run.deadKits.splice(di, 1);
+    }
+    if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
+    if (run.party.length < G().partyMax) {
+      run.party.push(nh);
+      notes.push(`${heroName(kit)} 加入队伍（${nh.level} 级）。`);
+    } else {
+      run.reserve.push(nh);
+      notes.push(`${heroName(kit)} 加入候补（队伍已满 ${G().partyMax} 人，任务板前可以换上场）。`);
+    }
+    return { levelUp: false, level: nh.level };
+  }
+  /** 抽一次（不检查融合体，调用方已经检查并扣过）。随机数用 `${seed}:draw:${第几抽}` 固定 */
+  function drawOnce(run, notes) {
+    run.draws = (run.draws || 0) + 1;
+    const rates = drawRates(run);
+    const all = run.party.concat(run.reserve || []);
+    const cand = heroPool().map(c => c.kit).filter(k => { const h = all.find(x => x.kit === k); return !(h && (h.level || 1) >= G().maxLevel); });
+    const roll = withRng(`${run.seed}:draw:${run.draws}`, () => {
+      const r = Math.random();
+      const type = r < rates.hero && cand.length ? "hero" : r < rates.hero + rates.weapon ? "weapon" : "craft";
+      const id = type === "hero" ? pick(cand) : type === "weapon" ? rollWeaponMat(Math.random()) : pick(craftMatIds());
+      return { type, id };
+    });
+    const lights = gachaCfg().light;
+    const light = roll.type === "hero" ? lights.hero : roll.type === "craft" ? lights.craft : (lights[roll.id] || "gray");
+    const kuizhi = gachaKuizhi(light);
+    const res = { no: run.draws, kind: { hero: "character", weapon: "weapon_material", craft: "craft_material" }[roll.type], type: roll.type, id: roll.id, name: roll.type === "hero" ? heroName(roll.id) : ((ITEM_CATALOG[roll.id] || {}).name || roll.id), qty: 1, light, rarity: light, kuizhi };
+    notes.push(`抽取机吐出了……${res.name}！`);
+    if (roll.type === "hero") {
+      res.kit = roll.id;
+      Object.assign(res, applyHeroDraw(run, roll.id, notes));
+    } else {
+      bagAdd(roll.id, 1);
+      notes.push(`获得 ${res.name}×1（现有 ${bagCount(roll.id)}）。`);
+    }
+    if (kuizhi > 0) { state.kuizhi = (Number(state.kuizhi) || 0) + kuizhi; notes.push(`附赠 ${kuizhi} 奎支。`); }
+    return res;
+  }
+  /** 连抽 n 次（十连给 10）：融合体不够 n×cost 时直接报错，什么都不动。
+   *  → { results: [{ no, kind: "character"|"weapon_material"|"craft_material", type: "hero"|"weapon"|"craft", id, kit?, name, qty, light, rarity, kuizhi, levelUp?, level? }], kuizhi, notes } */
+  function drawMany(run, n) {
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1) throw new Error("抽取次数要是正整数");
+    const info = drawInfo(run);
+    if (run.stage !== "board") throw new Error(info.why);
+    const need = n * G().drawCost;
+    if (info.fusion < need) throw new Error(`${ITEM_CATALOG[G().fusionItem].name}不够（${n} 抽要 ${need}，有 ${info.fusion}）`);
+    bagAdd(G().fusionItem, -need);
+    const notes = [`投入 ${ITEM_CATALOG[G().fusionItem].name}×${need}，抽 ${n} 次。`];
+    const results = [];
+    for (let i = 0; i < n; i++) results.push(drawOnce(run, notes));
+    return { results, kuizhi: results.reduce((a, r) => a + r.kuizhi, 0), notes: logAll(run, notes) };
+  }
+  /** 抽一次（兼容旧接口）：30% 角色 / 40% 武器材料 / 30% 制作材料；返回那一条结果再加 notes */
+  function drawHero(run) {
+    const r = drawMany(run, 1);
+    return Object.assign({}, r.results[0], { notes: r.notes });
   }
   /** 换人：候补 inKit 换下队伍里的 outKit（outKit 不给就是直接加入，队伍要有空位）；inKit 不给就是 outKit 下场 */
   function swapHero(run, outKit, inKit) {
@@ -3231,7 +3296,7 @@ function advanceDays(run, n) {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
+    drawInfo, drawHero, drawMany, drawRates, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook

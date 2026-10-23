@@ -268,7 +268,7 @@ const ROGUE_SOLO = {
  *   任务经验照跑团模式：主持人手册的任务经验表（trpg-tasks.js · TRPG_TASK_PAY），按任务天数和队伍平均等级查，每人全额（rogue.js · taskXp）
  *   武器升级照跑团模式：要实物材料（商店常备）+ 工匠加工费
  *   角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败
- *   完成任务得到赫心融合体，在角色抽取机里抽角色：新角色入队（满员进候补），抽到已有的角色 +1 级
+ *   完成任务得到赫心融合体，在抽取机里抽（概率见下面 ROGUE_GACHA）：抽到角色时新角色入队（满员进候补），抽到已有的角色 +1 级
  *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
  *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
  *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
@@ -281,8 +281,33 @@ const ROGUE_GROWTH = {
   maxLevel: 20,
   fusionItem: "heart_fusion"
 };
+/* 长线养成：抽取机概率（每抽一次消耗 1 个赫心融合体）
+ *   share       每抽的大类：hero 角色（原来的抽角色逻辑）/ weapon 武器升级材料 / craft 道具制作材料
+ *               所有角色都满级时，hero 那一份按比例分给 weapon / craft（40:30）
+ *   weaponMats  武器材料各档相对权重 —— 和每日挑战奖励的材料是同一张表（rogue.js · completeGrowthDailyTask）
+ *   craftMats   null = 道具制作材料（items.js · CRAFT_MATERIALS）全部等概率
+ *   light       每次结果的光色（给抽卡界面用）：gold / purple / blue / gray
+ *   kuizhiMode  ⚠ 待定（等作者拍板）："byLight" 按光色给奎支（kuizhiByLight）；"flat" 每抽固定 kuizhiFlat.base + 按光色的 kuizhiFlat.extra
+ *   dailyTaskFusion  每完成 1 个每日挑战给几个赫心融合体；dailyAllFusion 三个全完成额外给几个 */
+const ROGUE_GACHA = {
+  share: { hero: 0.30, weapon: 0.40, craft: 0.30 },
+  weaponMats: [
+    { id: "mat_metal",   w: 50 },
+    { id: "mat_alloy",   w: 30 },
+    { id: "mat_polymer", w: 14 },
+    { id: "mat_crystal", w: 4 },
+    { id: "mat_heart",   w: 2 }
+  ],
+  craftMats: null,
+  light: { hero: "gold", craft: "blue", mat_heart: "gold", mat_crystal: "purple", mat_polymer: "blue", mat_alloy: "blue", mat_metal: "gray" },
+  kuizhiMode: "byLight",   // ⚠ PENDING：作者还没定，"byLight" 或 "flat"
+  kuizhiByLight: { gray: 100, blue: 150, purple: 500, gold: 1000 },
+  kuizhiFlat: { base: 100, extra: { gray: 0, blue: 0, purple: 0, gold: 0 } },
+  dailyTaskFusion: 1,
+  dailyAllFusion: 5
+};
 if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
-  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: "长线养成：在角色抽取机里抽一名角色（抽到已有的角色 +1 级）", goods: true };
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支`, goods: true };
 }
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）

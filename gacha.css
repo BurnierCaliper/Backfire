@@ -1,0 +1,37 @@
+/* 抽取机动画（gacha-ui.js）：光色 金 > 紫 > 蓝 > 灰，只用渐变和阴影 */
+.gacha-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.g-rate { padding: 0 6px; border-radius: 4px; font-weight: bold; }
+.g-rate.g-gold { color: #ffd76a; } .g-rate.g-purple { color: #c99bff; } .g-rate.g-blue { color: #7cc4ff; }
+.gacha-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(6, 8, 14, .86); display: flex; align-items: center; justify-content: center; }
+.gacha-box { width: min(920px, 94vw); max-height: 92vh; overflow: auto; text-align: center; color: #eee; }
+.g-cards { display: flex; justify-content: center; gap: 12px; margin: 12px 0; }
+.g-cards.g-grid { display: grid; grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 600px) { .g-cards.g-grid { grid-template-columns: repeat(2, 1fr); } }
+.g-card { --c: #9aa0a8; --glow: 0 0 6px rgba(154,160,168,.4); position: relative; min-height: 132px; min-width: 120px; border-radius: 10px;
+  background: #1a1d26; border: 2px solid #333a48; display: flex; align-items: center; justify-content: center; overflow: hidden; transition: border-color .3s, box-shadow .4s; }
+.g-card.g-blue { --c: #5fb2ff; --glow: 0 0 12px rgba(95,178,255,.55); }
+.g-card.g-purple { --c: #b77cff; --glow: 0 0 18px rgba(183,124,255,.7), 0 0 4px #fff3; }
+.g-card.g-gold { --c: #ffcf4a; --glow: 0 0 28px rgba(255,207,74,.9), 0 0 60px rgba(255,170,40,.45); }
+.g-orb { width: 46px; height: 46px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff8, #556 70%); box-shadow: 0 0 10px #8896; transition: transform .35s, opacity .35s; }
+.g-face { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 8px; opacity: 0; transform: scale(.85); transition: opacity .35s, transform .35s; }
+.g-face b { color: var(--c); font-size: 1.05em; } .g-face small { opacity: .85; } .g-tag { font-size: .8em; color: var(--c); }
+.g-card.open { border-color: var(--c); box-shadow: var(--glow); }
+.g-card.open .g-orb { transform: scale(2.2); opacity: 0; }
+.g-card.open .g-face { opacity: 1; transform: none; }
+.g-card.g-gold.open { background: radial-gradient(circle, rgba(255,207,74,.28), #1a1d26 70%); animation: g-pulse 1.2s ease-in-out 2; }
+.g-card.g-gold.open::after { content: ""; position: absolute; inset: -40%; background: linear-gradient(115deg, transparent 40%, rgba(255,240,180,.55) 50%, transparent 60%); animation: g-sweep 1s ease-out 1; pointer-events: none; }
+.g-card.g-purple.open { background: radial-gradient(circle, rgba(183,124,255,.2), #1a1d26 70%); }
+@keyframes g-pulse { 50% { box-shadow: 0 0 44px rgba(255,207,74,1), 0 0 90px rgba(255,170,40,.6); } }
+@keyframes g-sweep { from { transform: translateX(-60%); } to { transform: translateX(60%); } }
+.g-actions { margin: 8px 0; }
+.g-summary { text-align: left; background: #12151d; border: 1px solid #333a48; border-radius: 8px; padding: 10px 16px; }
+.g-summary ol { list-style: none; padding: 0; margin: 0; }
+.g-summary li { display: grid; grid-template-columns: 14px auto 1fr auto; gap: 8px; align-items: center; padding: 3px 0; border-bottom: 1px solid #ffffff10; }
+.g-summary .g-dot { width: 10px; height: 10px; border-radius: 50%; background: #9aa0a8; }
+.g-summary .g-gold .g-dot { background: #ffcf4a; box-shadow: 0 0 6px #ffcf4a; } .g-summary .g-gold b { color: #ffd76a; }
+.g-summary .g-purple .g-dot { background: #b77cff; } .g-summary .g-purple b { color: #c99bff; }
+.g-summary .g-blue .g-dot { background: #5fb2ff; }
+@media (prefers-reduced-motion: reduce) {
+  .g-card, .g-orb, .g-face { transition: none !important; }
+  .g-card.g-gold.open, .g-card.g-gold.open::after { animation: none !important; }
+}
