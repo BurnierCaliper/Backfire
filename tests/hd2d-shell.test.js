@@ -705,11 +705,12 @@ function soloFlow(R, page) {
     const snapUnit = V.snapUnit, gameSkills = V.gameSkills, blockReason = V.blockReason, spaceStartOrEnd = () => {};
     const skillFlowSteps = () => [], skillThunk = () => null, previewOf = () => ({ needsTarget: true, meaningful: true }), candidateUnits = () => V.enemies;
     const targetName = (id) => id, animActor = (id) => id, allOnField = () => true, skillCommand = (actor, skill, target) => ({ actor, skill, target });
-    // 出手：花掉行动点，演完照 refreshAll 画一遍
+    // 出手：花掉行动点，演完照 refreshAll 画一遍。V.play（#362 的测试给）= 演出：照 game.js · act，演之前 G.depth++、画一遍，等它演完 G.depth--、再画一遍
     const act = (cmd) => {
       V.log.acts.push(cmd);
       const u = unitById(cmd.actor), c = (gameSkills(u).find(s => s.id === cmd.skill) || {}).cost || {};
       u.ap = Math.max(0, (u.ap || 0) - (c.ap || 0));
+      if (V.play) { G.depth++; refreshHud(); return V.play().then(() => { G.depth--; refreshHud(); return true; }); }
       refreshHud();
       return Promise.resolve(true);
     };
@@ -874,4 +875,222 @@ test("联机玩家（#317 追加）：只是在等主机回话才灰掉的技能
   assert.match(css, /\.ob-wait:disabled \{ animation: ob-wait-dim \.32s step-end forwards; \}/, "过 0.3 秒才变灰");
   assert.match(css, /@keyframes ob-wait-dim \{ from \{ opacity: 1; \} to \{ opacity: \.4; \} \}/);
   assert.ok(!/\.sk\[disabled\],/.test(read("weather-fx.css")), "天气的灰按钮样式不盖等主机的那几个");
+});
+
+/* ---------- 9. 选中技能以后先收起技能栏（#362）：选目标时不挡战场，取景照收起之前的、镜头不重新取景 ---------- */
+test("先收起技能栏（#362，hd2d-shell.js · fold / held）：开着的收起来（不记在本机、不算手动点过），这一段里再叫不再收，打完放开；本来就收着的不动；中间手动点开的以手动的为准；收着时页面自己展开（setPanel，手机上轮到你）不展开；没换上新外壳不报错", () => {
+  const R = rules();
+  const storage = memStorage();
+  const page = uiPage(R, { storage });
+  const S = page.w.HD2DShell, hud = page.doc.querySelector("#g-app > .g-hud");
+  const closed = () => hud.classList.contains("dock-closed");
+  assert.equal(S.fold(hud, true), false, "没换上新外壳：不动");
+  assert.equal(S.held(hud), false);
+  S.attach(hud, { phone: false });
+  const btn = hud.querySelector(".hd2d-dock-toggle");
+  assert.equal(closed(), false, "桌面：开着");
+  // 选中技能：收起来，是这里收的；不记在本机，不算手动点过
+  assert.equal(S.fold(hud, true), true);
+  assert.ok(closed() && S.held(hud), "收起来了");
+  assert.deepEqual([btn.textContent, btn.getAttribute("aria-expanded")], ["技能 ▲", "false"], "按钮上的字、读屏跟着");
+  assert.equal(S.saved("dock", storage), null, "不记在本机");
+  assert.equal(S.manual(hud, "dock"), false, "不算手动点过");
+  assert.equal(S.fold(hud, true), true, "这一段里再叫：照旧收着");
+  // 收着时页面自己要展开（联机纸片画面的手机上轮到你，online-ui.js · dockAuto → setPanel）：不展开
+  assert.equal(S.setPanel(hud, "dock", true), true);
+  assert.ok(closed() && S.held(hud), "setPanel 不在这一段里展开");
+  // 打完这一下：放开
+  assert.equal(S.fold(hud, false), false);
+  assert.ok(!closed() && !S.held(hud), "打完放开");
+  assert.deepEqual([btn.textContent, btn.getAttribute("aria-expanded")], ["技能 ▼", "true"]);
+  assert.equal(S.saved("dock", storage), null, "放开也不记");
+  assert.equal(S.fold(hud, false), false, "不在这一段里：不动");
+  assert.equal(closed(), false);
+  // 中间手动点开：以手动的为准——这一段里再叫不再收，打完也不动
+  S.fold(hud, true);
+  btn.click();
+  assert.ok(!closed() && !S.held(hud), "手动点开了");
+  assert.equal(S.fold(hud, true), false, "这一段里再叫：不再收");
+  assert.equal(closed(), false);
+  S.fold(hud, false);
+  assert.equal(closed(), false, "打完也不动");
+  assert.equal(S.saved("dock", storage), "open", "手动点的照旧记在本机");
+  // 手动收着的：不算这里收的，打完也不展开
+  btn.click();
+  assert.equal(closed(), true);
+  assert.equal(S.fold(hud, true), false, "本来就收着：不算这里收的");
+  assert.equal(S.held(hud), false);
+  S.fold(hud, false);
+  assert.equal(closed(), true, "打完照旧收着");
+  S.detach(hud);
+  assert.equal(S.fold(hud, false), false, "拆掉了：不动");
+  assert.equal(S.held(hud), false);
+  // 手机：没记过时收着，轮到你页面自己展开（setPanel）；选目标收起、这一段里 setPanel 不展开；打完放开；不是你了照旧能收（setPanel）
+  const P2 = uiPage(R, { storage: memStorage() }), S2 = P2.w.HD2DShell, hud2 = P2.doc.querySelector("#g-app > .g-hud");
+  S2.attach(hud2, { phone: true });
+  const closed2 = () => hud2.classList.contains("dock-closed");
+  assert.equal(closed2(), true, "手机没记过：收着");
+  S2.setPanel(hud2, "dock", true);
+  assert.equal(closed2(), false, "轮到你：页面自己展开");
+  S2.fold(hud2, true);
+  S2.setPanel(hud2, "dock", true);
+  assert.ok(closed2() && S2.held(hud2), "选目标：收起，轮到你的展开不打开它");
+  S2.fold(hud2, false);
+  assert.equal(closed2(), false, "打完放开");
+  S2.setPanel(hud2, "dock", false);
+  assert.equal(closed2(), true, "不是你了：页面照旧能收");
+});
+
+test("取景（#362，paper-ui.js · coverRects / dockHeight）：技能栏先收着的这一段，交给新画面的技能栏矩形照收起之前量到的、--olp-dock-h 照旧（null = 不写）——收起、打完再展开取景都不变；别的面板照常量；放开以后、手动收起的照常量", () => {
+  const R = rules();
+  const page = uiPage(R, { scripts: ["paper-ui.js"] });
+  const PU = page.w.PaperUI, S = page.w.HD2DShell, doc = page.doc, hud = doc.querySelector("#g-app > .g-hud");
+  S.attach(hud, { phone: false });
+  const party = hud.querySelector(".hd2d-party");
+  // 量到的大小（视口坐标）：技能栏开着 960 × 190、收起 560 × 90（都贴着底）
+  const OPEN = { left: 240, top: 700, right: 1200, bottom: 890 }, FOLDED = { left: 440, top: 800, right: 1000, bottom: 890 };
+  let box = OPEN, partyBox = { left: 10, top: 80, right: 246, bottom: 400 };
+  const geo = (b) => Object.assign({ x: b.left, y: b.top, width: b.right - b.left, height: b.bottom - b.top }, b);
+  hud.getBoundingClientRect = () => geo(box);
+  party.getBoundingClientRect = () => geo(partyBox);
+  Object.defineProperty(hud, "offsetHeight", { configurable: true, get: () => box.bottom - box.top });
+  const sel = ["#g-app > .g-hud.hd2d-shell > .hd2d-party", "#g-app > .g-hud.hd2d-shell"];
+  const rects = () => plain(PU.coverRects(doc, sel));
+  assert.deepEqual(rects(), [partyBox, OPEN], "平时：照量到的");
+  assert.equal(PU.dockHeight(hud), "190px");
+  // 选中技能：技能栏收起（变矮、变窄）——取景照收起之前量到的，--olp-dock-h 照旧
+  S.fold(hud, true);
+  box = FOLDED;
+  assert.deepEqual(rects(), [partyBox, OPEN], "收着的这一段：技能栏照收起之前量到的那一块");
+  assert.equal(PU.dockHeight(hud), null, "--olp-dock-h 照旧（不写）");
+  // 别的面板照常量（收着时点开 / 收起队伍）
+  partyBox = { left: 10, top: 80, right: 80, bottom: 400 };
+  assert.deepEqual(rects(), [partyBox, OPEN], "队伍栏照常量");
+  // 打完放开：照常量（和选技能之前一样就是一样的，取景不变）
+  S.fold(hud, false);
+  box = OPEN;
+  assert.deepEqual(rects(), [partyBox, OPEN]);
+  assert.equal(PU.dockHeight(hud), "190px");
+  // 手动收起的（不是这里收的）：照常量
+  hud.querySelector(".hd2d-dock-toggle").click();
+  box = FOLDED;
+  assert.deepEqual(rects(), [partyBox, FOLDED], "手动收起的照常量");
+  assert.equal(PU.dockHeight(hud), "90px");
+  // 没换上新外壳 / 量不到：照旧
+  S.detach(hud);
+  assert.equal(PU.dockHeight(hud), "90px");
+  assert.equal(PU.dockHeight(null), "");
+  // 用到它的两处：单机 game-paper.js · dress、联机 online-ui.js · paperDress 写 --olp-dock-h 都先问它（null 不写）
+  assert.match(code(read("game-paper.js")), /dockH = UI\.dockHeight\(hud\);\s*if \(dockH != null && /);
+  assert.match(code(read("online-ui.js")), /dockH = global\.OnlinePaper\.dockHeight\(hud\);\s*if \(dockH != null && /);
+});
+
+test("单机（#362）：开着新画面时选技能、选目标，技能栏先收起；换技能照旧收着；Esc 取消就展开；点目标出手，演出中照旧收着，演完回到选技能再展开；不记在本机；手动收着的不动；旧画面不管", async () => {
+  const R = rules(), kolt = R.unit("kolt");
+  kolt.ap = Math.max(3, kolt.apMax || 0); kolt.apMax = Math.max(kolt.apMax || 0, kolt.ap);
+  // 旧画面：选技能不收
+  {
+    const page = uiPage(R), F = soloFlow(R, page);
+    F.refreshHud();
+    F.hud.querySelector('#g-skills .sk[data-skill="kolt_aa"]').click();
+    await settle();
+    assert.ok(F.V.G.arm && F.V.G.arm.mode === "unit");
+    assert.equal(F.hud.classList.contains("dock-closed"), false, "旧画面：不管");
+  }
+  const storage = memStorage();
+  const page = uiPage(R, { storage });
+  const F = soloFlow(R, page), hud = F.hud, S = page.w.HD2DShell, doc = page.doc;
+  S.attach(hud, { phone: false });
+  F.refreshHud();
+  const closed = () => hud.classList.contains("dock-closed");
+  const aa = () => hud.querySelector('#g-skills .sk[data-skill="kolt_aa"]');
+  assert.equal(closed(), false, "平时开着");
+  // 选技能 → 选目标：收起
+  aa().click();
+  await settle();
+  assert.ok(F.V.G.arm && F.V.G.arm.mode === "unit", "在选目标");
+  assert.ok(closed() && S.held(hud), "选中技能：技能栏收起来了");
+  assert.equal(hud.querySelector(".hd2d-dock-toggle").textContent, "技能 ▲");
+  // 换一个技能（数字键）：照旧收着
+  MD.key(doc, "2");
+  await settle();
+  assert.ok(F.V.G.arm && F.V.G.arm.skillId !== "kolt_aa" && closed(), "换技能：照旧收着");
+  // Esc 取消：回到选技能，展开
+  MD.key(doc, "Escape");
+  await settle();
+  assert.equal(F.V.G.arm, null);
+  assert.ok(!closed() && !S.held(hud), "取消：展开");
+  // 点目标出手：演出中照旧收着，演完展开
+  let done = null;
+  F.V.play = () => new Promise(r => { done = r; });
+  aa().click();
+  await settle();
+  assert.equal(closed(), true);
+  F.pick(F.V.enemies[0].id);
+  await settle();
+  assert.equal(F.V.G.depth, 1, "演出中");
+  assert.equal(F.V.G.arm, null);
+  assert.ok(closed() && S.held(hud), "演出中照旧收着");
+  done();
+  await settle();
+  assert.equal(F.V.G.depth, 0, "演完了");
+  assert.ok(!closed() && !S.held(hud), "演完回到选技能：展开");
+  assert.deepEqual(plain(F.log.acts.slice(-1)), [{ actor: kolt.id, skill: "kolt_aa", target: F.V.enemies[0].id }]);
+  assert.equal(S.saved("dock", storage), null, "自己收起 / 展开的不记在本机");
+  assert.equal(S.manual(hud, "dock"), false);
+  // 手动收着的：选技能不算这里收的，取消以后照旧收着
+  F.V.play = null;
+  hud.querySelector(".hd2d-dock-toggle").click();
+  assert.equal(closed(), true);
+  aa().click();
+  await settle();
+  assert.ok(F.V.G.arm && closed() && !S.held(hud), "本来就收着：不算这里收的");
+  MD.key(doc, "Escape");
+  await settle();
+  assert.equal(closed(), true, "取消以后照旧收着");
+});
+
+test("联机玩家（#362）：主机问目标 / 区域 / 选项时技能栏先收起，等主机、演出中照旧收着，回到选技能（主机给了技能栏、演完）或者不是你了再展开；不用选目标的（主机直接回「确认执行」）、规则询问（__field）不收；中间手动点开的不再收；旧画面不管", () => {
+  const R = rules(), O = onlineHud(R), hud = O.hud, S = O.page.w.HD2DShell;
+  const closed = () => hud.classList.contains("dock-closed");
+  const enemy = O.pv.units.find(u => !u.isPlayer && !u.hidden);
+  const target = { kind: "unit", key: "target", title: "选择目标", options: [{ value: enemy.id, label: enemy.name }] };
+  const ask = { kind: "unit", title: "更换刀头", options: [{ value: enemy.id, label: enemy.name }] };
+  const skills = { kind: "skill", options: O.skills }, ready = { kind: "ready", title: "确认执行", options: [] };
+  const step = (patch, why, want) => { Object.assign(O.ui, patch); O.paint(); assert.equal(closed(), want, why); };
+  // 旧画面：不管
+  step({ armed: "kolt_aa", menu: target }, "旧画面：不收", false);
+  step({ armed: "", menu: skills }, "旧画面", false);
+  S.attach(hud, { phone: false });
+  step({}, "新画面：平时开着", false);
+  // 点技能：先问主机（正在同步）——还没收；主机回了问目标：收起
+  step({ armed: "kolt_aa", menu: null, busy: true }, "还在问主机：不收", false);
+  step({ busy: false, menu: target }, "主机问目标：收起", true);
+  assert.ok(S.held(hud), "是这里收的");
+  assert.match(hud.querySelector(".hint").innerHTML, /^<b>选择目标<\/b>[\s\S]*data-ob="cancel"/, "提示栏照旧写标题、取消按钮（收起时有标题 / 按钮的提示栏照旧露出来）");
+  // 点目标：问主机 → 确认执行 → 提交了、还没拿到新的技能栏 → 演出中 → 主机给了新的技能栏但还在演——一直收着
+  step({ busy: true }, "点了目标、问主机：照旧收着", true);
+  step({ busy: false, menu: ready }, "确认执行：照旧收着", true);
+  step({ armed: "", menu: null }, "提交了、还没拿到新的技能栏：照旧收着", true);
+  step({ busy: true }, "演出中：照旧收着", true);
+  step({ menu: skills }, "主机给了新的技能栏、还在演：照旧收着", true);
+  step({ busy: false }, "演完、回到选技能：展开", false);
+  assert.equal(S.held(hud), false);
+  // 不用选目标的：主机直接回「确认执行」——不收
+  step({ armed: "__move", menu: ready }, "不用选目标：不收", false);
+  step({ armed: "", menu: skills }, "", false);
+  // 换一个技能（主机问区域）：照旧收着；选目标时不是你了（超时、主持人跳过）：展开
+  step({ armed: "kolt_aa", menu: target }, "", true);
+  step({ armed: "__move", menu: { kind: "zone", key: "dest", title: "选择移动区域", options: [{ value: 2, label: "2 区" }] } }, "换技能、问区域：照旧收着", true);
+  step({ armed: "", menu: null, acting: false }, "不是你了：展开", false);
+  // 规则询问（战场点选，__field）：不是选了技能，不收；选着技能时来了询问也不展开
+  step({ acting: true, armed: "__field", menu: ask }, "规则询问：不收", false);
+  step({ armed: "kolt_aa", menu: target }, "", true);
+  step({ armed: "__field", menu: ask }, "选着技能时来了规则询问：照旧收着", true);
+  step({ armed: "", menu: skills }, "回到选技能：展开", false);
+  // 中间手动点开：以手动的为准（这一段里不再收）
+  step({ armed: "kolt_aa", menu: target }, "", true);
+  hud.querySelector(".hd2d-dock-toggle").click();
+  step({}, "手动点开了：再画也不收", false);
+  step({ armed: "", menu: skills }, "", false);
 });

@@ -4029,6 +4029,9 @@
     // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
     const acting = !!state.combatStarted && state.combatPhase === "player";
     if (shell) shell.who(hudEl, !state.combatStarted || acting ? shell.whoHtml(actorView, acting) : "");
+    // 新画面：选中技能以后技能栏先收起（选目标时提示栏、按钮条不再把它撑高挡住战场），演完这一下、回到选技能时再展开（#362，hd2d-shell.js · fold；
+    // 收着的这一段取景照收起之前的技能栏让开，镜头不重新取景）。不用选目标的技能直接出手，不收
+    if (shell) { if (G.arm && G.arm.skillId) shell.fold(hudEl, true); else if (G.depth === 0) shell.fold(hudEl, false); }
     // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
     const gauge = $("g-gauge");
     if (gauge) {

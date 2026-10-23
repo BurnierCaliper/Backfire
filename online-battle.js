@@ -317,6 +317,13 @@
       if (Number(ui.deadline) > 0) hint += `　<span class="ol-countdown" role="timer" aria-live="off" data-ol-deadline="${Number(ui.deadline)}"></span>`;
       const h = hud.querySelector(".hint");
       if (h.dataset.html !== hint) { h.innerHTML = hint; h.dataset.html = hint; tickCountdowns(h); }
+      // 新画面：选中技能、主机问目标 / 区域 / 选项时技能栏先收起（选目标时不挡战场），演完这一下、回到选技能（或者不是你了）再展开
+      // （#362，hd2d-shell.js · fold：收着的这一段取景照收起之前的技能栏让开，镜头不重新取景）。主机直接执行的（不用选目标）不收；战场点选的规则询问（__field）不是选了技能，不动
+      if (SH) {
+        const mineNow = !!(ui.acting && mine.has(ui.current)), asking = !!(m && m.kind !== "skill" && m.kind !== "ready");
+        if (ui.armed && ui.armed !== "__field" && asking) SH.fold(hud, true);
+        else if (!ui.armed && !ui.busy && (!mineNow || (m && m.kind === "skill"))) SH.fold(hud, false);
+      }
     }
 
     /** 新画面开着（#297）：唤出 / 收回武器人的大按钮（照单机 game.js 的 #g-summon：图标、名字、消耗、快捷键，颜色跟着这个人（武器人跟着主人）的主属性），
