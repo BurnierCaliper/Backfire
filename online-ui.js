@@ -12,6 +12,8 @@
   const SIDE_COLLAPSE = { key: "backfire.online.sideCollapsed", collapse: "▸", expand: "◂", collapseTitle: "收起右侧栏（战斗画面变宽）", expandTitle: "展开右侧栏：战斗记录与小队聊天" };
   // 「菜单」按钮（#298，以前这里是「房间码 · 消息与成员」）：房间码照旧写在前面，断线时写「重连中」
   const DOCK_TEXT = { room: "房间", reconnecting: "重连中", menu: "菜单", title: "菜单（Esc）：消息与成员、大厅、克制表、主持人工具……" };
+  // 单位详情（作者 10/20 定）：悬停只出简短说明（unit-tip.js · html 的 brief），末尾写 more；不在选目标时点一下单位（手机上轻点）打开详情面板看完整的
+  const UNIT_DETAIL = { more: "点一下单位看全部说明", label: "单位详情", close: "关闭单位详情" };
   function mount(api) {
     if (mounted) mounted.destroy();
     if (!api || typeof api.getView !== "function" || typeof document === "undefined") return null;
@@ -242,28 +244,35 @@
     /** 间隔现在的样子：「危墙（耐久 12）」「机关门（关着）」 */
     const gapStateTip = (g) => !g ? "畅通" : (TIP_GAP[g.type] || "间隔") +
       (g.type === "wall" || g.type === "bridge" ? `（耐久 ${Number(g.hp) || 0}）` : g.type === "door" ? (g.open ? "（开着）" : "（关着）") : "");
-    function unitTip(node) {
+    /** 说明的是哪一个：{ gapKey } 两区之间的间隔 / { propId } 配置物 / { unitId } 单位。
+     *  refOf：战场上点 / 悬停给的 id（旧画面的单位卡、新画面的铭牌：单位 id、prop:…、gap:…）；refOfNode：旧画面悬停到的单位卡 / 间隔竖条 */
+    const refOf = id => { const s = String(id == null ? "" : id); return s.indexOf("gap:") === 0 ? { gapKey: s.slice(4) } : s.indexOf("prop:") === 0 ? { propId: s.slice(5) } : { unitId: s }; };
+    const refOfNode = node => node.classList && node.classList.contains("g-gap") && node.dataset.key ? { gapKey: node.dataset.key } : node.dataset.propId ? { propId: node.dataset.propId } : { unitId: node.dataset.unitId };
+    const refKey = ref => !ref ? "" : ref.gapKey != null ? "gap:" + ref.gapKey : ref.propId != null ? "prop:" + ref.propId : String(ref.unitId || "");
+    /** 说明的内容（unit-tip.js · html）：opt 原样交过去（{ brief, more }：悬停的简短版；不给是完整版，详情面板用）。
+     *  不在战场上了（拿掉、藏起来、被打倒的敌人、摧毁的配置物）给 "" */
+    function tipHtml(ref, opt) {
       const T = global.UnitTip, data = displayState || view.state || {};
-      if (!T) return "";
+      if (!T || !ref) return "";
       // 两区之间的间隔（危墙、桥、驻波墙……）：和本机画面一样写名字、耐久 / 开关，驻波墙另写它过滤的属性和降幅 / 增幅
-      if (node.classList && node.classList.contains("g-gap") && node.dataset.key) {
-        const key = node.dataset.key, gp = (data.gaps || {})[key] || {}, where = "（" + key.replace("-", "–") + " 区之间）";
+      if (ref.gapKey != null) {
+        const key = String(ref.gapKey), gp = (data.gaps || {})[key] || {}, where = "（" + key.replace("-", "–") + " 区之间）";
         if (gp.type === "wave" && gp.wave) {
           const w = gp.wave, el = TIP_ELE[w.el] || "?", amp = w.mode === "amplify";
           const text = `这一道过滤${el}属性，${amp ? "增幅" : "降幅"}：穿过它的${el}属性伤害${amp ? "提高，击破照常" : "降低，并且不造成任何击破"}；任何单位穿过时${amp ? "获得坚挺和振奋" : "受到不稳和虚弱"}。`;
           return T.html({ kind: "gap", gapType: "wave", text }, [], { name: `驻波墙·${el}·${amp ? "增幅" : "降幅"}${where}`,
-            sub: w.saved && w.saved.type && w.saved.type !== "open" ? "暂时取代：" + gapStateTip(w.saved) : "" });
+            sub: w.saved && w.saved.type && w.saved.type !== "open" ? "暂时取代：" + gapStateTip(w.saved) : "" }, opt);
         }
         return T.html({ kind: "gap", gapType: gp.type || "open" }, [], { name: (TIP_GAP[gp.type || "open"] || "间隔") + where,
-          sub: gp.type === "wall" || gp.type === "bridge" ? `耐久 ${Number(gp.hp) || 0}` : gp.type === "door" ? (gp.open ? "开着" : "关着") : "" });
+          sub: gp.type === "wall" || gp.type === "bridge" ? `耐久 ${Number(gp.hp) || 0}` : gp.type === "door" ? (gp.open ? "开着" : "关着") : "" }, opt);
       }
-      if (node.dataset.propId) {
-        const p = (data.props || []).find(x => String(x.id) === node.dataset.propId);
-        if (!p) return "";
-        return T.html({ kind: "prop", propKind: p.kind }, [], { name: p.name || p.kind, sub: [p.hp != null ? `耐久 ${p.hp}${p.maxHp == null ? "" : "/" + p.maxHp}` : "", p.zone + " 区"].filter(Boolean).join(" · ") });
+      if (ref.propId != null) {
+        const p = (data.props || []).find(x => String(x.id) === String(ref.propId));
+        if (!p || p.destroyed || p.hidden) return "";
+        return T.html({ kind: "prop", propKind: p.kind }, [], { name: p.name || p.kind, sub: [p.hp != null ? `耐久 ${p.hp}${p.maxHp == null ? "" : "/" + p.maxHp}` : "", p.zone + " 区"].filter(Boolean).join(" · ") }, opt);
       }
-      const u = (data.units || []).find(x => x.id === node.dataset.unitId);
-      if (!u) return "";
+      const u = (data.units || []).find(x => x.id === ref.unitId);
+      if (!u || u.hidden || (u.dead && !u.isPlayer)) return "";
       const st = u.statuses || {}, tokens = [];
       if (u.dead) tokens.push(u.isPlayer ? "倒下" : "");
       if (u.dying && !u.dead) tokens.push("濒死");
@@ -284,10 +293,58 @@
       // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
       const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
       if (vc) return T.html({ kind: "prop", propKind: vc.kind }, tokens.filter(Boolean), { name: vc.name || u.name || u.id, sub: `Lv${vc.level || 1} · ${u.zone} 区 · ${u.isPlayer ? "我方" : "敌方"}`, mechs,
-        rows: Array.isArray(vc.roster) ? vc.roster : null, rowsTitle: vc.seatText || "" });
+        rows: Array.isArray(vc.roster) ? vc.roster : null, rowsTitle: vc.seatText || "" }, opt);
       // 分阶段的首领 / 精英：主机算好的阶段编号（display.stage），能力只列这一阶段的，和单机一样
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs }, opt);
     }
+    /** 悬停说明（旧画面的单位卡 / 间隔竖条、新画面的铭牌）：只出简短版——名字、行动方式、效果名字、首领机制的倒计时，末尾提示点一下看全部
+     *  （作者 10/20 定：以前首领的悬停说明占满整屏、盖住被悬停的卡，最后几行被「回到…」按钮挡住）。详情面板正开着这一个就不弹 */
+    function unitTip(node) {
+      const ref = refOfNode(node);
+      if (detailOpen() && refKey(ref) === refKey(detailRef)) return "";
+      return tipHtml(ref, { brief: true, more: UNIT_DETAIL.more });
+    }
+    /* 单位详情面板（作者 10/20 定）：不在选目标时点一下单位 / 配置物 / 间隔（手机上轻点；手机没有悬停，以前根本看不到敌人说明）打开完整说明——
+     * 桌面靠右、手机贴底，自带滚动条（hud-icons.css · .ut-panel），跟着战场刷新；✕、Esc、再点同一个收起，点别的换成别的。
+     * Esc 先收它：暂停菜单那边登记了「开着就不开菜单」（PauseMenu.addBlocker，见下面的 pauseItems），这里在捕获阶段收起、不往下传（选着技能时这一下不取消技能） */
+    const detailBox = make("aside", "online-unit-detail", "ut-panel", { role: "dialog", "aria-label": UNIT_DETAIL.label });
+    detailBox.hidden = true;
+    let detailRef = null;
+    const detailOpen = () => !!detailRef && !detailBox.hidden;
+    /** 照这一刻的战场重画面板（内容一样不动，滚到哪留在哪）；不在联机玩家的战斗画面了、说明的东西不在战场上了就收起 */
+    function paintDetail() {
+      const inBattle = view.active && !view.isHost && !stage.hidden && (view.screen === "battle" || view.screen === "ended");
+      const body = detailRef && inBattle ? tipHtml(detailRef) : "";
+      if (!body) { closeDetail(); return; }
+      const h = `<button type="button" class="ut-close" data-ut-close aria-label="${esc(UNIT_DETAIL.close)}" title="${esc(UNIT_DETAIL.close)}">✕</button>${body}`;
+      if (detailBox.dataset.html !== h) { const top = detailBox.scrollTop; detailBox.innerHTML = h; detailBox.dataset.html = h; detailBox.scrollTop = top; }
+      detailBox.hidden = false;
+    }
+    /** 点了一下（id：单位 id、prop:…、gap:…）：打开这一个的详情；正开着的就是它 = 收起 */
+    function openDetail(id) {
+      const ref = refOf(id);
+      if (detailOpen() && refKey(detailRef) === refKey(ref)) { closeDetail(); return; }
+      detailRef = ref; detailBox.dataset.html = "";
+      if (global.UnitTip) global.UnitTip.hide();
+      paintDetail();
+      if (!detailBox.hidden) detailBox.scrollTop = 0;
+    }
+    function closeDetail() {
+      detailRef = null;
+      if (detailBox.hidden && !detailBox.dataset.html) return;
+      detailBox.hidden = true; detailBox.dataset.html = ""; detailBox.innerHTML = "";
+    }
+    detailBox.addEventListener("click", event => { if (event.target.closest && event.target.closest("[data-ut-close]")) closeDetail(); });
+    const onDetailKey = event => {
+      if (event.key !== "Escape" || event.defaultPrevented || !detailOpen()) return;
+      const t = event.target;
+      if (t && t.closest && t.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])")) return;   // 打字的时候 Esc 留给输入框
+      // 上面还盖着别的弹窗（房间面板、背包、协助询问……）：这一下 Esc 是关它的（别人在回答的询问只挂一条小提示，不算）
+      if (global.PauseMenu && global.PauseMenu.visibleLayers().some(el => el !== detailBox && !el.classList.contains("hs-ask-mini"))) return;
+      event.preventDefault(); event.stopPropagation();
+      closeDetail();
+    };
+    document.addEventListener("keydown", onDetailKey, true);
     const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id], .g-gap[data-key]");
     stage.addEventListener("mouseover", event => {
       const node = hoverable(event.target);
@@ -1424,6 +1481,7 @@
       paintPaper();   // 纸片画面的顶栏 / 吊牌先画好：新画面开关要挪进它的「工具 ▾」（paintStage → paintField3d）
       if (!stage.hidden) paintStage();
       else paintField3d(null);
+      paintDetail();   // 单位详情面板跟着这一包刷新（离开战斗画面、说明的东西不在战场上了就收起）
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (loreUi) loreUi.sync();
@@ -1470,7 +1528,9 @@
       // 玩家选着技能、正在选目标、战场上有要点选的询问：Esc 留给战场取消（online-battle.js），不开菜单
       global.PauseMenu.addBlocker(() => !!(view.active && !view.isHost && view.screen === "battle" && (request?.skill || fieldAsk()))),
       // 纸片画面（#308）的「工具 ▾」下拉、⇅ 点开的按钮开着：Esc 先收它们
-      global.PauseMenu.addBlocker(() => !!(paperOn && (toolsOpen || swapOpen != null)))
+      global.PauseMenu.addBlocker(() => !!(paperOn && (toolsOpen || swapOpen != null))),
+      // 单位详情面板开着（作者 10/20）：Esc 先收面板（onDetailKey），不开菜单
+      global.PauseMenu.addBlocker(() => detailOpen())
     ] : [];
     function paintPanel() {
       if (panel.hidden) return;
@@ -1558,7 +1618,9 @@
         onUnit: id => {
           const field = fieldAsk();
           if (field) { const i = field.options.findIndex(o => o.target && String(o.target) === String(id)); if (i >= 0) answerField(i); return; }
-          const m = currentMenu?.choices; if (!m || disabled() || !request?.skill) return;
+          // 不是在选目标（没选技能）：点一下单位 / 配置物 / 间隔打开详情面板（作者 10/20 定；选了技能就照旧是选目标）
+          if (!request?.skill) { openDetail(id); return; }
+          const m = currentMenu?.choices; if (!m || disabled()) return;
           let i = (m.options || []).findIndex(o => !o.disabled && String(o.value) === String(id));
           if (i < 0 && m.kind === "zone") {   // 区域选择时点到区里的单位，算点那个区
             const u = ((displayState || view.state || {}).units || []).find(x => x.id === id);
@@ -2107,6 +2169,7 @@
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);
+      document.removeEventListener("keydown", onDetailKey, true);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
       paperCover();   // #339：新画面不用再让开纸片的面板（destroyed 了交 null）

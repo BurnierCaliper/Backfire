@@ -1,6 +1,7 @@
 // 分阶段的首领 / 精英（#205）：战斗里的悬停说明只写当前阶段的能力——
 // 别的阶段的能力不列，只留一句「还有其他阶段」（不剧透）；首领机制的倒计时照旧；图鉴照旧列全部阶段。
-// 联机玩家拿到的是房主算好的阶段编号（online-view.js 白名单只发编号），悬停说明和单机一样，不含坚毅生命
+// 联机玩家拿到的是房主算好的阶段编号（online-view.js 白名单只发编号），说明和单机一样，不含坚毅生命
+// （作者 10/20 起联机的悬停只出简短版：写现在是哪个阶段、不列能力；完整说明点一下单位在详情面板里看）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -293,7 +294,7 @@ test("单机战斗画面：沙灵聚合体一阶段的悬停说明只写一阶�
   assert.deepEqual(errors, []);
 });
 
-test("联机玩家画面：悬停说明和单机一样只写当前阶段——房主那边进二阶段，玩家看到的跟着换", { timeout: 120000 }, async t => {
+test("联机玩家画面：悬停的简短版写现在是哪个阶段、不列能力；点开的详情面板和单机一样只列当前阶段的能力——房主那边进二阶段，玩家看到的跟着换", { timeout: 120000 }, async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const { createLocalRelayServer } = require("../relay/local-server.cjs");
   const origin = await site(t);
@@ -324,7 +325,7 @@ test("联机玩家画面：悬停说明和单机一样只写当前阶段——�
   await host.evaluate(() => { state.units.filter(u => u.isPlayer).forEach(u => { u.shp = 777001; }); OnlineGame.touch(); });
   const sel = `#online-stage .ol-battle [data-unit-id="${id}"]`;
   await alice.waitForSelector(sel);
-  // 玩家画面收到新数据后重画要一点时间：移开再悬停，直到说明里写的是想要的阶段（最多试 20 次）
+  // 悬停（作者 10/20 起是简短版）：玩家画面收到新数据后重画要一点时间——移开再悬停，直到说明里写的是想要的阶段（最多试 20 次）
   const tip = async (stage) => {
     const want = "当前阶段：" + ["一阶段", "二阶段"][stage - 1];
     let text = "";
@@ -336,11 +337,29 @@ test("联机玩家画面：悬停说明和单机一样只写当前阶段——�
     }
     return text;
   };
-  checkTipText(await tip(1), 1);
+  /** 简短版：写出现在是哪个阶段，哪一阶段的能力都不列，末尾提示点开看全部 */
+  const checkBrief = (text, stage) => {
+    assert.ok(text.includes("当前阶段：" + ["一阶段", "二阶段"][stage - 1]) && /还有其他阶段/.test(text), text);
+    for (const w of [].concat(AGG[1], AGG[2], AGG[3])) assert.ok(!text.includes(w), `简短版不列能力「${w}」：${text}`);
+    assert.match(text, /点一下单位看全部说明/);
+    assert.doesNotMatch(text, /坚毅生命|777001/);
+  };
+  const detail = () => alice.evaluate(() => document.getElementById("online-unit-detail").textContent);
+  checkBrief(await tip(1), 1);
+  // 点一下：详情面板（完整版）只写一阶段的能力
+  await alice.mouse.move(2, 2);
+  await alice.click(sel);
+  await alice.waitForSelector("#online-unit-detail", { state: "visible" });
+  checkTipText(await detail(), 1);
+  // 房主那边进二阶段：开着的面板跟着换
   assert.equal(await host.evaluate(TO_PHASE2), 2);
   await host.evaluate(() => { GAME.refresh(); OnlineGame.touch(); });
   await alice.waitForFunction(i => OnlineGame.getView().packet?.state?.units?.find(u => u.id === i)?.display?.stage === 2, id);
-  checkTipText(await tip(2), 2);
+  await alice.waitForFunction(() => document.getElementById("online-unit-detail").textContent.includes("当前阶段：二阶段"));
+  checkTipText(await detail(), 2);
+  await alice.click("#online-unit-detail [data-ut-close]");
+  await alice.waitForSelector("#online-unit-detail", { state: "hidden" });
+  checkBrief(await tip(2), 2);
   assert.doesNotMatch(await alice.evaluate(() => JSON.stringify(OnlineGame.getView().packet)), /777001|"shp"/);
   assert.deepEqual(errors, []);
 });

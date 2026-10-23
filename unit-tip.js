@@ -5,11 +5,14 @@
  *     text：间隔自己的一段说明（驻波墙写这一道墙过滤什么属性、降幅还是增幅），不给就按配置物图鉴
  *     stage：分阶段的首领 / 精英现在在第几阶段（bestiary.js · bestiaryStageOf，联机由房主算好发过来），能力只列这一阶段的
  *   UnitTip.effect(token)   → { name, text }           token：状态文字里的一个词（「灼烧×3」「高能 5」「导体」「失衡」…）
- *   UnitTip.html(info, tokens, head) → 浮窗内容 */
+ *   UnitTip.html(info, tokens, head, opt) → 浮窗内容；opt.brief = 简短版（联机悬停用，完整的在点开的详情面板里看，online-ui.js） */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   const g = (name) => { try { return root[name] !== undefined ? root[name] : eval(name); } catch (e) { return undefined; } };
+
+  // 简短版（联机悬停，作者 10/20 定）：身上的效果最多列几个名字，多的写「+N」
+  const BRIEF = { effects: 8 };
 
   // 图鉴里没有单独条目的几种状态（文字取自规则和角色被动）
   const EXTRA = {
@@ -101,8 +104,12 @@
     return out;
   }
 
-  /** 浮窗内容。head：{ name, sub, mechs }（等级、区、阵营之类；mechs：首领机制的倒计时说明，unit-card.js · mechLines）；tokens：身上的效果词 */
-  function html(info, tokens, head) {
+  /** 浮窗内容。head：{ name, sub, mechs }（等级、区、阵营之类；mechs：首领机制的倒计时说明，unit-card.js · mechLines）；tokens：身上的效果词。
+   *  opt.brief：简短版（联机悬停，作者 10/20 定）——名字、描述（行动方式）、首领机制的倒计时、现在的阶段、载具的乘员照写，
+   *  不列能力和种族被动，效果只写名字、最多 BRIEF.effects 个（多的写「+N」）；opt.more：末尾一行提示（「点一下单位看全部说明」）。
+   *  不给 opt 是完整版（本机的悬停说明、联机的详情面板） */
+  function html(info, tokens, head, opt) {
+    opt = opt || {};
     const d = describe(info);
     const effs = (tokens || []).map(effect).filter(Boolean);
     const seen = new Set();
@@ -111,21 +118,30 @@
     const perks = (head && Array.isArray(head.perks) ? head.perks : []).filter(x => typeof x === "string" && x);   // 种族被动（enemies.js · RACE_PERKS）
     // 载具的乘员名单（vehicle.js）：head.rowsTitle 是小标题（「乘员 n / 4」），head.rows 一行一个人
     const rows2 = (head && Array.isArray(head.rows) ? head.rows : []).filter(x => typeof x === "string" && x);
-    return `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
+    const iconOf = (e) => {
+      const k = root.HudIcons ? HudIcons.keyOf(e.name.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim()) : null;
+      return k ? HudIcons.icon(k) : "";
+    };
+    const top = `<div class="ut-top"><b>${esc(head && head.name || "")}</b>${head && head.sub ? `<span>${esc(head.sub)}</span>` : ""}</div>` +
       (d.kicker ? `<div class="ut-kicker">${esc(d.kicker)}</div>` : "") +
       // 首领机制放在描述前面：还有几回合落下最要紧
-      (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
-      (perks.length ? `<div class="ut-h">种族被动</div><ul class="ut-list">${perks.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
-      (rows2.length ? `<div class="ut-h">${esc((head && head.rowsTitle) || "乘员")}</div><ul class="ut-list">${rows2.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "") +
-      (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
+      (mechs.length ? `<div class="ut-h ut-mech-h">首领机制 · 倒计时</div><ul class="ut-mechs">${mechs.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 30 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "");
+    const perkHtml = perks.length ? `<div class="ut-h">种族被动</div><ul class="ut-list">${perks.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "";
+    const crewHtml = rows2.length ? `<div class="ut-h">${esc((head && head.rowsTitle) || "乘员")}</div><ul class="ut-list">${rows2.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : "";
+    const descHtml = (d.text ? `<p class="ut-desc">${esc(d.text)}</p>` : "") +
       // 分阶段的：写出现在是哪个阶段，别的阶段只留一句，不写它们的能力
-      (d.stage ? `<p class="ut-stage">当前阶段：<b>${esc(d.stage)}</b> · 还有其他阶段</p>` : "") +
+      (d.stage ? `<p class="ut-stage">当前阶段：<b>${esc(d.stage)}</b> · 还有其他阶段</p>` : "");
+    if (opt.brief) {
+      const shown = rows.slice(0, BRIEF.effects), rest = rows.length - shown.length;
+      return top + crewHtml + descHtml +
+        `<div class="ut-h">身上的效果${rows.length ? " · " + rows.length : ""}</div>` +
+        (rows.length ? `<ul class="ut-chips">${shown.map(e => `<li>${iconOf(e)}<b>${esc(e.name)}</b></li>`).join("")}${rest > 0 ? `<li class="ut-chips-more">+${rest}</li>` : ""}</ul>` : `<p class="ut-none">没有效果</p>`) +
+        (opt.more ? `<div class="ut-open">${esc(opt.more)}</div>` : "");
+    }
+    return top + perkHtml + crewHtml + descHtml +
       (d.list.length ? `<ul class="ut-list">${d.list.map(x => { const i = x.indexOf("："); return `<li>${i > 0 && i < 18 ? `<b>${esc(x.slice(0, i))}</b>${esc(x.slice(i))}` : esc(x)}</li>`; }).join("")}</ul>` : "") +
       `<div class="ut-h">身上的效果</div>` +
-      (rows.length ? `<ul class="ut-effects">${rows.map(e => {
-        const k = root.HudIcons ? HudIcons.keyOf(e.name.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim()) : null;
-        return `<li>${k ? HudIcons.icon(k) : ""}<b>${esc(e.name)}</b>${e.text ? `<span>${esc(e.text)}</span>` : ""}</li>`;
-      }).join("")}</ul>` : `<p class="ut-none">没有效果</p>`);
+      (rows.length ? `<ul class="ut-effects">${rows.map(e => `<li>${iconOf(e)}<b>${esc(e.name)}</b>${e.text ? `<span>${esc(e.text)}</span>` : ""}</li>`).join("")}</ul>` : `<p class="ut-none">没有效果</p>`);
   }
 
   // 浮窗本体（跟着单位卡出现，不挡鼠标）
@@ -178,7 +194,7 @@
   }
   function hide() { if (tipEl) tipEl.classList.remove("show"); tipAnchor = null; }
 
-  const api = { describe, effect, html, show, hide, EXTRA };
+  const api = { describe, effect, html, show, hide, EXTRA, BRIEF };
   root.UnitTip = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
