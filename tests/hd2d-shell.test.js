@@ -661,3 +661,195 @@ test("技能按钮上的属性图标去掉白描边（#317，主人：白边让�
   box.innerHTML = R.ctx.skillList(kolt).map((s, i) => U.skillHtml(U.skillButton({ id: s.id, name: s.name, hint: s.hint }, R.OV.projectUnit(kolt), effects, i), page.w.Icons)).join("");
   noRim([...box.querySelectorAll(".sk .sk-el")], "原型页");
 });
+
+/* ---------- 8. 选技能 / 取消 / 选目标：按钮还是原来的节点，一下只画一遍（#317）---------- */
+/** 从源码里抠出一个函数，前面有 async 的也带上 */
+function fnSrcAsync(src, name) {
+  const at = src.indexOf("function " + name + "(");
+  return (src.slice(at - 6, at) === "async " ? "async " : "") + fnSrc(src, name);
+}
+/**
+ * 单机：选技能那一条真的跑——armSkill → disarm → pickUnit、Esc / 点队伍栏换人 → disarm、点目标 → G.arm.resolve → 出手（act），
+ * 连同技能栏 / 队伍栏（refreshHud）和快捷键，都从 game.js 抠出来。规则那边（分步 skillFlowSteps、预演 previewOf、能选的目标 candidateUnits）、
+ * 战场上的标记换成假的；出手（act）照 game.js：花掉这个技能的行动点，演完 refreshAll 画一遍。paints() = refreshHud 一共画了几遍（数 refreshTop）
+ */
+function soloFlow(R, page) {
+  const g = read("game.js");
+  const helpers = ["esc", "el", "sumCur", "sumMax"].map(n => new RegExp("^  const " + n + " = .*$", "m").exec(g)[0]).join("\n");
+  const fns = ["refreshHud", "isSummonSkill", "mainElementOf", "summonIcon", "disarm", "pickUnit", "canGiveUp", "selectActor"].map(n => fnSrc(g, n)).join("\n") +
+    "\n" + fnSrcAsync(g, "armSkill") + "\n" + hudFns(g);
+  const k0 = g.indexOf('document.addEventListener("keydown", (e) => {\n      // 只在战斗界面响应'), k1 = g.indexOf("(e) => {", k0);
+  const keySrc = g.slice(k1, blockEnd(g, g.indexOf("{", k1)) + 1);
+  const space = /const SPACE_SAFE = ("[^"]*");/.exec(g);
+  const log = { acts: [], hints: [], paints: 0 };
+  const enemies = R.st.units.filter(u => !u.isPlayer && !u.hidden);
+  const V = {
+    G: { actorId: R.unit("kolt").id, depth: 0, arm: null, ended: false, summonShown: null, skillsShown: null, skillTap: null, undo: [] },
+    state: R.st, log, enemies,
+    snapUnit: (u) => ({ dead: !!u.dead, dying: !!u.dying, stunned: !!u.stunned, ap: u.ap || 0, apMax: u.apMax || 0, bonus: u.bonus || 0, bonusMax: u.bonusMax || 0,
+      layers: (u.layers || []).map(l => ({ type: l.type, cur: l.current, max: l.max })) }),
+    gameSkills: (u) => (u && u.isPlayer ? R.ctx.skillList(u).map(s => Object.assign({}, s, { cost: R.ctx.skillCost(s.id) || {} })) : []),
+    // 行动点不够的灰掉（出手花掉以后有的按钮跟着灰）
+    blockReason: (u, sk) => (((sk.cost && sk.cost.ap) || 0) > (u.ap || 0) ? "行动点不足" : "")
+  };
+  page.w.HeroSheet = { tip() {}, hideTip() {}, skillTipHtml: () => "" };
+  const make = new vm.Script(`(function (V) {
+    const G = V.G, state = V.state;
+    ${helpers}
+    const $ = (id) => document.getElementById(id);
+    const refreshTop = () => { V.log.paints++; }, hotseat = () => false, stopSkillPv = () => {}, touchUI = () => false, skillTapPv = () => false, scheduleSkillPv = () => {};
+    const setHint = (h) => { V.log.hints.push(h); }, flashHint = (t) => { V.log.hints.push("flash:" + t); }, defaultHint = () => "";
+    const markTargets = () => {}, unmarkTargets = () => {}, clearPreview = () => {}, showPickBar = () => {}, idleBox = () => {}, doUndo = () => {}, toggleFast = () => {};
+    const unitById = (id) => state.units.find(u => u.id === id) || null;
+    const isWeaponUnit = (u) => !!(u && u.weaponOf);
+    const snapUnit = V.snapUnit, gameSkills = V.gameSkills, blockReason = V.blockReason, spaceStartOrEnd = () => {};
+    const skillFlowSteps = () => [], skillThunk = () => null, previewOf = () => ({ needsTarget: true, meaningful: true }), candidateUnits = () => V.enemies;
+    const targetName = (id) => id, animActor = (id) => id, allOnField = () => true, skillCommand = (actor, skill, target) => ({ actor, skill, target });
+    // 出手：花掉行动点，演完照 refreshAll 画一遍
+    const act = (cmd) => {
+      V.log.acts.push(cmd);
+      const u = unitById(cmd.actor), c = (gameSkills(u).find(s => s.id === cmd.skill) || {}).cost || {};
+      u.ap = Math.max(0, (u.ap || 0) - (c.ap || 0));
+      refreshHud();
+      return Promise.resolve(true);
+    };
+    const cards = new Map();
+    let hudEpoch = 0, hudPaints = 0, choiceResolve = null, choiceKeys = [];
+    const SPACE_SAFE = ${space ? space[1] : '"button"'}, kbdFocus = () => false;
+    ${fns}
+    const onKey = ${keySrc};
+    return { refreshHud, onKey, pick: (id) => G.arm.resolve(id) };
+  })`, { filename: "game.js（抠出来的选技能那一条）" });
+  const api = make.runInContext(page.ctx)(V);
+  page.doc.addEventListener("keydown", api.onKey);
+  return Object.assign(api, { V, log, paints: () => log.paints, hud: page.doc.querySelector("#g-app > .g-hud") });
+}
+
+test("单机（#317）：选技能、Esc 取消重复三次，再换人、点目标出手——技能按钮、队伍栏的人、唤出按钮一直是原来那几个节点；选技能 / 取消 / 换人一下只画一遍；只碰变了的那一个按钮", async () => {
+  for (const shellOn of [true, false]) {
+    const R = rules(), kolt = R.unit("kolt");
+    kolt.ap = Math.max(2, kolt.apMax || 0); kolt.apMax = Math.max(kolt.apMax || 0, kolt.ap);
+    const page = uiPage(R);
+    const F = soloFlow(R, page);
+    const hud = F.hud, doc = page.doc, tag = shellOn ? "新画面" : "旧画面";
+    if (shellOn) page.w.HD2DShell.attach(hud, { phone: false });
+    F.refreshHud();
+    const skills = () => [...hud.querySelectorAll("#g-skills .sk")], pcs = () => [...hud.querySelectorAll("#g-party .pc")];
+    const sk0 = skills(), pc0 = pcs(), summon = doc.getElementById("g-summon"), summonKids = [...summon.childNodes];
+    const inner0 = sk0.map(b => [...b.querySelectorAll("*")]);
+    assert.ok(sk0.length >= 3 && pc0.length >= 4 && !summon.hidden, tag + "：有技能按钮、队伍栏、唤出按钮");
+    const aa = sk0.find(b => b.dataset.skill === "kolt_aa");
+    assert.ok(aa, "普通攻击");
+    const W = MD.watch([doc.getElementById("g-skills"), doc.getElementById("g-party"), summon]);
+    const only = (node) => W.log.map(([k, x]) => [k, x === node]);
+    try {
+      for (let r = 0; r < 3; r++) {
+        W.clear();
+        let n = F.paints();
+        aa.click();   // 选技能：armSkill → disarm → pickUnit
+        await settle();
+        assert.ok(F.V.G.arm && F.V.G.arm.skillId === "kolt_aa" && F.V.G.arm.mode === "unit", tag + "：在选目标");
+        assert.equal(F.paints() - n, 1, tag + "：选技能一下只画一遍（以前 disarm、armSkill、pickUnit 各一遍）");
+        assert.ok(aa.classList.contains("armed"), tag + "：选中的亮着");
+        assert.deepEqual(only(aa), [["setAttribute", true]], tag + "：只改了选中的那个按钮的 class，别的按钮、队伍栏、唤出按钮一下都没碰");
+        W.clear();
+        n = F.paints();
+        MD.key(doc, "Escape");   // 取消
+        await settle();
+        assert.equal(F.V.G.arm, null, tag + "：取消了");
+        assert.equal(F.paints() - n, 1, tag + "：取消一下只画一遍");
+        assert.ok(!aa.classList.contains("armed"));
+        assert.deepEqual(only(aa), [["setAttribute", true]], tag + "：取消也只改那一个按钮的 class");
+        assert.deepEqual(skills(), sk0, tag + "：技能按钮还是原来那几个节点");
+        assert.deepEqual(pcs(), pc0, tag + "：队伍栏的人还是原来那几个节点");
+      }
+      // 数字键选技能；选着技能时点队伍栏换人
+      let n = F.paints();
+      MD.key(doc, "1");
+      await settle();
+      assert.equal(F.V.G.arm && F.V.G.arm.skillId, F.V.G.skillsShown[0].id);
+      assert.equal(F.paints() - n, 1, tag + "：数字键选技能也只画一遍");
+      // 里面的东西（图标、名字、费用）也没整块换：每个按钮里面的节点还是原来那些
+      skills().forEach((b, i) => assert.deepEqual([...b.querySelectorAll("*")], inner0[i], tag + "：" + b.dataset.skill + " 里面没重画"));
+      assert.deepEqual([...summon.childNodes], summonKids, tag + "：唤出按钮里面也没重画");
+      const other = pc0.find(b => b.dataset.id && b.dataset.id !== kolt.id), mine = new Map(sk0.map(b => [b.dataset.skill, b]));
+      n = F.paints();
+      other.click();
+      await settle();
+      assert.equal(F.V.G.actorId, other.dataset.id);
+      assert.equal(F.paints() - n, 1, tag + "：选着技能时点队伍栏换人只画一遍（以前 disarm 一遍、selectActor 一遍）");
+      assert.deepEqual(pcs(), pc0, tag + "：换人以后队伍栏还是原来那几个节点（只换了谁亮着）");
+      assert.ok(other.classList.contains("on") && !pc0.find(b => b.dataset.id === kolt.id).classList.contains("on"), tag + "：亮着的换了人");
+      // 换了人技能也换了：两个人都有的（移动之类）还是原来那个按钮，柯尔特自己的拿掉
+      const theirs = skills();
+      assert.ok(theirs.some(b => !mine.has(b.dataset.skill)), tag + "：换成了这个人的技能");
+      theirs.filter(b => mine.has(b.dataset.skill)).forEach(b => assert.equal(b, mine.get(b.dataset.skill), tag + "：两个人都有的 " + b.dataset.skill + " 还是原来那个按钮"));
+      F.V.G.actorId = kolt.id; F.refreshHud();   // 换回柯尔特
+      const sk1 = skills(), aa1 = sk1.find(b => b.dataset.skill === "kolt_aa"), inner1 = sk1.map(b => [...b.querySelectorAll("*")]);
+      // 选目标出手：花掉行动点，演完画一遍
+      aa1.click();
+      await settle();
+      const enemy = F.V.enemies[0], apBefore = kolt.ap;
+      F.pick(enemy.id);
+      await settle();
+      assert.deepEqual(plain(F.log.acts.slice(-1)), [{ actor: kolt.id, skill: "kolt_aa", target: enemy.id }], tag + "：点目标出手");
+      assert.ok(kolt.ap < apBefore, "花掉了行动点");
+      assert.ok(!aa1.classList.contains("armed"), tag + "：出手以后不再亮着");
+      assert.ok(skills().length === sk1.length && skills().every((b, i) => b === sk1[i]), tag + "：出手以后技能按钮还是原来那几个节点");
+      skills().forEach((b, i) => assert.deepEqual([...b.querySelectorAll("*")], inner1[i], tag + "：出手以后 " + b.dataset.skill + " 里面没重画"));
+      assert.deepEqual(pcs(), pc0, tag + "：出手以后队伍栏的人还是原来那几个节点");
+    } finally { W.stop(); }
+  }
+});
+
+test("联机玩家（#317）：选技能（问主机前后 online-ui.js · call() 各画一遍）、取消、选目标出手——技能按钮、队伍栏的人还是原来那几个节点；只碰变了的；纸片画面贴的纸纹留着", () => {
+  for (const shellOn of [true, false]) {
+    const R = rules(), O = onlineHud(R);
+    const hud = O.hud, tag = shellOn ? "新画面" : "旧画面";
+    if (shellOn) O.page.w.HD2DShell.attach(hud, { phone: false });
+    O.paint();
+    const skills = () => [...hud.querySelectorAll(".skills .sk")], pcs = () => [...hud.querySelectorAll(".party .pc")];
+    const sk0 = skills(), pc0 = pcs(), inner0 = sk0.concat(pc0).map(b => [...b.querySelectorAll("*")]);
+    assert.ok(sk0.length >= 3 && pc0.length >= 4, tag + "：有技能按钮、队伍栏");
+    const aa = sk0.find(b => b.dataset.obSkill === "kolt_aa");
+    // 纸片画面贴的纸纹（online-paper.js · dress：data-olp-tex、style 里的 --olp-tex，记过的不再贴）
+    sk0.concat(pc0).forEach(b => { b.dataset.olpTex = "tag"; b.style.setProperty("--olp-tex", 'url("t")'); });
+    const enemy = O.pv.units.find(u => !u.isPlayer && !u.hidden);
+    const pickMenu = { kind: "unit", title: "普通攻击", options: [{ value: enemy.id, label: enemy.name }] };
+    const same = (what) => {
+      assert.ok(skills().length === sk0.length && skills().every((b, i) => b === sk0[i]), tag + "：" + what + "：技能按钮还是原来那几个节点");
+      assert.ok(pcs().length === pc0.length && pcs().every((b, i) => b === pc0[i]), tag + "：" + what + "：队伍栏的人还是原来那几个节点");
+      sk0.concat(pc0).forEach((b, i) => assert.deepEqual([...b.querySelectorAll("*")], inner0[i], tag + "：" + what + "：按钮里面没重画"));
+      sk0.concat(pc0).forEach(b => assert.ok(b.dataset.olpTex === "tag" && b.style.getPropertyValue("--olp-tex") === 'url("t")', tag + "：" + what + "：纸纹还在"));
+    };
+    const W = MD.watch([hud.querySelector(".skills"), hud.querySelector(".party")]);
+    try {
+      // 选技能：先画一遍「正在同步」（按钮照旧灰掉），主机回了再画一遍（选中普通攻击、菜单换成选目标）
+      O.ui.busy = true; O.paint();
+      same("正在同步");
+      assert.ok(skills().every(b => b.disabled), tag + "：正在同步：照旧都灰掉");
+      O.ui.busy = false; O.ui.armed = "kolt_aa"; O.ui.menu = pickMenu; O.paint();
+      same("选了技能");
+      assert.ok(aa.classList.contains("armed") && !aa.disabled, tag + "：选中的亮着");
+      assert.deepEqual(W.log.filter(([, x]) => pc0.some(b => b.contains(x))), [], tag + "：选技能前后队伍栏一下都没碰");
+      // 不经过「正在同步」直接换选中的：只改那两个按钮的 class
+      W.clear();
+      O.ui.armed = "__move"; O.paint();
+      const mv = sk0.find(b => b.dataset.obSkill === "__move");
+      assert.deepEqual(W.log.map(([k, x]) => [k, x === aa || x === mv]), [["setAttribute", true], ["setAttribute", true]], tag + "：只改了换下来、换上去那两个按钮的 class");
+      // 取消（Esc → onCancel → 问主机，前后各画一遍）
+      O.ui.busy = true; O.paint();
+      O.ui.busy = false; O.ui.armed = ""; O.ui.menu = { kind: "skill", options: O.skills }; O.paint();
+      assert.ok(!skills().some(b => b.classList.contains("armed")), tag + "：取消了");
+      same("取消");
+      // 选目标出手：新的一包（柯尔特的行动点花掉了）
+      O.ui.armed = "kolt_aa"; O.ui.menu = pickMenu; O.paint();
+      const pv2 = plain(O.pv), k2 = pv2.units.find(u => u.id === O.kolt.id);
+      k2.ap = Math.max(0, (k2.ap || 0) - 1);
+      O.ui.armed = ""; O.ui.menu = { kind: "skill", options: O.skills };
+      O.b.update(pv2, O.ui);
+      assert.ok(!aa.classList.contains("armed"));
+      assert.ok(skills().every((b, i) => b === sk0[i]) && pcs().every((b, i) => b === pc0[i]), tag + "：出手以后技能按钮、队伍栏的人还是原来那几个节点");
+    } finally { W.stop(); }
+  }
+});

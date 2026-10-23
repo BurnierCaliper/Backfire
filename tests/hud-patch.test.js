@@ -16,23 +16,8 @@ function page() {
 }
 /** 整块重画出来是什么样（比较读回来的 HTML 用） */
 function fresh(doc, html) { const d = doc.createElement("div"); d.innerHTML = html; return d.innerHTML; }
-/** 记下 live 里面元素的每一次改动：[种类, 节点]（换属性、插入 / 拿掉子节点、整块换 innerHTML；文字节点改字不记，看节点还是不是原来那个）。stop() 收工 */
-function watch(P, live) {
-  const log = [];
-  const E = P.window.Element.prototype, N = P.window.Node.prototype;
-  const undo = [];
-  const wrap = (proto, name) => {
-    const f = proto[name];
-    proto[name] = function () { if (live.contains(this)) log.push([name, this]); return f.apply(this, arguments); };
-    undo.push(() => { proto[name] = f; });
-  };
-  ["setAttribute", "removeAttribute"].forEach(n => wrap(E, n));
-  ["insertBefore", "removeChild"].forEach(n => wrap(N, n));
-  const ih = Object.getOwnPropertyDescriptor(E, "innerHTML");
-  Object.defineProperty(E, "innerHTML", { configurable: true, get: ih.get, set(v) { if (live.contains(this)) log.push(["innerHTML", this]); ih.set.call(this, v); } });
-  undo.push(() => Object.defineProperty(E, "innerHTML", ih));
-  return { log, stop: () => undo.reverse().forEach(f => f()) };
-}
+/** 记下 live 里面元素的每一次改动（tests/mini-dom.js · watch）：[种类, 节点]；文字节点改字不记，看节点还是不是原来那个。stop() 收工 */
+const watch = (P, live) => MD.watch(live);
 /** 改动记录读成 [种类, 是不是这个节点]（直接比节点 deepEqual 太慢） */
 const kinds = (log, node) => log.map(([k, n]) => [k, n === node]);
 

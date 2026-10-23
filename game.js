@@ -3680,7 +3680,7 @@
    *  这一下同步的部分跑完（微任务：浏览器画出来之前）还没人画过才补画一遍 */
   function hudSoon() {
     const n = hudPaints;
-    queueMicrotask(() => { if (hudPaints === n) refreshHud(); });
+    Promise.resolve().then(() => { if (hudPaints === n) refreshHud(); });
   }
 
   function refreshHud() {
