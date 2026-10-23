@@ -2754,7 +2754,8 @@ function applyFinishBonus() {
   if (counterPts > 0) { bs.parts.counterMaster = (bs.parts.counterMaster || 0) + counterPts; bs.total += counterPts; }
   bs.counterMaster = cm.ok;
   bs.speedMult = speedMult;
-  bs.finishMult = mult * (cm.ok ? SCORE_COUNTER_MASTER.mult : 1);
+  // 存之前取到两位小数：1.2 × 1.5 直接乘是 1.7999999999999998，结算日志会显示成「×1.7999999999999998」
+  bs.finishMult = Math.round(mult * (cm.ok ? SCORE_COUNTER_MASTER.mult : 1) * 100) / 100;
   bs.flawless = flawless;
   return { extra: speed + flawlessPts + ambushPts + counterPts, mult: bs.finishMult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts,
     counterMaster: cm.ok, counterPts, counterQual: cm.qual, counterAttacks: cm.attacks };

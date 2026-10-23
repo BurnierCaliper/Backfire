@@ -86,3 +86,18 @@ test("分数线：B 及以上 ×1.15（向上取整到 10），C、D 不变；�
   const par = 800, mixed = c.gradeLines(1, par).find(x => x[0] === "B");
   assert.equal(mixed[1], Math.ceil((1000 * 0.65 + par * mixed[4] * 0.35) * 1.15 / 10 - 1e-9) * 10);
 });
+
+test("克制大师 + 第 3 回合速杀：倍率存成 1.8（不是 1.7999999999999998），结算日志显示 ×1.8", () => {
+  const f = field(); f.act(ADV);
+  f.st.turnNo = 3;
+  f.st.battleScore.total = 1000;
+  const r = f.c.settleBattleRewards("win");
+  const fb = r.finishBonus;
+  assert.equal(fb.speedMult, 1.2);
+  assert.equal(fb.counterMaster, true);
+  assert.equal(fb.mult, 1.8);
+  assert.equal(f.st.battleScore.finishMult, 1.8);
+  // game.js 的结算日志就是 `整场分数 ×${fb.mult}`
+  assert.equal(`整场分数 ×${fb.mult}`, "整场分数 ×1.8");
+  assert.match(require("fs").readFileSync(require("path").join(__dirname, "..", "game.js"), "utf8"), /整场分数 ×\$\{fb\.mult\}/);
+});
