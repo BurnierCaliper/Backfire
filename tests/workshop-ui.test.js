@@ -187,6 +187,49 @@ test("评审 3：房主在 viewFor 里给每个打下手的选项都算好成功
   assert.doesNotMatch(read("workshop-data-adapter.js"), /1 - \(1 - base\)/);
 });
 
+/* ---------- issue #366：工坊写道具效果 ---------- */
+test("issue #366：配方列表（可做、缺材料）、选中配方的详情、学配方都写道具效果（ITEM_CATALOG 的 hint）", () => {
+  const { c, run, W, D } = setup();
+  const hint = id => c.ITEM_CATALOG[id].hint;
+  c.bagAdd("cm_scrap", 1); c.bagAdd("cm_coil", 2);       // 电解液罐（fx_shock）能做，燃烧瓶（fx_burn）缺料
+  run.smiths = ["tima"];                                   // 任务板前有季玛：能学巧手的配方（冰锥弹……）
+  const m = D.hostWorkshopModel(run);
+  let html = W.html(m);
+  const g = m.grouped(W.state.kit);
+  assert.ok(g.craftable.length && g.missing.length);
+  g.craftable.concat(g.missing).forEach(r => {
+    assert.ok(hint(r.id), `${r.id} 有说明`);
+    assert.ok(recipeBlock(html, r.id).includes(hint(r.id)), `列表里的${r.name}写了效果`);
+  });
+  assert.match(recipeBlock(html, "fx_shock"), /施加感电/);
+  // 详情：能做的、缺材料的都写
+  const detailOf = h => h.slice(h.indexOf('class="ws-col ws-detail"'));
+  W.state.sel = "fx_shock";
+  html = W.html(m);
+  assert.ok(detailOf(html).includes(`效果：${hint("fx_shock")}`));
+  W.state.sel = "fx_burn";
+  html = W.html(m);
+  assert.ok(detailOf(html).includes(`效果：${hint("fx_burn")}`));
+  // 学配方
+  const learn = (html.match(/<summary>学配方[\s\S]*?<\/details>/) || [""])[0];
+  assert.ok(m.learn.length && m.learn.some(x => x.item === "fx_sting"));
+  m.learn.forEach(x => assert.ok(learn.includes(hint(x.item)), `学配方里的${x.name}写了效果`));
+});
+
+test("issue #366：联机玩家的工坊也写道具效果（读本机的道具表，联机发的数据不用多带）", () => {
+  const { c, r } = onlineSetup();
+  const W = c.WorkshopUI, m = c.WorkshopData.viewWorkshopModel(r);
+  const hint = id => c.ITEM_CATALOG[id].hint;
+  let html = W.html(m);
+  const g = m.grouped(W.state.kit);
+  const rows = g.craftable.concat(g.missing);
+  assert.ok(rows.length);
+  rows.forEach(x => assert.ok(recipeBlock(html, x.id).includes(hint(x.id)), `列表里的${x.name}写了效果`));
+  W.state.sel = rows[0].id;
+  html = W.html(m);
+  assert.ok(html.slice(html.indexOf('class="ws-col ws-detail"')).includes(`效果：${hint(rows[0].id)}`));
+});
+
 test("评审 4：换画面时收起工坊和非战斗模式的背包（body[data-screen] 变化 / 联机进战斗）", () => {
   const ws = read("workshop-ui.js"), bp = read("backpack-ui.js"), ol = read("online-ui.js");
   assert.match(ws, /attributeFilter: \["data-screen"\]/);
