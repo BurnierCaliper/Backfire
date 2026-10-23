@@ -1664,15 +1664,11 @@ function refreshEnemyEconomy(u, notes) {
     }
     if (!u.flying && w > 0) bonus += 1;
   }
-  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳照样把它清掉）。
+  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳只扣 1，抵得掉）。
   // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
   if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
-  // 不稳：敌人一样失去附赠动作，触发一次后消失
-  if (u.statuses && u.statuses.unstable) {
-    bonus = 0;
-    u.statuses.unstable = false;
-    if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
-  }
+  // 不稳 / 空手格挡：和玩家同一个顺序，所有加成算完再各 −1
+  bonus = applyBonusPenalties(u, bonus, notes);
   // 易怒蛮牛发作后这回合没有附赠
   if (u.raceNoBonus) {
     u.raceNoBonus = false;
@@ -5316,6 +5312,21 @@ function recoverFromStun(u, notes) {
 function ambushSkipRound() {
   return !!state.ambush && (Number(state.turnNo) || 1) <= 1;
 }
+/** 附赠动作的惩罚（玩家、敌人共用，所有加成算完之后调用）：
+ *  不稳 −1（触发一次后消失）、空手格挡成功后的下一回合 −1；两个都有 −2；最少 0 */
+function applyBonusPenalties(u, bonus, notes) {
+  if (u.statuses && u.statuses.unstable) {
+    bonus -= 1;
+    u.statuses.unstable = false;
+    if (notes) notes.push(`${u.name} 不稳：这回合附赠动作 −1。`);
+  }
+  if (u.loseBonusNext) {
+    bonus -= 1;
+    u.loseBonusNext = false;
+    if (notes) notes.push(`${u.name} 空手格挡：这回合附赠动作 −1。`);
+  }
+  return Math.max(0, bonus);
+}
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
   if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
@@ -5335,15 +5346,6 @@ function refreshEconomy(u) {
     return;
   }
   let ap = isSoloHero(u) ? soloCfg().apPerRound : 1, bonus = 1;   // 单人模式：主角每回合 2 行动点
-  if (u.loseBonusNext) {
-    bonus = 0;
-    u.loseBonusNext = false;
-  }
-  // 不稳：失去这回合的附赠动作，触发一次后消失（以前误写成 u.self === "unstable"，从来没生效）
-  if (u.statuses && u.statuses.unstable) {
-    bonus = 0;
-    u.statuses.unstable = false;
-  }
   const iso = state.fields[u.zone] && state.fields[u.zone].isolate;
   if (!iso && state.weather === "sand") {
     const w = sandWind(u.zone, state.zoneMode, state.sandDir);
@@ -5354,6 +5356,7 @@ function refreshEconomy(u) {
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof featAlertBonus === "function") bonus += featAlertBonus(u);   // 警戒（feats.js）：每场第一回合 +1 附赠
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
+  bonus = applyBonusPenalties(u, bonus);   // 所有加成算完再扣：不稳、空手格挡各 −1
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
@@ -6884,7 +6887,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     const ok = forced.ok != null ? !!forced.ok : roll <= chance;
     notes.push(`${helper.name} 空手格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (ok) {
-      notes.push("空手格挡成功：目标仍受一半伤害，击破照常（可以打进失衡）。格挡者下回合失去附赠行动。");
+      notes.push("空手格挡成功：目标仍受一半伤害，击破照常（可以打进失衡）。格挡者下回合附赠行动 −1。");
       helper.loseBonusNext = true;
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
