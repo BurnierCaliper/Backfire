@@ -37,8 +37,9 @@
    *   text         顶栏最前面的模式名（modes）、吊牌上每个人的状态（status）、抽屉的竖标签……
    *   tools        「工具 ▾」下拉里的分组：每组一个小标题，ids = 旧顶栏里的按钮（下拉框住的是 <label> 就排整个 label）。
    *                没列在这里的按钮排在最后（以后顶栏多了按钮，下拉里照样有，不会丢）；hide = 只是字的那几块，挪到胶带上了，下拉里不再显示
-   *   extras       纸片画面的下拉里另加的（#339 要的：单局 / 跑团探索画面顶栏上的「图鉴」「规则」，战斗里也能翻）：
-   *                group 排在哪一组的最后、mode 图鉴打开哪一本（bestiary-ui.js · Bestiary.open；不给 = 默认那本），title 悬停说明（和单局顶栏的同一句）。离开纸片画面就拿掉
+   *   extras       纸片画面的下拉里另加的（#339 要的：单局 / 跑团探索画面顶栏上的「图鉴」「规则」、「战场数据」面板里的「整局数据」，战斗里也能直接点）：
+   *                group 排在哪一组的最后、mode 图鉴打开哪一本（bestiary-ui.js · Bestiary.open；不给 = 默认那本），career 打开整局数据（sheet-ui.js · CareerLog），
+   *                title 悬停说明（和原来那个按钮的同一句）。离开纸片画面就拿掉
    *   art.targets  哪些面板贴哪种纸（paper-ui.js · dress） */
   const P = UI.make({
     bodyClass: "g-paper",
@@ -64,7 +65,9 @@
     hide: ["g-round", "g-phasel", "g-weather", "g-clock", "g-enc-name", "g-log-open"],
     extras: [
       { id: "gp-bestiary", label: "图鉴", title: "图鉴：敌人、配置物和所有效果", group: "查看" },
-      { id: "gp-rules", label: "规则", title: "规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……", group: "查看", mode: "rules" }
+      { id: "gp-rules", label: "规则", title: "规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……", group: "查看", mode: "rules" },
+      // 整局数据：以前在「战场数据」面板里（单局探索画面另有一个），战斗里也直接能点；career = 带 data-career（sheet-ui.js · CareerLog 同一个入口）
+      { id: "gp-career", label: "整局数据", title: "本局 / 这个跑团存档所有战斗里每个角色的输出占比和团队贡献", group: "查看", career: true }
     ],
     // 打开图鉴时按几人队算敌人血量（同单局顶栏：场上的角色数，夹在 2–4 里）
     bestiaryParty: { min: 2, max: 4 },
@@ -248,7 +251,8 @@
           const b = env.doc.createElement("button");
           b.type = "button"; b.className = "g-btn gp-extra"; b.id = x.id; b.textContent = x.label; b.title = x.title || "";
           b.style.order = String(n++);
-          b.addEventListener("click", () => openBestiary(x.mode));
+          if (x.career) b.dataset.career = "1";   // 页面上带 data-career 的点一下就打开整局数据（sheet-ui.js 在捕获阶段接）
+          else b.addEventListener("click", () => openBestiary(x.mode));
           top.appendChild(b); env.added.heads.push(b); members.push(b);
         });
         env.added.groups.push({ head: h, members });

@@ -227,17 +227,23 @@ test("「工具 ▾」：旧顶栏的每一个按钮、下拉框、链接都在�
   assert.deepEqual(o.errors, []);
 });
 
-test("「工具 ▾」的「查看」里另有图鉴、规则（单局 / 跑团探索画面顶栏上的那两个，同一个图鉴入口）；离开纸片画面就拿掉", { timeout: 90000 }, async t => {
+test("「工具 ▾」的「查看」里另有图鉴、规则（单局 / 跑团探索画面顶栏上的那两个，同一个图鉴入口）、整局数据（「战场数据」面板里那个，同一个入口）；离开纸片画面就拿掉", { timeout: 90000 }, async t => {
   const o = await soloPage(t); if (!o) return; const { page } = o;
   await openTools(page);
-  assert.deepEqual(await page.evaluate(() => ["gp-bestiary", "gp-rules"].map(id => { const b = document.getElementById(id); return b && b.textContent; })), ["图鉴", "规则"]);
+  assert.deepEqual(await page.evaluate(() => ["gp-bestiary", "gp-rules", "gp-career"].map(id => { const b = document.getElementById(id); return b && b.textContent; })), ["图鉴", "规则", "整局数据"]);
   await page.click("#gp-rules");
   await page.waitForFunction(() => { const r = document.querySelector(".bx.show"); return r && /规则说明/.test(r.textContent); });
   await page.waitForSelector("#g-app > .g-top", { state: "hidden" });
   await page.evaluate(() => Bestiary.close && Bestiary.close());
+  // 整局数据：和「战场数据」面板里的那个是同一个（sheet-ui.js · CareerLog），点完下拉收起
+  await openTools(page);
+  await page.click("#gp-career");
+  await page.waitForSelector("#career-sheet.show", { state: "visible" });
+  await page.waitForSelector("#g-app > .g-top", { state: "hidden" });
+  await page.click("#cl-close");
   await page.evaluate(() => HD2DField.switchTo("old"));
   await page.waitForFunction(() => !document.body.classList.contains("g-paper"));
-  assert.equal(await page.locator("#gp-bestiary, #gp-rules, .gp-tools-h").count(), 0, "旧顶栏里不多出东西");
+  assert.equal(await page.locator("#gp-bestiary, #gp-rules, #gp-career, .gp-tools-h").count(), 0, "旧顶栏里不多出东西");
   assert.deepEqual(o.errors, []);
 });
 
