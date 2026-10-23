@@ -119,6 +119,15 @@
   const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
   const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
+  // 中立生物（沙漠的尘虫 / 管虫）身上的小标签（#358）：键 → 写什么，和单机旧画面 game.js · snapUnit 的 neutralTags 同一套字
+  const neutralTagText = { stun: "失衡", flat: "摊平", seen: "已发现" };
+  /** 中立生物的小标签：演出快照给了 neutralTags 就只认上面表里的键；规则单位按失衡 / 摊平 / 被声呐发现现算。字一律用上面那张表 */
+  function neutralTagsOf(unit) {
+    const given = get(unit, "neutralTags");
+    const has = new Set(Array.isArray(given) ? given.filter(obj).map(t => get(t, "key"))
+      : [get(unit, "stunned") ? "stun" : "", get(get(unit, "resources"), "flattened") ? "flat" : "", get(unit, "detected") ? "seen" : ""]);
+    return Object.keys(neutralTagText).filter(k => has.has(k)).map(key => ({ key, text: neutralTagText[key] }));
+  }
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
@@ -126,6 +135,14 @@
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }
+    // 中立生物（desert.js）：新画面的「沙下动静」（#358）要的——是不是中立生物、下潜的几回合后离开、小标签（失衡 / 摊平 / 已发现）。
+    // 规则单位身上没有 neutral（单机旧画面是 game.js · snapUnit 现算的），由主机按 isNeutralCreature 算好发过去；演出快照已经带着 neutral / neutralTags，照同一份白名单转。
+    // 都是旧画面上写着的公开信息，不含坚毅生命
+    if (typeof get(unit, "neutral") !== "boolean" && call("isNeutralCreature", unit) === true) out.neutral = true;
+    if (out.neutral) {
+      const leave = number(get(unit, "leaveIn")); if (leave !== undefined) out.leaveIn = leave;
+      out.neutralTags = neutralTagsOf(unit);
+    }
     // 首领 / 10 级起精英 / 和载具合并的驾驶员（敌我都算）：要攒几个晕眩标记才晕眩（玩家那边画「晕眩标记 n/2」徽章；他们自己算不出敌人的级别规则）
     try { if (typeof root.isBossUnit === "function" && root.isBossUnit(unit)) out.stunMax = 2; } catch (e) {}
     // 属性（升级加点要看）：六项数值和曾经加过的项
