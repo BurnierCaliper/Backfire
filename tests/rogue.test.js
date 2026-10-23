@@ -711,8 +711,12 @@ test("检定节点只插在两场战斗之间，一个任务最多 2 个", () =>
         if (x !== "check") return;
         seen += 1;
         // 插检定时前后是战斗；之后按小时补的休息点（tests/rest-spacing.test.js）可能夹在中间
-        const fight = (y) => y === "battle" || y === "elite" || y === "rest";
-        assert.ok(k > 0 && fight(ty[k - 1]) && fight(ty[k + 1]), "检定前后都应是战斗（或补的休息点）：" + ty.join(","));
+        // 跳过休息点列，看两边最近的非休息点：必须是战斗
+        const fight = (y) => y === "battle" || y === "elite";
+        let a = k - 1, z = k + 1;
+        while (a >= 0 && ty[a] === "rest") a--;
+        while (z < ty.length && ty[z] === "rest") z++;
+        assert.ok(a >= 0 && z < ty.length && fight(ty[a]) && fight(ty[z]), "检定两边最近的非休息点都应是战斗：" + ty.join(","));
       });
     }
   }

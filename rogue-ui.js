@@ -375,7 +375,7 @@
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
-            <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
+            <small>${wakeHtml(C.hours.longRest)} · ${plan.free ? "不消耗补给" : plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short" ${shortCan.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时<small>${shortCan.ok ? "" : esc(shortCan.why) + " · "}${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
           <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>${esc(Rogue.restSkipLabel(run))} · 不花时间</small></button>
         </div>`;
@@ -725,6 +725,7 @@
   function huntLine(t) {
     const h = t && t.hunt;
     if (!h || h.found == null) return "";
+    if (h.located && h.target && h.targetAfterRest) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>。已经连续赶了很久的路，先在前面的休息点歇一歇，下一站再去对付它（休息时目标不会跑）。</div>`;
     if (h.located && h.target) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>（血量、atk ×1.5，多占 1 枚代币）。击败它完成任务；从这一战撤退目标会逃走，任务失败。</div>`;
     const pips = (n, max, cls) => Array.from({ length: max }, (_, i) => `<i class="${i < n ? cls : ""}"></i>`).join("");
     return `<div class="t-hunt">线索 <span class="hunt-pips">${pips(h.found, h.need, "ok")}</span> ${h.found}/${h.need}

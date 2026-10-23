@@ -273,12 +273,12 @@ const Rogue = (function () {
         types.push(pickWeighted(tpl.mix || { battle: 1 }, prev && prev !== "battle" ? [prev] : null));
       }
       types.push(tpl.elite ? "elite" : "battle");
-      // 每个任务正好一个休息点（能长休的地方）：插在中间，不在第一站、也不在最后一站
+      // 模板休息点（能长休的地方）：插在中间，不在第一站、也不在最后一站；之后 spaceRests 再按小时补
       types.splice(between(1, types.length - 1), 0, "rest");
       const weather = rollTaskWeather(run);
       insertChecks(types);
       const cols = buildRoute(types, tpl);   // 放在最后掷：主干、天气和以前完全一样
-      const added = spaceRests(types, cols); // 按小时补休息点：任何一条路线连续不长休都不超过 REST_GAP_MAX 小时（不掷随机数）
+      const added = spaceRests(types, cols); // 按小时补休息点：任何一条路线连续不长休都不超过 restGapMax 小时（不掷随机数）
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
@@ -327,7 +327,7 @@ const Rogue = (function () {
 
   /** 路线图（类似《杀戮尖塔》，从左到右）：主干的每一站是一列，中间的列多给 1–2 个可选节点。
    *  第一列、休息点那一列、最后一列（战斗 / 精英战）都只有一个节点：
-   *  所以不管怎么走都正好经过一次休息点，终点都是任务目标。相邻两列的连线见 routeLinks。 */
+   *  所以不管怎么走都经过同样的休息点（模板的一个 + spaceRests 按小时补的），终点都是任务目标。相邻两列的连线见 routeLinks。 */
   const ROUTE = { width: [[.25, 1], [.8, 2], [1, 3]], extra: { check: 1 } };
   function buildRoute(types, tpl) {
     return types.map((t, c) => {
@@ -347,28 +347,34 @@ const Rogue = (function () {
   /* ---------- 休息点间隔：按小时算 ----------
    * 一段 = 从任务起点（或上一个休息点）走到下一个休息点（或任务终点）累计的小时：每走一站路程 travel 小时 + 节点本身的小时。
    * 力竭 20 小时起算，这里留 2 小时余量：任何一条路线上任何一段都不超过 18 小时。 */
-  const REST_GAP_MAX = 18;
+  const restGapMax = () => Number(C.hours.restGapMax) || 18;   // rogue-data.js · ROGUE_CONFIG.hours.restGapMax
   const nodeHours = (t) => (NODE[t] && NODE[t].hours) || 0;
   const travelMax = () => Number(C.hours.travel) || 0;   // 按没有向导的最坏情况算
-  /** 普通任务：一列一列往后看，这一列所有分支里最慢的那条，走完后要是连走到休息点都超了，就在这一列前面插一个休息点（单节点列，所有路线必经）。
-   *  只看每列最大值 = 覆盖所有路线的最坏情况。不掷随机数，种子流不变 */
+  /** 普通任务：一列一列往后看，按连线（routeLinks）算走到这一列每个节点时距上次休息的最坏小时（和 worstRestGap 同一个 DP，精确覆盖所有路线）；
+   *  这一列走完后要是连走到下一个休息点（最后一列：任务终点）都会超，就在这一列前面插一个休息点（单节点列，所有路线必经）。
+   *  不掷随机数，种子流不变。返回补进去的休息点在第几列 */
   function spaceRests(types, cols) {
-    const T = travelMax();
+    const T = travelMax(), MAX = restGapMax();
     const added = [];   // 补进去的休息点最后落在第几列
-    let cum = 0;
+    let best = null;    // 上一列每个节点走完时距上次休息的最坏小时（休息点 = 0）
     for (let c = 0; c < cols.length; c++) {
-      if (types[c] === "rest") { cum = 0; continue; }
-      const step = (c > 0 ? T : 0) + Math.max(...cols[c].map(nodeHours));
       const last = c === cols.length - 1;
-      // 走完这一列之后：不是最后一列就还得能走到下一个休息点（+ 路程），最后一列只要不超
-      if (c > 0 && cum + step + (last ? 0 : T) > REST_GAP_MAX) {
+      let nb;
+      if (c === 0) nb = cols[0].map(t => (t === "rest" ? 0 : nodeHours(t)));
+      else {
+        nb = cols[c].map(() => -Infinity);
+        routeLinks(cols[c - 1].length, cols[c].length).forEach(([i, j]) => { nb[j] = Math.max(nb[j], best[i]); });
+        nb = nb.map((v, j) => (cols[c][j] === "rest" ? 0 : v + T + nodeHours(cols[c][j])));
+      }
+      // 走完这一列：不是最后一列就还得能走到下一个休息点（+ 路程），最后一列只要不超
+      if (c > 0 && types[c] !== "rest" && Math.max(...nb) + (last ? 0 : T) > MAX) {
         types.splice(c, 0, "rest");
         cols.splice(c, 0, ["rest"]);
         added.push(c);
-        cum = 0;
-        continue;   // 下一轮重新看原来这一列
+        best = [0];
+        continue;   // 下一轮重新看原来这一列（前面是刚补的休息点）
       }
-      cum += step;
+      best = nb;
     }
     return added;
   }
@@ -1191,16 +1197,20 @@ const Rogue = (function () {
           return { preset, name: "【目标】" + ((p && p.name) || preset) };
         });
         notes.push(h.found >= h.need ? `线索凑齐了：找到了悬赏目标 ${h.target.name}！` : `虽然没问出什么，${h.target.name} 却自己找上门来了！`);
-        // 目标那一战打完就结束：走过去要是会超 REST_GAP_MAX，先插一个休息点
-        if (huntHoursSinceRest(t) + travelMax() + nodeHours("elite") > REST_GAP_MAX) {
+        // 目标那一战打完就结束：走过去要是会超 restGapMax，先插一个休息点
+        if (huntHoursSinceRest(t) + travelMax() + nodeHours("elite") > restGapMax()) {
           h.targetAfterRest = true;
+          h.restUsed = true;
+          notes.push(`已经连续赶了 ${huntHoursSinceRest(t)} 小时路，先找个地方歇一歇，养足精神再去对付它。`);
           pushHuntNode(t, { type: "rest", noPay: true });
         } else pushHuntNode(t, { type: "elite", target: true });
         return;
       }
-      // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 REST_GAP_MAX 就这一站强制是休息点
+      // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 restGapMax 就这一站强制是休息点
+      // （强制补过之后随机那一站也不再抽休息点：h.restUsed，免得休息点 → 检定 → 休息点）
       const T = travelMax(), worstOther = Math.max(...Object.keys(BOUNTY().other).filter(k => k !== "rest").map(nodeHours));
-      if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > REST_GAP_MAX) {
+      if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > restGapMax()) {
+        h.restUsed = true;
         pushHuntNode(t, { type: "rest", noPay: true });
         return;
       }
@@ -1445,16 +1455,24 @@ const Rogue = (function () {
     const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
     return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep), spit: pick(plan && plan.spit), ammo: pick(plan && plan.ammo) };
   }
+  /** 按小时补的休息点（node.noPay）：长休不消耗水和食物（悬赏不额外给补给，作者裁定）。模板原有的休息点照常消耗 */
+  function freeRestHere(run) {
+    const node = currentNode(run);
+    return !!(node && node.type === "rest" && node.noPay);
+  }
+  function restChoiceAt(run, plan) {
+    return Object.assign(restChoice(plan), freeRestHere(run) ? { free: true } : {});
+  }
   function restPlan(run, plan) {
-    return withParty(run, () => longRestNeeds(restChoice(plan))).out;
+    return withParty(run, () => longRestNeeds(restChoiceAt(run, plan))).out;
   }
   /** 长休界面：每个角色的需求、选择和可选的食物 / 睡眠道具 */
   function restOptions(run, plan) {
-    return withParty(run, () => longRestOptions(restChoice(plan))).out;
+    return withParty(run, () => longRestOptions(restChoiceAt(run, plan))).out;
   }
   function canLongRest(run, plan) { return restPlan(run, plan).ok; }
   /** 营地画面（长休前，ledger.js · campStatus）：把队伍摆上场算一份，不改动本局 */
-  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoice(plan))).out; }
+  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoiceAt(run, plan))).out; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -1466,7 +1484,7 @@ const Rogue = (function () {
     return withParty(run, () => SkillText.armoryData()).out;
   }
   function doLongRest(run, notes, watch, plan, ambush) {
-    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
+    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoiceAt(run, plan), { hours: C.hours.longRest, watch: watch || null }), notes));
     // 长休结算画面（rest-report.js）：玩家看的，坚毅只给一句模糊的话
     if (r.out && r.out.report) run.lastRest = Object.assign(r.out.report, ambush ? { ambush } : {});
     const e = run.task && run.task.escort;
@@ -3158,7 +3176,7 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, restSkipPay, restSkipLabel, worstRestGap, REST_GAP_MAX, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, freeRestHere, restSkipPay, restSkipLabel, worstRestGap, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
     interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
