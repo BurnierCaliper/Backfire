@@ -37,6 +37,7 @@
     skillTap: null,    // 触屏：不用选目标的技能点了一下、正在预演（再点同一个按钮才放出去）
     view: new Map(),   // 当前画面显示的快照 id → snap
     version: 0,
+    battleGen: 0,      // 放弃战斗（abandonBattle）时加一：之前还在半路的演出 / 敌人回合 / 询问醒过来对不上就直接退出
     level: 1,
     partyKits: ["ruby", "yuito", "hiaki", "tou"],
     enemyPlan: [
@@ -52,6 +53,8 @@
   if (window.AttackFx) AttackFx.setClock(G.fxClock);
   const hotseat = () => window.HotseatGame && HotseatGame.isActive();
   const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
+  /** 从 gen 那一刻起这场战斗被放弃了（abandonBattle）：半路的流程醒过来先看这个，是就直接退出，不再结算、不碰之后摆的新战场 */
+  const abandoned = (gen) => gen !== G.battleGen;
 
   function wait(ms) {
     if (G.instant) return Promise.resolve();
@@ -1338,6 +1341,7 @@
   }
 
   async function playBeats(beats, hold) {
+    const gen = G.battleGen;
     let longest = 0;
     const fallen = [];
     beats.forEach(b => {
@@ -1370,7 +1374,10 @@
       }
     });
     if (longest) await wait(longest);
-    for (const s of fallen) await announceDeath(s);
+    for (const s of fallen) {
+      if (abandoned(gen)) return;   // 战斗已经放弃：后面的阵亡提示不再弹
+      await announceDeath(s);
+    }
   }
 
   /** 一段演出放完：留着的被打倒的敌人开始淡出，红叉跟着一起淡（卡片的淡出见 game.css · .unit-wrap.dead） */
@@ -1429,6 +1436,16 @@
     advShake.t = setTimeout(() => f.classList.remove("adv-shake"), 420);
   }
   async function playTape(tape, after, meta) {
+    const gen = G.battleGen;
+    // 演到一半这场战斗被放弃了（abandonBattle）：收起这段演出改过的画面（慢放、推近的镜头），后面的出手、受击、数字不再演到之后的新战场上
+    const gone = () => {
+      if (!abandoned(gen)) return false;
+      G.slow = 1;
+      $("g-app").classList.remove("hitstop");
+      zoomOut();
+      if (window.HD2DField && HD2DField.release) HD2DField.release();
+      return true;
+    };
     const pops = tape.filter(e => e.type === "pop");
     comboPrime(pops);
     const stunId = newStunId(after, pops);
@@ -1469,6 +1486,7 @@
       const prevSlow = G.slow;
       G.slow = 1.7;
       for (let i = 0; i < opps.length; i++) {
+        if (abandoned(gen)) break;
         const o = opps[i];
         const moverCard = cards.get(o.targetId), k3 = cards3d();
         if (moverCard) moverCard.wrap.classList.add("slow-move");
@@ -1485,6 +1503,7 @@
       }
       G.slow = prevSlow;
       if (!meta.slow) $("g-app").classList.remove("hitstop");
+      if (gone()) return;
     }
     // 单人模式的支援：出手的是登场的伙伴，主角不前冲（伙伴的前冲在 partner 里播）
     const supportTape = pops.some(e => e.kind === "partner");
@@ -1515,7 +1534,7 @@
     }
     // 镜头推近：所有协助攻击，和碎渣重炮、狂瀑这几招；其他界面压暗
     const zoomed = !!(strike && !G.sim && ((meta._cmd && meta._cmd.type === "assistAnswer") || (scr && scr.zoom)));
-    if (zoomed) { await zoomIn(strike.targetId); await wait(300); strikeFrom = rectOf(strike.actorId); }
+    if (zoomed) { await zoomIn(strike.targetId); await wait(300); if (gone()) return; strikeFrom = rectOf(strike.actorId); }
     // 拉斯缪尔的能量罐：他（或 EDC）这一下让累积能量变了，就在他身边画出罐子，水位慢慢走到新的刻度
     const tank = window.AttackFx && !G.sim && !G.skip ? rasTankOf(meta, cmd) : null;
     if (tank) AttackFx.tank(rectOf(tank.id), tank.from, tank.to, { ms: tank.ms });
@@ -1530,6 +1549,7 @@
     const blockerId = blockerOf(meta, tape);   // 协助格挡的人：冲上去挡
     if (blockerId) motions.push(lunge(blockerId, meta.actorId));
     if (motions.length) await Promise.all(motions);
+    if (gone()) return;
     // 格挡成功：兵刃相接的一声「铛——」+ 两人连线的中点一把金色火花（玩家的协助格挡、空手格挡，敌人的格挡都算）
     const parried = parriedOf(meta, tape);
     if (parried) {
@@ -1586,6 +1606,7 @@
     G.koHold = (G.koHold || 0) + 1;
     try {
       for (let i = 0; i < pops.length; i++) {
+        if (abandoned(gen)) return;
         const e = pops[i];
         const beatsBefore = e.snap ? setView(e.snap, true) : [];
         const s = G.view.get(e.unitId);
@@ -1706,6 +1727,7 @@
         }
       }
       if (heldBeats.length) await playBeats(heldBeats);
+      if (abandoned(gen)) return;   // 放弃了：不把这场的结算画面盖到新战场上
       if (zoomed) zoomOut();
       const beats = setView(after, true);
       pendingStun.forEach(b => {
@@ -1732,7 +1754,9 @@
   }
 
   async function perform(thunk, meta, system = false, context) {
+    const gen = G.battleGen;
     if (system && window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
+    if (abandoned(gen)) return null;   // 等房间恢复的时候这场战斗被放弃了：不再结算
     meta = meta || {};
     G.skip = false;
     G.tape = [];
@@ -1777,22 +1801,27 @@
     if (result && result.executed === false) return null;
     const after = snapAll();
     await playTape(tape, after, meta);
+    if (abandoned(gen)) return null;   // 演到一半放弃了：这场的记录不写进之后的新战场
     pushLog(meta, tape);
     refreshHud();
     return tape;
   }
 
   async function act(thunk, meta, context) {
+    const gen = G.battleGen;
     pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
     comboStart();
     try {
       const tape = await perform(thunk, meta, !!context, context);
+      if (abandoned(gen)) return;
       if (hotseat() && tape === null) return false;
       await resolveQueues();
       if (hotseat()) return true;
     } finally {
+      // 这场战斗已经放弃（abandonBattle 把 G.depth、画面都收拾好了）：不再收尾，免得把之后摆的新战场当成这场来结算
+      if (abandoned(gen)) return;
       comboEnd();
       G.depth--;
       G.version++;
@@ -1822,6 +1851,7 @@
   /** d100 检定动画（协助格挡、事件里的熟练项检定共用）：数字滚动后停在 spec.roll，按 spec.ok 变色。
    *  spec：{ who, chance, roll, ok, note, okText, failText } */
   function playBlockCheck(spec) {
+    const gen = G.battleGen;
     return new Promise(resolve => {
       const box = $("g-check");
       const num = $("g-check-num");
@@ -1836,6 +1866,7 @@
       let ticks = 0;
       const target = Math.max(1, Math.min(100, Number(spec.roll) || 1));
       const step = () => {
+        if (abandoned(gen)) { resolve(spec); return; }   // 战斗已经放弃：骰子框已经收起，不再动它
         ticks++;
         if (G.skip && ticks > 4) delay = 400;
         if (delay < 220) {
@@ -1858,9 +1889,11 @@
   }
 
   async function resolveQueues() {
+    // 每次等完（询问、检定动画、演出）先看这场战斗是不是已经放弃了（abandonBattle）：放弃了就不再往下结算
+    const gen = G.battleGen;
     for (let guard = 0; guard < 40; guard++) {
       if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
-      if (G.ended) return;
+      if (abandoned(gen) || G.ended) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
@@ -1873,6 +1906,7 @@
           if (window.AttackFx && !G.sim) AttackFx.threat(rectOf(attacker.propId ? "prop:" + attacker.propId : attacker.id), rectOf(target.id));
           try { choice = await promptBlock(job, attacker, target, helpers, walls); }
           finally { if (window.AttackFx) AttackFx.clearThreat(); }
+          if (abandoned(gen)) return;
         }
         const blocker = unitById(choice);
         let forced = null;
@@ -1889,6 +1923,7 @@
             ok,
             note: iai ? "居合：必定成功" : ""
           });
+          if (abandoned(gen)) return;
         }
         const seq = job.seq;
         // 连续协助格挡：这个人没挡住、还有别人能挡时，这一击还没落下（同一击仍在队首）——
@@ -1921,6 +1956,7 @@
             foes.map(u => ({ id: u.id })), (id) => `${k.name} 切刀 → ${targetName(id)}`, [{ label: "不切换", value: "no" }]);
           pick = got && typeof got === "object" ? { swap: false } : got ? { swap: true, targetId: got } : { swap: false };
         } else pick = await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        if (abandoned(gen)) return;
         const swapTarget = (pick && pick.swap && pick.targetId) || null;
         if (pick && pick.swap) {
           // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
@@ -1944,6 +1980,7 @@
         const opts = [{ label: "移到最前", sub: `下一发就是${last}`, value: "front" }, { label: "留在最后", value: "stay" }];
         const pick = hotseat() ? await HotseatGame.ownedChoice(lg, "解开保险", opts)
           : await openChoice("解开保险", `最后一发是${last}。要把它移到队列最前面吗？`, opts, { label: "留在最后", value: "stay" });
+        if (abandoned(gen)) return;
         systemCommand({ type: "longgeSafetyAnswer", front: pick === "front" });
         continue;
       }
@@ -1972,6 +2009,7 @@
               (step.units || []).map(u => ({ id: u.id })), (id) => `环境扫描 → ${targetName(id)}`, [{ label: "放弃扫描", value: SKIP }]);
             v = got && typeof got === "object" ? SKIP : got;
           } else v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          if (abandoned(gen)) return;
           if (v == null || v === SKIP) { skipped = true; break; }
           picks[step.key] = v;
         }
@@ -2003,6 +2041,7 @@
             const answer = await HotseatGame.requestAsk("assist", target.name + " 失衡 · 协助攻击", options, () => eligibleAssisters(breaker, target), job);
             choice = answer.unitId; hotseatExtra = answer.extra;
           } else choice = job.vsPlayer ? aiPickAssister(list) : await promptAssist(job, target, list);
+          if (abandoned(gen)) return;
         }
         const helper = unitById(choice);
         let extra = hotseatExtra;
@@ -2021,6 +2060,7 @@
             blades,
             { label: "取消", value: null }
           );
+          if (abandoned(gen)) return;
           if (!pick) {
             systemCommand({ type: "assistAnswer", helper: null, extra: {} });
             continue;
@@ -2033,6 +2073,7 @@
           const modes = [{ label: "手杖", sub: "移动到敌人那一区戳刺 0.5 ATK 冰；有子弹则耗 1 发给同区友方治疗", value: "cane" }];
           if (ammo) modes.push({ label: "霰弹枪", sub: `耗 1 发子弹 · 1.5 ATK 子弹属性（${typeof longgeAmmoText === "function" ? longgeAmmoText(helper) : ""}）`, value: "gun" });
           const pick = modes.length === 1 ? "cane" : await openChoice("龙哥协助攻击", "选择手杖还是霰弹枪。无论哪种都会立刻解锁扳机，并窥探 2。", modes, { label: "取消", value: null });
+          if (abandoned(gen)) return;
           if (!pick) {
             systemCommand({ type: "assistAnswer", helper: null, extra: {} });
             continue;
@@ -2042,6 +2083,7 @@
           if (pick === "cane" && ammo) {
             const opts = longgeHealOptions(helper, target).map(u => ({ label: u.name, sub: u.id === helper.id ? "自己" : `${u.zone} 区`, value: u.id }));
             const heal = opts.length === 1 ? opts[0].value : await openChoice("龙哥 · 手杖治疗", `戳刺后会耗 1 发子弹治疗：选一名 ${target.zone} 区的友方（含自己）。蓝弹固定治疗等级 + 5，红弹治疗已损失血量的 40%。`, opts, { label: "让程序选（血量比例最低）", value: null });
+            if (abandoned(gen)) return;
             if (heal) extra.heal = heal;
           }
         }
@@ -3049,31 +3091,43 @@
   const aiPickAssister = EnemyAI.pickAssister;
 
   async function enemyPhase() {
+    const gen = G.battleGen;   // 敌人回合中这场战斗被放弃了（abandonBattle）：每次等完先看，放弃了就当回合已经结束（返回 true）
     if (window.OnlineGame?.isHost()) GMCommands.beginEnemyRound(state.turnNo);
     const order = EnemyAI.actingOrder();
     for (const id of order) {
       if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
+      if (abandoned(gen)) return true;
       if (window.OnlineGame?.isHost() && (!GMCommands.enemyMayAct(unitById(id)) || GMCommands.isManual(unitById(id)))) continue;
       for (let n = 0; n < 5; n++) {
         if (window.OnlineGame?.isHost() && n < (G.onlineEnemyCursor?.[id] || 0)) continue;
         if (window.OnlineGame?.isHost() && (GMCommands.isManual(unitById(id)) || !GMCommands.enemyMayAct(unitById(id)))) break;
         if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
+        if (abandoned(gen)) return true;
         const u = unitById(id);
         if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         const actKey = `act:${state.turnNo}:${id}:${n}`;
         const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);
+        if (abandoned(gen)) return true;
         if (tape === null) break;
         await resolveQueues();
         if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
+        if (abandoned(gen)) return true;
         if (checkEnd()) return true;
         const v = unitById(id);
         if (!v || `${v.ap}|${v.bonus}|${v.zone}` === sig) break;
         await wait(450);
+        if (abandoned(gen)) return true;
       }
       await wait(450);
+      if (abandoned(gen)) return true;
     }
-    if (window.OnlineGame?.isHost() && !G.ended) { await OnlineGame.manualEnemyPhase(); if (checkEnd()) return true; if (OnlineGame.takeAIResume()) return enemyPhase(); }
+    if (window.OnlineGame?.isHost() && !G.ended) {
+      await OnlineGame.manualEnemyPhase();
+      if (abandoned(gen)) return true;
+      if (checkEnd()) return true;
+      if (OnlineGame.takeAIResume()) return enemyPhase();
+    }
     return false;
   }
 
@@ -3088,6 +3142,7 @@
   const kbdFocus = el => { const hit = el && el.closest ? el.closest(SPACE_SAFE) : null; return !!hit && hit !== pointerFocusEl; };
   /** 空格：热座 / 联机里结束的是当前这个单位的行动；它还有行动点或附赠没用时先问一句 */
   async function spaceStartOrEnd() {
+    const gen = G.battleGen;
     if (state.combatStarted && hotseat() && !G.depth && !G.ended && !choiceResolve) {
       const cur = unitById(HotseatGame.currentUnit());
       if (cur && ((cur.ap || 0) > 0 || (cur.bonus || 0) > 0)) {
@@ -3095,26 +3150,30 @@
           { label: "确定结束", value: "yes" },
           { label: "继续行动", value: "no" }
         ]);
-        if (ans !== "yes") return;
+        if (abandoned(gen) || ans !== "yes") return;
       }
     }
     return clickStartOrEnd();
   }
   async function clickStartOrEnd() {
     if (G.depth > 0 || G.ended || choiceResolve) return;
+    const gen = G.battleGen;
     if (!state.combatStarted) {
       if (window.HotseatGame && !HotseatGame.canStart()) return;
       await askOpeningChoices();
+      if (abandoned(gen)) return;   // 等开战前的选择时主持人放弃了这场战斗：不再开战
       pushUndo("开始战斗");
       if (hotseat()) HotseatGame.startCombat();
       else dispatch({ type: "startCombat" });
       if (window.Sfx) Sfx.ui("turn");   // 开战：第一回合开始
       if (hotseat()) await resolveQueues();
+      if (abandoned(gen)) return;
       if (state.ambush) {
         // 遭遇战：我方第一回合被跳过，直接进敌人回合
         phaseCard("遭遇战 · 被偷袭", "enemy");
         refreshAll();
         await wait(900);
+        if (abandoned(gen)) return;
         endTurn(true);
         return;
       }
@@ -3136,6 +3195,7 @@
   }
   async function askRetreat() {
     if (!canRetreat() || choiceResolve) return;
+    const gen = G.battleGen;
     const pv = retreatPreview();
     const text = pv.lines.join("；") + "。";
     let guardId = null;
@@ -3144,26 +3204,30 @@
       const pickG = await openChoice("撤退 · 谁来断后", text + " 选一名还站着的角色断后。",
         guards.map(u => ({ label: u.name, sub: `血量 ${sumHp(u)}`, value: u.id })),
         { label: "不撤了", value: null });
-      if (!pickG) return;
+      if (abandoned(gen) || !pickG) return;
       guardId = pickG;
     } else {
       const ok = await openChoice("撤退", text, [{ label: "撤退", value: "yes" }], { label: "不撤了", value: null });
-      if (ok !== "yes") return;
+      if (abandoned(gen) || ok !== "yes") return;
     }
     if (hotseat() && !canRetreat()) return;
     const success = await act({ type: "retreat", rearguard: guardId });
+    if (abandoned(gen)) return;   // 撤退演出中主持人放弃了这场战斗：不再按撤退结算
     if (!G.ended && (!hotseat() || success && state.retreated)) finish(false, "retreat");
   }
   const sumHp = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
 
   /** 开战前的选择。柯尔特可以自行决定初始刀头（不算「更换刀头」，不触发追击伤害）。 */
   async function askOpeningChoices() {
+    // 等选择的时候主持人放弃了这场战斗（abandonBattle，例：初始刀头分给了玩家、玩家还没选）：不再往场上写
+    const gen = G.battleGen;
     // 双相冲动+：诺拉自选初始状态
     const nora = typeof findKit === "function" ? findKit("nora", state.units) : null;
     if (nora && nora.isPlayer && typeof passivePlus === "function" && passivePlus(nora, 2)) {
       const opts = [{ label: "温和", value: "gentle" }, { label: "残忍", value: "cruel" }];
       const pick = hotseat() ? await HotseatGame.ownedChoice(nora, "诺拉 · 初始状态", opts)
         : await openChoice("诺拉 · 初始状态", "双相冲动+：开局时可以自行选择初始状态，回合开始时不会再随机改变。", opts, { label: "保持当前", value: (nora.resources || {}).mood || "gentle" });
+      if (abandoned(gen)) return;
       systemCommand({ type: "openingChoice", actor: nora.id, mood: pick === "cruel" ? "cruel" : "gentle" });
       addLogPhase(`诺拉 初始状态：${pick === "cruel" ? "残忍" : "温和"}`);
     }
@@ -3180,12 +3244,14 @@
       ],
       { label: "保持电钻", value: "drill" }
     );
+    if (abandoned(gen)) return;
     systemCommand({ type: "openingChoice", actor: k.id, bit: pick === "acid" ? "acid" : "drill" });
     addLogPhase(`柯尔特 初始刀头：${k.resources.bit === "acid" ? "酸液炮（远距离）" : "电钻（近距离）"}`);
   }
 
   async function endTurn(ambush = false) {
     if (G.depth > 0 || G.ended || !state.combatStarted || state.combatPhase !== "player" || choiceResolve) return;
+    const gen = G.battleGen;
     if (hotseat() && !ambush) {
       const ack = HotseatGame.submit({ type: "endTurn" });
       if (!ack.ok) { flashHint(ack.error); return; }
@@ -3198,26 +3264,33 @@
         { label: "确定结束", value: "yes" },
         { label: "继续行动", value: "no" }
       ], { label: "取消", value: "no" });
-      if (ans !== "yes") return;
+      if (abandoned(gen) || ans !== "yes") return;
     }
     disarm(true);   // 下面 syncBusy 马上画（#317：一次只画一遍）
     pushUndo(`结束第 ${state.turnNo} 回合`);
     G.depth++;
     syncBusy();
     try {
+      // 敌人回合中（演出、敌人行动、等人回答协助格挡、主持人手动操控敌人）这场战斗被放弃了：每次等完先看，放弃了就直接退出
       const endKey = `end:${state.turnNo}`;
       await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, { phase: "玩家回合结束 · 敌人回合开始" }, hotseat());
+      if (abandoned(gen)) return;
       await resolveQueues();   // 敌人回合开始时落下的死刑：每一段先问协助格挡
-      if (checkEnd()) return;
+      if (abandoned(gen) || checkEnd()) return;
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
+      if (abandoned(gen)) return;
       const over = await enemyPhase();
+      if (abandoned(gen)) return;
       if (!over && !G.ended) {
         await wait(250);
+        if (abandoned(gen)) return;
         await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
+        if (abandoned(gen)) return;
         if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
         await resolveQueues();
+        if (abandoned(gen)) return;
         if (!checkEnd()) {
           phaseCard(`第 ${state.turnNo} 回合`, "player");
           if (hotseat()) HotseatGame.beginRound();
@@ -3225,6 +3298,7 @@
         }
       }
     } finally {
+      if (abandoned(gen)) return;   // 放弃了：abandonBattle 已经把 G.depth、画面收拾好，不再收尾
       G.depth--;
       G.version++;
       syncBusy(true);
@@ -3341,6 +3415,38 @@
   function reviewLog() {
     $("g-result").classList.remove("show");
     $("g-logs").scrollTop = $("g-logs").scrollHeight;
+  }
+
+  /** 放弃这场战斗（跑团主持人没结算就回到探索环节：trpg-ui.js · backFromBattle，#322）。
+   *  正在播的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人的阶段、选到一半的技能目标都停下作废——
+   *  还在半路的流程醒过来看到 battleGen 变了就直接退出（不再结算、不碰之后摆的新战场）。这场当作已经结束（不结算），
+   *  选择框、骰子框、点选、横幅收起，G.depth 清零。规则状态不在这里动：接着由跑团按开战前的队伍记忆重新摆场 */
+  function abandonBattle() {
+    G.battleGen++;
+    G.ended = true;
+    G.depth = 0;
+    G.tape = null;
+    G.skip = false;
+    G.slow = 1;
+    G.koHold = 0;
+    // 弹着的选择框（格挡、撤退、阵亡提示……）按「取消」收起；等它的流程醒过来看到放弃了就退出
+    if (choiceResolve) choiceResolve.cancel();
+    choiceResolve = null;
+    disarm(true);   // 选到一半的技能 / 目标
+    cancelSkillTap();
+    showPickBar(null);
+    for (const id of ["g-choice", "g-check", "g-combo"]) { const box = $(id); if (box) box.classList.remove("show"); }
+    combo.on = false;
+    $("g-app").classList.remove("hitstop");
+    zoomOut();
+    releaseKOs();
+    hideBanner(0);
+    if (window.AttackFx) { AttackFx.clearAim(); AttackFx.clearThreat(); AttackFx.skip(); }
+    if (window.HD2DField && HD2DField.release) HD2DField.release();
+    if (window.UnitTip) UnitTip.hide();
+    if (hotseat()) HotseatGame.abandon();   // 收回等人回答的协助询问 / 分步选择，行动顺序回到战前
+    if (window.OnlineGame?.isHost()) OnlineGame.abandonBattle();   // 放开主持人手动敌人阶段、清掉掉线倒计时、作废排队的主持人操作
+    syncBusy(true);
   }
 
   function encSummary(spec) {
@@ -5456,6 +5562,7 @@
   G.aiStep = EnemyAI.step; G.aiTarget = EnemyAI.target; G.AI_SPEC = EnemyAI.SPEC; G.aiSpecial = EnemyAI.special;
   G.endTurn = endTurn;
   G.checkEnd = checkEnd;
+  G.abandonBattle = abandonBattle;
   G.refresh = refreshAll;
   G.flashHint = flashHint;   // 新画面（hd2d/hd2d-field.js）打不开时在提示栏说一声
   G.fitZones = fitZones;
@@ -5464,9 +5571,13 @@
   G.actLegacy = fn => act(fn, { skillName: "主持人操作", onlineLegacy: true });
   G.resolveOnlineEdits = async () => {
     if (!window.OnlineGame?.isHost() || G.depth || G.ended) return;
+    const gen = G.battleGen;
     G.depth++; syncBusy();
     try { await resolveQueues(); }
-    finally { G.depth--; G.version++; syncBusy(); autoSelect(true); refreshAll(); if (state.combatStarted) checkEnd(); resumeHotseat(); }
+    finally {
+      // 等协助询问时这场战斗被放弃了（abandonBattle 已经收拾好）：不再收尾
+      if (!abandoned(gen)) { G.depth--; G.version++; syncBusy(); autoSelect(true); refreshAll(); if (state.combatStarted) checkEnd(); resumeHotseat(); }
+    }
   };
   G.onlineCheckpoint = () => JSON.parse(JSON.stringify({ state, campaign: G.campaign, partyKits: G.partyKits, enemyPlan: G.enemyPlan,
     encounter: G.encounter || null, lastEncounter: G.lastEncounter, level: G.level, ended: G.ended, lastOutcome: G.lastOutcome, actorId: G.actorId,
@@ -5480,14 +5591,23 @@
   };
   G.resumeOnline = async () => {
     if (!state.combatStarted || G.ended || G.depth) return;
+    const gen = G.battleGen;   // 接着打的这段里主持人放弃了这场战斗（abandonBattle）：每次等完先看，放弃了就直接退出
     G.depth++; syncBusy();
     try {
       await resolveQueues();
+      if (abandoned(gen)) return;
       if (state.combatPhase === "enemy") {
         const over = await enemyPhase();
-        if (!over) { await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true); await resolveQueues(); if (window.Sfx) Sfx.ui("turn"); }
+        if (abandoned(gen)) return;
+        if (!over) {
+          await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true);
+          if (abandoned(gen)) return;
+          await resolveQueues();
+          if (abandoned(gen)) return;
+          if (window.Sfx) Sfx.ui("turn");
+        }
       }
       if (!G.ended && ["setup", "enemy"].includes(HotseatGame.getView().phase)) HotseatGame.beginRound();
-    } finally { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); }
+    } finally { if (!abandoned(gen)) { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); } }
   };
 })();
