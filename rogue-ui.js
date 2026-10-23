@@ -251,7 +251,7 @@
     if (!emptyPartyWhy(run)) return "";
     return `<div class="task r-empty-rest">
       <div class="t-head"><b>休整</b><span class="days">1 天</span></div>
-      <p class="r-hint">队伍里没有人，休整一天可领 1 个${esc(fusionName || "融合体")}，用抽取机招募角色。</p>
+      <p class="r-hint">队伍里没有人，休整一天可领 ${(typeof ROGUE_GROWTH !== "undefined" && ROGUE_GROWTH.fusionPerDay) || 1} 个${esc(fusionName || "融合体")}，用抽取机招募角色。</p>
       <button class="g-btn r-main" id="r-board-camp">休整一天</button>
     </div>`;
   }
