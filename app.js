@@ -1671,10 +1671,10 @@ function refreshEnemyEconomy(u, notes) {
   if (typeof vehicleBonusFloor === "function") bonus = vehicleBonusFloor(u, bonus);
   // 不稳 / 空手格挡：和玩家同一个顺序，所有加成算完再各 −1
   bonus = applyBonusPenalties(u, bonus, notes);
-  // 易怒蛮牛发作后这回合没有附赠（驾驶员照旧留 1 个开车）
+  // 易怒蛮牛发作后这回合没有附赠（载具驾驶员也一样是 0）
   if (u.raceNoBonus) {
     u.raceNoBonus = false;
-    bonus = u.vehMerged ? 1 : 0;
+    bonus = 0;
     if (notes) notes.push(`${u.name} 易怒蛮牛：这回合失去附赠动作。`);
   }
   if (loseAp) ap = 0;

@@ -102,3 +102,13 @@ test("新文字的正面断言：图鉴「不稳」、规则页、空手格挡�
   assert.ok(rd("rulebook.js").includes("附赠动作 −1"));
   assert.ok(rd("app.js").includes("：这回合附赠动作 −${n}。"));
 });
+
+test("易怒蛮牛发作的那回合：载具驾驶员和别的敌人一样没有附赠（不托底到 1）", () => {
+  const { c, S, foe } = setup("thug_knife");
+  foe.vehMerged = true; foe.raceNoBonus = true;
+  S.combatPhase = "enemy";
+  const notes = [];
+  c.refreshEnemyEconomy(foe, notes);
+  assert.equal(foe.bonus, 0);
+  assert.ok(notes.some(n => /易怒蛮牛：这回合失去附赠动作/.test(n)));
+});
