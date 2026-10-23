@@ -6884,7 +6884,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     const ok = forced.ok != null ? !!forced.ok : roll <= chance;
     notes.push(`${helper.name} 空手格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (ok) {
-      notes.push("空手格挡成功：目标仍受一半伤害，架势照扣（最少留 1）。格挡者下回合失去附赠行动。");
+      notes.push("空手格挡成功：目标仍受一半伤害，击破照常（可以打进失衡）。格挡者下回合失去附赠行动。");
       helper.loseBonusNext = true;
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
