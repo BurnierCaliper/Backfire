@@ -43,11 +43,12 @@
   <div class="t-card">
     <h1 class="t-name">Antlerscale<span>Backfire</span></h1>
     <p class="t-sub">角鳞 · 在巨人的阴影下，活到明天</p>
-    <!-- 主菜单：两个大入口 + 图鉴；点进去是各自的子菜单（Esc / 返回 回到这里） -->
+    <!-- 主菜单：两个大入口 + 图鉴 + 规则说明；点进去是各自的子菜单（Esc / 返回 回到这里） -->
     <div class="t-home" id="t-home">
       <button class="t-btn t-big primary" id="t-local" data-view="local"><b>本地玩法</b><small>继续 / 新的一局 / 单人 / 长线养成 / 训练场</small></button>
       <button class="t-btn t-big" id="t-online" data-view="online"><b>联机玩法</b><small>跑团：主持人开房，朋友用房间码加入</small></button>
       <button class="t-btn t-big" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
+      <button class="t-btn" id="t-rules"><b>规则说明</b><small>回合、行动点、检定、伤害、武器 ATK、义体改造率……随时可查</small></button>
     </div>
     <div class="t-panel" id="t-panel-local" data-view="local" hidden>
       <div class="t-panel-head"><button class="t-back" data-back="local" title="返回（Esc）">← 返回</button><h2>本地玩法</h2></div>
@@ -93,6 +94,7 @@
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
     <button class="g-btn" id="run-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
+    <button class="g-btn" id="run-rules" title="规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……">规则</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
   </header>
   <div class="run-main">
@@ -122,6 +124,7 @@
     <button class="g-btn" id="tr-slots" title="换到别的团的存档（当前进度已自动保存）">换存档</button>
     <button class="g-btn" id="tr-map" title="角鳞星地图：看队伍在哪，主持人可以在地图上移动队伍">地图</button>
     <button class="g-btn" id="tr-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
+    <button class="g-btn" id="tr-rules" title="规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……">规则</button>
     <button class="g-btn" id="tr-bs" title="按叙事直接改血量、坚毅、耐久、等级、时间、奎支……">后台</button>
     <button class="g-btn r-main" id="tr-fight" title="切到战斗画面，在那里配置遭遇、开打">进入战斗环节</button>
     <button class="g-btn" id="tr-title">回到标题</button>
@@ -904,6 +907,7 @@ window.GAME_MODE = true;
 <script src="world-travel.js"></script>
 <script src="bestiary.js"></script>
 <script src="codex.js"></script>
+<script src="rulebook.js"></script>
 <script src="effects.js"></script>
 <script src="mods.js"></script>
 <script src="ai.js"></script>
