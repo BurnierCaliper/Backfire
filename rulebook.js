@@ -510,7 +510,7 @@ const RULEBOOK_CHAPTERS = [
         { title: "被动升级", lines: [`武器等级 + 羁绊到 ${plus}（升级后的被动名字后面带 +，内容见角色图鉴）。`] },
         { title: "客制化图纸", lines: [
           `武器等级 + 羁绊到 ${BLUEPRINT_MIN_LEVEL} 级起才能装客制化图纸，一把武器装一张；不到 ${BLUEPRINT_MIN_LEVEL} 级的武器上装着的图纸不生效。图纸可能改 atk、架势、耐久，看各自的说明。`,
-          `单局里在同一位工匠那里升级满 ${SR.blueprintAfter} 次，可以从他的图纸里挑一张；请工匠装上要 ${SR.installCost} 奎支。`
+          `单局里在同一位工匠那里升级满 ${SR.blueprintAfter} 次，可以从他还没给过的图纸里挑一张；领完计数归零，再升级满 ${SR.blueprintAfter} 次可以领下一张。不会领到已经有的图纸，他的图纸都有了就不再计数。请工匠装上要 ${SR.installCost} 奎支。`
         ] }
       ];
     } },

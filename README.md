@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工匠图纸：领一张后计数归零，再升级 5 次领下一张**（所有模式：单局、单人、每日挑战、长线养成、联机房主都走 rogue.js · `smithInfo` / `upgradeWeapon` / `claimBlueprint`；新字段 `run.smithBp`，旧存档在 `ensureSmithState` 里迁移；rogue-ui.js 工匠卡片文字；rulebook.js「改装件、羁绊与图纸」；rogue-data.js 注释；测试 tests/blueprint-counter.test.js）
+  - **以前**：在同一位工匠那里升级满 5 次，可以从他的 2 张图纸里挑一张，而且每位工匠只能领一次（`smithClaimed` 只记一个 id），所以每位工匠的两张图纸实际上只能拿到其中一张。
+  - **现在**：升级满 5 次领一张，领完这位工匠的图纸计数归零；再在他那里升级满 5 次可以领下一张。已经有的图纸（领过的、手里的、装在武器上的）不会再给；他的图纸都有了就不再计数。累计升级次数 `smithUses` 照旧（崔佛「关系变好」打折看它）。攒满后没领之前不再往上加。旧存档：领过的那位工匠计数从 0 开始，没领过的沿用以前的累计次数。
+
 - **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
   - **以前**：评价只看分数；分数线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000（和本场基准分混合），没有奖励克制或借天气的打法。
   - **现在**：统计我方主动发起的攻击（一次行动打几下、打几个人都算一次；协助攻击、借机 / 反击、持续伤害、连带伤害、环境不算），其中有克制或吃到天气增益（任一即可）的占一半及以上、且至少 1 次攻击时，胜利结算在速杀 / 无伤 / 遭遇战之后整场分数再 ×1.5，结算画面写「克制大师」。不管有没有达成，B / A / S / SS / SSS 的分数线都 ×1.15（向上取整到 10），C 线不变。
