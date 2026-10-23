@@ -313,20 +313,23 @@
     if (env.tab) { env.tab.remove(); env.tab = null; }
     if (env.rcHead) { env.rcHead.remove(); env.rcHead = null; }
     if (log) log.classList.remove("gp-drawer", "gp-collapsed");
-    // 技能栏、技能按钮、队伍栏这些贴过纸纹的（game.js 会接着用同一个按钮）：纸纹的标记拿掉
+    // 技能栏、技能按钮、队伍栏这些贴过纸纹的（game.js 会接着用同一个按钮）：纸纹、撕边的标记、补进去的影子层都拿掉
+    // （纹理还没画好的面板没有 data-olp-tex，撕边、影子层已经补上了：按 --olp-clip、.olp-ply 也找一遍）
     const a = app();
-    if (a) a.querySelectorAll("[data-olp-tex]").forEach(untex);
+    if (a) {
+      a.querySelectorAll('[data-olp-tex], [style*="--olp-clip"]').forEach(untex);
+      a.querySelectorAll(".olp-ply").forEach(p => { const el = p.parentNode; untex(el); if (p.parentNode) p.parentNode.removeChild(p); });
+    }
     watch(false);
     if (env.sizer) env.sizer.disconnect();
     pushCover();   // 新画面不用再让开纸片的面板
     paintTheme(null);
     setTimeout(() => { if (typeof root.dispatchEvent === "function" && typeof Event === "function") root.dispatchEvent(new Event("resize")); }, 0);
   }
-  /** 纸纹（paper-ui.js · dress）贴过的标记拿掉（离开纸片画面时：旧画面的顶栏、记录栏不留纸纹） */
+  /** 纸纹（paper-ui.js · dress）贴过的拿掉（离开纸片画面时：旧画面的顶栏、记录栏不留纸纹、撕边、影子层；paper-ui.js · undress） */
   function untex(el) {
-    if (!el) return;
-    delete el.__olpTex; delete el.dataset.olpTex;
-    el.style.removeProperty("--olp-tex"); el.style.removeProperty("--olp-pad");
+    if (!el || el.nodeType !== 1) return;
+    UI.undress(el);
     if (el.getAttribute("style") === "") el.removeAttribute("style");
   }
 

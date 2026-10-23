@@ -1,5 +1,6 @@
 // #342：高能自爆的余波是能量伤害——打到带高能状态的单位，照打中时的口径（gainHighFromHits）累积高能值，
-// 先累积、再判它会不会连锁自爆；本回合刚被施加高能的不累积；没有高能状态的（蓄能、什么都没有）不累积
+// 先累积、再判它会不会连锁自爆；没有高能状态的（蓄能、什么都没有）不累积。
+// #348：去掉「本回合刚被施加高能不累积」——从施加高能的那一刻起挨余波就累积
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -91,23 +92,22 @@ test("能量场自爆的余波（同一个 explodeHigh）一样累积", () => {
   assert.equal(b.highEnergy, 8);
 });
 
-test("本回合刚被施加高能的（瑞比扳机）：这回合挨余波不累积，下回合起照常累积", () => {
+test("刚被施加高能的（瑞比扳机）：同一回合挨余波马上累积，和早就带着高能的一样（#348）", () => {
   const { c, st, a, b, d } = field({ party: ["ruby", "kolt"], foes: 3 });
   const ruby = c.findKit("ruby", st.units);
   ruby.zone = 1; ruby.ap = 5;
   st.attackerId = ruby.id; st.targetId = b.id;
   c.runSkill("ruby_trigger");
   assert.equal(b.statuses.high, true, "扳机挂上高能");
-  assert.equal(b.highApplyTurn, st.turnNo);
   d.statuses.high = true; d.highEnergy = 20;
   c.explodeHigh(a, 20);
   assert.equal(c.totalHp(b), 90, "余波照样打到 B");
-  assert.equal(b.highEnergy, 0, "本回合刚被施加高能：不累积");
-  assert.equal(d.highEnergy, 25, "早就带着高能的 D 照常累积");
-  // 下一回合：D 自爆，余波打到 B，照常累积
+  assert.equal(b.highEnergy, 5, "刚被施加高能的这一回合就累积 1d4+1〔4+1〕");
+  assert.equal(d.highEnergy, 25, "早就带着高能的 D 一样累积");
+  // 下一回合：D 自爆，余波打到 B，再累积一次
   st.turnNo += 1;
   c.explodeHigh(d, 25);
-  assert.equal(b.highEnergy, 5, "下回合起照常累积");
+  assert.equal(b.highEnergy, 10);
 });
 
 test("没有高能状态的（蓄能、什么都没有）挨余波：不涨高能值，也不会被挂上高能", () => {

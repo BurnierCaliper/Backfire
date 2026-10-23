@@ -61,7 +61,7 @@ body.ol-paper.g-paper .g-app > .g-log.gp-drawer {
   height: min(560px, calc(100vh - var(--olp-under) - 30px - var(--olp-dock-h, 210px) - 24px)); min-height: 200px; overflow: visible; transform: none; transition: none;
   color: var(--olp-receipt-ink); background: var(--olp-receipt); background-image: none; border: 0; box-shadow: var(--olp-shadow);
 }
-body.ol-paper.g-paper .g-app > .g-log.gp-drawer > :not(.gp-drawer-tab) { position: relative; z-index: 1; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > :not(.gp-drawer-tab, .olp-ply) { position: relative; z-index: 1; }   /* 影子层 .olp-ply（#321）照 online-paper.css 压在纸下面 */
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs { min-height: 0; }
 /* 抽屉上的标签：收着时是竖着的「战斗记录」（有联机小队的新消息时盖红章数字）；拉开时是纸上边探出来的一张小标签「收起 ▸」 */
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-drawer-tab {
@@ -74,7 +74,7 @@ body.ol-paper.g-paper .g-app > .g-log .gp-sr { position: absolute; width: 1px; h
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed {
   top: 36%; right: 0; width: 40px; height: auto; min-height: 0; color: var(--olp-kraft-ink); background: var(--olp-kraft); box-shadow: var(--olp-shadow);
 }
-body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > :not(.gp-drawer-tab) { display: none !important; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > :not(.gp-drawer-tab, .olp-ply) { display: none !important; }   /* 纸片的影子层（#321）：收着时也留着 */
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > .gp-drawer-tab {
   position: relative; top: auto; right: auto; display: block; width: 100%; height: auto; min-height: 150px; padding: 14px 0 40px; clip-path: none; box-shadow: none;
   writing-mode: vertical-rl; font-size: 21px; letter-spacing: 3px; background: transparent;

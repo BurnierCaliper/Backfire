@@ -267,7 +267,8 @@ function battleTemplateCapture(name) {
   Object.keys(state.fields || {}).forEach(z => { fields[z] = btClone(state.fields[z]); });
   const gaps = {};
   Object.keys(state.gaps || {}).forEach(k => {
-    const g = state.gaps[k];
+    // 驻波墙（频域造物）是这一轮的临时效果：模板记它暂时取代的那个间隔
+    const g = typeof waveGapBase === "function" ? waveGapBase(state.gaps[k]) : state.gaps[k];
     if (g && g.type !== "open") gaps[k] = { type: g.type, hp: Number(g.maxHp) || Number(g.hp) || null, open: !!g.open };
   });
   const props = (state.props || []).filter(p => p && !p.destroyed && !p.dead && BATTLE_TEMPLATE_PROPS.includes(p.kind))

@@ -1347,7 +1347,7 @@ const Rogue = (function () {
       if (!u) return null;
       const before = totalHp(u);
       const inner = [];
-      applyTypedDot(u, amount, element, inner, `检定失败：${ELE[element]}属性伤害 ${amount}`);
+      applyTypedDot(u, amount, element, inner, `检定失败：${ELE[element]}属性伤害 ${amount}`, { highGain: "检定失败能量伤害" });   // 随机到能量、带高能的照样累积高能值
       if (totalHp(u) <= 0) {
         // 不致死：留 1 点在最里层
         const last = (u.layers || []).filter(l => l.type !== "shield").slice(-1)[0];

@@ -142,6 +142,7 @@ body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collaps
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party { display: grid; justify-items: center; gap: 6px; padding: 0 8px 8px; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm { width: max-content; padding: 2px; background: transparent; border: 0; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm::before, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm::before { display: none !important; }   /* 压过下面贴纸纹的 :is(…, #online-side)（带 id，权重高） */
+body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm[data-olp-tex], body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm[data-olp-tex] { filter: none; }   /* 没有白卡片：头像贴纸不挂纸片的影子（#321） */
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm > :not(.face), body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm > :not(.face) { display: none; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon { margin-left: 0; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed .olp-party-tools, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pc-sheet { display: none; }
@@ -186,6 +187,7 @@ body.ol-paper .ol-side.ol-side-collapsed {
   top: 36%; right: 0; width: 40px; height: auto; min-height: 0; background: var(--olp-kraft); box-shadow: var(--olp-shadow);
 }
 body.ol-paper .ol-side.ol-side-collapsed > :not(.ol-side-tabs), body.ol-paper .ol-side.ol-side-collapsed .ol-side-tabs > :not(.ol-side-collapse) { display: none !important; }
+body.ol-paper .ol-side[data-olp-tex] > .olp-ply { display: block !important; }   /* 纸片的影子层（#321）：收着时也留着 */
 body.ol-paper .ol-side.ol-side-collapsed .ol-side-tabs { border: 0; }
 /* 竖标签上的字要清楚（审查：太淡、太小）：深色、大一号、字距拉开；未读数是一枚红章（红框红字、斜一点、斑驳只一点点） */
 body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse:not([hidden]) {
@@ -200,8 +202,11 @@ body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse-dot {
   -webkit-mask-image: var(--olp-grit, none); mask-image: var(--olp-grit, none); -webkit-mask-size: 120px; mask-size: 120px;
 }
 /* ---------- 纸片美术（第 3 步）：纹理照 mock.html 程序生成（online-paper.js · texture / dress），写成 --olp-tex ----------
- * 面板（撕边、不均匀的影子画在纹理里，比面板四边多出 --olp-pad）：纹理挂在 ::before 上，面板自己的底色、影子拿掉；
- * 按钮（瓦楞纸板「工具 ▾」「唤出」「结束行动」、黄纸「菜单」）：纹理直接当底图。还没贴上（量不到大小、没有 canvas）时照旧是上面的纯色 */
+ * #321：纹理是每种纸 × 每套配色一张 --olp-tile 见方、能无缝平铺的小图，平铺铺满任意大小的面板（不按面板大小画）：
+ * 面板：纹理挂在 ::before 上平铺，撕边是它的 clip-path（--olp-clip，按面板大小生成的点）、雪天的霜是它的内阴影（--olp-frost），面板自己的底色、影子拿掉；
+ *   影子（--olp-ply-fx，drop-shadow 跟着撕边走）：大面板挂在补进去的一层 .olp-ply 上（它的 ::before 是同样撕边的一块纸，压在纹理下面）；
+ *   技能吊牌、队伍卡、按钮、行动顺序吊牌这些小纸片挂在它自己身上（它们里面由 hud-patch.js 按需更新，补进去的节点会被拿掉）
+ * 按钮（瓦楞纸板「工具 ▾」「唤出」「结束行动」、黄纸「菜单」）：纹理直接当底图平铺。还没贴上（量不到大小、没有 canvas）时照旧是上面的纯色 */
 body.ol-paper {
   --olp-label: "ZCOOL QingKe HuangYou", "Noto Sans SC", "Microsoft YaHei", sans-serif;   /* 标题、名字（15px 以上） */
   --olp-stencil: "Black Ops One", Impact, sans-serif;                                     /* 房间码、快捷键、喷漆的小字 */
@@ -214,10 +219,20 @@ body.ol-paper [data-olp-tex] { background-color: transparent !important; box-sha
 /* 单机：旧顶栏变的「工具 ▾」下拉（.g-top）、战斗记录抽屉（#g-log）、队伍栏里的「角色资料 / 武器工坊」（.pc-sheet）也是这样贴 */
 body.ol-paper :is(.olp-top, .olp-tools, .olp-tag-card, .olp-move, .hd2d-party, .g-hud.hd2d-shell, .pm, .olp-party-tools .ol-button, .pc-sheet, .sk, #online-side, .g-top, #g-log)[data-olp-tex] { isolation: isolate; border-color: transparent; }
 body.ol-paper :is(.olp-top, .olp-tools, .olp-tag-card, .olp-move, .hd2d-party, .g-hud.hd2d-shell, .pm, .olp-party-tools .ol-button, .pc-sheet, .sk, #online-side, .g-top, #g-log)[data-olp-tex]::before {
-  content: ""; display: block; position: absolute; inset: calc(-1 * var(--olp-pad, 0px)); width: auto; height: auto; z-index: -1; pointer-events: none;   /* 压过 skin.css 给技能栏的警示条 */
-  background: var(--olp-tex) center / 100% 100% no-repeat; border: 0; opacity: 1; transform: rotate(var(--olp-skew, 0deg)); animation: none;
+  content: ""; display: block; position: absolute; inset: 0; width: auto; height: auto; z-index: -1; pointer-events: none;   /* 压过 skin.css 给技能栏的警示条 */
+  background: var(--olp-tex) 0 0 / var(--olp-tile, 256px) repeat; border: 0; opacity: 1; transform: rotate(var(--olp-skew, 0deg)); animation: none;
+  clip-path: var(--olp-clip, none); box-shadow: var(--olp-frost, none);
 }
-body.ol-paper :is(.olp-tools-b, .olp-menu-b, .summonbtn, .endturn)[data-olp-tex] { background-image: var(--olp-tex) !important; background-size: 100% 100% !important; }
+body.ol-paper :is(.olp-tools-b, .olp-menu-b, .summonbtn, .endturn)[data-olp-tex] {
+  background-image: var(--olp-tex) !important; background-size: var(--olp-tile, 256px) !important; background-repeat: repeat !important; background-position: 0 0 !important;
+}
+/* 影子：大面板挂在 .olp-ply 上（paper-ui.js · shape 补进去的，PAPER.art.kinds 的 ply），小纸片挂在自己身上 */
+body.ol-paper [data-olp-tex] > .olp-ply {
+  display: block; position: absolute; inset: 0; z-index: -2; pointer-events: none; filter: var(--olp-ply-fx, none); transform: rotate(var(--olp-skew, 0deg));
+}
+body.ol-paper [data-olp-tex] > .olp-ply::before { content: ""; position: absolute; inset: 0; background: var(--olp-kraft); clip-path: var(--olp-clip, none); }
+body.ol-paper :is(.olp-tag-card, .olp-move, .pm, .olp-party-tools .ol-button, .sk)[data-olp-tex] { filter: var(--olp-ply-fx, none); }
+body.ol-paper.g-paper .pc-sheet[data-olp-tex] { filter: var(--olp-ply-fx, none); }   /* 单机队伍栏里的「角色资料 / 武器工坊」：小纸片，影子挂在自己身上 */
 body.ol-paper :is(.pm, .olp-party-tools .ol-button, .pc-sheet, .olp-move) { position: relative; }
 /* 都稍微歪一点（±0.5～3°）：内容不转（字要清楚，队伍栏挂在技能栏里不能被一起带歪），只转后面那张纸 */
 body.ol-paper .olp-top { --olp-skew: -0.4deg; }

@@ -2731,6 +2731,11 @@
     if (String(id).indexOf("gap:") === 0) {
       const key = String(id).slice(4), g = (state.gaps || {})[key];
       if (!g) return "";
+      // 驻波墙：名字写属性和降幅 / 增幅，副标题写暂时取代的是什么，正文是这一道墙的说明（app.js · waveWallText）
+      if (typeof isWaveGap === "function" && isWaveGap(g)) {
+        const base = g.wave.saved && g.wave.saved.type && g.wave.saved.type !== "open" ? "暂时取代：" + gapStateText(g.wave.saved) : "";
+        return UnitTip.html({ kind: "gap", gapType: "wave", text: waveWallText(g.wave) }, [], { name: waveWallName(g.wave) + "（" + key.replace("-", "–") + " 区之间）", sub: base });
+      }
       const hp = (g.type === "bridge" || g.type === "wall") ? `耐久 ${g.hp || 0}` : g.type === "door" ? (g.open ? "开着" : "关着") : "";
       return UnitTip.html({ kind: "gap", gapType: g.type }, [], { name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", sub: hp });
     }
@@ -4721,7 +4726,9 @@
       if (!state.gaps || !state.gaps[key]) dispatch({ type: "battle.panel", action: "normalizeGaps" });
       const g = state.gaps[key];
       const keep = ["is-targetable", "is-hover", "hit"].filter(c => node.classList.contains(c));
-      node.className = "g-gap gap-" + (g.type || "open") + (keep.length ? " " + keep.join(" ") : "");
+      // 驻波墙（频域造物）：按降幅 / 增幅、过滤的属性上色（game.css · .gap-wave）
+      const wave = typeof isWaveGap === "function" && isWaveGap(g) ? g.wave : null;
+      node.className = "g-gap gap-" + (g.type || "open") + (wave ? ` wave-${wave.mode === "amplify" ? "amplify" : "dampen"} el-${wave.el}` : "") + (keep.length ? " " + keep.join(" ") : "");
       if (!node._bound) {
         node._bound = true;
         const id = "gap:" + key;
@@ -4731,7 +4738,9 @@
       }
       const hp = (g.type === "bridge" || g.type === "wall") ? (" " + (g.hp || 0)) : "";
       const door = g.type === "door" ? (g.open ? " 开" : " 关") : "";
-      node.innerHTML = `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;
+      node.innerHTML = wave
+        ? `<span class="gap-lab">${esc(gapLabel(g.type))}<b>${esc(ELE[wave.el] || wave.el)}·${wave.mode === "amplify" ? "增幅" : "降幅"}</b></span>`
+        : `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;
     });
   }
 

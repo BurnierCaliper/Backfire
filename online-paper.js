@@ -18,7 +18,8 @@
  *     PAPER                                 配置：paper-ui.js 的 BASE 合上下面这一份（类名、本机记住收起的键、文字、贴纸纹的面板……）
  *     active(o)                             这一刻是不是纸片画面：o = { active, isHost, screen, on3d }
  *     isOpen / setOpen / shellHtml / topHtml / tagsHtml / receiptHtml / dress …   paper-ui.js · make 给的（用这里的配置）
- *     dockAuto / phoneVars / themeOf / themeVars / texture / grit / readMoves / pressMove / readCam / pressCam …   paper-ui.js 共用的 */
+ *     dockAuto / phoneVars / themeOf / themeVars / tileSpec / bucket / tornClip / fits / texture / flush / pending / grit / readMoves / pressMove / readCam / pressCam …
+ *                                           paper-ui.js 共用的（纸纹 #321：每种纸 × 每套配色一张平铺的小纹理，撕边 clip-path、影子 drop-shadow） */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./paper-ui.js"));
   else root.OnlinePaper = factory(root, root.PaperUI);
