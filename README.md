@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **移动堡垒的「焚烧」改成每个被打的单位各掷一次 35% 灼烧，伤害不变**（vehicle.js · `VEHICLES.fortress.burn.burnChance = 0.35`）。
+  - **以前**：焚烧打同区所有敌对单位 0.5×atk 火，**每个被打的人都必定**灼烧 1。
+  - **现在**：伤害照旧 0.5×atk 火；每个被打的单位**各自独立掷一次**，35% 灼烧 1。掷骰用游戏装好的种子随机数（`Math.random`，`RNG.install`），回放 / 联机同种子结果一样。技能提示、图鉴（codex.js）、docs/suppression-force.md 一起改了。
+  - **测试**：新增 tests/fortress-burn.test.js（多种子灼烧率约 35%、伤害不变、每人各掷一次、同种子结果一样）；tests/vehicle.test.js 的焚烧测试固定掷骰 0.3。
+  - **平衡模拟**（`node tools/enemy-balance.js --groups fortress,heat`，每格 100 场 × 2/3/4 人）：有车 · 占 1 枚代币的普通战胜率 49.3% → 62.3%、精英战 33.3% → 40.7%；酷暑下的镇压队遭遇（车 30%）65.0% → 69.3%。
 - **易怒蛮牛：每回合最多一次、晕眩 / 失衡不发作、一击结算完再冲（不再来回冲）**（enemies.js · `raceAfterHurt` / `raceRageFlush` / `raceRageGo` / `raceRageMarkBroke` / `RAGE_HOLD` / `rageBlocked`、`RACE_PERKS["兽人·牛"]` 说明文字；app.js · `beginRound`（重置 `raceRageUsed`）、`dealTo`（包一层，原来的主体改名 `dealToInner`）、`bossQuickRecover`、`finishAssist`（设 `RAGE_HOLD.assistOf`）；docs/enemy-race.md；新测试 tests/angry-bull.test.js；改了 tests/enemy-race-perks.test.js、tests/growth-mode.test.js）
   - **以前**：没有次数限制，主伤害的 `applyCombat` 末尾就立刻发作。一次攻击的主伤害触发一次，同一个 `dealTo` 接着结算的高压场地连带伤害又触发一次，于是日志里一次发作「冲撞 A、冲撞 B」、「1 区 → 2 区 → 1 区」来回冲；牛先冲走，原区的高压连带伤害反而按新区算（新区没场地就没吃到）。晕眩、失衡的牛照样冲撞；10 级起用首领架势规则的精英牛，被主伤害打进失衡、立刻恢复架势后，同一击的场地连带伤害还会让它发作。
   - **现在**：一次 `dealTo`（主伤害 + 它自己结算的高压场地、共振、反弹等连带伤害）算「一击」，这期间受伤只记下来，整击结算完再判：这一击里任何一段把它打进失衡 / 晕眩（`stunned`、架势 0、`result.broke`，含首领立刻恢复架势），整击不发作，也不占这回合的次数；打出失衡后排上队的协助攻击也算这次失衡的一部分（作者裁定：10 级起用首领架势规则的精英牛已经立刻恢复架势，协助攻击打它也不发作、不占次数，和 lv 5 的牛一致；判断条件是 `finishAssist` 正在结算、以这只牛为目标的那次协助攻击（`RAGE_HOLD.assistOf`，`rageBlocked`）。这次协助攻击里打到牛的每一下都算，包括诺拉冷气注射这类不带 `assist` 的；不经过 `finishAssist` 的全反击、防守反击、单人支援照常判断，`_bossAssistWindow` 开没开都不影响；只算以这只牛为目标的那次协助攻击，别的目标的协助攻击溅到它照常判断）；否则发作一次。每回合（一整轮，`beginRound` 时重置 `raceRageUsed`，单局 / 跑团 / 联机共用这个回合入口）最多发作一次，所以一次发作只移动一次、只撞一人（移动规则本身不变：随机冲到相邻一区、撞那个区里随机一人）。连带伤害按原区结算，日志里也先写触发它的伤害、再写发作。`dealTo` 之外的伤害（状态、场地单独结算）照旧立刻判。只扣架势的一段（惯性 + 震荡、聚焦抹层等 `dealBreak`）把精英牛打进失衡、立刻恢复架势的，也由 `bossQuickRecover` 记进这一击，整击不发作。打危墙 / 配置物（替身）时发作的几行写进 `out.lines`，照样出现在这一击的日志里。`dealTo` 中途出错时这一击的暂存直接丢掉，不会挂到下一次攻击上。
