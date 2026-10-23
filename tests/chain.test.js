@@ -84,7 +84,7 @@ test("评分：基准分把所有场次、援军的敌人都算进去；固定�
   const plain = H.load();
   plain.BattleSim.setup({ party: ["ruby", "yuito"], encounter: { zoneMode: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }] }, level: 1, seed: "CH" });
   const a = c.gradeLines(1, null), b = plain.gradeLines(1, null);
-  a.forEach((row, i) => { if (b[i][1] > 0) assert.equal(row[1], Math.round(b[i][1] * 1.44)); });
+  a.forEach((row, i) => { if (b[i][1] > 0) assert.equal(row[3], Math.round(b[i][3] * 1.44)); });   // 固定线 ×1.44（B 及以上之后再 ×1.15、取整到 10）
   const par0 = c.scorePar();
   st.turnNo = 3; c.Chain.roundStart([]);
   assert.ok(c.scorePar() > par0, "援军的敌人进了基准分");
