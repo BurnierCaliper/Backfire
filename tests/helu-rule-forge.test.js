@@ -432,4 +432,18 @@ test("驻波墙：战场上看得出来（属性、增幅 / 降幅），悬停�
   assert.match(game, /waveWallText\(g\.wave\)/);
   const ob = fs.readFileSync(path.join(__dirname, "..", "online-battle.js"), "utf8");
   assert.match(ob, /gp\.type === "wave" && gp\.wave/);
+  // 主持人工具：这条间隔是驻波墙时提醒一句（改类型会取消驻波墙，以主持人改的为准）
+  const gm = fs.readFileSync(path.join(__dirname, "..", "online-gm-ui.js"), "utf8");
+  assert.match(gm, /g\.type === "wave" && g\.wave \?[^:]*驻波墙/);
+});
+
+test("驻波墙：主持人中途改了这条间隔的类型 → 以主持人改的为准，回合结束不再恢复", () => {
+  const { c, st, helu } = field();
+  st.gaps["1-2"] = { type: "wall", hp: 9, maxHp: 12, open: false, lastFrom: null };
+  wall(c, "1-2", "fire", "dampen", helu.id);
+  Object.assign(st.gaps["1-2"], { type: "bridge", hp: 20, maxHp: 20 });   // gm-commands.js · editGap 的写法
+  assert.equal(c.lineBlocked(1, 2), false);
+  endRound(c);
+  assert.equal(st.gaps["1-2"].type, "bridge");
+  assert.equal(st.gaps["1-2"].wave, undefined, "留下的驻波墙记录清掉");
 });
