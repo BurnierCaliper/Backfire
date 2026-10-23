@@ -18,7 +18,7 @@
 
 ```
 界面      game.html · screens.js（界面切换）· game.js（战斗演出）· game.css · skin.css（美术皮肤）
-          routemap.js（任务路线图）· world-map.js / world-data.js（角鳞星地图）· bestiary.js / bestiary-ui.js（敌人图鉴）· icons.js（属性 / 天气图标）· sheet-ui.js（角色资料）· armory-ui.js（武器工坊）· fonts/（打包的字体）
+          routemap.js（任务路线图）· world-map.js / world-data.js（角鳞星地图）· bestiary.js / bestiary-ui.js（敌人图鉴）· rulebook.js（规则说明：图鉴的「规则」一本）· icons.js（属性 / 天气图标）· sheet-ui.js（角色资料）· armory-ui.js（武器工坊）· fonts/（打包的字体）
 联机      commands.js / *-commands.js（统一指令）· hotseat.js（热座）· online-*.js（在线跑团）· relay/（转发服务）
 单局      rogue.js（流程规则）· rogue-ui.js（界面）· rogue-data.js（所有数值）· run.js（种子、遭遇）· save.js（存档）
 跑团模式  trpg.js · trpg-ui.js · trpg-data.js · trpg-tasks.js（任务）· lore.js / lore-ui.js（角色资料：NPC 条目，目前只在联机跑团）
