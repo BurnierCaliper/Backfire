@@ -23,12 +23,21 @@ function passCheck(R, run) {
   run.party.forEach(h => { h.profs[info.prof] = 3; });
   return R.attemptCheck(run, run.party[0].kit);
 }
-/** 非检定节点：随便走过去 */
+/** 非检定节点：随便走过去，一直走到下一个检定（或目标）。
+ *  按小时强制的休息点是额外的一站（tests/rest-spacing.test.js）：休息点 → 随机站 → 检定，所以两个检定之间可能有两站 */
 function passOther(c, R, run) {
-  const n = R.currentNode(run);
-  if (n.type === "battle" || n.type === "elite") return R.finishBattle(run, "win");
-  if (n.type === "rest") return R.restAtNode(run, "leave");
-  return R.leaveNode(run);
+  let out;
+  for (let g = 0; g < 4; g++) {
+    const n = R.currentNode(run);
+    if (!n || n.type === "check" || n.target || run.stage !== "task") break;
+    const forced = n.type === "rest" && n.noPay;
+    if (n.type === "battle" || n.type === "elite") out = R.finishBattle(run, "win");
+    else if (n.type === "rest") out = R.restAtNode(run, "leave");
+    else out = R.leaveNode(run);
+    const nx = R.currentNode(run);
+    if (forced && nx && !nx.target) assert.notEqual(nx.type, "check", "强制休息点后面先接随机站");
+  }
+  return out;
 }
 
 test("任务板：悬赏不显示路线，只有第一个线索检定", () => {

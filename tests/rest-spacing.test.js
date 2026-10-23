@@ -253,3 +253,34 @@ test("引擎实测：每个休息点都长休，路线上实际清醒小时（LE
   }
   assert.ok(n >= 30, "跑了 " + n); assert.ok(peak > 10, "峰值 " + peak); assert.ok(longs > n, "长休 " + longs);
 });
+
+test("悬赏强制的休息点是额外的一站：后面先接随机站（不是检定、不是休息点），目标前的那个后面接目标", () => {
+  let forced = 0, r = 3;
+  const rnd = () => { r = (r * 1103515245 + 12345) % 2147483648; return r / 2147483648; };
+  for (let s = 0; s < 120; s++) {
+    let run, k = -1;
+    for (let i = 0; i < 80 && k < 0; i++) { run = R.newRun({ party: ["kolt", "helu"], seed: `XO${s}:${i}` }); k = run.board.findIndex(t => t.kind === "bounty"); }
+    if (k < 0) continue;
+    R.acceptTask(run, k);
+    const task = run.task;
+    for (let g = 0; g < 200 && run.stage === "task" && run.task === task; g++) {
+      const node = R.currentNode(run);
+      if (node.type === "check") { if (rnd() < 0.5) passCheck(run); else R.skipCheck(run); }
+      else if (node.type === "battle" || node.type === "elite") R.finishBattle(run, "win");
+      else if (node.type === "rest") R.restAtNode(run, "leave");
+      else R.leaveNode(run);
+    }
+    const ns = task.nodes;
+    ns.forEach((x, i) => {
+      if (x.type !== "rest" || !x.noPay) return;
+      forced++;
+      const nx = ns[i + 1];
+      assert.ok(nx, "强制休息点不在最后");
+      if (nx.target) return;
+      assert.ok(nx.type !== "check" && nx.type !== "rest", `${run.seed}：强制休息点后面是 ${nx.type}`);
+      assert.equal(ns[i - 1].type, "check", "强制休息点插在检定之后");
+    });
+    assert.ok(gap(ns.map(x => x.type)) <= MAX(c));
+  }
+  assert.ok(forced > 100, "强制休息点 " + forced);
+});

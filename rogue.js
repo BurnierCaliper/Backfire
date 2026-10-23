@@ -1178,6 +1178,14 @@ const Rogue = (function () {
     return h;
   }
   /** 刚走完路线上的最后一站：决定下一站是什么（目标那一战之后就没有了 → 任务完成） */
+  /** 悬赏检定之间随机的那一站（ROGUE_BOUNTY.other；随机休息点整个任务最多一次，强制补过也算） */
+  function pushHuntOther(run, t, h) {
+    const w = Object.assign({}, BOUNTY().other);
+    if (h.restUsed) delete w.rest;
+    const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
+    if (type === "rest") h.restUsed = true;
+    pushHuntNode(t, { type });
+  }
   function huntNext(run, node, notes) {
     const t = run.task, h = t.hunt;
     if (!node || node.target) return;
@@ -1207,18 +1215,20 @@ const Rogue = (function () {
         return;
       }
       // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 restGapMax 就这一站强制是休息点
-      // （强制补过之后随机那一站也不再抽休息点：h.restUsed，免得休息点 → 检定 → 休息点）
+      // 强制的休息点是额外插的一站，不占随机那一站：休息点 → 随机站 → 检定（h.otherAfterRest）；补过之后随机站不再抽休息点（h.restUsed）
       const T = travelMax(), worstOther = Math.max(...Object.keys(BOUNTY().other).filter(k => k !== "rest").map(nodeHours));
       if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > restGapMax()) {
         h.restUsed = true;
+        h.otherAfterRest = true;   // 强制休息点是额外的一站：走完它照常接随机那一站，再接检定
         pushHuntNode(t, { type: "rest", noPay: true });
         return;
       }
-      const w = Object.assign({}, BOUNTY().other);
-      if (h.restUsed) delete w.rest;
-      const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
-      if (type === "rest") h.restUsed = true;
-      pushHuntNode(t, { type });
+      pushHuntOther(run, t, h);
+      return;
+    }
+    if (h.otherAfterRest) {
+      h.otherAfterRest = false;
+      pushHuntOther(run, t, h);
       return;
     }
     if (h.targetAfterRest) {
