@@ -95,13 +95,16 @@ test("长线养成完成任务：上场的每人都拿这一格的全额（不�
   assert.ok(notes.some(n => /完成：获得 \d+ 奎支，每人 100 经验/.test(n)), notes.join("\n"));
 });
 
-test("长线养成：等级取完成任务那一刻的——任务途中平均等级跨了档，完成时按新的档发", () => {
+test("长线养成：经验在接任务时就定下（作者 10/23）——任务途中平均等级跨了档，完成时照接任务时的档发", () => {
   const { run, R } = growth("TXP6");
   setLevels(run, [4]);
   const i = nonHunt(run);
   assert.equal(R.taskPay(run, run.board[i]).xp, 70, "接任务时 4 级：每人 70");
-  finishTask(run, R, i, () => setLevels(run, [5]));   // 任务途中升到 5 级
-  run.party.forEach(h => assert.equal(h.xp, 100, `${h.kit}：完成时 5 级，按 5–8 级那一档`));
+  finishTask(run, R, i, () => {
+    setLevels(run, [5]);   // 任务途中升到 5 级
+    assert.equal(R.taskPay(run, run.task).xp, 70, "进行中的任务卡上照旧是 70");
+  });
+  run.party.forEach(h => assert.equal(h.xp, 70, `${h.kit}：照接任务时 4 级那一档发 70`));
 });
 
 test("任务卡、联机任务板上的经验数读的是 Rogue.taskPay（和完成时发的同一个数）", () => {
