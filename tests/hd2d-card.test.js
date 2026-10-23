@@ -59,13 +59,14 @@ function page() {
   return { w, ctx, doc: P.document, UC: w.UnitCard, OB: w.OnlineBattle };
 }
 
-/** 场景（hd2d-scene.js）里画白卡、量大小、标记的那几段，抠出来放进小 DOM 里跑。state / options 是假的场景状态 */
+/** 场景（hd2d-scene.js）里画白卡、量大小、标记的那几段，抠出来放进小 DOM 里跑。state / options 是假的场景状态；
+ *  wake（#321：叫醒按需渲染，下一帧满帧画）在这里不用画，给个空的 */
 function sceneBits(pg, state, options) {
   const src = read("hd2d/hd2d-scene.js");
   const nm = /const NO_MARKS = \{[^;]*\};/.exec(src);
   assert.ok(nm, "场景有 NO_MARKS");
   const body = ["syncCard", "measureCards", "markPlates"].map(n => fnSrc(src, n)).join("\n");
-  return vm.runInContext(`(function (state, options, L) { ${nm[0]}\n${body}\n return { syncCard, measureCards, markPlates }; })`, pg.ctx)(state, options, L);
+  return vm.runInContext(`(function (state, options, L) { function wake() {}\n${nm[0]}\n${body}\n return { syncCard, measureCards, markPlates }; })`, pg.ctx)(state, options, L);
 }
 /** 一块假的铭牌（场景 makePlate 做的那几样 DOM：.hd2d-plate > .pl-in > .pl-bob，加上细杆；光圈、标签换成假的） */
 function fakePlate(doc, id) {

@@ -368,6 +368,22 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面不再卡：纸纹改成每种纸一张能平铺的小纹理（撕边 clip-path、影子 drop-shadow），开局画好以后不再画；3D 战场静止时降帧；暂停页面加「画质」（自动 / 高 / 低）**（主人反馈：联机模式下队友看到的画面比以前更卡、操作延迟更大，issue #321；online-paper.js · `PAPER.art` 的 `tile` / `fiber` / `bucket` / `reuse` / `clips` / `idle` / `slice`、`kinds` 的 `ply`、`weather.snow.frost`，`tileSpec` / `tornClip` / `fits` / `texture` / `paintTile` / `dress` / `need` / `shape` / `flush` / `pending`，`roughPath` 的点带上是哪条边，`themeVars` 加 `--olp-tile` / `--olp-ply-fx` / `--olp-frost`；online-paper.css 纸纹平铺、`clip-path`、`.olp-ply`；新增 hd2d/hd2d-pace.js（`PACE`，`busy` / `due` / `meter`）；hd2d/hd2d-scene.js · `QUALITY`、`CAM.still`、`frame` / `applyPixels` / `resize` / `wake` / `camMoved`、`sc.setQuality` / `sc.drawn`；hd2d/hd2d-field.js · `FIELD.scripts` 加 hd2d-pace.js、`FIELD.quality`，`quality` / `setQuality` / `levelOf` / `nextQuality`，`fxBusy` / `onSlow` / `registerQuality`；pause-menu.js · `PAUSE_MENU.items.quality` / `order`；prototypes/hd2d/index.html 加载 hd2d-pace.js、给场景 `busy`；测试：tests/online-paper.test.js（#321 七条）、tests/online-paper-ui.test.js（「纸片美术」改成 blob: 地址的平铺小纹理、撕边、影子，新增「#321 开局画好以后……都不再画纹理」一条，「技能吊牌」等纸纹画好再量）、新增 tests/hd2d-pace.test.js、tests/hd2d-quality.test.js，tests/hd2d-layout.test.js 原型页的脚本顺序加上 hd2d-pace.js）
+  - **以前**：
+    - 纸片画面的纸纹按面板的**精确宽高**缓存。选技能 / 取消时技能栏高度在 976 × 235 ↔ 976 × 288 之间变，每变出一个新高度就当场重画一张纸纹、再同步 `toDataURL` 编码（无界面浏览器里两次加起来把主线程堵了约 6.7 秒；真机少很多，也是卡一下）。`actionMenu` 来回本身只有 25–80 毫秒，不是网络慢。
+    - 画一张纸纹本身就慢：面板多大就画多大，逐像素的折面、上千条纤维线一条条描、`shadowBlur` 画撕边外的影子、`filter: blur`；每来一个新大小的面板（说明框、悬停的小卡片……）就再画一张。只按尺寸分档、挪到空闲时画也只是换个时间卡（主人在无界面浏览器里量过：选 / 取消技能那一段又画了 12 张，一共 39 秒，最长一次卡 6 秒）。
+    - 3D 战场每个 rAF 都画：像素比最高 2，后期有景深 / 泛光 / 热浪 / 调色，画面静止时也一直满负荷。
+    - 没有画质选项。
+  - **现在**：
+    - **纸纹不再按面板大小画**：每种纸（顶栏胶带、牛皮纸、技能栏、白纸、收据、卡片、吊牌、当前行动的吊牌、瓦楞纸板、黄纸，一共 10 种）× 每套配色（白天 / 夜晚 × 天气）只画一张 256 × 256、能无缝平铺的小纹理，CSS 平铺（`repeat`）铺满任意大小的面板。左右、上下接得上：折面按环面找最近的点再插值放大，纤维 / 沙粒 / 水渍出了边从另一边接着画，瓦楞纸的竖纹间距取到正好铺满一张。全在一块像素里算，只 `putImageData` 一次，不用 `shadowBlur` / `filter` / 一条条描线。
+    - 开局（这一套配色第一次要纸纹时）把这一套的 10 种都排上，挪到浏览器空闲时画（`requestIdleCallback`，最多等 600 毫秒；没有就 `setTimeout`，一次一张），画完 `toBlob` 交给浏览器编码、`URL.createObjectURL` 拿地址；还没画好的面板先是纯色（换配色时先贴着上一套）。之后选技能 / 取消、开关下拉和抽屉、开新的面板、收起展开、拖窗口大小都不再画；只有换到没画过的配色（天黑了、变天了）才画那一套，回到画过的直接换回。整局纹理最多「种类 × 配色」张。
+    - **撕边**改成 CSS `clip-path: polygon(…)`：照原来的走法（每 9 像素一个点，撕开的那几条边每 4 像素一个点、更毛，收据底边锯齿）按面板大小生成点，沿着边的方向写百分比、往里缩的深度写像素，面板在这附近变大变小撕边照样贴合；和现在那一档差不到 25%（技能栏 235 ↔ 288）就接着用，不换（换也只是换一个 CSS 变量）。按钮那种（瓦楞纸板、黄纸）不撕边。
+    - **影子**改成 CSS `filter: drop-shadow(…)`（还是两层，跟着撕边走）：大面板（顶栏、下拉、队伍栏、技能栏、抽屉）挂在补进去的一层 `.olp-ply` 上，面板里的内容变了、滚动都不连累它；技能吊牌、队伍卡、按钮、行动顺序吊牌这些小纸片挂在它自己身上（它们里面由 hud-patch.js 按需更新，补进去的节点会被拿掉）。
+    - 沙暴的沙粒、下雨的水渍、雾的那层灰画在平铺纹理里；雪天的霜是纸那一层的内阴影（`--olp-frost`）。数值都在 `PAPER.art`（`tile`、`fiber`、`shadow`、`bucket`、`reuse`、`clips`、`idle`、`slice`、`kinds`、`weather`）。
+    - **3D 战场按需渲染**（hd2d-pace.js）：每一帧先问画不画——有演出在播（单机看 game.js 的 `G.depth`，联机玩家 / 原型看 hd2d-play.js 的 `busy`；铭牌在换区滑动、地台在闪（#330）也算）、镜头在动（换段 / 推镜头 / 转场的过渡，拖动和它的惯性）、天气粒子在飞（沙 / 雨 / 雪 / 热浪……）、打雷（闪光、镜头抖）、刚变过（铭牌、标记、选中、换行动的人、窗口、画质……之后 0.6 秒）时照常满帧；都没有时一秒只画 12 帧（行动光圈、选中框、飘浮物、灯闪、胶片颗粒照样走）；系统开了「减少动态效果」又静止（雷鸣除外，雷要按时间数）：一帧都不画，等下一次变。数值在 `PACE`。
+    - **画质**（暂停页面里的「画质」，新画面开着时才有；单机 / 联机同一个本机设置，记在 localStorage，读写都包 try/catch，存不了也照这一次选的）：点一下按 自动 → 高 → 低 换，菜单不收起，马上换上。低 = 像素比最高 1、关掉景深和泛光；高 = 和以前一样；自动 = 先用高，满帧画时（开场 4 秒以后）每攒 3 秒算一次平均，一帧超过 42 毫秒就降到低（只降一次，这一次打开页面都用低的，不记在本机），菜单上写「画质 自动（太卡，已降到低）」。数值在 `FIELD.quality`、`PACE.slow`。
+    - 玩家看到的数据不变：照旧只走 online-view.js 的白名单，坚毅生命一个字都不碰；这些只换这台电脑上的画面，不发给别人。
+    - **hd2d/hd2d-scene.js 改了，场景包 hd2d/hd2d-scene.bundle.js 要重新打（`npm run build:hd2d`）**；还没重新打包时（或者浏览器缓存里还是旧的场景包），画质换不了、照旧每帧画，不报错。
 - **Helumica 新技能：6 级「规则干涉」、9 级「频域造物」（驻波墙）**（作者 10/23 定，issue #345；party.js · `skillList` / `skillCost`；skill-text.js 卡面；engine.js · `WAVE_WALL`（数值表）/ `resolveAttack`（穿墙的伤害、击破修正）/ `SKILL_RANGE` / `SKILL_TARGET_SIDE`；app.js · `HELU_RULE` / `heluRuleReplaced` / `heluRuleBonusOk` / `heluRuleUnits`、`placeWaveWall` / `expireWaveWalls` / `waveWallsOnLine` / `wavePassUnit` / `waveMoved` / `waveLedgerOpen` · `Sync` · `Close`、`skillFlowSteps` / `SKILL_REQUIREMENT` / `skillTargetError` / `runSkillInner` 的两个分支、`dealTo` / `dealToStructure` / `doMoveInner` / `displaceTo` / `chaseFollow` / `applyAbyssFall` / `turnEnd` / `runSkill` / `doMove` 接上驻波墙、`toggleDevice` / `releaseButtons` / `gMissingDoor` 认被取代的门、`forcedPath`（从 `crossGapsForced` 抽出来）；props.js · `gapLabel`；ai.js 绕空隙时驻波墙算能走；battle-templates.js 存模板记被取代的那个间隔；online-view.js 间隔白名单加驻波墙、分步 key 加 `gap` / `element`；game.js / online-battle.js / game.css 战场上画驻波墙，game.js / online-ui.js / unit-tip.js 悬停说明；hd2d/hd2d-field.js · `waveTagsOf` / `syncWaveTags` / `placeWaveTags`、hd2d/hd2d.css 新画面上的驻波墙字牌；online-gm-ui.js 主持人工具的「区间地形」提醒这条间隔是驻波墙；codex.js 配置物图鉴加「驻波墙」；attack-fx.js 两个技能不画攻击演出；测试 tests/helu-rule-forge.test.js（新））
   - **以前**：Helumica 只到 3 级的「大气干扰」（另有 2 级「环境扫描」），6 级、9 级没有技能。
   - **规则干涉（6 级，1 行动点）**：先选 1 距离以内的一个区，变成干涉场（就是原来的谐波场地）。能不能改照 `fieldChangeWhy`：深渊、损毁地面、固有场地、被锁定的改不了，分步里不列，1 距离以内都改不了时技能灰掉。**分析过当前战场**（这场用过环境扫描，`resources.scanned`）**并且这一区原本有别的场地被干涉场取代**时，分步多一步：选那一区的任意一个单位（敌人、Helumica 自己也行），它立刻 +1 附赠动作，可以超过上限（上限不动，画面按「现有和上限取大」画）。原本没有场地、本来就是干涉场都不给；高地、深渊、隔离、塌陷这些和场地共存的不算「别的场地」。给敌人的附赠照常在敌人回合开始时重算。
@@ -473,6 +489,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **新画面技能按钮上的属性图标去掉白描边**（主人反馈，issue #317；icons.js · `Icons.element(el, { rim: false })`；hd2d/hd2d-ui.js：`UI.skill.rim`、`elementBadge`；测试：tests/hd2d-shell.test.js 第 7 节、tests/hd2d-ui.test.js 的技能按钮那一条）
   - **以前**：新画面（单机、联机玩家、原型页）技能按钮左上角的属性图标是 icons.js 的属性图标原样：底下一层粗白描边（`.o`）、上面一层属性色，小小一个看着是一团白边，看不太清楚。
   - **现在**：技能按钮里的属性图标只画属性色那一层（无属性的灰圈也一样）；头像的职责图标、右上角攻击 / 技能角标、伤害数字 / 预览牌上的属性图标照旧带白边。
+
 - **新画面：用右上角开关关掉以后，滚轮不再把旧战场切回新画面**（主人 10/23：想用旧画面时也会因为滚轮变成新画面；hd2d/hd2d-field.js · FIELD.lockKey、locked / setLocked、toggle、onFieldWheel；测试 tests/hd2d-mist.test.js「右上角开关关掉新画面」，8 / 9 两条按新行为更新）
   - **以前**：不管怎么回到旧画面的，在旧战场上往前滚攒够一下就会转到新画面。
   - **现在**：点右上角开关关掉新画面时本机另记一个锁（`backfire-hd2d-lock`），锁着时旧战场上的滚轮照旧是浏览器自己的，不转到新画面，要开就点开关（点开就解锁）。在新画面远景再往外拉（滚轮）回到旧画面的不锁，往前滚照样能回去。单机和联机玩家是同一个开关、同一套逻辑。
