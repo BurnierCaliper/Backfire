@@ -91,12 +91,13 @@ function clock() {
 const wheelEv = (deltaY, extra) => Object.assign({
   deltaY, deltaMode: 0, ctrlKey: false, prevented: 0, stopped: 0, preventDefault() { this.prevented++; }, stopPropagation() { this.stopped++; }
 }, extra || {});
-/** 打开一页：on = 本机记着开（一打开就建新画面，不播转场）；reduced = 减少动态效果；load = 换掉加载（默认交出假场景） */
+/** 打开一页：on = 本机记着开（一打开就建新画面，不播转场），不然本机记着关（#316 起没选过 = 默认开，旧画面要明确选过关）；
+ *  reduced = 减少动态效果；load = 换掉加载（默认交出假场景） */
 async function page(opts) {
   opts = opts || {};
   const { ctx, st } = battle();
   const F = ctx.HD2DField, P = fakeDoc(), T = clock();
-  const mem = new Map(opts.on ? [[F.FIELD.storageKey, "on"]] : []), writes = [];
+  const mem = new Map([[F.FIELD.storageKey, opts.on ? "on" : "off"]]), writes = [];
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); writes.push(String(v)); } };
   const log = { calls: [], scenes: [], loads: 0, refresh: 0 };
   ctx.GAME = { depth: 0, snapAll: () => null, refresh: () => { log.refresh++; }, fieldInput: { unit() {}, hover() {}, zone() {}, zoneHover() {} } };
@@ -311,7 +312,7 @@ test("旧 → 新：旧战场上往前滚（拉近）→ 云雾涌进来（同�
   assert.equal(log.loads, 1, "云雾一涌进来就开始加载");
   assert.equal(F.on(), false, "还没盖满：还是旧画面");
   assert.equal(btn.textContent, "新画面 关");
-  assert.equal(mem.get(F.FIELD.storageKey), undefined, "还没切：开关没动");
+  assert.equal(mem.get(F.FIELD.storageKey), "off", "还没切：开关没动（还是本机记着的关）");
   // 转场中：同一次滚动接着滚（惯性）、点开关：不理
   const inertia = (secs) => {
     for (let k = 0; k < Math.round(secs / 0.1); k++) { T.advance(0.1); const e = p.wheel(wheelEv(-60)); assert.ok(e.prevented && e.stopped, "惯性的滚轮吞掉"); }
