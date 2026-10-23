@@ -60,7 +60,7 @@ textarea#out { display: block; width: 100%; max-width: 1040px; margin: 8px auto 
   <header class="top">
     <span class="tag">调音</span>
     <h1>Backfire 音效调音台</h1>
-    <p class="lede">游戏里用到的每个录音音效都在这里。拖动推子会立刻生效，点「试听」听改后的效果；改过的推子会变成橙色。调好后点底部的「复制参数」，把文字发给我，我写进游戏。电属性、格挡、失衡、爆炸用的是程序合成音效，不在这里。</p>
+    <p class="lede">游戏里用到的每个录音音效都在这里。拖动推子会立刻生效，点「试听」听改后的效果；改过的推子会变成橙色。调好后点底部的「复制参数」，把文字发给我，我写进游戏。电属性、格挡、失衡、爆炸用的是程序合成音效，不在这里；联机玩家「轮到你」的 DJ 搓碟也是合成的，在下面单独一块。</p>
     <ul class="legend">
       <li><b>音量</b> 倍数，1 = 原样</li>
       <li><b>音高 / 速度</b> 1 = 原样，大于 1 更尖更快</li>
@@ -71,6 +71,7 @@ textarea#out { display: block; width: 100%; max-width: 1040px; margin: 8px auto 
     </ul>
   </header>
   <section class="k tone" id="tone"></section>
+  <section class="k tone" id="scratch"></section>
   <div class="groups" id="groups"></div>
 </div>
 <div class="tray" data-sfx-none>
@@ -120,8 +121,37 @@ function renderTone() {
       <button class="play" data-tplay="">▶ 普通</button><button class="play" data-tplay="adv">▶ 克制</button><button class="play" data-tplay="dis">▶ 劣势</button>
       <button class="reset" id="tone-reset">恢复默认</button></div>`;
 }
+// 轮到你（联机玩家）：DJ 搓碟（sfx.js · SCRATCH，现场合成）。推子直接改 Sfx.SCRATCH，试听叫 Sfx.scratch
+const SKEY = "backfire-sfx-scratch";
+const SDEF = JSON.parse(JSON.stringify(Sfx.SCRATCH));
+try {
+  const sv = JSON.parse(localStorage.getItem(SKEY) || "{}") || {};
+  Object.keys(SDEF).forEach(k => { if (k === "needle") Object.assign(Sfx.SCRATCH.needle, sv.needle || {}); else if (typeof sv[k] === "number") Sfx.SCRATCH[k] = sv[k]; });
+} catch (e) {}
+const SFIELDS = [
+  ["len", "总长（秒）", 0.15, 1.2, 0.01], ["strokes", "来回几下", 1, 6, 1], ["lead", "第一下占几成", 0.1, 0.9, 0.01], ["gap", "两下之间停（秒）", 0, 0.12, 0.005],
+  ["low", "扫频下沿（Hz）", 100, 2000, 10], ["high", "扫频上沿（Hz）", 500, 8000, 50], ["speed", "最快播放速度", 0.3, 4, 0.05], ["back", "往回拉 × 多少", 0.3, 1, 0.01],
+  ["q", "带通 Q（越大越像「哇」）", 0.3, 15, 0.1], ["tone", "锯齿波音量", 0, 1, 0.01], ["toneLow", "锯齿波最低（Hz）", 40, 600, 5], ["toneHigh", "锯齿波最高（Hz）", 200, 2000, 10],
+  ["gain", "音量", 0, 1.5, 0.01]
+];
+const NFIELDS = [["at", "唱针：搓完后几秒", 0, 0.4, 0.01], ["gain", "唱针「咚」音量", 0, 1.2, 0.01], ["freq", "唱针「咚」音高（Hz）", 40, 300, 1], ["len", "唱针「咚」长短（秒）", 0.02, 0.4, 0.01], ["click", "唱针「嗒」音量", 0, 1, 0.01]];
+const scratchChanged = () => SFIELDS.some(([f]) => !same(Sfx.SCRATCH[f], SDEF[f])) || NFIELDS.some(([f]) => !same(Sfx.SCRATCH.needle[f], SDEF.needle[f]));
+const saveScratch = () => { try { localStorage.setItem(SKEY, JSON.stringify(Sfx.SCRATCH)); } catch (e) {} };
+function renderScratch() {
+  const el = document.getElementById("scratch"), S = Sfx.SCRATCH;
+  el.classList.toggle("changed", scratchChanged());
+  const fader = (id, name, v, d, min, max, step, attr) => `<div class="f${same(v, d) ? "" : " mod"}">
+      <label for="${id}">${name}<output>${fmt(v)}</output></label>
+      <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${v}" ${attr}></div>`;
+  el.innerHTML = `<div class="k-h"><h2>轮到你 · DJ 搓碟</h2><span class="key">scratch</span><span class="src">联机玩家轮到自己的角色行动时响一次：噪声过带通，音高 / 速度来回扫几下，「嚓—嚓嚓」，最后唱针落下。现场合成，没有录音。</span></div>
+    <div class="faders">${SFIELDS.map(([f, name, min, max, step]) => fader("scratch-" + f, name, S[f], SDEF[f], min, max, step, `data-sk="${f}"`)).join("")}
+      ${NFIELDS.map(([f, name, min, max, step]) => fader("scratch-needle-" + f, name, S.needle[f], SDEF.needle[f], min, max, step, `data-sn="${f}"`)).join("")}</div>
+    <div class="tone-row"><button class="play" data-splay>▶ 试听</button><button class="reset" id="scratch-reset">恢复默认</button></div>`;
+}
+const playScratch = () => Sfx.scratch({ throttle: 0.001 });
 function render() {
   renderTone();
+  renderScratch();
   document.getElementById("groups").innerHTML = KEYS.map(k => {
     const t = tune[k];
     return `<section class="k${changed(k) ? " changed" : ""}" data-k="${k}">
@@ -138,7 +168,7 @@ function render() {
   paintSum();
 }
 function paintSum() {
-  const n = KEYS.filter(changed).length + (toneChanged() ? 1 : 0);
+  const n = KEYS.filter(changed).length + (toneChanged() ? 1 : 0) + (scratchChanged() ? 1 : 0);
   document.getElementById("sum").innerHTML = n ? `改动了 <b>${n}</b> 项` : "还没有改动。";
 }
 function play(k) { Sfx.playSample(k, { tune: tune[k] }); }
@@ -151,7 +181,14 @@ document.addEventListener("input", e => {
     try { localStorage.setItem(TKEY, JSON.stringify(Sfx.TONE)); } catch (er) {}
     paintSum(); return;
   }
-  const sec = e.target.closest("section.k"); if (!sec || sec.id === "tone") return;
+  if (e.target.dataset.sk || e.target.dataset.sn) {
+    const S = Sfx.SCRATCH, f = e.target.dataset.sk || e.target.dataset.sn, obj = e.target.dataset.sk ? S : S.needle, def = e.target.dataset.sk ? SDEF : SDEF.needle;
+    obj[f] = Number(e.target.value);
+    const box = e.target.closest(".f"); box.querySelector("output").textContent = fmt(obj[f]); box.classList.toggle("mod", !same(obj[f], def[f]));
+    document.getElementById("scratch").classList.toggle("changed", scratchChanged());
+    saveScratch(); paintSum(); return;
+  }
+  const sec = e.target.closest("section.k"); if (!sec || sec.id === "tone" || sec.id === "scratch") return;
   const k = sec.dataset.k, f = e.target.dataset.f;
   if (f === "on") tune[k].on = e.target.checked;
   else {
@@ -165,6 +202,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   // 松开推子自动试听一次
   if (e.target.dataset.tone) { const el = document.getElementById("tone-el").value; Sfx.play(el, { [e.target.dataset.tone]: true, throttle: 0.001 }); return; }
+  if (e.target.dataset.sk || e.target.dataset.sn) { playScratch(); return; }
   const sec = e.target.closest("section.k");
   if (sec && sec.dataset.k && e.target.type === "range") play(sec.dataset.k);
 });
@@ -173,19 +211,27 @@ document.addEventListener("click", e => {
   const tp = e.target.closest("[data-tplay]");
   if (tp) { const el = document.getElementById("tone-el").value; Sfx.play(el, tp.dataset.tplay ? { [tp.dataset.tplay]: true, throttle: 0.001 } : { throttle: 0.001 }); return; }
   if (e.target.id === "tone-reset") { ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], TDEF[m])); try { localStorage.removeItem(TKEY); } catch (er) {} renderTone(); paintSum(); return; }
+  if (e.target.closest("[data-splay]")) { playScratch(); return; }
+  if (e.target.id === "scratch-reset") { resetScratch(); renderScratch(); paintSum(); return; }
   const r = e.target.closest("[data-reset]");
   if (r) { tune[r.dataset.reset] = Object.assign({}, DEF[r.dataset.reset]); save(); render(); }
 });
-document.getElementById("reset-all").addEventListener("click", () => { KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k]); }); ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], TDEF[m])); try { localStorage.removeItem(TKEY); } catch (er) {} save(); render(); document.getElementById("out").hidden = true; });
+function resetScratch() {
+  Object.keys(SDEF).forEach(k => { if (k === "needle") Object.assign(Sfx.SCRATCH.needle, SDEF.needle); else Sfx.SCRATCH[k] = SDEF[k]; });
+  try { localStorage.removeItem(SKEY); } catch (er) {}
+}
+document.getElementById("reset-all").addEventListener("click", () => { KEYS.forEach(k => { tune[k] = Object.assign({}, DEF[k]); }); ["adv", "dis"].forEach(m => Object.assign(Sfx.TONE[m], TDEF[m])); try { localStorage.removeItem(TKEY); } catch (er) {} resetScratch(); save(); render(); document.getElementById("out").hidden = true; });
 function resultText() {
   const ks = KEYS.filter(changed);
-  if (!ks.length && !toneChanged()) return "没有改动。";
+  if (!ks.length && !toneChanged() && !scratchChanged()) return "没有改动。";
   const toneText = toneChanged() ? "\n克制 / 劣势（TONE）：\n" + ["adv", "dis"].map(m => `${m}（${m === "adv" ? "克制" : "劣势"}）: { ${TFIELDS[m].map(([f]) => `${f}: ${fmt(Sfx.TONE[m][f])}`).join(", ")} }`).join("\n") : "";
+  const S = Sfx.SCRATCH;
+  const scratchText = scratchChanged() ? "\n轮到你 · DJ 搓碟（SCRATCH）：\n{ " + SFIELDS.map(([f]) => `${f}: ${fmt(S[f])}`).concat([`needle: { ${NFIELDS.map(([f]) => `${f}: ${fmt(S.needle[f])}`).join(", ")} }`]).join(", ") + " }" : "";
   return "音效调音参数（SFX_TUNE）：\n" + ks.map(k => {
     const t = tune[k];
     const parts = FIELDS.map(([f]) => `${f}: ${fmt(t[f])}`).concat([`on: ${t.on !== false}`]);
     return `${k}（${Sfx.UI_LABEL[k] || k}）: { ${parts.join(", ")} }`;
-  }).join("\n") + toneText;
+  }).join("\n") + toneText + scratchText;
 }
 document.getElementById("copy").addEventListener("click", () => {
   const out = document.getElementById("out"); const text = resultText();

@@ -103,7 +103,8 @@
  * screen IDs leaves those dialogs in the outer document and its scroll range. */
 body.online-player { overflow: hidden; }
 /* #hd2d-pop：新画面（HD-2D，#289）的纸片风数字那一层（hd2d/hd2d-play.js 挂在 body 上），联机玩家开着新画面时也要看得到 */
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl):not(#hd2d-pop) { display: none !important; }
+/* .pm-overlay：暂停页面（pause-menu.js，#298），联机玩家也要看得到 */
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl):not(.pm-overlay):not(#hd2d-pop) { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */
@@ -118,17 +119,15 @@ body.ol-has-side .hs-overlay { right: 330px; }
 .ol-tab { flex: 1; position: relative; min-height: 40px; font: inherit; font-weight: 800; font-size: 15px; color: #cbb99a; background: transparent; border: 0; cursor: pointer; }
 .ol-tab.on { color: #0b0806; background: var(--sk-hazard, #f2c230); }
 .ol-tab:focus-visible { outline: 2px solid var(--sk-mint, #39e6b4); outline-offset: -2px; }
-/* 未读红点（#207）：「消息与成员」按钮右上角、「大厅交流」标题旁、「小队」标签同一个样式——红底白字、白色描边，超过 9 条写「9+」 */
+/* 未读红点（#207）：「菜单」按钮右上角（pause-menu.css 的 .pm-dot，同一个样子）、「大厅交流」标题旁、「小队」标签同一个样式——红底白字、白色描边，超过 9 条写「9+」 */
 .ol-dot { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 2px solid #fff; border-radius: 10px; color: #fff; background: #e0362c; font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; vertical-align: middle; box-shadow: 0 1px 3px #000a; pointer-events: none; }
 .ol-badge { margin-left: 6px; }   /* 跟在文字后面的红点（「小队」标签、「大厅交流」标题） */
 /* 出现的那一下轻轻弹一下：按钮、标题上的由 online-ui.js 在红点从没有到有时加 .ol-dot-pop；「小队」标签上的一直带着，显示出来时播一次 */
 .ol-dot-pop { animation: ol-dot-pop .36s ease-out; }
 @keyframes ol-dot-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .ol-dot-pop { animation: none; } }
-/* 「消息与成员」按钮：红点压在按钮右上角；旁边的「角色分配」让开一点，红点不压到它 */
-.ol-dock [data-online="openRoom"] { position: relative; }
-.ol-dock [data-online="openRoom"] .ol-dot { position: absolute; z-index: 1; top: -8px; right: -8px; }
-.ol-dock .ol-button + .ol-button { margin-left: 10px; }
+/* 「房间码 · 菜单」按钮（#298，以前是「消息与成员」）：红点压在按钮右上角（pause-menu.css · .pm-badge） */
+.ol-dock .pm-open { position: relative; }
 .ol-side-log, .ol-side-chat { flex: 1; min-height: 0; margin: 0; padding: 10px 14px 10px 30px; overflow-y: auto; color: #e9dcc0; font-size: 14px; line-height: 1.55; }
 .ol-side-chat { list-style: none; padding-left: 14px; }
 .ol-side[data-tab="log"] .ol-side-chat, .ol-side[data-tab="log"] .ol-side-form { display: none; }
@@ -337,8 +336,8 @@ body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
   .ol-stage-heading .ol-info-tools { gap: 6px; }
   .ol-stage-heading .ol-info-tools .ol-button { padding: 6px 8px; min-height: 34px; }
   body.online-player .ol-dock .ol-button { font-size: 12px; padding: 4px 8px; min-height: 30px; max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* 「消息与成员」：省略号挪到按钮里的文字上，按钮本身不裁切，右上角的红点才露得出来（#207） */
-  body.online-player .ol-dock [data-online="openRoom"] { overflow: visible; }
+  /* 「房间码 · 菜单」：省略号挪到按钮里的文字上，按钮本身不裁切，右上角的红点才露得出来（#207） */
+  body.online-player .ol-dock .pm-open { overflow: visible; }
   body.online-player .ol-dock .ol-dock-label { display: block; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 760px) {
@@ -350,6 +349,23 @@ body.online-player .ol-dock .ol-button { min-height: 36px; padding: 6px 12px; }
 @media (max-width: 760px) { body.online-player #hs-bar > span:not(.hs-phase) { display: none; } }
 /* 手机竖屏：顶栏留出阶段文字；探索时聊天栏默认收成底部一条 */
 .ol-side-fold { flex: 0 0 auto; padding: 0 12px; background: transparent; color: var(--sk-muted, #a8977b); border: 0; border-left: 1px solid #4d4337; font: inherit; cursor: pointer; }
+/* 右侧栏收起（#298，电脑）：收成一条窄边，只剩展开按钮（收起时小队来了新消息挂数字），战斗画面变宽；
+ * 手机竖屏（≤760px）照旧用上面的「展开 ▴ / 收起 ▾」 */
+.ol-side-collapse { flex: 0 0 auto; position: relative; min-width: 40px; padding: 0 10px; background: transparent; color: var(--sk-muted, #a8977b); border: 0; border-left: 1px solid #4d4337; font: inherit; font-size: 16px; cursor: pointer; }
+.ol-side-collapse[hidden] { display: none; }
+.ol-side-collapse:hover { color: var(--sk-canvas, #ece0c6); }
+.ol-side-collapse:focus-visible { outline: 2px solid var(--sk-mint, #39e6b4); outline-offset: -2px; }
+.ol-side-collapse-dot { position: absolute; top: 2px; right: 0; }
+@media (max-width: 760px) { .ol-side-collapse { display: none; } }
+@media (min-width: 761px) {
+  .ol-side.ol-side-collapsed { width: 44px; }
+  .ol-side.ol-side-collapsed > :not(.ol-side-tabs), .ol-side.ol-side-collapsed .ol-side-tabs > :not(.ol-side-collapse) { display: none !important; }
+  .ol-side.ol-side-collapsed .ol-side-tabs { border-bottom: 0; }
+  .ol-side.ol-side-collapsed .ol-side-collapse { width: 100%; min-height: 48px; padding: 0; border-left: 0; }
+  body.ol-has-side.ol-side-collapsed .ol-stage { right: 44px; }
+  body.ol-has-side.ol-side-collapsed .ol-toast { right: 58px; }
+  body.ol-has-side.ol-side-collapsed .hs-overlay { right: 44px; }
+}
 @media (max-width: 760px) {
   body.online-player #hs-bar .hs-phase { display: inline; margin-right: auto; }
   /* 收起时只留频道标签和输入框：随时能说话，看历史再展开 */
@@ -396,7 +412,9 @@ body.online-player.ol-in-battle .ol-weather { padding: 3px 8px; gap: 6px; }
 body.online-player.ol-in-battle .ol-weather-icon { font-size: 18px; }
 body.online-player.ol-in-battle .ol-weather small { font-size: 11px; margin-top: 0; }
 body.online-player.ol-in-battle .ol-battle .g-hud { flex: none; position: relative; padding: 8px 12px 10px; }
-body.online-player.ol-in-battle .ol-battle .party { margin-bottom: 6px; }
+/* 技能按钮、队伍栏的排法（这里和下面两个 @media 里的）只管旧画面：开着新画面时 .g-hud 换上了新外壳（.hd2d-shell，#297），
+ * 技能按钮、队伍栏和单机用同一份样子（hd2d/hd2d.css），所以这些规则都写成 .g-hud:not(.hd2d-shell) 里面的 */
+body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .party { margin-bottom: 6px; }
 body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 @media (max-height: 820px) and (min-width: 821px) {
   body.online-player.ol-in-battle .ol-battle .g-field { padding: 8px 10px 6px; }
@@ -416,24 +434,24 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
   body.online-player.ol-in-battle .ol-battle .g-zone { min-height: max-content; }
   body.online-player.ol-in-battle .ol-battle .g-hud { position: relative; max-height: 46vh; overflow-y: auto; padding: 6px 6px 8px; }
   body.online-player.ol-in-battle .ol-battle .hud-row { flex-wrap: wrap; gap: 6px; }
-  body.online-player.ol-in-battle .ol-battle .skills { flex: 1 1 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
-  body.online-player.ol-in-battle .ol-battle .sk { min-width: 0; }
-  body.online-player.ol-in-battle .ol-battle .sk .nm, body.online-player.ol-in-battle .ol-battle .sk .cost { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .skills { flex: 1 1 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk { min-width: 0; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .nm, body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .cost { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   body.online-player.ol-in-battle .ol-battle .hud-side { flex: 1 1 100%; }
   body.online-player.ol-in-battle .ol-battle .hud-side .endturn { width: 100%; }
-  body.online-player.ol-in-battle .ol-battle .party { max-width: 100%; }
-  body.online-player.ol-in-battle .ol-battle .pc { width: 92px; min-width: 0; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .party { max-width: 100%; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .pc { width: 92px; min-width: 0; }
   body.online-player.ol-in-battle .ol-battle .pc .mini, body.online-player.ol-in-battle .ol-battle .pc .u-econ { max-width: 100%; overflow: hidden; }
   body.online-player.ol-in-battle .ol-battle .hi-gauge { max-width: 100%; overflow: hidden; flex: 1 1 100%; }
   body.online-player.ol-in-battle .ol-battle .hi-gauge:empty { display: none; }
   body.online-player.ol-in-battle .ol-stage > .ol-battle-slot, body.online-player.ol-in-battle .ol-battle { min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
   body.online-player.ol-in-battle .ol-battle .g-field { overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
-  body.online-player.ol-in-battle .ol-battle .skills { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  body.online-player.ol-in-battle .ol-battle .sk { padding: 5px 6px 4px 20px; }
-  body.online-player.ol-in-battle .ol-battle .sk .key { left: 5px; top: 5px; }
-  body.online-player.ol-in-battle .ol-battle .sk .cost { font-size: 11px; }
-  body.online-player.ol-in-battle .ol-battle .party { margin-bottom: 4px; }
-  body.online-player.ol-in-battle .ol-battle .pc { width: 78px; padding: 3px 6px 4px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .skills { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk { padding: 5px 6px 4px 20px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .key { left: 5px; top: 5px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .cost { font-size: 11px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .party { margin-bottom: 4px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .pc { width: 78px; padding: 3px 6px 4px; }
   body.online-player.ol-in-battle .ol-battle .hud-side .endturn { min-height: 40px; height: auto; padding: 4px; }
   body.online-player.ol-in-battle .ol-battle .hint { font-size: 12px; }
   body.online-player.ol-in-battle .ol-stage-heading { margin-bottom: 4px; flex-wrap: nowrap; }
@@ -464,17 +482,17 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
   body.online-player.ol-in-battle .ol-stage-heading .ol-info-tools button { min-height: 26px; }
   body.online-player.ol-in-battle .ol-checks-compact { margin-bottom: 4px; }
   body.online-player.ol-in-battle .ol-battle .g-hud { padding: 4px 12px 6px; }
-  body.online-player.ol-in-battle .ol-battle .party { margin-bottom: 4px; }
-  body.online-player.ol-in-battle .ol-battle .sk { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px 5px 26px; min-height: 0; }
-  body.online-player.ol-in-battle .ol-battle .sk .key { top: 6px; }
-  body.online-player.ol-in-battle .ol-battle .sk .nm { font-size: 15px; white-space: nowrap; }
-  body.online-player.ol-in-battle .ol-battle .sk .cost { font-size: 11px; white-space: nowrap; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .party { margin-bottom: 4px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px 5px 26px; min-height: 0; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .key { top: 6px; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .nm { font-size: 15px; white-space: nowrap; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .sk .cost { font-size: 11px; white-space: nowrap; }
   body.online-player.ol-in-battle .ol-battle .hud-row { align-items: center; }
   body.online-player.ol-in-battle .ol-battle .hud-row { gap: 10px; }
   body.online-player.ol-in-battle .ol-battle .hud-side { margin-left: auto; }
   /* 提示栏放到队伍条右边那块空地上，不再单独占一行 */
   body.online-player.ol-in-battle .ol-battle .g-hud .hint { position: absolute; top: 8px; right: 12px; width: 42%; max-height: 52px; overflow-y: auto; margin: 0; font-size: 12px; line-height: 1.45; text-align: right; }
-  body.online-player.ol-in-battle .ol-battle .g-hud .party { margin-right: 44%; }
+  body.online-player.ol-in-battle .ol-battle .g-hud:not(.hd2d-shell) .party { margin-right: 44%; }
 }
 /* 游戏内确认框（代替原生 confirm）：比其他弹窗高一层，垂直居中 */
 .ol-confirm { z-index: 110; align-items: center; }

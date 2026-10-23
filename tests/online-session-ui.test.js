@@ -31,21 +31,23 @@ async function assertHostControlsClickable(page, screen, t, label = screen) {
   const sizes = [[1440, 900], [768, 1024], [390, 844], [320, 568], [844, 390], [568, 320]];
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
-    const tools = page.locator("#ogm-toggle"), room = page.locator('#online-dock [data-online="openRoom"]');
-    await tools.waitFor({ state: "visible" }); await room.waitFor({ state: "visible" });
-    const [toolRect, roomRect] = await Promise.all([tools.boundingBox(), room.boundingBox()]);
-    const context = JSON.stringify({ screen, label, width, height, toolRect, roomRect });
-    for (const rect of [toolRect, roomRect]) assert.ok(rect && rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1, "both host controls must remain inside the viewport: " + context);
-    const overlapping = Math.max(toolRect.x, roomRect.x) < Math.min(toolRect.x + toolRect.width, roomRect.x + roomRect.width) && Math.max(toolRect.y, roomRect.y) < Math.min(toolRect.y + toolRect.height, roomRect.y + roomRect.height);
-    assert.equal(overlapping, false, "host tools and room controls must not overlap: " + context);
+    // #298：主持人工具、消息与成员都收进了「房间码 · 菜单」按钮打开的暂停页面，原来的两个按钮不在了
+    const menu = page.locator("#ol-menu-open");
+    await menu.waitFor({ state: "visible" });
+    assert.equal(await page.locator('#ogm-toggle, #online-dock [data-online="openRoom"]').count(), 0, "the old host buttons moved into the pause menu");
+    const menuRect = await menu.boundingBox();
+    const context = JSON.stringify({ screen, label, width, height, menuRect });
+    assert.ok(menuRect && menuRect.x >= 0 && menuRect.y >= 0 && menuRect.x + menuRect.width <= width + 1 && menuRect.y + menuRect.height <= height + 1, "the host menu button must remain inside the viewport: " + context);
     // Exercise the browser's normal hit testing on the complete game page.
     // Forced clicks/DOM-dispatched events would hide the original regression.
-    await tools.click({ timeout: 3000 });
+    await menu.click({ timeout: 3000 });
+    await page.locator('#pm-overlay [data-pause-item="gmTools"]').click({ timeout: 3000 });
     await page.locator("#ogm-panel").waitFor({ state: "visible" });
     assert.match(await page.locator("#ogm-panel h2").innerText(), /主持人工具/);
     await page.locator('#ogm-panel [data-action="close"]').click({ timeout: 3000 });
     await page.locator("#ogm-panel").waitFor({ state: "hidden" });
-    await room.click({ timeout: 3000 });
+    await menu.click({ timeout: 3000 });
+    await page.locator('#pm-overlay [data-pause-item="room"]').click({ timeout: 3000 });
     await page.locator("#online-panel").waitFor({ state: "visible" });
     assert.match(await page.locator("#online-panel").innerText(), /房间成员/);
     await page.locator('#online-panel [data-online="close"]').click({ timeout: 3000 });
@@ -250,7 +252,9 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   await pageFor(last.owner).evaluate(cmd => { window.roundResult = null; OnlineGame.submit(cmd).then(result => { window.roundResult = result; }); }, { type: "endTurn", actor: last.actor });
   try { await host.waitForFunction(() => OnlineGame.getView().manualPhase && state.combatPhase === "enemy", null, { timeout: 5000 }); }
   catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, combatPhase: state.combatPhase, manual: GMCommands.snapshot(), notice: OnlineGame.getView().notice, last: JSON.parse(localStorage.getItem("backfire-online-v1")).requests.slice(-1).map(entry => entry[1].response) }))) + " player=" + JSON.stringify(await pageFor(last.owner).evaluate(() => window.roundResult)) + " errors=" + JSON.stringify(f.errors)); }
-  assert.match(await host.locator("#ogm-toggle").innerText(), /敌人待操作/);
+  // 敌人等主持人操作：暂停页面里写「敌人待操作 · 主持人工具」，「菜单」按钮挂提示（#298，以前写在 #ogm-toggle 上）
+  assert.deepEqual(await host.evaluate(() => { const r = PauseMenu.list().find(x => x.id === "gmTools"); return { label: r.label, badge: r.badge }; }), { label: "敌人待操作 · 主持人工具", badge: true });
+  assert.equal(await host.locator("#ol-menu-open .pm-dot").count(), 1);
   await assertHostControlsClickable(host, "battle", t, "manual-enemy");
   const aiActions = await host.evaluate(() => Commands.history().filter(row => row.command.type === "battle.enemyAction").map(row => row.command.actor));
   assert.ok(aiActions.includes(enemyControl.ai), "the unmarked enemy acts through the existing AI before the manual phase");
@@ -516,7 +520,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   assert.deepEqual(await bob.evaluate(() => ({ same: document.getElementById("ol-side-text") === window.__inp, value: window.__inp.value, focused: document.activeElement === window.__inp })), { same: true, value: "wo m", focused: true });
   // 房间面板里的私信框：拼字时整个面板不重画
   await bob.evaluate(() => { window.__inp.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })); window.__inp.value = ""; });
-  await bob.click('#online-dock [data-online="openRoom"]');
+  await bob.click("#ol-menu-open"); await bob.click('#pm-overlay [data-pause-item="room"]');
   await bob.click("#ol-message");
   await bob.evaluate(() => { window.__ta = document.getElementById("ol-message"); window.__ta.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__ta.value = "zhu chi"; });
   await host.evaluate(() => OnlineGame.submit({ type: "gm.msg", to: "all", text: "全体注意天快黑了" }));
