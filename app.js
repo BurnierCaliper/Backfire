@@ -6296,7 +6296,8 @@ function swapKoltBit(actor, lines) {
 function koltMeleeSwapTargets(actor) {
   const k = findKit("kolt", state.units) || actor;
   if (!k) return [];
-  return fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(k.zone));
+  // 切刀追击不是谐波攻击：下潜中的不能被选为目标（effects.js · 下潜，#360）
+  return fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(k.zone) && submergedPickOk(u, false));
 }
 
 function queueKoltSwap(actor) {
@@ -9567,7 +9568,20 @@ function pushDest(a, t) {
   if (want != null && zonesAdjacent(want, t.zone)) return want;
   return otherZone(t.zone, a && a.zone);
 }
+/** 技能的分步选择（skillFlowStepsAll 列出来的）。选单位的那几步：下潜中的单位不能被选为目标（effects.js · 下潜，#360）——
+ *  谐波攻击（这一步写着 harmonic，或者整个技能在 engine.js · SKILL_HITS_SUBMERGED 里）照样留着，别的技能的名单里拿掉。
+ *  画面、联机 / 热座的校验（hotseat-validation.js · checkFlow）、模拟器都用这一份：下潜中的单位也选不进去 */
 function skillFlowSteps(id, actor, picks) {
+  return (skillFlowStepsAll(id, actor, picks) || []).map(st => {
+    if (!st || st.type !== "unit" || !Array.isArray(st.units)) return st;
+    const harmonic = st.harmonic != null ? !!st.harmonic : skillHitsSubmerged(id);
+    // 谐波的那一步记上 harmonic：涉猎专长调用原技能的分步（feats.js · featSkillSteps）时外面再过一遍也不会被拿掉
+    if (harmonic) return st.harmonic ? st : Object.assign({}, st, { harmonic: true });
+    const units = st.units.filter(u => submergedPickOk(u, false));
+    return units.length === st.units.length ? st : Object.assign({}, st, { units });
+  });
+}
+function skillFlowStepsAll(id, actor, picks) {
   picks = picks || {};
   if (!actor) return [];
   if (typeof featOfSkill === "function" && featOfSkill(id)) return featSkillSteps(actor, id, picks);
@@ -9588,7 +9602,9 @@ function skillFlowSteps(id, actor, picks) {
           const c = livePartyCards().find(x => x.kit === k) || { name: k };
           return { value: k, label: `${c.name}${c.note ? " · " + c.note : ""}` };
         }) },
+      // 伙伴打的是谐波协助攻击（Helumica）时，下潜中的敌人也能选（engine.js · SKILL_HITS_SUBMERGED）
       { key: "target", type: "unit", optional: false, label: "对哪名敌人打协助攻击",
+        harmonic: !!picks.partner && skillHitsSubmerged(assistSkillId({ kit: picks.partner })),
         units: fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused) }
     ];
   }

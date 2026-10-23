@@ -151,6 +151,11 @@ function meltShieldRoundStart(u, notes) {
 function isSubmerged(u) {
   return !!(u && u.submerged && !u.dead);
 }
+/** 选单位的名单（技能分步里选单位的那几步、最后单独选的目标、刀头切换的追击……）里能不能有它（#360）：
+ *  下潜中的不能被选为目标，只有谐波攻击照样选得到（harmonic = 这一下是谐波攻击，见 engine.js · SKILL_HITS_SUBMERGED）。塌陷是区域伤害，不用选 */
+function submergedPickOk(u, harmonic) {
+  return !isSubmerged(u) || !!harmonic;
+}
 /** 进入下潜 */
 function submergeUnit(u, notes) {
   if (!u || u.dead || u.submerged) return false;

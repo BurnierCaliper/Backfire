@@ -706,6 +706,8 @@
     }
   }
 
+  /** 下潜的中立生物（尘虫迁徙）：不画名牌，折进区角的「沙下动静」（paintSandStir），列表里点一行 = 点它的卡片 */
+  const inSandStir = (s) => !!(s && s.neutral && s.submerged && !s.dead && !s.hidden);
   /** 把画面切到某个快照。返回这一帧里发生的「大事件」，给演出用。 */
   function setView(snaps, animate) {
     const next = toMap(snaps);
@@ -713,7 +715,7 @@
     applyEnv(snaps.env);
     next.forEach((s, id) => {
       if (s.isGap) return;   // 危墙 / 桥梁画在区域间的竖条上（paintGaps）
-      if (s.hidden || (s.neutral && s.submerged && !s.dead)) {   // 下潜的中立生物：不画名牌（见 paintSandStir）
+      if (s.hidden || inSandStir(s)) {   // 下潜的中立生物：不画名牌（见 paintSandStir）
         const c = cards.get(id);
         if (c) { c.wrap.remove(); cards.delete(id); }
         return;
@@ -764,12 +766,13 @@
     if (window.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner($("g-field"), snaps);
   }
 
-  /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只 */
+  /** 夜晚下潜的中立生物（尘虫迁徙）：每个区角上一块「沙下动静 ×N」，点开看每只的状态；谐波选目标时点列表里的那一只
+   *  （选目标时能选的那几行亮着，见 markStir；列表每次重画都照正在选的目标再标一遍） */
   const STIR_ICON = `<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M5 16c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#f0cf9a" stroke-width="2.6" stroke-linecap="round"/><path d="M5 25c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#d9a35f" stroke-width="2.2" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="32" r="2" fill="#d9a35f"/><circle cx="22" cy="33" r="2" fill="#d9a35f"/><circle cx="30" cy="31" r="2" fill="#d9a35f"/></svg>`;
   function paintSandStir(snaps) {
     document.querySelectorAll(".g-zone").forEach(z => {
       const zone = Number(z.dataset.num);
-      const list = snaps.filter(s => s.neutral && s.submerged && !s.dead && !s.hidden && Number(s.zone) === zone);
+      const list = snaps.filter(s => inSandStir(s) && Number(s.zone) === zone);
       let box = z.querySelector(".sandstir-wrap");
       if (!list.length) { if (box) box.remove(); return; }
       if (!box) {
@@ -790,6 +793,7 @@
         `<footer>下潜中：只有谐波攻击和塌陷打得到。沙鱼发现后会去吃。</footer></div>` +
         `<button class="sandstir" type="button" title="点开看看">${STIR_ICON}<span>沙下动静 ×${list.length}<small>${esc(names)}迁徙中 · 点开看看</small></span></button>`;
     });
+    if (fieldMarks.pick) markStir(new Set(fieldMarks.targets));
   }
 
   /** 区域里单位太多时逐级缩小铭牌，避免压到下方的角色选单 */
@@ -2631,12 +2635,28 @@
       c.wrap.classList.toggle("is-dim", !ok && id !== G.actorId);
     });
     gapNodes().forEach(n => n.classList.toggle("is-targetable", ids.has("gap:" + n.dataset.key)));
+    markStir(ids);
     paintMarks({ pick: true, targets: [...ids] });
+  }
+  /** 「沙下动静」列表（#360）：能选的那几行亮起来、别的变暗，跟单位卡一样；有能选的那一块，区角的按钮也亮着（点开才看得到列表）。
+   *  ids = null：收起标记。新画面（#358）的沙下动静标记照 fieldMarks.targets 亮，点那一行也走 G.fieldInput.unit（= onCardClick） */
+  function markStir(ids) {
+    document.querySelectorAll("#g-field .sandstir-wrap").forEach(box => {
+      let any = false;
+      box.querySelectorAll("[data-stir-id]").forEach(r => {
+        const ok = !!ids && ids.has(r.dataset.stirId);
+        if (ok) any = true;
+        r.classList.toggle("is-targetable", ok);
+        r.classList.toggle("is-dim", !!ids && !ok);
+      });
+      box.classList.toggle("has-target", any);
+    });
   }
   function unmarkTargets() {
     if (window.AttackFx) AttackFx.clearAim();
     cards.forEach(c => c.wrap.classList.remove("is-targetable", "is-dim", "is-hover"));
     gapNodes().forEach(n => n.classList.remove("is-targetable", "is-hover"));
+    markStir(null);
     document.querySelectorAll(".g-zone").forEach(z => z.classList.remove("is-move-target", "is-move-hover"));
     paintMarks({ pick: false, targets: [], hover: null, zones: [], hoverZone: null });
   }
@@ -2702,10 +2722,15 @@
     });
     bar.classList.add("show");
   }
-  /** 这些 id 是不是都在战场上有卡片（单位、配置物、危墙 / 桥梁），能直接点 */
+  /** 这些 id 是不是都在战场上点得到：有卡片（单位、配置物）、危墙 / 桥梁的竖条，或者折进「沙下动静」的下潜中立生物
+   *  （列表里点那一行就是点它，#360：以前候选里混进一只就整步退回弹列表）。新画面开着时旧战场照旧排着，下潜的中立生物新画面里也点得到 */
   function allOnField(ids) {
-    return ids.length > 0 && ids.every(id => cards.has(id) ||
+    return ids.length > 0 && ids.every(id => cards.has(id) || !!stirRow(id) ||
       (String(id).indexOf("gap:") === 0 && !!document.querySelector(`#g-field .g-gap[data-key="${String(id).slice(4)}"]`)));
+  }
+  /** 「沙下动静」列表里这一只的那一行；不在列表里 = null */
+  function stirRow(id) {
+    return [...document.querySelectorAll("#g-field .sandstir-wrap [data-stir-id]")].find(r => r.dataset.stirId === String(id)) || null;
   }
 
   function pickZone(zones, previewFn) {
@@ -2910,6 +2935,8 @@
       all = all.filter(u => inSkillRange(actor, u, hint, state.zoneMode) || near(u));
     }
     if (typeof skillTargetMoveOk === "function") all = all.filter(u => skillTargetMoveOk(actor, sk.id, u));
+    // 下潜中的单位不能被选为目标：只有谐波攻击（engine.js · SKILL_HITS_SUBMERGED）的名单里留着（effects.js · 下潜，#360）
+    if (typeof submergedPickOk === "function") all = all.filter(u => submergedPickOk(u, typeof skillHitsSubmerged === "function" && skillHitsSubmerged(sk.id)));
     if (side !== "ally" && side !== "allySelf" && side !== "anySelf") {
       const inRange = (fake) => ov
         ? (() => { const d = zoneDist(actor.zone, fake.zone, state.zoneMode); return d >= ov.min && d <= ov.max; })()
