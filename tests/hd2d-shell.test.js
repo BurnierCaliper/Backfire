@@ -620,3 +620,40 @@ test("只用该看的数据：头像、效果、技能按钮里没有坚毅生�
   assert.doesNotMatch(code(read("hd2d/hd2d-shell.js")), /shp|坚毅/i, "hd2d-shell.js 不读坚毅生命");
   assert.doesNotMatch(code(fnSrc(read("hd2d/hd2d-ui.js"), "partyInner")), /shp/i);
 });
+
+/* ---------- 7. 技能按钮的属性图标不带白描边（#317）---------- */
+/** 技能按钮左上角的属性图标：只有属性色那一层（.c），没有白描边（icons.js 的 .o、贴纸的 .rim） */
+function noRim(els, tag) {
+  assert.ok(els.length >= 3, tag + "：有技能按钮");
+  assert.ok(els.some(e => !e.classList.contains("none")), tag + "：有带属性的");
+  els.forEach(e => {
+    const svg = e.querySelector("svg.eicon");
+    assert.ok(svg && svg.querySelector(":scope > .c"), tag + "：属性色那一层还在");
+    assert.equal(svg.querySelectorAll(".o, .rim").length, 0, tag + "：属性图标没有白描边");
+  });
+}
+test("技能按钮上的属性图标去掉白描边（#317，主人：白边让图标看不清）：单机、联机玩家、原型页的技能按钮都只画属性色那一层；头像、攻击 / 技能角标、别处的属性图标照旧带白边", () => {
+  const R = rules(), kolt = R.unit("kolt");
+  // 单机
+  const page = uiPage(R);
+  const H2 = soloHud(R, page);
+  page.w.HD2DShell.attach(H2.hud, { phone: false });
+  H2.refreshHud();
+  noRim([...H2.hud.querySelectorAll("#g-skills .sk .sk-el")], "单机");
+  const avs = [...H2.hud.querySelectorAll("#g-party .face.av")];
+  assert.ok(avs.length >= 2, "队伍栏有头像");
+  avs.forEach(a => assert.ok(a.querySelector(".stk > .rim") && a.querySelector(".stk > .ink"), "头像照旧：白边 + 墨线"));
+  H2.hud.querySelectorAll("#g-skills .sk .sk-kind").forEach(k => assert.ok(k.querySelector(".stk > .rim"), "右上角攻击 / 技能角标照旧带白边"));
+  assert.match(page.w.Icons.element("fire"), /<g class="o">/, "别处的属性图标（伤害数字、预览牌）照旧带白边");
+  // 联机玩家
+  const O = onlineHud(R);
+  O.page.w.HD2DShell.attach(O.hud, { phone: false });
+  O.paint();
+  noRim([...O.hud.querySelectorAll(".skills .sk .sk-el")], "联机");
+  O.hud.querySelectorAll(".party .face.av").forEach(a => assert.ok(a.querySelector(".stk > .rim"), "联机的头像照旧带白边"));
+  // 原型页的技能按钮（同一份 hd2d-ui.js · skillInner）
+  const U = page.w.HD2DUI, effects = R.codex.filter(e => e.element).map(e => [e.name, e.element]);
+  const box = page.doc.createElement("div");
+  box.innerHTML = R.ctx.skillList(kolt).map((s, i) => U.skillHtml(U.skillButton({ id: s.id, name: s.name, hint: s.hint }, R.OV.projectUnit(kolt), effects, i), page.w.Icons)).join("");
+  noRim([...box.querySelectorAll(".sk .sk-el")], "原型页");
+});

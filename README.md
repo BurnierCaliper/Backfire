@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面技能按钮上的属性图标去掉白描边**（主人反馈，issue #317；icons.js · `Icons.element(el, { rim: false })`；hd2d/hd2d-ui.js：`UI.skill.rim`、`elementBadge`；测试：tests/hd2d-shell.test.js 第 7 节、tests/hd2d-ui.test.js 的技能按钮那一条）
+  - **以前**：新画面（单机、联机玩家、原型页）技能按钮左上角的属性图标是 icons.js 的属性图标原样：底下一层粗白描边（`.o`）、上面一层属性色，小小一个看着是一团白边，看不太清楚。
+  - **现在**：技能按钮里的属性图标只画属性色那一层（无属性的灰圈也一样）；头像的职责图标、右上角攻击 / 技能角标、伤害数字 / 预览牌上的属性图标照旧带白边。
+
 - **新增规则说明页：图鉴第七本「规则」，标题画面 / 单局顶栏 / 跑团顶栏的「图鉴」旁边加「规则」入口**（作者夕夏定，issue #263；新增 rulebook.js（`RULEBOOK_GROUPS` / `RULEBOOK_CHAPTERS` / `rulebookEntries`）；bestiary-ui.js：`MODES` 加「规则」、`codexList` / `codexTabs` / `renderCodexDetail` 接上、新增 `rulebookHtml` / `ruleLine`、规则这一本的搜索提示；bestiary.css：`.bx-rules` 放宽详情栏、`.rx-table` 表格；game.html：`#t-rules` / `#run-rules` / `#tr-rules` 三个按钮、在 codex.js 之后加载 rulebook.js；screens.js / rogue-ui.js / trpg-ui.js 接三个按钮；ROADMAP 代码地图加一行；测试：新增 tests/rulebook.test.js）
   - **以前**：没有成体系的规则说明。图鉴只有角色 / 专长 / 义体 / 敌人 / 配置物 / 效果六本，回合、行动点、检定、伤害怎么算、武器 ATK、义体改造率这些规则只能翻手册或问主持人。
   - **现在**：
