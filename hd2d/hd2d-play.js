@@ -13,7 +13,7 @@
  *     onImpact  第一下打中的那一刻：画面换成包里的 state（铭牌的血条跟着掉）；跳过时也照样换
  *     camera    { push(actorId, targetId, secs) 出手时推一下镜头, release(secs) 播完拉回 }（HD2DPlay.camera 给；关掉 / 减少动态效果时不推）
  *     lens()    这一刻的镜头（纸片感按俯角压扁）
- *     sound(kind, i)  该响音效的那一刻（联机玩家，online-sfx.js，#304）：出手 strike、第 i 段打中 wave、格挡 parry、演完 end；跳过、倍率 0 时不叫
+ *     sound(kind, i)  该响音效的那一刻（联机玩家，online-sfx.js，#304）：出手 strike、第 i 段打中 wave、格挡 parry、第 i 辆自爆小车炸开 blast、演完 end；跳过、倍率 0 时不叫
  *     cards     3D 白卡的卡片动画（#330，HD2DPlay.cards 给的；正式画面才有）：近身冲过去、远程后坐、支援拉线、协助格挡冲上去挡、受击闪 + 击退、格挡、登场、高能自爆预警
  *     ko        { hold(ids), release() }：被打倒的先留在场上（画面换成包里的 state 之前说好），演完再淡出（hd2d-field.js）
  *     warn(id, on) / quake(力度)   高能自爆预警（卡片 + 脚下的地台一起闪，hd2d-field.js）、震屏
@@ -141,7 +141,7 @@
     const skipped = new Promise(r => { me.kick = r; });
     const wait = (p) => Promise.race([p, skipped]);
     const cue = F.cues(packet, { before: opts.before, bigHit: opts.bigHit });
-    const ids = [cue.actor, cue.target, cue.blocker].concat(cue.waves.map(w => w.unitId), cue.numbers.map(n => n.unitId)).filter(Boolean);
+    const ids = [cue.actor, cue.target, cue.blocker].concat(cue.waves.map(w => w.unitId), cue.numbers.map(n => n.unitId), cue.blasts || []).filter(Boolean);
     ad.remember(ids);                                   // 先记一遍：被打死的结算后就不在画面上了
     const view = opts.view ? opts.view() : { width: innerWidth, height: innerHeight, top: 0 };
     const move = cue.move, cam = opts.camera, P = F.FX.push;
@@ -198,10 +198,24 @@
           if (C) C.parry(cue.blocker || cue.target);
           sound("parry");
         }
-        showNumbers(F.placeNumbers(cue.numbers.filter(n => n.wave === i && !n.boom), ad.rectOf, view));
+        showNumbers(F.placeNumbers(cue.numbers.filter(n => n.wave === i && !n.boom && n.blast == null), ad.rectOf, view));
         if (i < waves.length - 1) await wait(AttackFx.after(F.FX.timing.hitGap));
       }
-      if (!waves.length) { sound("wave", 0); showNumbers(F.placeNumbers(cue.numbers.filter(n => !n.boom), ad.rectOf, view)); }
+      if (!waves.length) { sound("wave", 0); showNumbers(F.placeNumbers(cue.numbers.filter(n => !n.boom && n.blast == null), ad.rectOf, view)); }
+      // 自爆小车死亡引爆（game.js · playTape 的 carboom，作者 10/20）：打死它的那几段演完以后在小车身上炸开——震屏、爆炸形状、受击粒子、弹「引爆」，
+      // 炸到的人的数字跟着这一下弹，爆炸声这时才响（sound "blast"）；以前算成攻击本身，每个被炸到的人身上补一遍这次攻击的打击形状
+      const B = F.FX.blast;
+      for (let k = 0; k < (cue.blasts || []).length && !me.skipped; k++) {
+        await wait(AttackFx.after(B.gap));
+        if (me.skipped) break;
+        const id = cue.blasts[k], r = ad.rectOf(id);
+        if (typeof opts.quake === "function") opts.quake(1);
+        if (r) AttackFx.impact(r, B.move, {});
+        if (r && root.HitFx && clockScale() > 0) HitFx.burst(B.move.el, r, { big: true });
+        if (C) C.hit(id, B.move.el, true, null);
+        sound("blast", k);
+        showNumbers(F.placeNumbers(cue.numbers.filter(n => n.blast === k && !n.boom), ad.rectOf, view));   // 炸出来的高能自爆在下面照旧演
+      }
       // 高能自爆（game.js · playTape 的 highboom）：卡片闪两下预警（脚下的地台跟着闪），再炸——震屏、卡片受击、弹「高能自爆」
       for (const id of cue.booms) {
         if (me.skipped) break;

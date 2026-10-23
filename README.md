@@ -368,6 +368,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **作者试玩反馈（10/20）重做：联机敌人等级跟队伍、柯尔特满血减伤的仪表、自爆小车的演出**（issue #356，参考 PR #200 在现在的 main 上重做；online-gm-ui.js · `partyLevel`（「生成敌人」的等级框）；online-game.js · `configureGM` 的 `setEncounter`；app.js · `KOLT_PRIDE` / `koltPrideCut` / `dealToInner`（过度自信、`main` 弹字、`holdBoom`）/ `sweepDeadEnemies` / `explodeBoomcar`；enemies.js · `ratExecFlags`；hud-icons.js · `gaugeState` / `GAUGE.kolt`；game.js · `strikePlan`、`playTape` 的 `carboom`；online-view.js · `projectTape`（`carboom`、「引爆」、`tag`）；online-ui.js · `playPacket` / `onlineCtx`；online-sfx.js · `popCalls` / `start().blast`；hd2d/hd2d-fx.js · `FX.blast` / `numberOf` / `cues().blasts`；hd2d/hd2d-play.js · `play`；测试 tests/author-feedback-1020.test.js、tests/author-feedback-1020-ui.test.js（新）、tests/online-gm-ui.test.js 加一条）
+  - **联机：敌人等级跟着队伍等级**（作者定）：
+    - 主持人「生成敌人」：以前等级框固定填 1；现在默认填队伍平均等级（trpg-tasks.js · `trpgPartyLevel`，四舍五入），照样能改。
+    - 主持人换遭遇（`gm.setEncounter`）：以前遭遇里没写等级的敌人跟顶栏手选的等级（默认 Lv1）；现在联机跑团按队伍平均等级（battle-templates.js · `btPartyLevel`），联机单局照旧。
+    - 战斗模板 / 带模板的任务里「Lv随队」的敌人、援军、配置物：main 上 10/21「联机跑团：…战斗模板「Lv随队」」那一条已经在跑团里开战时按队伍等级算（联机、本机跑团都是），这次没改，只加测试守着。issue 里写的「本机跑团照旧按顶栏」和那一条不一样，本机跑团保持现在的样子（按队伍等级），等仓库主人定。
+  - **柯尔特「过度自信」的仪表和实际生效对上**：规则是「现有血量 ≥ 进入战斗时的血量上限（`prideMaxHp`）」就减伤，起身中（靠坚毅生命）、被动被图纸放弃时不减；以前角色仪表自己按「现有血量 ≥ 现在的上限」算——拿到临时护盾、临时层把上限抬高时，明明在减伤仪表却写「未满血」；被动被放弃时照样亮「满血减伤」。现在结算（`dealTo`）、暴虐猎手的斩杀预判（`ratExecFlags`）和仪表都用同一个判断 `koltPrideCut`（减伤比例放进配置 `KOLT_PRIDE`：25%，过度自信+ 45%，数值没变）；仪表在被动放弃时写「过度自信已放弃」，起身中写「起身中不减伤」。联机玩家的仪表是房主算好发过去的（online-view.js · `projectHud`），同样对上；多发的两个开关（`noPassive`、起身中 `rising`）不带坚毅生命的任何数。中途上场的柯尔特第一次挨打时记下上限（以前要等被动开着、不在起身中的那一下才记）。
+  - **协助攻击打死自爆小车时播错演出**：小车的死亡引爆用不在场上的「小车残骸」替身打同区所有人，这些伤害被当成协助攻击本身（主攻击）的伤害，演出里协助攻击的刀光 / 弹道挨个落到被炸到的队友和敌人身上；而且引爆在清场时（打死它那一下的弹字之前）就炸了，画面上先看到爆炸，最后才挨刀。现在：
+    - 不在场上的替身（自爆小车残骸、爆炸桶、电池、危墙倒塌、炮台……）打的不算主攻击（弹字不标 `main`）；我方操控的碎渣机炮那一炮（替身记着操控的人 `creditTo`）照旧算。主攻击之外的伤害不补打击形状、预览不写「克制 / 劣势」，和高压场地这类连带伤害一样。
+    - 自爆小车被一击打死时，引爆等这一击的弹字出来以后再炸（`dealToInner` 记 `holdBoom`，清场时只记下 `_boomPending`）；不是被一击打死的（持续伤害、别的爆炸、主持人击杀）照旧当场炸。驻波墙的穿墙补算、出血那一行、清扫机代挡后的自爆（`sweeperGuardAfter`）都照旧，引爆排在它们后面。
+    - 引爆有自己的演出（弹字 `carboom`「引爆」）：在小车身上炸开——震屏、爆炸声、爆炸形状、「引爆」（旧画面盖章、新画面纸片风大字）；炸到的人的弹字标成爆炸（`tag "boom"`，和高能自爆的余波一样数字放大、停久一点），不算进打死它的那次攻击的目标（高能自爆的余波本来就标 `boom`，同样不再算进出手的目标、不补打击形状）。四个画面都接上：单机旧画面 / 新画面（game.js）、联机玩家旧画面（online-ui.js）、联机玩家新画面（hd2d-fx.js · `cues` 把「引爆」和紧跟着炸到的那几下单独成一组 `blasts`，hd2d-play.js 演完那几段再炸，爆炸声 online-sfx.js · `blast` 这时才响）。联机玩家收到的包里多了 `carboom` 这一种弹字和 `tag: "boom"`（online-view.js 白名单），没有新的数值。计算器页（app.js · `spawnPopup`）不弹「引爆」：它给浮字编号要抽一次随机数，弹了会让装了种子随机数的模拟（BattleSim、长线养成的自动打）换一种打法。
+  - **测试**：tests/author-feedback-1020.test.js（新，不用浏览器）——生成敌人的默认等级、换遭遇的等级、模板「Lv随队」；柯尔特的仪表（临时护盾、被动放弃、起身中，本机和联机投影）；协助攻击打死自爆小车的弹字顺序和标记、不是一击打死照旧当场炸、「引爆」不多抽种子随机数、替身不算主攻击；`strikePlan` 不把炸到的人算目标；`projectTape` 白名单；新画面的 `cues` / `play`；联机音效。tests/author-feedback-1020-ui.test.js（新，要浏览器：Playwright，没有就用机器上的 Chrome）——单机旧画面里协助攻击打死自爆小车，打击形状只落在小车身上、最后是小车炸开。tests/online-gm-ui.test.js 加一条（要 Playwright）：生成敌人的等级默认填队伍平均等级、照样能改。新加的测试在没改的代码上都失败（模板「Lv随队」那条是守着 main 上已有的规则，本来就过）。
 - **长线养成：全队永久死亡后队伍空了的处理**（修复 #340 里空队伍那一条；rogue.js · `acceptTask`、`camp`、`captureParty` / `fillFromReserve`（新）、`applyHeroDraw`、`finishBattle`；测试 tests/empty-party.test.js）
   - **以前**：坚毅生命耗尽的角色移出队伍后，队伍可以是空的，却还能接任务；上场的变成默认队伍，打赢了也按「队伍空了」判团灭、结束本局（长线存档跟着结束）。空队伍在任务板前没法休整；有候补也不会自动补上；抽到候补里已有的人只 +1 级，留在候补。
   - **现在**（只改长线养成）：

@@ -1247,10 +1247,9 @@ function ratExecFlags(t) {
   if (!t.isPlayer && typeof mechChargeDr === "function") dr += Number(mechChargeDr(t)) || 0;
   if (t.vehMerged && typeof vehicleCoverDr === "function") dr += Number(vehicleCoverDr(t)) || 0;
   if (dr > 0) f.drPct = dr;
-  if (t.kit === "kolt" && !t.upOnShp && (typeof passiveOn !== "function" || passiveOn(t))) {
-    const mx = Number(t.prideMaxHp != null ? t.prideMaxHp : baseMaxHp(t)) || 0;
-    if (mx > 0 && totalCurHp(t) >= mx) f.prideReduce = typeof passivePlus === "function" && passivePlus(t, 2) ? 0.45 : true;
-  }
+  // 过度自信：和 dealTo、角色仪表同一个判断（app.js · koltPrideCut）
+  const pride = typeof koltPrideCut === "function" ? koltPrideCut(t) : 0;
+  if (pride) f.prideReduce = pride;
   return f;
 }
 /** 斩杀：免费走到 t 那一区，免费普通攻击一次（可以协助格挡，格挡率 +execBlock%）。日志写成一块「【暴虐猎手】斩杀」 */
