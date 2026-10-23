@@ -253,7 +253,7 @@ const Rogue = (function () {
       // 每天的赫心融合体从「过了一天」开始发：开局当天不发（开局抽不了，靠完成任务 / 过天获得）
       run.lastFusionDay = Number(run.day) || 1;
       grantDailyFusion(run);
-      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在抽取机里抽取。`);
       makeBoard(run);
       return;
     }
@@ -2573,7 +2573,7 @@ const Rogue = (function () {
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     if (run.growth && G().fusionPerTask > 0) {
       bagAdd(G().fusionItem, G().fusionPerTask);
-      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去角色抽取机抽角色。`);
+      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去抽取机抽取。`);
     }
     const ei = escortInfo(run, t);
     if (ei && ei.intact) {
@@ -2921,7 +2921,7 @@ function advanceDays(run, n) {
     return out;
   }
 
-  /* ---------- 长线养成：角色抽取机、候补 ---------- */
+  /* ---------- 长线养成：抽取机、候补 ---------- */
   function requireGrowth(run) {
     if (!run || !run.growth) throw new Error("只有长线养成有这个");
   }
