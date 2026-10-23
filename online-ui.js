@@ -887,8 +887,8 @@
       const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
       if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
     }
-    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、撕边、不均匀的影子、天气；按尺寸缓存）。
-     *  每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起贴 */
+    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、天气，每种纸 × 每套配色一张平铺的小纹理，开局画好；
+     *  撕边、影子按面板大小只换 CSS 变量，#321）。每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起换撕边（不画纹理） */
     let paperSizer = null, paperDressQueued = false;
     function paperDress() {
       if (!paperOn || !global.OnlinePaper) return;
