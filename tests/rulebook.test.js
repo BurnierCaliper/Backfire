@@ -178,7 +178,8 @@ test("义体与改造率：档位表、攻击义体伤害、换算比例从 cybe
   const e = chapter(c, "cyber");
   const T = run(c, "CYBERWARE_TIER"), tiers = run(c, "CYBERWARE_TIERS"), V = run(c, "CYBERWARE_VOL");
   const tb = section(e, "义体").table;
-  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `.vol${V[t]}`, `−${T[t].hpCut}`, pct(T[t].occupancy)]));
+  // 最后一列：装这一档要角色几级（#315：等级 ≥ 档位，和 5 级总开关取高的）
+  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `.vol${V[t]}`, `−${T[t].hpCut}`, pct(T[t].occupancy), `${Math.max(t, run(c, "CYBERWARE_UNLOCK_LEVEL"))} 级`]));
   const at = section(e, "发动义体（单体伤害型）").table;
   tiers.forEach((t, i) => assert.deepEqual(plain(at.rows[i]), [`${t} 级`, c.cyberwareDamageSpec(t, "melee").text, c.cyberwareDamageSpec(t, "ranged").text]));
   const text = allText(e);

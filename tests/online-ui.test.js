@@ -562,6 +562,8 @@ function trpgCyberwarePacket(installed, purse) {
   c.S.TRPG.active = true; c.S.TRPG.clinicOpen = true;
   c.LEDGER.purse = { kolt: 50000, helu: 3 };
   c.cyberwareLoadExamples();
+  // #315：5 级起才能在诊所装 / 拆义体（5 级的柯尔特：原生命上限 56，示例义体占 5/56 + 15% ≈ 23.9%）
+  c.S.state.units.forEach(u => { if (u.isPlayer) { u.level = 5; c.applyLevelStats(u); } });
   if (installed) c.trpgCyberwareInstall("kolt", "example_t5_melee");
   const p = JSON.parse(JSON.stringify(c.trpgCyberwarePacket("kolt")));
   if (purse != null) p.purse = purse;
@@ -583,7 +585,7 @@ test("跑团诊所 · 义体：物资弹窗里的入口打开浮层，提交 cyb
   await page.waitForSelector("#cw-overlay:not([hidden]) .cw-card");
   assert.match(await page.locator("#cw-overlay").innerText(), /手里有 50000 奎支/);
   await page.click('[data-cw-pick="example_t5_melee"]');
-  assert.match(await page.locator(".cw-confirm").innerText(), /0% → 40%/);
+  assert.match(await page.locator(".cw-confirm").innerText(), /0% → 23\.9%/);
   await page.click(".cw-confirm [data-cw-cmd]");
   const sent = (await calls(page)).filter(c => c.kind === "submit").pop().args;
   assert.deepEqual(sent, { type: "cyberwareInstall", kit: "kolt", id: "example_t5_melee" });

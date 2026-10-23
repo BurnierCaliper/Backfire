@@ -13,6 +13,7 @@ const J = v => JSON.parse(JSON.stringify(v));
 function setup() {
   const c = H.load(), R = c.Rogue, run = R.newRun({ party: ["kolt", "helu", "ruby"], seed: "CWON" });
   run.stage = "camp";                    // 营地诊所（rogue-data.js · campClinic）
+  run.party.forEach(h => { h.level = 5; });   // #315：5 级起才能在诊所装 / 拆义体
   c.S.state.kuizhi = 0;
   c.RunFlow = { current: () => run, actRaw: cmd => c.Commands.dispatch(Object.assign({ type: "run" }, cmd), { run }) };
   c.OnlineGame = { isHost: () => true, players: () => [{ id: "host", online: true }, { id: "p2", online: true }] };
