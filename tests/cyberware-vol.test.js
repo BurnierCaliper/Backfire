@@ -570,6 +570,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("画面：图鉴里有「义体」这一本，按种类筛、能搜 .vol2，点开看详情（写坚毅消耗的规则，不写谁还剩多少）", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));

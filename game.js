@@ -3248,7 +3248,7 @@
     const rewards = systemCommand({ type: "battle.finish", outcome: G.lastOutcome });
     if (rewards.finishBonus) {
       const fb = rewards.finishBonus;
-      const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : ""].filter(Boolean);
+      const what = [fb.speedMult > 1 ? `速杀（第 ${state.turnNo} 回合打完）×${fb.speedMult}` : "", fb.flawless ? `无伤 +${SCORE_FLAWLESS.points}、×${1 + SCORE_FLAWLESS.mult}` : "", fb.ambush ? `遭遇战 ×${SCORE_AMBUSH_MULT}` : "", fb.counterMaster ? `克制大师（${fb.counterQual}/${fb.counterAttacks} 次攻击克制或吃到天气增益）×${SCORE_COUNTER_MASTER.mult}` : ""].filter(Boolean);
       if (fb.extra > 0) {
         addLogPhase(`${what.join(" + ")}：整场分数 ×${fb.mult}（+${fb.extra}）`);
         if (!G.instant && !G.sim) {
@@ -3263,6 +3263,7 @@
     let gradeLine = "";
     if (gr) {
       gradeLine = `评价 ${gr.grade}（${gr.score} 分）`;
+      if (rewards.finishBonus && rewards.finishBonus.counterMaster) gradeLine += " · 克制大师";
       if (rewards.totalXpBonus > 0) gradeLine += `：战斗经验 ×${gr.xpMult}，每人额外 +${rewards.totalXpBonus}`;
       if (rewards.xpBonus > 0) {
         addLogPhase(`评价 ${gr.grade}：战斗经验 ×${gr.xpMult}，每人额外 +${rewards.xpBonus} 经验`);
@@ -3619,7 +3620,7 @@
       const parts = Object.keys(SCORE_PART_NAMES).filter(k => gr.parts[k]).map(k => k === "fatigue" ? `招式疲劳 −${gr.parts[k]}` : `${SCORE_PART_NAMES[k]} ${gr.parts[k]}`).join(" · ");
       return `<p class="stats-grade"><b class="g-${gr.grade}">评价 ${gr.grade}</b> ${gr.score} 分（按第 ${gr.act} 幕的分数线）${gr.next ? `，距 ${gr.next.grade} 还差 ${Math.max(0, gr.next.need - gr.score)} 分` : ""}<br>${parts || "还没有得分"}</p>`;
     })()}
-    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 分数线（第 ${typeof scoreAct === "function" ? scoreAct() : 1} 幕固定线 × ${SCORE_LINE_MIX.fixed} + 本场基准分 ${scorePar()} × 倍数 × ${SCORE_LINE_MIX.par}）：${gradeLines(typeof scoreAct === "function" ? scoreAct() : 1, scorePar()).filter(([, k]) => k > 0).map(([g, k, x]) => `${g} ≥ ${k}${x > 1 ? `（经验 ×${x}）` : ""}`).join("、")}，C 线以下为 D。基准分 = 每个出现过的敌人的血量 + 击杀分（击破、失衡不算进基准，是额外的漂亮操作）；固定线每往后一幕 +${SCORE_ACT_STEP}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}；无伤（我方没受任何伤害）：+${SCORE_FLAWLESS.points}、倍率 +${SCORE_FLAWLESS.mult}，和速杀倍率加算（胜利时整场分数再乘）${state.battleScore && state.battleScore.hurt ? "。本场已有人受伤" : ""}。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。队友给的行动点（例如结人的意式浓缩）打出来的那次行动，分数一半算给提供行动点的人。</p>`;
+    <p class="stats-turn">${state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "还没开战"} · 分数线（第 ${typeof scoreAct === "function" ? scoreAct() : 1} 幕固定线 × ${SCORE_LINE_MIX.fixed} + 本场基准分 ${scorePar()} × 倍数 × ${SCORE_LINE_MIX.par}）：${gradeLines(typeof scoreAct === "function" ? scoreAct() : 1, scorePar()).filter(([, k]) => k > 0).map(([g, k, x]) => `${g} ≥ ${k}${x > 1 ? `（经验 ×${x}）` : ""}`).join("、")}，C 线以下为 D。基准分 = 每个出现过的敌人的血量 + 击杀分（击破、失衡不算进基准，是额外的漂亮操作）；固定线每往后一幕 +${SCORE_ACT_STEP}。速杀：${SCORE_SPEED.map(([n, m]) => `${n} 回合内 ×${m}`).join(" / ")}；无伤（我方没受任何伤害）：+${SCORE_FLAWLESS.points}、倍率 +${SCORE_FLAWLESS.mult}，和速杀倍率加算（胜利时整场分数再乘）；克制大师：我方主动发起的攻击（协助攻击、反击、持续伤害不算）里克制或吃到天气增益的占一半及以上，胜利时整场分数再 ×${SCORE_COUNTER_MASTER.mult}；B 及以上的分数线都 ×${SCORE_HIGH_LINE_MULT}${state.battleScore && state.battleScore.hurt ? "。本场已有人受伤" : ""}。得分里的击杀、团队分不一定能归到具体某人，所以个人得分加起来可能比总分少。队友给的行动点（例如结人的意式浓缩）打出来的那次行动，分数一半算给提供行动点的人。</p>`;
     $("g-stats-sheet").classList.add("show");
   }
   function statsText() {

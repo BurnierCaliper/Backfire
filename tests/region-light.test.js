@@ -396,6 +396,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("浏览器 · 跑团战场配置：下拉框默认「跟着地图（当前：第二采矿场）」「跟着时钟（当前：夜晚）」；选了别的就用选的，夜晚规则不变；选回第一项又跟着时钟", async (t) => {
   if (!browser) { if (process.env.REQUIRE_UI === "1") throw new Error("UI 验收需要 Playwright"); t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));

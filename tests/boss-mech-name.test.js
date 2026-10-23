@@ -296,6 +296,7 @@ test("浏览器 · 战场配置：四个面板都有「技能名」；死刑填�
   if (!browser) { if (process.env.REQUIRE_UI === "1") throw new Error("UI 验收需要 Playwright"); t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(origin + "/game.html"); await page.waitForFunction(() => !!window.GAME && !!window.UnitCard);
   await page.evaluate(() => {

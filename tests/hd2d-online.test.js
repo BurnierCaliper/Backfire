@@ -67,7 +67,7 @@ function fakeScene(log) {
 /**
  * 一位联机玩家的页面：原型页的假网页 + online-battle.js + hd2d-field.js；单机的 #g-app（顶栏里有开关）/ #g-field 照 game.html 摆着，
  * 联机舞台（顶上工具栏的 .ol-hd2d-slot、战斗画面 .ol-battle 的战场）另建。房主的 state 每个人塞上特殊的坚毅生命数、私有笔记，玩家拿到的是投影过的。
- * opts.on = 本机记着新画面开；opts.reduced = 减少动态效果（转场直接切）
+ * opts.on = 本机记着新画面开，不然本机记着关（#316 起没选过 = 默认开，旧画面要明确选过关）；opts.reduced = 减少动态效果（转场直接切）
  */
 async function olPage(opts) {
   opts = opts || {};
@@ -127,7 +127,7 @@ async function olPage(opts) {
   st.units.forEach(u => { const c = doc.createElement("div"); c.dataset.unitId = u.id; cards[u.id] = c; });
   const battle = { el: ol, cardOf: (id) => cards[id] || null };
 
-  const mem = new Map(opts.on ? [[F.FIELD.storageKey, "on"]] : []), writes = [];
+  const mem = new Map([[F.FIELD.storageKey, opts.on ? "on" : "off"]]), writes = [];
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); writes.push([k, String(v)]); } };
   const q = [], clock = { t: 100 };
   F.boot({ doc, storage, load: () => { log.loads++; return Promise.resolve(fakeScene(log)); }, hint: (m) => log.hints.push(m), reduced: () => !!opts.reduced, wait: (s, fn) => q.push(fn), now: () => clock.t });

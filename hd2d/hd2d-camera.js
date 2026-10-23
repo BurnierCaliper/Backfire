@@ -189,18 +189,25 @@
     }
     return camOf();
   }
+  /** 白卡（#316，布局给了卡片快照）这一段里每张卡的基础缩放（L.CONFIG.card.tier）：远景 far；中景 mid；近景选中的区放大（near），别的区照中景 */
+  function cardBase(tier, u, zone) {
+    const K = L.CONFIG.card.tier;
+    return tier === "far" ? K.far : CAMERA[tier].big && u.zone === zone ? K.near : K.mid;
+  }
   /** 这一段的镜头摆法（远景就是布局的默认镜头）和铭牌的抬高 */
   function lensOf(layout, tier, zone) {
     const T = CAMERA[tier], far = layout.camera.dist;
     const small = layout.plateSize || L.plateSize(layout.view), big = L.plateSize(layout.view, true);
-    const sizeOf = (u) => (T.big && u.zone === zone ? big : small);
+    // 白卡：每个单位按自己的卡片尺寸 × 这一段的基础缩放，抬高的上限也按白卡的（卡高得多）
+    const sizeOf = layout.cards ? (u) => L.cardAt(u, cardBase(tier, u, zone)) : (u) => (T.big && u.zone === zone ? big : small);
+    const cap = layout.cards ? L.CONFIG.card.maxLift[tier] : T.maxLift;
     let range = [2, far];
     if (tier === "mid") {
       const near = lensOf(layout, "near", zone).cam.dist, top = far * T.dist.far;
       range = [Math.min(near * T.dist.near, top), top];
     }
-    const cam = frame(layout, windowOf(layout, tier, zone), T, zone, sizeOf, range);
-    return { cam, lifts: L.liftPlates(layout.units, cam, sizeOf, T.maxLift) };
+    const cam = frame(layout, windowOf(layout, tier, zone), Object.assign({}, T, { maxLift: cap }), zone, sizeOf, range);
+    return { cam, lifts: L.liftPlates(layout.units, cam, sizeOf, cap) };
   }
 
   /**
@@ -221,6 +228,7 @@
     layout.units.forEach(u => {
       const r = lens.lifts.get(u.id);
       plates[u.id] = { lift: r.lift, rect: r.rect, big: !!T.big && u.zone === zone, dim: !!T.dim && u.zone !== zone };
+      if (layout.cards) plates[u.id].scale = cardBase(tier, u, zone);   // 白卡：这一段的基础缩放（场景每帧按 L.cardScale 再乘远近）
     });
     // 沿视线离镜头多远（景深、雾都按这个量）
     const depth = (c, p) => (c.pos.x - p.x) * c.back.x + (c.pos.y - p.y) * c.back.y + (c.pos.z - p.z) * c.back.z;
@@ -278,18 +286,23 @@
   function closePose(layout, id, opts) {
     const u = layout.units.find(x => x.id === id);
     if (!u) return null;
-    const T = CAMERA.close, P = L.CONFIG.plate, zone = u.zone, z = zoneOf(layout, zone);
-    const small = layout.plateSize || L.plateSize(layout.view), big = L.plateSize(layout.view, true), mine = { w: big.w * T.zoom, h: big.h * T.zoom };
+    const T = CAMERA.close, card = !!layout.cards, P = card ? L.CONFIG.card : L.CONFIG.plate, zone = u.zone, z = zoneOf(layout, zone);
+    const small = layout.plateSize || L.plateSize(layout.view), big = L.plateSize(layout.view, true);
+    // 白卡（#316）：这个单位的卡按近景放大的再乘 zoom，别的卡按近景（选中的区放大、别的区照中景）
+    const K = L.CONFIG.card.tier, base = (x) => (x.zone === zone ? K.near : K.mid);
+    const mine = card ? L.cardAt(u, K.near * T.zoom) : { w: big.w * T.zoom, h: big.h * T.zoom };
     const cam = closeLens(layout, u, mine);
     const others = layout.units.filter(x => x.id !== id);
-    const lifts = L.liftPlates(others, cam, (x) => (x.zone === zone ? big : small), T.maxLift);
+    const lifts = card ? L.liftPlates(others, cam, (x) => L.cardAt(x, base(x)), L.CONFIG.card.maxLift.close) : L.liftPlates(others, cam, (x) => (x.zone === zone ? big : small), T.maxLift);
     const self = L.plateRect(cam, mine, u, 0), plates = {};
     others.forEach(x => {
       const r = lifts.get(x.id).rect;
       const hide = r.x0 < self.x1 + P.gapX && self.x0 < r.x1 + P.gapX && r.y0 < self.y1 + P.gapY && self.y0 < r.y1 + P.gapY;
       plates[x.id] = { lift: lifts.get(x.id).lift, rect: r, big: x.zone === zone, dim: true, hide, close: false, zoom: 1 };
+      if (card) plates[x.id].scale = base(x);
     });
     plates[id] = { lift: 0, rect: self, big: true, dim: false, hide: false, close: true, zoom: T.zoom };
+    if (card) plates[id].scale = K.near * T.zoom;   // 白卡：放大已经算进这一段的基础缩放里（场景不再另乘 zoom）
     const depth = (c, p) => (c.pos.x - p.x) * c.back.x + (c.pos.y - p.y) * c.back.y + (c.pos.z - p.z) * c.back.z;
     const back = (c) => depth(c, { x: c.target.x, y: 0, z: layout.bounds.minZ });
     const center = { x: u.x, y: u.y, z: u.z };
