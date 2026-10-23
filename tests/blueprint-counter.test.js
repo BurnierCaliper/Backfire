@@ -170,6 +170,11 @@ test("文字：规则页、单局工匠界面说明写了新规则", () => {
   assert.match(ui, /领完计数归零/);
   assert.doesNotMatch(ui, /只能挑一张/);
   const readme = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
-  const sec = readme.slice(readme.indexOf("## 规则改动记录"));
-  assert.match(sec.split("\n- ")[1], /工匠图纸/);
+  // 在整节里找，不要求是最上面一条（之后合并的改动会排在它上面）
+  const start = readme.indexOf("## 规则改动记录");
+  assert.ok(start >= 0);
+  const next = readme.indexOf("\n## ", start + 1);
+  const entry = readme.slice(start, next < 0 ? readme.length : next).split(/\n(?=- \*\*)/)
+    .find((e) => /^- \*\*工匠图纸/.test(e)) || "";
+  assert.match(entry, /以前/); assert.match(entry, /现在/); assert.match(entry, /领图纸/);
 });
