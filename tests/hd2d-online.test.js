@@ -257,7 +257,8 @@ test("联机玩家开 / 关新画面：同一个开关（#g-hd2d-toggle 挪到�
   await P.drain();
   assert.ok(sc.disposed && !P.ol.classList.contains("hd2d-on"), "拆干净，旧战场回来");
   assert.equal(P.btn.textContent, "新画面 关");
-  assert.deepEqual(P.writes.map(w => w[1]), ["on", "off"]);
+  assert.deepEqual(P.writes.filter(w => w[0] === P.F.FIELD.storageKey).map(w => w[1]), ["on", "off"]);
+  assert.equal(P.writes.filter(w => w[0] === P.F.FIELD.lockKey).pop()[1], "1", "点开关关掉：记了锁（主人 10/23）");
   assert.deepEqual(P.calls, [], "开 / 关新画面、转场都不经过联机的 api（不发给别人）");
   // 离开战斗（探索、离开房间）：拆下来，开关放回单机顶栏原来的位置
   P.U.paintField3d(null);
