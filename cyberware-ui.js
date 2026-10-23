@@ -5,7 +5,10 @@
  * 红线：坚毅（shp）数值永远不出现；只显示 burdenText / warning。发动的具体消耗写在图鉴「义体」里（固定的规则文字）。
  * 按钮发出的指令：{ action:"installCyberware"|"removeCyberware", kit, id }，交给打开浮层的一方的 act()。
  * 以新换旧：同系列装着另一件时，房主的预览 / 目录带 replaces（会先拆掉哪件）、replaceCost（它的拆除费）；
- *   指令还是 installCyberware，房主那边一起拆旧装新（cyberware.js · cyberwareInstall）。 */
+ *   指令还是 installCyberware，房主那边一起拆旧装新（cyberware.js · cyberwareInstall）。
+ * 5 级解锁（#315）：view.locked 时目录照常能看，安装 / 拆除按钮灰掉、写「5 级解锁」；真正拦下的是房主 / 本机的规则（cyberwareLockWhy）。
+ * 档位等级（#315 追加）：目录 / 预览里那一件带 needLevel 时（档位要的等级还没到），它照样列出来，安装 / 以新换旧按钮灰掉、写「需要 10 级」之类；
+ *   原因是房主算好的 error（cyberware.js · cyberwareTierNeed）。拆除不看档位。 */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -72,11 +75,21 @@
   const meta = r => [`${num(r.tier)} 级`, r.kindName || KIND[r.kind] || r.kind].concat(effect(r), [r.hpCut ? `生命上限 −${r.hpCut}` : ""])
     .filter(Boolean).map(esc).join(" · ");
   const swapText = r => `以新换旧：会先拆掉「${r.replaceName || r.replaces}」（拆除费 ${num(r.replaceCost)} 奎支）`;
+  // 等级门槛（#315）：不到 5 级时装 / 拆的按钮都灰掉、写「5 级解锁」；几级由房主 / 本机的 view.unlockLevel 给（cyberware.js · CYBERWARE_UNLOCK_LEVEL）
+  function lockOf(v) {
+    if (!v || !v.locked) return null;
+    const lv = num(v.unlockLevel);
+    return lv ? { tag: `${lv} 级解锁`, why: `${lv} 级解锁义体安装 / 拆除` } : { tag: "等级不够", why: "等级不够，不能安装 / 拆除" };
+  }
   function installedHtml(model) {
     const list = model.packet.view.installed || [];
+    const lock = lockOf(model.packet.view);
     return `<section class="ws-group cw-installed"><h3>已安装 <small>${list.length}</small></h3>
-      <ul class="ws-list">${list.map(r => `<li class="cw-row on"><div class="cw-txt"><b>${esc(r.name)}</b><small>${meta(r)} · 短休前还能用 ${esc(num(r.usesLeft))} 次</small></div>
-        <button type="button" class="g-btn" ${cmdAttr({ action: "removeCyberware", kit: model.kit, id: r.id })} ${model.money < num(r.removeCost) ? "disabled title=\"奎支不够\"" : ""}>拆除<small>${esc(num(r.removeCost))} 奎支</small></button></li>`).join("")
+      <ul class="ws-list">${list.map(r => {
+        const no = lock ? lock.why : model.money < num(r.removeCost) ? "奎支不够" : "";
+        return `<li class="cw-row on"><div class="cw-txt"><b>${esc(r.name)}</b><small>${meta(r)} · 短休前还能用 ${esc(num(r.usesLeft))} 次</small></div>
+        <button type="button" class="g-btn" ${cmdAttr({ action: "removeCyberware", kit: model.kit, id: r.id })} ${no ? `disabled title="${esc(no)}"` : ""}>拆除<small>${esc(num(r.removeCost))} 奎支${lock ? ` · ${esc(lock.tag)}` : ""}</small></button></li>`;
+      }).join("")
         || `<li class="ws-empty">还没有安装义体。</li>`}</ul></section>`;
   }
   function shopHtml(model) {
@@ -85,18 +98,22 @@
     const conflictText = r => r.conflict ? `<small class="cw-conf">冲突标签「${esc(r.conflict)}」：同标签的义体不能同时安装</small>` : "";
     // 以新换旧：手里的钱要够新义体的价格 + 旧义体的拆除费
     const why = r => !r.canInstall ? (r.error || "现在不能安装") : model.money < num(r.price) + num(r.replaceCost) ? "奎支不够" : "";
+    // 不到 5 级：目录照常能看，按钮灰掉、写「5 级解锁」；这一档要的等级还没到（房主给的 needLevel）：写「需要 10 级」之类。原因都是房主算好的 r.error
+    const lock = lockOf(model.packet.view);
+    const levelTag = r => num(r.needLevel) ? `需要 ${num(r.needLevel)} 级` : lock ? lock.tag : "";
     return `<section class="ws-group cw-shop"><h3>可安装 <small>${rows.length}</small></h3>
       ${shop.length ? `<p class="ws-note cw-rule">${esc(RULE)}</p>` : ""}
+      ${lock && shop.length ? `<p class="ws-note cw-lock">${esc(lock.why)}：现在可以先看目录；已经装着的义体照常生效。</p>` : ""}
       <ul class="ws-list">${rows.map(r => {
         const pv = model.preview ? model.preview(r.id) : null;   // 有预览就按 overinstall / burden 判断，不比对文字
         const heavy = pv ? !!(pv.overinstall || pv.burden === "heavy") : num(r.rateAfter) > num(model.packet.view.cap) + 1e-9;
-        const no = why(r);
+        const no = why(r) || (lock ? lock.why : "");
         return `<li class="cw-row${no ? " miss" : " ok"}${ui.confirm === r.id ? " sel" : ""}"><div class="cw-txt"><b>${esc(r.name)}</b>
           <small>${meta(r)}</small>${r.text ? `<span class="cw-desc">${esc(r.text)}</span>` : ""}
           <small>安装后改造率 <b class="cw-after${heavy ? " over" : ""}">${pc(r.rateAfter)}</b> / ${pc(model.packet.view.cap)}${r.warning && !no ? ` · <span class="${heavy ? "cw-heavy-tag" : ""}">${esc(r.warning)}</span>` : ""}</small>
           ${conflictText(r)}${r.replaces ? `<small class="cw-swap">${esc(swapText(r))}</small>` : ""}${no ? `<small class="ws-need">${esc(no)}</small>` : ""}</div>
           <span class="s-price">${esc(num(r.price))}</span>
-          <button type="button" class="g-btn r-main" data-cw-pick="${esc(r.id)}" ${no ? "disabled" : ""} ${no ? `title="${esc(no)}"` : ""}>${r.replaces ? "以新换旧" : "安装"}</button></li>`;
+          <button type="button" class="g-btn r-main" data-cw-pick="${esc(r.id)}" ${no ? "disabled" : ""} ${no ? `title="${esc(no)}"` : ""}>${r.replaces ? "以新换旧" : "安装"}${levelTag(r) ? `<small>${esc(levelTag(r))}</small>` : ""}</button></li>`;
       }).join("") || `<li class="ws-empty cw-none">${shop.length ? "目录里的义体都装上了。" : "暂无可安装的义体"}</li>`}</ul></section>`;
   }
   const conflictName = (model, id) => ((((model.packet || {}).view || {}).installed || []).find(x => x.id === id) || {}).name || id;

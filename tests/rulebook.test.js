@@ -178,7 +178,8 @@ test("义体与改造率：档位表、攻击义体伤害、换算比例从 cybe
   const e = chapter(c, "cyber");
   const T = run(c, "CYBERWARE_TIER"), tiers = run(c, "CYBERWARE_TIERS"), V = run(c, "CYBERWARE_VOL");
   const tb = section(e, "义体").table;
-  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `.vol${V[t]}`, `−${T[t].hpCut}`, pct(T[t].occupancy)]));
+  // 最后一列：装这一档要角色几级（#315：等级 ≥ 档位，和 5 级总开关取高的）
+  tiers.forEach((t, i) => assert.deepEqual(plain(tb.rows[i]), [`${t} 级`, `.vol${V[t]}`, `−${T[t].hpCut}`, pct(T[t].occupancy), `${Math.max(t, run(c, "CYBERWARE_UNLOCK_LEVEL"))} 级`]));
   const at = section(e, "发动义体（单体伤害型）").table;
   tiers.forEach((t, i) => assert.deepEqual(plain(at.rows[i]), [`${t} 级`, c.cyberwareDamageSpec(t, "melee").text, c.cyberwareDamageSpec(t, "ranged").text]));
   const text = allText(e);
@@ -483,9 +484,7 @@ test("血量层改造：能换的肉体 = 改造率上限 × 肉体上限（装�
     // 照规则页的文字算
     const raw = cw.length ? Math.max(0, cap - c.cyberwareOccupancy(u)) * base : cap * fleshMax;
     const byText = Math.floor(raw + 1e-9);
-    // 文字的结果恰好是整数时，诊所的浮点误差会少算 1 点（规则代码的问题，见 PR #275 的说明，这里不改）
-    const edge = Math.abs(raw - Math.round(raw)) < 1e-9;
-    assert.ok(game === byText || (edge && game === byText - 1), `体质 ${con} 智力 ${int} Lv${lv} ${cw}：诊所 ${game}，文字 ${byText}`);
+    assert.equal(game, byText, `体质 ${con} 智力 ${int} Lv${lv} ${cw}：诊所 ${game}，文字 ${byText}`);
     n++;
   }
   assert.ok(n > 100);

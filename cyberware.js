@@ -7,6 +7,9 @@
  *   过度安装：要专长（CYBERWARE_OVERINSTALL_FEAT，占位）；不封顶；每超 5% 每天多 −1 坚毅；拆掉就解除
  *   义体扣坚毅最少留 1（CYBERWARE_SHP_FLOOR），永不致死
  *   诊所购买 / 拆除（花钱、完全可逆）；不能升级：同一系列（line）只能装一件，换等级只能以新换旧（拆除费 + 新的价格）
+ *   角色 5 级起才能在诊所安装 / 拆除（CYBERWARE_UNLOCK_LEVEL，#315）；已经装着的照常生效、照常每天消耗，只是到 5 级前拆不掉；
+ *   装哪一件还要角色等级到它的档位（等级 ≥ def.tier：.vol1 5 级 / .vol2 10 级 / .vol3 15 级 / .vol4 20 级，以新换旧看新的那件）；拆除不看档位；
+ *   血量层改造（growth.js · cyberPlan）1 级就能用，不受这个限制
  * 红线：坚毅（shp）数值永远不给玩家看。cyberwareView / cyberwareInstallPreview 只给档位文字；
  *   图鉴（cyberwareCodexInfo）只写固定的规则（可以写坚毅生命的具体消耗），不碰任何角色当前的坚毅生命。
  *
@@ -39,6 +42,7 @@ const CYBERWARE_VOL = { 5: 1, 10: 2, 15: 3, 20: 4 };
 const CYBERWARE_ATTACK = { break: 2, fireShp: 2, dailyShp: 2, flatPerStep: 10, melee: { sides: 20, plus: 0 }, ranged: { sides: 12, plus: 2 } };
 /** 所有主动义体的默认：发动花多少（设计没写，先按 1 行动点，占位）、每次短休能用几次 */
 const CYBERWARE_ACTIVE = { cost: { ap: 1 }, usesPerShortRest: 1 };
+const CYBERWARE_UNLOCK_LEVEL = 5;            // 角色几级起能在诊所安装 / 拆除义体（#315）；装哪一件还要等级 ≥ 它的档位（def.tier，不另写表）；血量层改造 1 级就能用，不看这个
 const CYBERWARE_SHP_FLOOR = 1;               // 义体扣坚毅最少留 1：义体导致的坚毅损失不会致死
 const CYBERWARE_OVER_STEP = 0.05;            // 每超 5% 每天多扣 1
 const CYBERWARE_OVERINSTALL_FEAT = "overinstall";   // 占位专长 id（feats.js 里还没有；也可设 u.cyberOverinstall = true）
@@ -360,10 +364,30 @@ function runCyberwareSkill(u, skillId, ctx) {
 function cwHas(u, id) { return cwList(u).some(d => d.id === id); }
 /** 同一系列已经装着的那件：义体不能升级，换等级只能以新换旧 */
 function cwSameLine(u, d) { return d && d.line ? cwList(u).find(x => x.line === d.line && x.id !== d.id) || null : null; }
-/** 安装预览（玩家可见，不含坚毅数值）：{ ok, error, cost, price, burden, warning, rateBefore, rateAfter, cap, overinstall,
+/** 角色等级（没有 level 字段按 1 级算） */
+function cwLevel(u) { return Number(u && u.level) || 1; }
+/** 等级门槛（#315）：角色不到 CYBERWARE_UNLOCK_LEVEL 级时诊所不给装、不给拆，返回原因（够了返回 null）。
+ *  只管诊所里的装 / 拆：已经装着的义体照常生效、照常每天消耗；opt.free（主持人免费安排）不看等级 */
+function cyberwareLockWhy(u, opt) {
+  if (opt && opt.free) return null;
+  return cwLevel(u) < CYBERWARE_UNLOCK_LEVEL ? `${CYBERWARE_UNLOCK_LEVEL} 级解锁义体安装 / 拆除` : null;
+}
+/** 装这一档的义体要角色几级（#315 追加）：档位本身（等级 ≥ def.tier，直接用档位数）和 5 级总开关取高的。诊所、图鉴、规则页都读这里 */
+function cyberwareInstallLevel(tier) { return Math.max(CYBERWARE_UNLOCK_LEVEL, Number(tier) || 0); }
+/** 档位等级（#315 追加）：装一件义体，角色等级要到它的档位。这一档要的等级比 5 级总开关高、角色又还没到时返回要几级（界面写「需要 N 级」），
+ *  其余返回 0（.vol1 不到 5 级时由 cyberwareLockWhy 拦）。只管安装（以新换旧看新的那件）；拆除不看档位；opt.free（主持人）不看 */
+function cyberwareTierNeed(u, d, opt) {
+  if (!d || (opt && opt.free)) return 0;
+  const need = cyberwareInstallLevel(d.tier);
+  return need > CYBERWARE_UNLOCK_LEVEL && cwLevel(u) < need ? need : 0;
+}
+/** 安装预览（玩家可见，不含坚毅数值）：{ ok, error, locked, needLevel, cost, price, burden, warning, rateBefore, rateAfter, cap, overinstall,
  *  hpCut, conflictWith, replaces, replaceName, replaceCost }。
- *  replaces：同系列装着另一件时，这次是以新换旧——先拆掉它（cost 含它的拆除费），改造率按拆掉以后算 */
-function cyberwareInstallPreview(u, id) {
+ *  locked：不到 5 级（cyberwareLockWhy），诊所整个不能装 / 拆；needLevel：这一件的档位要的等级更高、角色还没到（cyberwareTierNeed），
+ *  error 写「需要 10 级才能安装 .vol2 义体」——两道都没过时写要的等级更高的这道（4 级看 .vol2 也写它：到了 5 级还是装不了），
+ *  否则写 5 级总开关的原因。等级原因排在冲突、超上限前面；改造率这些照样算好，诊所目录照常能看。
+ *  replaces：同系列装着另一件时，这次是以新换旧——先拆掉它（cost 含它的拆除费），改造率按拆掉以后算；档位等级看新的这件 */
+function cyberwareInstallPreview(u, id, opt) {
   const d = cyberwareDef(id);
   if (!d) return { ok: false, error: "没有这件义体" };
   if (cwHas(u, id)) return { ok: false, error: "已经装了" };
@@ -372,22 +396,26 @@ function cyberwareInstallPreview(u, id) {
   const clash = d.conflict ? keep.find(x => x.conflict === d.conflict) : null;
   const before = cyberwareRate(u), after = cyberwareRate(u, keep.concat([d]));
   const over = after.over > 1e-9;
+  const lock = cyberwareLockWhy(u, opt), needLevel = cyberwareTierNeed(u, d, opt);
   let error = null;
-  if (clash) error = `和「${clash.name}」冲突，不能同时安装`;
+  if (needLevel) error = `需要 ${needLevel} 级才能安装 .vol${d.vol} 义体`;
+  else if (lock) error = lock;
+  else if (clash) error = `和「${clash.name}」冲突，不能同时安装`;
   else if (over && !cyberwareCanOverinstall(u)) error = "超出改造率上限（需要专长才能过度安装）";
   const burden = over ? "heavy" : (d.dailyShp || d.shpCut ? "strain" : "none");
   const replaceCost = old ? old.removePrice : 0;
-  return { ok: !error, error, cost: d.price + replaceCost, price: d.price, id: d.id, name: d.name, tier: d.tier,
+  return { ok: !error, error, locked: !!lock, needLevel, cost: d.price + replaceCost, price: d.price, id: d.id, name: d.name, tier: d.tier,
     rateBefore: pct(before.total), rateAfter: pct(after.total), cap: pct(after.cap), overinstall: over,
     hpCut: d.hpCut, conflictWith: clash ? clash.id : null, burden,
     replaces: old ? old.id : null, replaceName: old ? old.name : "", replaceCost,
     warning: burden === "none" ? "" : (burden === "heavy" ? "这会给身体带来极大负担。" : "这会给身体带来负担。") };
 }
 function pct(x) { return Math.round(x * 1000) / 10; }
-/** 安装（以新换旧时连旧的一起拆掉）：purse = { kuizhi } 之类的钱包对象，key 默认 "kuizhi"；opt.free 免费（主持人） */
+/** 安装（以新换旧时连旧的一起拆掉）：purse = { kuizhi } 之类的钱包对象，key 默认 "kuizhi"；opt.free 免费（主持人），也不看等级门槛、档位等级。
+ *  预览不 ok（等级、档位、冲突、超上限）就直接报错：钱、身上的义体（以新换旧时旧的那件）都不动 */
 function cyberwareInstall(u, id, purse, opt) {
   opt = opt || {};
-  const pv = cyberwareInstallPreview(u, id);
+  const pv = cyberwareInstallPreview(u, id, opt);
   if (!pv.ok) throw new Error(pv.error);
   const key = opt.key || "kuizhi";
   if (!opt.free) {
@@ -400,10 +428,13 @@ function cyberwareInstall(u, id, purse, opt) {
   return pv;
 }
 function cyberwareRemoveCost(u, id) { const d = cyberwareDef(id); return d ? d.removePrice : 0; }
-/** 拆除：花钱，完全可逆（生命 / 坚毅上限还回来） */
+/** 拆除：花钱，完全可逆（生命 / 坚毅上限还回来）；不到 5 级拆不了（cyberwareLockWhy，主持人 opt.free 不看等级）；
+ *  不看档位：5 级起什么档都能拆（旧存档 / 主持人给的、比现在等级高档的也行） */
 function cyberwareRemove(u, id, purse, opt) {
   opt = opt || {};
   if (!cwHas(u, id)) throw new Error("没有装这件义体");
+  const lock = cyberwareLockWhy(u, opt);
+  if (lock) throw new Error(lock);
   const cost = cyberwareRemoveCost(u, id), key = opt.key || "kuizhi";
   if (!opt.free) {
     if (!purse || (Number(purse[key]) || 0) < cost) throw new Error("奎支不够");
@@ -449,16 +480,17 @@ function cyberwareView(u) {
   return {
     rate: pct(r.total), cap: pct(r.cap), cyberwareRate: pct(r.cyberware), layerRate: pct(r.layers),
     remainingHp: Math.floor(r.remainingHp + 1e-9), overinstall: r.over > 1e-9, canOverinstall: cyberwareCanOverinstall(u),
+    locked: !!cyberwareLockWhy(u), unlockLevel: CYBERWARE_UNLOCK_LEVEL,   // 不到 5 级：诊所的装 / 拆按钮灰掉（#315）
     burden, burdenText: CYBERWARE_BURDEN_TEXT[burden],
     installed: list.map(d => Object.assign(cwPublic(d), { usesLeft: cyberwareUsesLeft(u, d.id), removeCost: d.removePrice }))
   };
 }
-/** 诊所目录（玩家可见）。replaces：装这件就是以新换旧（会先拆掉同系列的那件） */
+/** 诊所目录（玩家可见）。replaces：装这件就是以新换旧（会先拆掉同系列的那件）；needLevel：档位要的等级还没到（界面写「需要 N 级」） */
 function cyberwareShopView(u) {
   return cyberwareCatalog().map(d => {
     const pv = cyberwareInstallPreview(u, d.id);
     return Object.assign(cwPublic(d), { price: d.price, text: d.text || "", installed: cwHas(u, d.id),
-      canInstall: !!pv.ok, error: pv.ok ? null : pv.error, warning: pv.warning || "", rateAfter: pv.rateAfter,
+      canInstall: !!pv.ok, error: pv.ok ? null : pv.error, locked: !!pv.locked, needLevel: pv.needLevel || 0, warning: pv.warning || "", rateAfter: pv.rateAfter,
       replaces: pv.replaces || null, replaceName: pv.replaceName || "", replaceCost: pv.replaceCost || 0 });
   });
 }
@@ -476,8 +508,13 @@ function cyberwareCodexInfo(d) {
   if (d.shpCut) grit.push(`坚毅生命上限 −${d.shpCut}（拆掉后还回来）。`);
   grit.push(`过度安装（超出改造率上限，要专长）：每超 ${pct(CYBERWARE_OVER_STEP)}%，每天再多消耗 1 点坚毅生命；拆掉就解除。`);
   grit.push(`义体扣坚毅生命最少留 ${CYBERWARE_SHP_FLOOR}，不会致死。`);
-  const clinic = [`在诊所安装：${d.price} 奎支；拆除：${d.removePrice} 奎支（花钱拆除，完全可逆）。`];
-  if (sameLine.length > 1) clinic.push(`不能升级：「${d.lineName || d.line}」系列共 ${sameLine.length} 个等级，同时只能装其中一件；换等级要在诊所以新换旧（付旧的拆除费 + 新的价格）。`);
+  // 等级（#315）：这件几级起能装（档位和 5 级总开关取高的）、5 级起能拆。只写这一件的：别的档位的字样会让搜「.vol2」搜出整个系列，每档一览在规则页的档位表
+  const need = cyberwareInstallLevel(d.tier);
+  const clinic = [need > CYBERWARE_UNLOCK_LEVEL
+    ? `${need} 级起可以在诊所安装（角色等级要到这件义体的等级）；${CYBERWARE_UNLOCK_LEVEL} 级起就能拆除（拆除不看档位）。`
+    : `${CYBERWARE_UNLOCK_LEVEL} 级起可以在诊所安装 / 拆除。`,
+    `在诊所安装：${d.price} 奎支；拆除：${d.removePrice} 奎支（花钱拆除，完全可逆）。`];
+  if (sameLine.length > 1) clinic.push(`不能升级：「${d.lineName || d.line}」系列共 ${sameLine.length} 个等级，同时只能装其中一件；换等级要在诊所以新换旧（付旧的拆除费 + 新的价格），新的那件也要角色等级够。`);
   clinic.push(d.conflict ? `冲突标签「${d.conflict}」：同标签的义体不能同时安装。` : "没有部位 / 槽位限制：装几件只看改造率。");
   return {
     kindName: k.name || d.kind,
