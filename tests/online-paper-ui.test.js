@@ -653,6 +653,45 @@ test("技能吊牌：打孔、打孔虚线、属性图标、名字从左往右�
   assert.deepEqual(o.errors, []);
 });
 
+test("技能吊牌名字下面那行消耗（房主算好的「行动 1」「附赠 1」）、「唤出」下面那行小字在纸上看得清：深色字（夜里浅色）、加粗，和纸面的对比度 ≥ 4.5（白天 / 夜里 × 常态 / 沙暴 / 下雨 / 雪 / 雾）（#339 主人截图：单机、联机一起改）", { timeout: 90000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  // 技能里多一个「唤出阿特」：单独做成纸板大按钮（hd2d-shell.js · pickSummon），消耗写在下面那行小字里
+  await page.evaluate(() => {
+    const menu = OnlineGame.actionMenu;
+    OnlineGame.actionMenu = async (request) => {
+      const r = await menu(request);
+      if (!request.skill) r.choices.options = [{ value: "ruby_summon", label: "唤出阿特", cost: "行动 1 · 附赠 1" }].concat(r.choices.options);
+      return r;
+    };
+  });
+  await asPlayer(page);
+  await page.waitForFunction(() => document.querySelectorAll(".ol-battle .skills .sk[data-olp-tex] .cost").length >= 2 && !!document.querySelector(".ol-battle .summonbtn[data-olp-tex] small"), null, { timeout: 30000 });
+  for (const light of ["day", "night"]) for (const [weather, paper] of Object.entries({ none: "none", sand: "sand", acid: "rain", snow: "snow", glow: "fog" })) {
+    await page.evaluate(([light, weather]) => { fixture.view.state.light = light; fixture.view.state.weather = weather; fixture.emit(); }, [light, weather]);
+    await page.waitForFunction(([light, paper]) => document.body.dataset.olpTime === light && document.body.dataset.olpWeather === paper, [light, paper]);
+    const r = await page.evaluate(() => {
+      const hud = document.querySelector(".ol-battle > .g-hud"), body = getComputedStyle(document.body), look = el => ({ text: el.textContent, color: getComputedStyle(el).color, weight: Number(getComputedStyle(el).fontWeight) });
+      // 「唤出」的颜色跟着这个人的主属性（online-battle.js · paintSummon：--el = 属性色，没有是危险黄）：每一种都量一遍，量完放回去
+      const sb = hud.querySelector(".summonbtn"), small = sb.querySelector("small"), keep = sb.style.getPropertyValue("--el");
+      const summon = Object.entries(HD2DUI.UI.elements).concat([["无", ""]]).map(([k, c]) => { sb.style.setProperty("--el", c || "var(--sk-hazard, #f2c230)"); return Object.assign({ el: k }, look(small)); });
+      if (keep) sb.style.setProperty("--el", keep); else sb.style.removeProperty("--el");
+      return { cost: [...hud.querySelectorAll(".skills .sk .cost")].map(look), kraft: body.getPropertyValue("--olp-kraft").trim(), board: body.getPropertyValue("--olp-board").trim(), summon };
+    });
+    const tag = `${light} · ${weather}`;
+    assert.deepEqual(r.cost.map(c => c.text), ["行动 1", "附赠 1"], tag);
+    for (const c of r.cost) {
+      assert.ok(contrast(c.color, r.kraft) >= 4.5, `${tag}：消耗「${c.text}」的字 ${c.color} 在牛皮纸 ${r.kraft} 上对比度只有 ${contrast(c.color, r.kraft).toFixed(2)}`);
+      assert.ok(c.weight >= 700, `${tag}：消耗「${c.text}」要加粗：${c.weight}`);
+    }
+    for (const s of r.summon) {
+      assert.ok(contrast(s.color, r.board) >= 4.5, `${tag}：「唤出」（${s.el}）下面那行「${s.text}」${s.color} 在纸板 ${r.board} 上对比度只有 ${contrast(s.color, r.board).toFixed(2)}`);
+      assert.ok(s.weight >= 700, `${tag}：「唤出」下面那行要加粗：${s.weight}`);
+    }
+    if (weather === "none") await shot(page, "paper-cost-" + light);
+  }
+  assert.deepEqual(o.errors, []);
+});
+
 test("队伍收起后只剩一列头像贴纸（后面没有白卡片）；收起后右边缘的竖标签「记录 · 聊天」字清楚，未读数是红章", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);

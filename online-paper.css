@@ -256,7 +256,10 @@ body.ol-paper .hd2d-party .pm .pm-tag { transform: rotate(-8deg); font-family: v
  * 吊牌左边从左往右排开：打孔（6～12px）→ 打孔虚线（15px）→ 属性图标（19～35px）→ 名字（39px 起），谁也不压谁（审查：图标压住了名字的第一个字） */
 body.ol-paper .g-hud.hd2d-shell .skills .sk[data-olp-tex] { width: 150px; color: var(--olp-kraft-ink); border: 0; padding-left: 39px; }
 body.ol-paper .g-hud.hd2d-shell .skills .sk .nm { font-family: var(--olp-label); font-weight: 400; font-size: 18px; text-shadow: none; }
-body.ol-paper .g-hud.hd2d-shell .skills .sk .cost { color: var(--olp-muted); }
+/* 名字下面那行消耗（「行动 1」「附赠 1」、联机房主算好的消耗 / 用不了的原因）：纸上的深色字、加粗（主人：牛皮纸上淡淡的绿字几乎看不见）——
+ * 新画面给「行动」「附赠」配的薄荷绿 / 浅黄（hd2d.css）是深色底上的，纸上不要，跟着这一行的颜色走（夜里是浅色字，配色表 kraftInk） */
+body.ol-paper .g-hud.hd2d-shell .skills .sk .cost { color: var(--olp-kraft-ink); font-weight: 700; }
+body.ol-paper .g-hud.hd2d-shell .skills .sk .cost :is(.ap, .bn) { color: inherit; }
 body.ol-paper .g-hud.hd2d-shell .skills .sk .key { color: var(--olp-kraft-ink); opacity: .55; font-size: 12px; }
 /* 打孔 + 打孔虚线：画在 ::after 上（::before 是纸纹） */
 body.ol-paper .g-hud.hd2d-shell .skills .sk[data-olp-tex]::after {
@@ -279,6 +282,8 @@ body.ol-paper .g-hud.hd2d-shell .summonbtn[data-olp-tex] { color: color-mix(in s
 body.ol-paper .g-hud.hd2d-shell :is(.summonbtn, .endturn)[data-olp-tex] small {
   display: block; opacity: 1; color: inherit; font: 400 12px/1.2 var(--olp-stencil); letter-spacing: 1px; -webkit-text-stroke: 0; text-shadow: 1px 1px 0 var(--olp-spray-edge);
 }
+/* 「唤出」下面那行消耗（「行动 1 · 附赠 1 · Q」）：跟着主属性的喷漆色在纸板上偏淡（主人截图）——换成纸板上的浅色字（配色表 boardInk）、加粗 */
+body.ol-paper .g-hud.hd2d-shell .summonbtn[data-olp-tex] small { color: var(--olp-board-ink); font-weight: 700; }
 body.ol-paper .g-hud.hd2d-shell .summonbtn[data-olp-tex] .sm-ic { filter: drop-shadow(1px 1px 0 var(--olp-spray-edge)); }
 /* 回形针夹着的队伍、订书钉钉着的技能栏、胶带贴着的抽屉（只是装饰：不挡点击） */
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party::after, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party::after {

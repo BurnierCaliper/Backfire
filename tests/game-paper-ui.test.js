@@ -597,6 +597,11 @@ const looks = (page, parts) => page.evaluate(([parts, props, still]) => {
   return out;
 }, [parts, PAPER_PROPS, STILL_CSS]);
 const diffOf = (a, b) => Object.keys(a).filter(k => a[k] !== b[k]).map(k => `${k}: ${a[k]} ≠ ${b[k]}`);
+/** looks 量出来的：元素身上真有的 CSS 动画里，animation-name 已经不写了的（CSS 不要了、却没取消、还套在上面的——真玩的时候就是一直带着上一种天气的光圈） */
+const leftovers = o => Object.keys(o).filter(k => k.endsWith(" CSS 动画") && o[k]).flatMap(k => {
+  const part = k.slice(0, -" CSS 动画".length), names = String(o[part + " animation-name"] || "").split(", ");
+  return o[k].split(", ").filter(n => !names.includes(n)).map(n => part + "：" + n);
+});
 /** 换天气（旧顶栏的下拉框，同一个处理：game.js 换 state.weather、#g-app[data-weather]） */
 const setWeather = (page, w) => page.evaluate(w => { const s = document.getElementById("g-weather-sel"); s.value = w; s.dispatchEvent(new Event("change", { bubbles: true })); }, w);
 
@@ -611,6 +616,8 @@ test("天气换色不串：纸片画面里旧皮肤（game.css / weather-fx.css�
     await page.waitForFunction(w => document.getElementById("g-app").dataset.weather === w, w);
     await settle(page);
     const oldBefore = await looks(page, OLD);
+    // 上一轮开 / 关过纸片画面，这一轮换了天气（第一轮是微光，第二轮起就是主人担心的「微光天气开过新画面再换天气」）：旧画面上不挂着上一种天气的动画
+    assert.deepEqual(leftovers(oldBefore), [], `换成「${w}」以后旧画面上还挂着已经不要的动画`);
     await paperOn(page);
     // 纸片画面：下拉打开、抽屉拉开、预演框亮着，纸纹贴好
     await page.evaluate(() => {
@@ -624,6 +631,7 @@ test("天气换色不串：纸片画面里旧皮肤（game.css / weather-fx.css�
       !!document.querySelector("#g-app > .g-hud[data-olp-tex]") && !!document.querySelector("#g-app > .g-hud .endturn[data-olp-tex]"), null, { timeout: 30000 });
     await settle(page);
     const withWeather = await looks(page, PAPER_PARTS);
+    assert.deepEqual(leftovers(withWeather), [], `天气「${w}」：纸片画面里还挂着旧皮肤已经不要的动画`);
     assert.equal(await page.evaluate(() => document.body.dataset.olpWeather), PAPER_WEATHER[w], "纸片自己的天气色调照旧：" + w);
     // 同一个纸片画面（纸片的天气色调不变），只是旧皮肤的天气规则套不上（拿掉 #g-app 的 data-weather）：应该一模一样
     await page.evaluate(() => { const a = document.getElementById("g-app"); a.dataset.keepWeather = a.dataset.weather; delete a.dataset.weather; });
@@ -638,7 +646,54 @@ test("天气换色不串：纸片画面里旧皮肤（game.css / weather-fx.css�
     await settle(page);
     const left = await page.evaluate(() => ({ vars: [...document.body.style].filter(p => p.startsWith("--olp")), time: document.body.dataset.olpTime || null, weather: document.body.dataset.olpWeather || null }));
     assert.deepEqual(left, { vars: [], time: null, weather: null }, "纸片的配色留在了旧画面上：" + w);
-    assert.deepEqual(diffOf(await looks(page, OLD), oldBefore), [], `天气「${w}」：开 / 关纸片画面以后旧皮肤的样子变了`);
+    const oldAfter = await looks(page, OLD);
+    assert.deepEqual(leftovers(oldAfter), [], `天气「${w}」：开 / 关纸片画面以后旧画面上还挂着已经不要的动画`);
+    assert.deepEqual(diffOf(oldAfter, oldBefore), [], `天气「${w}」：开 / 关纸片画面以后旧皮肤的样子变了`);
+  }
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- 主人截图（10/23，1440×900 战斗中）：技能名字下面那行消耗字太淡 ---------- */
+/** 两个颜色（#rrggbb / rgb(…) / color(srgb 0–1 …)）的对比度（WCAG；同 tests/online-paper-ui.test.js） */
+const contrast = (a, b) => {
+  const rgb = c => (/^#/.test(c) ? [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)) : /^color\(srgb/.test(c) ? c.match(/[\d.]+/g).slice(0, 3).map(v => Number(v) * 255) : c.match(/[\d.]+/g).slice(0, 3).map(Number));
+  const lum = c => { const [r, g, b] = rgb(c).map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+/** 纸片自己的天气色调（paper-ui.js · BASE.theme.weather）：常态、沙暴、下雨（酸雨）、雪、雾（微光）各挑一种 */
+const COST_WEATHERS = { none: "none", sand: "sand", acid: "rain", snow: "snow", glow: "fog" };
+
+test("技能吊牌名字下面那行消耗（「行动 1」「附赠 1」）、「唤出」下面那行小字在纸上看得清：深色字（夜里浅色）、加粗，和纸面的对比度 ≥ 4.5（白天 / 夜里 × 常态 / 沙暴 / 下雨 / 雪 / 雾）——新画面原来的薄荷绿、浅黄在牛皮纸上几乎看不见", { timeout: 150000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  await page.waitForFunction(() => !!document.querySelector("#g-app > .g-hud .skills .sk[data-olp-tex] .cost .ap") && !!document.querySelector("#g-app > .g-hud .summonbtn[data-olp-tex] small"), null, { timeout: 30000 });
+  for (const time of ["day", "night"]) {
+    if (time === "night") await page.evaluate(() => { state.light = "night"; document.getElementById("g-app").classList.add("is-night"); });
+    for (const [w, paper] of Object.entries(COST_WEATHERS)) {
+      await setWeather(page, w);
+      await page.waitForFunction(([time, paper]) => document.body.dataset.olpTime === time && document.body.dataset.olpWeather === paper, [time, paper]);
+      const r = await page.evaluate(() => {
+        const hud = document.querySelector("#g-app > .g-hud"), look = el => ({ text: el.textContent, color: getComputedStyle(el).color, weight: Number(getComputedStyle(el).fontWeight) });
+        const probe = name => { const x = document.createElement("i"); x.style.color = `var(${name})`; hud.appendChild(x); const c = getComputedStyle(x).color; x.remove(); return c; };
+        // 「唤出」的颜色跟着这个人的主属性（game.js：--el = var(--属性)，没有主属性是危险黄）：每一种都量一遍，量完放回去
+        const sb = hud.querySelector(".summonbtn"), small = sb.querySelector("small"), keep = sb.style.getPropertyValue("--el");
+        const summon = Object.keys(HD2DUI.UI.elements).concat([""]).map(k => { sb.style.setProperty("--el", k ? `var(--${k})` : "var(--sk-hazard, #f2c230)"); return Object.assign({ el: k || "无" }, look(small)); });
+        if (keep) sb.style.setProperty("--el", keep); else sb.style.removeProperty("--el");
+        return { cost: [...hud.querySelectorAll(".skills .sk .cost, .skills .sk .cost :is(.ap, .bn)")].map(look), aps: hud.querySelectorAll(".skills .sk .cost .ap").length,
+          bns: hud.querySelectorAll(".skills .sk .cost .bn").length, kraft: probe("--olp-kraft"), board: probe("--olp-board"), summon };
+      });
+      const tag = `${time} · ${w}`;
+      assert.ok(r.aps > 0 && r.bns > 0, tag + "：「行动」「附赠」两种消耗都有：" + JSON.stringify([r.aps, r.bns]));
+      for (const c of r.cost) {
+        assert.ok(contrast(c.color, r.kraft) >= 4.5, `${tag}：消耗「${c.text}」的字 ${c.color} 在牛皮纸 ${r.kraft} 上对比度只有 ${contrast(c.color, r.kraft).toFixed(2)}`);
+        assert.ok(c.weight >= 700, `${tag}：消耗「${c.text}」要加粗：${c.weight}`);
+      }
+      for (const s of r.summon) {
+        assert.ok(contrast(s.color, r.board) >= 4.5, `${tag}：「唤出」（${s.el}）下面那行「${s.text}」${s.color} 在纸板 ${r.board} 上对比度只有 ${contrast(s.color, r.board).toFixed(2)}`);
+        assert.ok(s.weight >= 700, `${tag}：「唤出」下面那行要加粗：${s.weight}`);
+      }
+      if (w === "none") await shot(page, "solo-paper-cost-" + time);
+    }
   }
   assert.deepEqual(o.errors, []);
 });

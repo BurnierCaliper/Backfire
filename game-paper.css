@@ -152,10 +152,9 @@ body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-hud, .g-log, .pvbox)::
 body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-log, .pvbox):not([data-olp-tex])::before { content: none; background: none; }
 /* 贴了纸纹的按钮、技能：底下不再垫旧皮肤的底图（天气的渐变、旧皮肤的噪点；纸纹盖不住撕边那一圈）——纸板按钮的底图就是纸纹，不算 */
 body.ol-paper.g-paper .g-app [data-olp-tex]:not(.summonbtn, .endturn) { background-image: none !important; }
-/* 灰着的技能照旧淡到 .4（和 game.css 的 .sk[disabled] 一样），名字、消耗的字不换色（「工具 ▾」里灰着的按钮在上面「工具 ▾」那一段） */
+/* 灰着的技能照旧淡到 .4（和 game.css 的 .sk[disabled] 一样），名字、消耗的字不换色（和 online-paper.css 里没灰的一样：纸上的深色字；「工具 ▾」里灰着的按钮在上面「工具 ▾」那一段） */
 body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) { opacity: .4; border-style: none; }
-body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) :is(.nm, .key) { color: var(--olp-kraft-ink); }
-body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) .cost { color: var(--olp-muted); }
+body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) :is(.nm, .key, .cost) { color: var(--olp-kraft-ink); }
 /* 预演框：每一行是纸上的字（旧皮肤天气给 .pvbox .ln 换的颜色不要）；不能用的原因是红章色 */
 body.ol-paper.g-paper .g-app > .pvbox.live .ln { color: inherit; }
 body.ol-paper.g-paper .g-app > .pvbox.live .ln.pv-why { color: var(--olp-stamp); }
