@@ -329,6 +329,15 @@ test("图鉴「义体」：每件的诊所说明多一句「5 级起可以在诊
   }
 });
 
+test("图鉴「规则」·义体与改造率：「义体」一节写角色 5 级起才能在诊所装 / 拆（读 CYBERWARE_UNLOCK_LEVEL），血量层改造 1 级就能做", () => {
+  const c = H.load();
+  vm.runInContext(read("rulebook.js"), c, { filename: "rulebook.js" });   // 和 tests/rulebook.test.js 一样另外加载
+  const e = c.rulebookEntries().find(x => x.chapter === "cyber");
+  const lines = J(e.sections.find(s => s.title === "义体").lines);
+  assert.ok(lines.includes("角色 5 级起才能在诊所安装 / 拆除义体；还不到 5 级时已经装着的义体照常生效，只是不能拆。血量层改造没有这个限制，1 级就能做。"), lines.join("\n"));
+  assert.match(read("rulebook.js"), /`角色 \$\{CYBERWARE_UNLOCK_LEVEL\} 级起才能在诊所安装 \/ 拆除义体；还不到 \$\{CYBERWARE_UNLOCK_LEVEL\} 级时/, "数字从配置读");
+});
+
 /* ---------- README ---------- */
 test("README：规则改动记录最上面一条是这次改动（#315），写了以前怎样、现在怎样", () => {
   const readme = read("README.md");

@@ -582,7 +582,9 @@ const RULEBOOK_CHAPTERS = [
           shpTier ? `${shpTier} 级起的义体还会压低坚毅生命上限。` : null,
           "义体不能升级：同一系列同时只能装一件，换等级要在诊所以新换旧（付旧的拆除费 + 新的价格）。",
           "没有部位 / 槽位限制，装几件只看改造率；写着冲突标签的，同标签的不能同时装。",
-          "在诊所花钱安装；拆除也要花钱，但完全可逆，压低的上限会还回来。每一件的效果、价格和坚毅生命的具体消耗见图鉴「义体」。"
+          "在诊所花钱安装；拆除也要花钱，但完全可逆，压低的上限会还回来。每一件的效果、价格和坚毅生命的具体消耗见图鉴「义体」。",
+          // #315：等级门槛读 cyberware.js · CYBERWARE_UNLOCK_LEVEL
+          `角色 ${CYBERWARE_UNLOCK_LEVEL} 级起才能在诊所安装 / 拆除义体；还不到 ${CYBERWARE_UNLOCK_LEVEL} 级时已经装着的义体照常生效，只是不能拆。血量层改造没有这个限制，1 级就能做。`
         ], table: { head: ["等级", "名字后缀", "生命上限", "固定占用"],
           rows: CYBERWARE_TIERS.map(t => [`${t} 级`, `.vol${CYBERWARE_VOL[t]}`, `−${CYBERWARE_TIER[t].hpCut}`, rbPct(CYBERWARE_TIER[t].occupancy)]) } },
         { title: `发动义体（${kind.name}）`, lines: fire.length ? [
