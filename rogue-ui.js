@@ -274,13 +274,18 @@
     const bench = run.party.length > 1
       ? `<p class="r-hint">队伍里的人也可以先换到候补：${run.party.map(p => `<button class="g-btn small" data-swap-out-only="${esc(p.kit)}">${esc(Rogue.heroName(p.kit))} 下场</button>`).join(" ")}</p>` : "";
     const daily = typeof Rogue.growthDaily === "function" ? Rogue.growthDaily(run) : null;
-    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">每个完成：随机材料 + 1000 奎支；三个全完成：额外 1 个${esc(fusion)} 和 1000 奎支。</p>` : "";
+    const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">${dailyRewardText(fusion)}</p>` : "";
     return `<h2>抽取机</h2>
       ${window.GachaUI ? GachaUI.panelHtml(d, fusion) : ""}
       <p class="r-hint">已有：${esc(owned)}</p>
       ${dailyHtml}
       ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
       ${bench}`;
+  }
+  /** 每日挑战奖励说明：数字从 rogue-data.js · ROGUE_GACHA.dailyTaskFusion / dailyAllFusion 读 */
+  function dailyRewardText(fusion) {
+    const per = Number(ROGUE_GACHA.dailyTaskFusion) || 0, all = Number(ROGUE_GACHA.dailyAllFusion) || 0;
+    return `每个完成：随机武器材料${per > 0 ? ` + ${per} 个${esc(fusion)}` : ""} + 1000 奎支；三个全完成：额外${all > 0 ? ` ${all} 个${esc(fusion)} 和` : ""} 1000 奎支。`;
   }
   /** 抽取：单机直接跑规则拿到结果再播动画（联机单局没有长线养成，抽取机只在单机出现） */
   function doDraw(n) {

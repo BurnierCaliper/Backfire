@@ -368,7 +368,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **长线养成抽取机：30% 角色 / 40% 武器材料 / 30% 制作材料，每抽附赠奎支；每日挑战每个给 1 个融合体、全完成额外 5 个**（作者批准；rogue.js · `drawMany`（新）/ `drawHero` / `drawRates`（新）/ `drawInfo` / `completeGrowthDailyTask`；rogue-data.js · `ROGUE_GACHA`（新）；rogue-commands.js 指令 `drawMany`、查询 `drawRates`；测试 tests/gacha-rates.test.js，tests/growth-mode.test.js 抽取那条）
+- **长线养成抽取机：30% 角色 / 40% 武器材料 / 30% 制作材料，每抽附赠奎支；每日挑战每个给 1 个融合体、全完成额外 5 个**（作者批准；rogue.js · `drawMany`（新）/ `drawHero` / `drawRates`（新）/ `drawInfo` / `completeGrowthDailyTask`；rogue-data.js · `ROGUE_GACHA`（新）；rogue-commands.js 指令 `drawMany`、查询 `drawRates`；rogue-ui.js · `dailyRewardText`（新，每日挑战奖励说明从 `ROGUE_GACHA` 读）；测试 tests/gacha-rates.test.js，tests/growth-mode.test.js 抽取那条）
   - **以前**：每抽 1 个赫心融合体 100% 抽到角色（11 名角色等概率，满级的不会抽到；新角色 1 级入队，重复 +1 级）；所有角色满级后抽取机不能用。每日挑战每个完成给随机武器材料 + 1000 奎支，三个全完成额外 1 个融合体 + 1000 奎支。
   - **现在**：每抽 30% 角色（原逻辑不变）/ 40% 武器升级材料（各档比例和每日挑战奖励同一张表 `ROGUE_GACHA.weaponMats`：金属 50 / 精炼合金 30 / 聚合材料 14 / 稀有晶体 4 / 赫心结晶 2）/ 30% 道具制作材料（items.js · `CRAFT_MATERIALS` 7 种等概率）。所有角色满级时角色那份按 40:30 分给两种材料（武器 4/7、制作 3/7），抽取机照常可用。每条结果带光色：角色金、赫心结晶金、稀有晶体紫、聚合材料蓝、精炼合金蓝、金属灰、制作材料一律蓝。每抽附赠奎支，**待定**：现在按光色（灰 100 / 蓝 150 / 紫 500 / 金 1000），开关 `ROGUE_GACHA.kuizhiMode` 改成 `"flat"` 就是固定 `kuizhiFlat.base`（100）+ 按光色的 `kuizhiFlat.extra`。没有保底。随机数仍按 `种子:draw:第几抽` 固定，`run.draws` 跟存档走。每日挑战每完成 1 个另给 1 个融合体，三个全完成的额外奖励从 1 个改成 5 个（1000 奎支不变）。
 - **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
@@ -1615,7 +1615,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - 开局选 2 名角色。没有主线、期限和首领，任务随便接；敌人等级 = 队伍平均等级（+ 任务难度、精英加成），区域按这个等级落在哪一幕的等级段里。
   - 经验照跑团模式：升级所需经验不打折（单局是 1/3），击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」。任务报酬的经验照单局。
   - 武器升级照跑团模式：要实物材料（背包里拿；任务之间的商店常备五种材料，价格照物品表）+ 工匠加工费（工匠的打折 / 加价 / 帮工规则照旧）。客制化图纸照单局：在同一位工匠那里升级满次数领图纸。
-  - 每完成一个任务得到 1 个**赫心融合体**；在任务板旁的**角色抽取机**投 1 个抽一名角色（所有角色机会相同，满级的不会抽到）：新角色 1 级入队，队伍满 4 人进候补；抽到已有的角色 +1 级（升级奖励照常排进升级选择）。任务板前可以和候补换人。
+  - 每完成一个任务得到 1 个**赫心融合体**；在任务板旁的**抽取机**投 1 个抽一次（可以十连）：30% 抽到角色（还没满级的角色机会相同，满级的不会抽到；所有角色都满级后改成武器材料 4/7、制作材料 3/7）、40% 武器升级材料、30% 道具制作材料，每抽另附奎支（数字见 rogue-data.js · `ROGUE_GACHA`）。抽到新角色 1 级入队，队伍满 4 人进候补；抽到已有的角色 +1 级（升级奖励照常排进升级选择）。每日挑战每完成一个另给 1 个赫心融合体，三个全完成额外给 5 个。任务板前可以和候补换人。
   - 角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败（休息点被偷袭团灭：没睡好，继续走）；满 80 小时不会力竭致死，而是昏睡过去。
   - 存档和单局共用一格（开新局会提醒覆盖）。数字都在 `ROGUE_GROWTH`。
   - 测试 `tests/growth-mode.test.js`。

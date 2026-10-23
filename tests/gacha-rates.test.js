@@ -40,7 +40,9 @@ test("武器材料各档比例 = 每日挑战奖励的同一张表；制作材�
   const w = rs.filter(r => r.kind === "weapon_material"), sum = GA.weaponMats.reduce((a, m) => a + m.w, 0);
   GA.weaponMats.forEach(m => {
     const got = w.filter(r => r.id === m.id).length / w.length;
-    assert.ok(Math.abs(got - m.w / sum) < 0.03, `${m.id} ${got}`);
+    const p = m.w / sum;
+    assert.ok(w.some(r => r.id === m.id), `${m.id} 一次都没出现`);
+    assert.ok(Math.abs(got - p) < Math.max(0.005, p * 0.3), `${m.id} ${got}`);
   });
   const cm = rs.filter(r => r.kind === "craft_material"), ids = (c.CRAFT_MATERIALS || c.S.CRAFT_MATERIALS).map(m => m.id);
   ids.forEach(id => { const got = cm.filter(r => r.id === id).length / cm.length; assert.ok(Math.abs(got - 1 / ids.length) < 0.035, `${id} ${got}`); });
@@ -144,4 +146,18 @@ test("每日挑战：每完成 1 个给 1 个融合体，三个全完成额外 5
   assert.ok(d.allDone);
   assert.equal(c.bagCount("heart_fusion") - f0, 3 + 5);
   assert.ok(notes.some(t => /额外获得 赫心融合体×5/.test(t)));
+});
+
+test("每日挑战奖励说明（rogue-ui.js）的数字从 ROGUE_GACHA 读，不再写旧规则", () => {
+  const src = require("fs").readFileSync(require("path").join(__dirname, "..", "rogue-ui.js"), "utf8");
+  const vm = require("node:vm");
+  const start = src.indexOf("  function dailyRewardText(");
+  assert.ok(start >= 0);
+  const body = src.slice(start, src.indexOf("\n  }\n", start) + 4);
+  const ctx = vm.createContext({ ROGUE_GACHA: { dailyTaskFusion: 2, dailyAllFusion: 7 }, esc: String });
+  vm.runInContext(body + "\nthis.f = dailyRewardText;", ctx);
+  assert.equal(ctx.f("赫心融合体"), "每个完成：随机武器材料 + 2 个赫心融合体 + 1000 奎支；三个全完成：额外 7 个赫心融合体 和 1000 奎支。");
+  ctx.ROGUE_GACHA.dailyTaskFusion = 0; ctx.ROGUE_GACHA.dailyAllFusion = 0;
+  assert.doesNotMatch(ctx.f("赫心融合体"), /融合体/);
+  assert.doesNotMatch(src, /额外 1 个\$\{esc\(fusion\)\}/);
 });

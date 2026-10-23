@@ -56,9 +56,9 @@ test("完成任务得到赫心融合体；回到任务板（不会进首领战�
 test("抽取机（30% 抽到角色）：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
   const { c, run, R, G } = fresh("G4");
   assert.equal(R.drawInfo(run).canDraw, false);
-  c.bagAdd("heart_fusion", 30);
+  c.bagAdd("heart_fusion", 100);
   let ups = 0, joins = 0;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 100; i++) {
     const before = run.party.length + run.reserve.length;
     const r = R.drawHero(run);
     if (r.kind !== "character") { assert.ok(["weapon_material", "craft_material"].includes(r.kind)); continue; }
@@ -78,7 +78,8 @@ test("抽取机（30% 抽到角色）：新角色入队，满员进候补；抽�
   }
   // 抽到重复角色升级也会排上升级选择
   const leveled = run.party.concat(run.reserve).find(h => h.level >= 4);
-  if (leveled) assert.ok((leveled.pending || []).some(p => p.level === 4));
+  assert.ok(leveled, "100 抽里应该有人升到 4 级");
+  assert.ok((leveled.pending || []).some(p => p.level === 4));
 });
 
 test("武器升级照跑团模式：要实物材料 + 加工费；商店常备材料", () => {

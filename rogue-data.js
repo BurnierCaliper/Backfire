@@ -303,7 +303,7 @@ const ROGUE_GACHA = {
   dailyAllFusion: 5
 };
 if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
-  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: "长线养成：在抽取机里抽一次：30% 角色（新角色入队，已有的 +1 级）/ 40% 武器升级材料 / 30% 道具制作材料，另附奎支", goods: true };
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支`, goods: true };
 }
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）

@@ -59,7 +59,6 @@ const Rogue = (function () {
   /** 现在幕间能不能改走下水道：背包里有地图（联机：队里任何一个人名下有，或者公用的），这一局还没进过。长线养成没有幕间 */
   const canEnterSewer = (run) => !run.growth && !!ITEM_CATALOG[SEWER().item] && bagCount(SEWER().item) > 0 && !sewerEntered(run);
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
-  const GA = () => (typeof ROGUE_GACHA !== "undefined" ? ROGUE_GACHA : null);
   const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
   let growthOn = false;   // 当前载入的是长线养成：经验照跑团模式（growth.js · grantXpToPlayers、app.js 战斗结算看这个）
   /** 队伍平均等级（四舍五入） */
@@ -2741,13 +2740,13 @@ const Rogue = (function () {
     bagAdd(mat, 1);
     if (per > 0) bagAdd(G().fusionItem, per);
     state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1、${fName}×${per} 和 1000 奎支。`);
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1${per > 0 ? `、${fName}×${per}` : ""} 和 1000 奎支。`);
     const all = run.growthDaily.tasks.every(t => t.done);
     if (all && !run.growthDaily.allDone) {
       run.growthDaily.allDone = true;
-      bagAdd(G().fusionItem, bonus);
+      if (bonus > 0) bagAdd(G().fusionItem, bonus);
       state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-      notes.push(`三个每日挑战全部完成：额外获得 ${fName}×${bonus} 和 1000 奎支。`);
+      notes.push(`三个每日挑战全部完成：额外获得 ${bonus > 0 ? `${fName}×${bonus} 和 ` : ""}1000 奎支。`);
     }
   }
 function advanceDays(run, n) {
@@ -2925,17 +2924,8 @@ function advanceDays(run, n) {
   function requireGrowth(run) {
     if (!run || !run.growth) throw new Error("只有长线养成有这个");
   }
-  /* 抽取机概率表（rogue-data.js · ROGUE_GACHA）。没加载数据文件时用同样的默认值 */
-  const GACHA_DEFAULT = {
-    share: { hero: 0.30, weapon: 0.40, craft: 0.30 },
-    weaponMats: [{ id: "mat_metal", w: 50 }, { id: "mat_alloy", w: 30 }, { id: "mat_polymer", w: 14 }, { id: "mat_crystal", w: 4 }, { id: "mat_heart", w: 2 }],
-    craftMats: null,
-    light: { hero: "gold", craft: "blue", mat_heart: "gold", mat_crystal: "purple", mat_polymer: "blue", mat_alloy: "blue", mat_metal: "gray" },
-    kuizhiMode: "byLight", kuizhiByLight: { gray: 100, blue: 150, purple: 500, gold: 1000 },
-    kuizhiFlat: { base: 100, extra: { gray: 0, blue: 0, purple: 0, gold: 0 } },
-    dailyTaskFusion: 1, dailyAllFusion: 5
-  };
-  const gachaCfg = () => Object.assign({}, GACHA_DEFAULT, GA() || {});
+  /* 抽取机概率表：数字只在 rogue-data.js · ROGUE_GACHA 一处 */
+  const gachaCfg = () => ROGUE_GACHA;
   /** 按武器材料表（每日挑战同一张）把 [0,1) 的 roll 换成材料 id */
   function rollWeaponMat(roll) {
     const t = gachaCfg().weaponMats, sum = t.reduce((a, m) => a + m.w, 0);
@@ -3035,8 +3025,7 @@ function advanceDays(run, n) {
   /** 连抽 n 次（十连给 10）：融合体不够 n×cost 时直接报错，什么都不动。
    *  → { results: [{ no, kind: "character"|"weapon_material"|"craft_material", type: "hero"|"weapon"|"craft", id, kit?, name, qty, light, rarity, kuizhi, levelUp?, level? }], kuizhi, notes } */
   function drawMany(run, n) {
-    n = Number(n);
-    if (!Number.isInteger(n) || n < 1) throw new Error("抽取次数要是正整数");
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1) throw new Error("抽取次数要是正整数");
     const info = drawInfo(run);
     if (run.stage !== "board") throw new Error(info.why);
     const need = n * G().drawCost;
