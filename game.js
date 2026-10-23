@@ -4657,6 +4657,7 @@
     const box = $("g-rest-party");
     box.innerHTML = "";
     const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]);
+    const eat = currentRestPlan().food;
     partyHeroes().forEach(h => {
       const row = el("div", "rp-row");
       const tag = h.dead ? "死亡" : h.dying ? "濒死" : h.upOnShp ? "起身中" : "";
@@ -4676,7 +4677,7 @@
         o.value = id; o.textContent = `长休吃 ${ITEM_CATALOG[id].name}（有 ${bagCount(id)}）`;
         fsel.appendChild(o);
       });
-      fsel.value = G.restFood[h.kit] || (typeof defaultFoodFor === "function" ? defaultFoodFor() : foods[0]);
+      fsel.value = eat[h.kit] || foods[0];
       fsel.onchange = () => { G.restFood[h.kit] = fsel.value; renderRestSheet(); };
       fsel.disabled = h.dead;
       const ssel = document.createElement("select");
@@ -4740,8 +4741,7 @@
     $("g-long-go").textContent = need.ok || force ? (force ? "长休（不扣补给）" : `长休（${need.water} ml 水 · ${foodN} 份食物）`) : "补给不足";
   }
   function currentRestPlan() {
-    const food = {};
-    partyHeroes().forEach(h => { food[h.kit] = G.restFood[h.kit] || defaultFoodFor(); });
+    const food = restFoodPlan({ food: G.restFood });   // 没选的人按库存分（ledger.js）
     const hsel = $("g-long-hours");
     return { hours: Number(hsel && hsel.value) || 8, food, sleep: Object.assign({}, G.restSleep), spit: Object.assign({}, G.restSpit), ammo: Object.assign({}, G.restAmmo), force: !!($("g-long-force") && $("g-long-force").checked) };
   }
