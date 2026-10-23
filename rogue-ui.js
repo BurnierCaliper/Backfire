@@ -334,8 +334,10 @@
       const spit = h.spit ? `<br><small>吐酸</small> <select data-rest-spit="${esc(h.kit)}">${(o.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
       // 龙哥 胶囊弹药+：排下一场开局的弹序
       const ammo = h.ammo != null ? `<br><small>下一场弹序</small> <select data-rest-ammo="${esc(h.kit)}">${(o.ammoOrders || []).map(e => `<option value="${esc(e.id)}" ${e.id === h.ammo ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : "";
-      return `<tr><td><b>${esc(h.name)}</b></td><td>${h.water} ml · ${h.food} 份</td>
-        <td><select data-rest-food="${esc(h.kit)}">${foods}</select></td>
+      // 补的休息点（need.free）：不耗补给、也没有食物加成，不让选吃什么
+      const eat = need.free ? "<small>这里不吃自带的食物</small>" : `<select data-rest-food="${esc(h.kit)}">${foods}</select>`;
+      return `<tr><td><b>${esc(h.name)}</b></td><td>${need.free ? "不消耗" : `${h.water} ml · ${h.food} 份`}</td>
+        <td>${eat}</td>
         <td><select data-rest-sleep="${esc(h.kit)}">${sleeps}</select>${spit}${ammo}</td></tr>`;
     }).join("");
     const bad = (a, b) => (a > b ? "r-bad" : "");
@@ -349,7 +351,7 @@
     }).join(" · ");
     return `<div class="r-restplan"><h3 class="r-sub">长休安排</h3>
       <table><tr><th>角色</th><th>需要</th><th>吃</th><th>睡眠道具</th></tr>${rows}</table>
-      <p class="r-hint">消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}
+      <p class="r-hint">${need.free ? `这里不消耗补给，也没有食物加成${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}` : `消耗：水 <b class="${bad(need.water, o.water)}">${need.water}</b>/${o.water} ml · ${foodSum}${sleepSum ? ` · ${sleepSum}（不消耗）` : ""}`}
         ${need.ok ? "" : `<br><span class="r-bad">不够：${esc(need.lack.join("，"))}</span>`}</p></div>`;
   }
   const NODE_PANELS = {
@@ -375,9 +377,9 @@
         <label class="r-watch">守夜：<select id="r-watch"><option value="">不安排守夜</option>${watchOpts}</select></label>
         <div class="r-choices">
           <button class="g-btn r-main" id="r-long" ${plan.ok ? "" : "disabled"}>长休 ${C.hours.longRest} 小时
-            <small>${wakeHtml(C.hours.longRest)} · ${plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
+            <small>${wakeHtml(C.hours.longRest)} · ${plan.free ? "不消耗补给" : plan.ok ? `消耗 ${plan.water} ml 水、${esc(food)}` : "补给不足：" + esc(plan.lack.join("，"))} · 血量回满、耐久回满、武器人痊愈、清空力竭</small></button>
           <button class="g-btn" id="r-short" ${shortCan.ok ? "" : "disabled"}>短休 ${C.hours.shortRest} 小时<small>${shortCan.ok ? "" : esc(shortCan.why) + " · "}${wakeHtml(C.hours.shortRest, "休息到")} · 不消耗补给 · 每人回复 等级×2+体质 · 一天两次</small></button>
-          <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>获得 ${C.restSkipKuizhi} 奎支 · 不花时间</small></button>
+          <button class="g-btn" id="r-rest-skip">不休息，直接离开<small>${esc(Rogue.restSkipLabel(run))} · 不花时间</small></button>
         </div>`;
     },
     shop: () => `<p>路边有个摊子。手里有 ${money()} 奎支。</p>
@@ -725,6 +727,7 @@
   function huntLine(t) {
     const h = t && t.hunt;
     if (!h || h.found == null) return "";
+    if (h.located && h.target && h.targetAfterRest) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>。已经连续赶了很久的路，先在前面的休息点歇一歇，下一站再去对付它（休息时目标不会跑）。</div>`;
     if (h.located && h.target) return `<div class="t-hunt found">已找到悬赏目标：<b>${esc(h.target.name)}</b>（血量、atk ×1.5，多占 1 枚代币）。击败它完成任务；从这一战撤退目标会逃走，任务失败。</div>`;
     const pips = (n, max, cls) => Array.from({ length: max }, (_, i) => `<i class="${i < n ? cls : ""}"></i>`).join("");
     return `<div class="t-hunt">线索 <span class="hunt-pips">${pips(h.found, h.need, "ok")}</span> ${h.found}/${h.need}

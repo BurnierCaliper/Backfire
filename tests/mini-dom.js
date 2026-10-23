@@ -434,4 +434,26 @@ function key(document, k, o) {
   return ev;
 }
 
-module.exports = { create, key, Event, serialize };
+/**
+ * 记下 roots（一个或几个节点）里面元素的每一次改动（#317：技能栏 / 队伍栏有没有被整块重画）：
+ * log = [[种类, 节点]]，种类是 setAttribute / removeAttribute / insertBefore / removeChild / innerHTML（节点 = 被改的那个；插入 / 拿掉记在父节点上）。
+ * 文字节点改字不记（看节点还是不是原来那个）。元素的类是所有页面共用的：用完一定要 stop()
+ */
+function watch(roots) {
+  const list = [].concat(roots).filter(Boolean);
+  const inside = (n) => list.some(r => r.contains(n));
+  const log = [], undo = [];
+  const wrap = (proto, name) => {
+    const f = proto[name];
+    proto[name] = function () { if (inside(this)) log.push([name, this]); return f.apply(this, arguments); };
+    undo.push(() => { proto[name] = f; });
+  };
+  ["setAttribute", "removeAttribute"].forEach(n => wrap(Element.prototype, n));
+  ["insertBefore", "removeChild"].forEach(n => wrap(Node.prototype, n));
+  const ih = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+  Object.defineProperty(Element.prototype, "innerHTML", { configurable: true, get: ih.get, set(v) { if (inside(this)) log.push(["innerHTML", this]); ih.set.call(this, v); } });
+  undo.push(() => Object.defineProperty(Element.prototype, "innerHTML", ih));
+  return { log, clear: () => { log.length = 0; }, stop: () => undo.reverse().forEach(f => f()) };
+}
+
+module.exports = { create, key, Event, serialize, watch };

@@ -1688,6 +1688,8 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
+  state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油
@@ -6811,7 +6813,9 @@ function finishAssist(helperId, extra) {
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
   state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
-  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; }
+  const prevAssistOf = RAGE_HOLD.assistOf;
+  RAGE_HOLD.assistOf = target;     // 易怒蛮牛：这次协助攻击打到 target 的每一下都算这次失衡（rageBlocked）
+  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; RAGE_HOLD.assistOf = prevAssistOf; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
@@ -7929,7 +7933,30 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
   return extra;
 }
 
+/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush） */
 function dealTo(attacker, target, opt) {
+  if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
+  RAGE_HOLD.depth++;
+  let out, ok = false;
+  try { out = dealToInner(attacker, target, opt); ok = true; }
+  finally {
+    RAGE_HOLD.depth--;
+    // 中途出错：这一击作废，暂存的记录一起丢掉（不然会挂到下一次毫不相干的攻击上发作；意图预测还会留下指向模拟单位的记录）
+    if (!ok && RAGE_HOLD.depth === 0) RAGE_HOLD.pending = [];
+  }
+  if (RAGE_HOLD.depth === 0) {
+    const notes = raceRageFlush();
+    if (notes.length) {
+      // 打配置物 / 危墙的替身（dealToStructure）：formatHitLines 只输出 out.lines
+      if (out && out.structure && Array.isArray(out.lines)) out.lines.push(...notes);
+      else if (out && Array.isArray(out.extra)) out.extra.push(...notes);
+      else appendLog(notes.join("\n"));
+    }
+  }
+  return out;
+}
+
+function dealToInner(attacker, target, opt) {
   if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
@@ -11088,6 +11115,7 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  if (typeof raceRageMarkBroke === "function") raceRageMarkBroke(u);   // 易怒蛮牛：这一击（含纯击破的一段）打出了失衡，整击不发作
   u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
   u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
