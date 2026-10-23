@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **工坊：配方列表、选中配方的详情、学配方都写道具效果**（issue #366；workshop-ui.js · `hintOf` / `effectLine`（新）、`html` 里的 `okRow` / `missRow`、`detail`、`learnHtml`；workshop.css · `.ws-effect`；测试 tests/workshop-ui.test.js 加两条）
+  - **以前**：工坊里每张配方只写名字、熟练项、难度、耗时、材料（缺材料的只写还差什么），看不到做出来的道具有什么用。
+  - **现在**：道具效果就是道具说明（items.js · `ITEM_CATALOG` 的 hint，和背包里写的是同一句），例如电解液罐「对距离 1 以内的一个区域内全部单位（不分敌我）施加感电。附赠动作。」。左边配方列表的每一张（可做、缺材料两组都有）在熟练项那一行下面多一行效果；右边选中配方的详情在耗时那一行下面写「效果：……」（缺材料的也写）；「学配方」里每张也写效果。房主 / 单机和联机玩家用的是同一个渲染器；联机玩家读本机的道具表，联机发的数据没变。
+  - **没改的**：规则、配方、成功率、材料、耗时都没动。issue 里写的 rogue-ui.js · `craftPanel()` 已经换成了这个工坊浮层（workshop-ui.js），没有那个函数了。跑团的工坊（主持人的 trpg-ui.js「工坊」页、联机跑团玩家的 online-ui.js · `trpgWorkshopMarkup`）这次没改，等仓库主人定要不要也加。
+  - **测试**：tests/workshop-ui.test.js 加两条——单机 / 房主：可做、缺材料两组的每一张都写效果，能做的、缺材料的详情都写「效果：……」，学配方的每一张都写；联机玩家（viewFor 发来的包）：列表和详情都写。两条在没改的代码上都失败。
 - **场上有下潜的沙漠中立生物时，本来在战场上点目标的技能改成弹出选择列表：非谐波技能的候选名单里不再有下潜中的单位；谐波攻击的候选里有沙下的，也在战场上点（点「沙下动静」列表里那一行）**（修复 #360；effects.js · `submergedPickOk`（新）；engine.js · `SKILL_HITS_SUBMERGED` / `skillHitsSubmerged`（新）；app.js · `skillFlowSteps`（原来的内容改名 `skillFlowStepsAll`，外面统一过滤选单位的步骤）、`koltMeleeSwapTargets`、单人模式「支援」选敌人那一步；cyberware.js · `cwRegisterSkill`（谐波的义体攻击登记进表）；game.js · `candidateUnits`、`allOnField` / `stirRow`（新）、`inSandStir`（新）、`markTargets` / `unmarkTargets` / `markStir`（新）、`paintSandStir`；game.css 沙下动静里能选的行；测试 tests/issue-360.test.js（新））
   - **以前**：选单位时候选里只要有一个 id 在战场上没有卡片，就整步退回弹列表（game.js · `allOnField`）。夜晚下潜的尘虫 / 管虫不画卡，折进区角的「沙下动静」；可很多技能的候选名单（`fieldUnits()` / `visibleEnemies()` 都不排除下潜中的单位）把它们也放了进来，于是这些本来在战场上点的技能一到沙漠夜晚就弹列表。规则上下潜中的单位本来就不能被选为目标（effects.js · 下潜：只有谐波攻击 / 塌陷例外），以前选了要到 `dealTo` 才说「下潜中，不能被选作攻击目标」。放进了下潜中单位的名单（有效的、预演判成无效的都算）：
     - 分步里选单位的那一步（app.js · `skillFlowSteps`）：扳机、短路、银翼·普通攻击、电力夺取、意式浓缩（酸液打击）、激活、传播（复制谁的状态 / 施加给谁）、黄金时间、灯的普通攻击、嘲讽、盾击突进、圣战起始（错位目标 / 一起移动的人）、猛扑、磁力移动、点火突进（带走的单位 / 引擎开着时原区挨打的敌人）、全速撞击、龙哥的普通攻击 / 冷气穿刺 / 热能轰击、柯尔特的更换刀头（切刀目标）、拆装部件（追击 / 换刀头后打的敌人）、碎渣重炮（迫击炮）、「非法」改装、强化输出（电钻突进后打谁）、拆卸模式、相控阵探头、逃离（原区受击敌人）、规则干涉（拿附赠动作的单位）、巨刃划空、冰美式（清场的参照单位）、单人模式的支援（打谁）；专长「推搡」（推谁）。

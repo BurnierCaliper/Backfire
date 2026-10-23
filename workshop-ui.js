@@ -1,15 +1,19 @@
 /* 工坊面板（单局 · 任务板 / 休整 / 工匠 / 休息点）：按钮打开的浮层，不再拼在页面底部，战斗里没有。
  * 房主 / 单机（rogue-ui.js）和联机玩家（online-ui.js）用同一个渲染器，数据走 workshop-data-adapter.js 的界面模型。
  *   顶：材料条 · 分类标签 + 只看可做
- *   左：可做（展开、高亮）/ 缺材料（折叠、灰，只写「还差 X×n」，不给成功率）
- *   右：选中配方的详情（材料 ✓ / ✗、每人成功率 + 打下手、耗时、产出、失败损失、制作 / 排活）
- *   下：学配方、拆解
+ *   左：可做（展开、高亮）/ 缺材料（折叠、灰，只写「还差 X×n」，不给成功率）；每张都写道具效果
+ *   右：选中配方的详情（道具效果、材料 ✓ / ✗、每人成功率 + 打下手、耗时、产出、失败损失、制作 / 排活）
+ *   下：学配方（也写道具效果）、拆解
  * 按钮都是 data-ws-cmd（JSON 指令），由打开面板的一方交给自己的 act()。 */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const pct = p => `${Math.round((Number(p) || 0) * 1000) / 10}%`;
   const nameOf = id => ((typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {})[id] || {}).name || id;
+  /* 道具效果（items.js · ITEM_CATALOG 的 hint，固定的规则文字）：配方列表、详情、学配方都写。
+   * 联机玩家也读本机的道具表，联机发的数据不用多带 */
+  const hintOf = id => ((typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {})[id] || {}).hint || "";
+  const effectLine = id => { const h = hintOf(id); return h ? `<small class="ws-effect">${esc(h)}</small>` : ""; };
   const cmdAttr = cmd => `data-ws-cmd="${esc(JSON.stringify(cmd))}"`;
   const KINDS = [["", "全部"], ["status", "投掷罐"], ["instant", "弹针"], ["common", "增益 / 减益"], ["stun", "晕眩"], ["field", "场地"], ["self", "自我效果"]];
   const PLACE_TEXT = { bench: "工作台：五类都能做", rest: "休息点：场地、自我效果做不了" };
@@ -45,8 +49,8 @@
     const tabs = KINDS.map(([k, n]) => `<button type="button" class="g-btn ws-tab" data-ws-kind="${esc(k)}" aria-pressed="${ui.kind === k}">${esc(n)}</button>`).join("");
     const heroTabs = heroes.length > 1 ? `<div class="ws-heroes" role="tablist" aria-label="谁来做">${heroes.map(h => `<button type="button" class="g-btn ws-hero" data-ws-kit="${esc(h.kit)}" aria-pressed="${ui.kit === h.kit}">${esc(h.name)}</button>`).join("")}</div>` : "";
     const okRow = r => `<li class="ws-recipe ok${ui.sel === r.id ? " sel" : ""}" data-ws-pick="${esc(r.id)}" tabindex="0">
-        <b>${esc(r.name)}</b><small>${esc(r.prof)} · ${esc(r.diffName)} · ${esc(r.hours)} 小时${r.metalKuizhi ? ` · 补金属 ${esc(r.metalKuizhi)} 奎支` : ""}</small></li>`;
-    const missRow = r => `<li class="ws-recipe miss${ui.sel === r.id ? " sel" : ""}" data-ws-pick="${esc(r.id)}" tabindex="0"><b>${esc(r.name)}</b><small class="ws-need">${esc(missReason(r))}</small></li>`;
+        <b>${esc(r.name)}</b><small>${esc(r.prof)} · ${esc(r.diffName)} · ${esc(r.hours)} 小时${r.metalKuizhi ? ` · 补金属 ${esc(r.metalKuizhi)} 奎支` : ""}</small>${effectLine(r.id)}</li>`;
+    const missRow = r => `<li class="ws-recipe miss${ui.sel === r.id ? " sel" : ""}" data-ws-pick="${esc(r.id)}" tabindex="0"><b>${esc(r.name)}</b><small class="ws-need">${esc(missReason(r))}</small>${effectLine(r.id)}</li>`;
     const matFilter = ui.mat ? `<p class="ws-filter">只看用到「${esc(nameOf(ui.mat))}」的配方 <button type="button" class="g-btn small" data-ws-mat="">清除</button></p>` : "";
     const list = `${matFilter}<section class="ws-group ws-ok"><h3>可做 <small>${craftable.length}</small></h3>
         <ul class="ws-list">${craftable.map(okRow).join("") || `<li class="ws-empty">${ui.only || !missing.length ? "现在没有材料够的配方。" : "没有材料够的配方，看看下面缺什么。"}</li>`}</ul></section>
@@ -75,8 +79,9 @@
       return `<li class="${enough ? "ok" : metal ? "pay" : "bad"}">${mark} ${esc(m.name || nameOf(m.id))} <b>${esc(m.have)}/${esc(m.need)}</b>${!enough && metal ? `<small>缺的按 ${esc(row.metalKuizhi)} 奎支补</small>` : ""}</li>`;
     }).join("");
     const isCraftable = (model.grouped(ui.kit).craftable || []).some(r => r.id === row.id);
+    const effect = hintOf(row.id);
     const head = `<h3>${esc(row.name)}</h3><p class="ws-meta">${esc(row.prof)} · ${esc(row.diffName)} · ${esc(row.hours)} 小时 · 产出 ${esc(row.name)}×1</p>
-      <ul class="ws-mats">${mats}</ul>`;
+      ${effect ? `<p class="ws-effect">效果：${esc(effect)}</p>` : ""}<ul class="ws-mats">${mats}</ul>`;
     if (!isCraftable) {
       // 缺材料 / 做不了：不给成功率
       return `${head}<p class="ws-need big">${esc(missReason(row))}</p>
@@ -111,7 +116,7 @@
     if (!l.length) return "";
     const money = model.money ? model.money(ui.kit) : 0;
     return `<details class="ws-sec"><summary>学配方（${esc(l[0].smithName)}）</summary><ul class="ws-q">${l.map(x => `<li>${esc(x.name)} · ${esc(x.prof)} · ${esc(x.diffName || "")}
-      <button type="button" class="g-btn small" ${cmdAttr({ action: "learnRecipe", item: x.item, smith: x.smith })} ${money < x.price ? "disabled" : ""}>学 · ${esc(x.price)} 奎支</button></li>`).join("")}</ul></details>`;
+      <button type="button" class="g-btn small" ${cmdAttr({ action: "learnRecipe", item: x.item, smith: x.smith })} ${money < x.price ? "disabled" : ""}>学 · ${esc(x.price)} 奎支</button>${effectLine(x.item)}</li>`).join("")}</ul></details>`;
   }
   function salvageHtml(model) {
     const s = model.salvage || [];
