@@ -1984,7 +1984,13 @@
             if (fk && event.kind === "fxword") { bubble.insertAdjacentHTML("afterbegin", global.HudIcons.badge(fk)); global.HudIcons.proc(bubble.firstElementChild); }
             if (fk) global.HudIcons.procIn(card, fk);
             card.classList.add("ol-impact"); bubble.classList.add("ol-visible");
-            if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind === "highboom" });
+            if (global.HitFx && (event.kind === "dmg" || event.kind === "highboom" || event.kind === "carboom")) global.HitFx.burst(event.element || "physical", card.getBoundingClientRect(), { big: event.kind !== "dmg" });
+            if (event.kind === "carboom") {
+              // 自爆小车死亡引爆：在小车身上炸开（和房主画面一样：震屏、爆炸形状；爆炸声在 online-sfx.js），炸到的人的数字跟在后面
+              const w = battle && battle.el;
+              if (w) { w.classList.remove("quake", "quake-s"); void w.offsetWidth; w.classList.add("quake"); setTimeout(() => w.classList.remove("quake"), 600); }
+              if (AF && AF.impact) { try { AF.impact(rectOf(card), { kind: "explode", el: event.element || "energy", area: true }, {}); } catch (_) { /* 画坏了不影响结算 */ } }
+            }
             if (main && !fx.parried) {
               if (scr && scr.impact) { try { scr.impact(ctx, event, n, false); } catch (_) { /* 同上 */ } }
               else AF.impact(rectOf(card), fx.move, { n, from: fxFrom });
@@ -2059,7 +2065,8 @@
       const zoneRect = (x) => boxOf(typeof x === "number" ? battle && battle.el.querySelector(`.g-zone[data-num="${x}"]`) : cardFor(x)?.closest(".g-zone"));
       const pops = tape.filter(e => e.type === "pop");
       const targets = [];
-      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
+      // 爆炸（tag "boom"）炸到的不算这次出手的目标（和 game.js · strikePlan 一样）
+      pops.forEach(e => { if (e.unitId && e.unitId !== fx.actor && e.tag !== "boom" && /^(dmg|break|status|fxword)$/.test(e.kind) && !targets.includes(e.unitId)) targets.push(e.unitId); });
       const shakeEl = () => battle && battle.el;
       return {
         actor: fx.actor, target: fx.target, mains: pops.filter(e => e.kind === "dmg" && e.main), targets, move: fx.move || {}, data: fx.data || {},
