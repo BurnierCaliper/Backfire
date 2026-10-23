@@ -105,6 +105,7 @@
     },
     /* 默认镜头：场景（hd2d-scene.js）也用这一份 */
     camera: { fov: 22, elevation: 30, margin: 0.97, targetY: 0.6 },
+    // top / bottom / left / right = 四边被界面盖住的像素（取景让开；left / right 没给 = 0：#339 纸片画面左上角的队伍、右边的抽屉）
     view: { width: 1440, height: 900, top: 46, bottom: 160 },        // 桌面：顶栏 + 展开的技能栏
     phoneView: { width: 390, height: 844, top: 42, bottom: 56 },     // 手机竖屏：面板默认收起
     maxDefPips: 12,       // 架势菱形最多画几个（训练木桩之类的巨大架势不画满）
@@ -555,10 +556,11 @@
     const base = opts.portrait ? CONFIG.phoneView : CONFIG.view, v = opts.view || {};
     return {
       width: Math.max(1, num(v.width, base.width)), height: Math.max(1, num(v.height, base.height)),
-      top: Math.max(0, num(v.top, base.top)), bottom: Math.max(0, num(v.bottom, base.bottom))
+      top: Math.max(0, num(v.top, base.top)), bottom: Math.max(0, num(v.bottom, base.bottom)),
+      left: Math.max(0, num(v.left, base.left || 0)), right: Math.max(0, num(v.right, base.right || 0))
     };
   }
-  /** 取景：让整个战场刚好装进「上下被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉）。
+  /** 取景：让整个战场刚好装进「四边被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉；左右没盖住时和以前一样）。
    *  rects(cam) 给了（白卡，#316）：这个镜头下每张卡在屏幕上的矩形（像素）也要装进去——卡是固定像素大小的，后排抬高以后会高出地台一大截。
    *  o.maxDist：最多退到多远（#341：卡不跟着镜头变小，退远了地台变小、同一排站得下的人更少、摞得更高，不封顶会越退越远）；
    *  o.from：从这个镜头接着推拉（挤的时候一轮一轮重新取景，接着上一轮的，几步就稳） */
@@ -566,6 +568,7 @@
     const C = CONFIG.camera;
     const W = Math.max(1, view.width), H = Math.max(1, view.height), aspect = W / H;
     const lo = -1 + 2 * (view.bottom || 0) / H, hi = 1 - 2 * (view.top || 0) / H;
+    const lx = -1 + 2 * (view.left || 0) / W, hx = 1 - 2 * (view.right || 0) / W;
     const b = bounds, top = b.maxY + 0.5, pts = [];
     [b.minX, b.maxX].forEach(x => [0, top].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
     const from = o && o.from, lim = o && o.maxDist > 0 ? o.maxDist : Infinity;
@@ -579,17 +582,17 @@
         cam.width = W; cam.height = H;
         rects(cam).forEach(r => { x0 = Math.min(x0, r.x0 / W * 2 - 1); x1 = Math.max(x1, r.x1 / W * 2 - 1); y0 = Math.min(y0, 1 - r.y1 / H * 2); y1 = Math.max(y1, 1 - r.y0 / H * 2); });
       }
-      const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = -(x0 + x1) / 2;
+      const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = (lx + hx) / 2 - (x0 + x1) / 2;
       const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
       t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
-      const k = Math.max((x1 - x0) / (2 * C.margin), (y1 - y0) / ((hi - lo) * C.margin));
+      const k = Math.max((x1 - x0) / ((hx - lx) * C.margin), (y1 - y0) / ((hi - lo) * C.margin));
       const next = Math.min(lim, dist * Math.min(1.6, Math.max(0.6, k)));
       // 接着上一轮推拉的（o.from）：已经居中、远近也不用再动了就停（不封顶时照旧走满）
       if (from && Math.abs(dx) < 1e-5 && Math.abs(dy) < 1e-5 && Math.abs(next - dist) < dist * 1e-5) { dist = next; break; }
       dist = next;
     }
     cam = camAt(t, dist, aspect);
-    cam.width = W; cam.height = H; cam.view = { top: view.top || 0, bottom: view.bottom || 0 };
+    cam.width = W; cam.height = H; cam.view = { top: view.top || 0, bottom: view.bottom || 0, left: view.left || 0, right: view.right || 0 };
     return cam;
   }
   /** 默认镜头的画面上沿那条视线，在进深 z 处离地多高：远景剪影不超过这个高度，整个轮廓就都在画面里（hd2d-backdrop.js 用） */
@@ -924,7 +927,8 @@
       // 每一轮从只框地台的镜头重新取景、重排站位（退远了地台变小、一排站得下的人更少，接着退远的镜头排只会越摞越高）：
       // 镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
       const K = CONFIG.card, cam0 = camera, lim = cam0.dist * K.crowd.farBack, sizeOf = (u) => cardAt(u, K.tier.far, fits[u.zone]);
-      const box = { x0: 0, x1: view.width, y0: view.top, y1: view.height - view.bottom }, all = new Set(zones.map(z => z.id));
+      // 卡要整张看得到的那一块：四边被界面盖住之后剩下的（#339 浮着的面板让出来的左右也先扣掉，再在里面挤）
+      const box = { x0: view.left || 0, x1: view.width - (view.right || 0), y0: view.top, y1: view.height - view.bottom }, all = new Set(zones.map(z => z.id));
       for (let round = 0; round < K.crowd.passes; round++) {
         if (round) { camera = cam0; units = arrange(camera, fits); }
         for (let pass = 0; pass < 3; pass++) {

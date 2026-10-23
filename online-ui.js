@@ -818,6 +818,7 @@
       document.body.classList.toggle(global.OnlinePaper ? global.OnlinePaper.PAPER.bodyClass : "ol-paper", on);
       toolsOpen = false; swapOpen = null;
       if (on) paperDrawer = global.OnlinePaper.isOpen("drawer", paperStore);
+      else paperCover();   // 出纸片画面：新画面不用再让开纸片的面板（进来时贴纸纹那一下量）
       setTimeout(() => { if (!destroyed && typeof dispatchEvent === "function" && typeof Event === "function") dispatchEvent(new Event("resize")); }, 0);
     }
     /** 「工具 ▾」下拉里的：原来舞台顶上那一排里除了角色资料 / 武器 / 背包（挪到队伍栏下面）的几个，同一个画法、同一个处理（不留两份）；
@@ -904,12 +905,24 @@
       const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
       if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
     }
+    /** 3D 白卡让开浮在战场上的面板（#339 第 4 步）：量一下顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉（OnlinePaper.PAPER.cover）交给新画面
+     *  （hd2d-field.js · cover：换成战场里的坐标、算上下左右让多少，变了才重排）；不是纸片画面时交 null。和上次一样就不交 */
+    let paperCoverKey = "null";
+    function paperCover() {
+      const F = global.HD2DField;
+      if (!F || typeof F.cover !== "function" || !global.OnlinePaper) return;
+      const rects = paperOn && !destroyed ? global.OnlinePaper.cover(document) : null, key = JSON.stringify(rects);
+      if (key === paperCoverKey) return;
+      paperCoverKey = key;
+      F.cover(rects);
+    }
     /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、天气，每种纸 × 每套配色一张平铺的小纹理，开局画好；
      *  撕边、影子按面板大小只换 CSS 变量，#321）。每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起换撕边（不画纹理） */
     let paperSizer = null, paperDressQueued = false;
     function paperDress() {
       if (!paperOn || !global.OnlinePaper) return;
       global.OnlinePaper.dress(document, null, paperTheme);
+      paperCover();
       // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起
       const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
       if (document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
@@ -2096,6 +2109,7 @@
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
+      paperCover();   // #339：新画面不用再让开纸片的面板（destroyed 了交 null）
       if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();

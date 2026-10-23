@@ -107,6 +107,7 @@ async function paperPage(t, opt) {
       const handle = { on: () => !!built, view() { place(); }, actor() {}, marks() {}, play: () => null, skip() {} };
       const F = {
         tier: 0, packetView: () => null,
+        covers: [], cover(rects) { F.covers.push(rects ? JSON.parse(JSON.stringify(rects)) : null); },   // #339：纸片画面交来的浮着的面板（记下来）
         attach(s) { if (spec === s) return handle; spec = s; place(); build(); return handle; },
         detach(s) { teardown(); spec = null; return true; },
         switchTo(to) { want = to === "new"; localStorage.setItem("backfire-hd2d-field", want ? "on" : "off"); paintToggle(); if (want) build(); else { teardown(); if (spec) spec.refresh(); } return true; }
@@ -116,7 +117,7 @@ async function paperPage(t, opt) {
     })();
   }, [SHP, SHP_MAX, opt.on !== false]);
   for (const f of ["icons.js", "hud-icons.js", "unit-card.js", "unit-tip.js", "daylight.js", "party-cards.js", "hotseat-ui.js", "online-battle.js", "pause-menu.js", "matchup-ui.js",
-    "lore-ui.js", "check-request-ui.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js", "online-paper.js", "online-ui.js"]) await page.addScriptTag({ path: file(f) });
+    "lore-ui.js", "check-request-ui.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js", "paper-ui.js", "online-paper.js", "online-ui.js"]) await page.addScriptTag({ path: file(f) });
   // 热座栏：和 online-game.js · mountOrder 一样，玩家看的是收到的包里的 view
   await page.evaluate(() => {
     window.hotseat = HotseatUI.mount({ getView: () => Object.assign({}, fixture.view.packet.view, { enabled: !!fixture.view.active && fixture.view.screen === "battle", configured: true, network: true, canConfigure: false, canDisable: false }),
@@ -652,6 +653,46 @@ test("技能吊牌：打孔、打孔虚线、属性图标、名字从左往右�
   assert.deepEqual(o.errors, []);
 });
 
+test("技能吊牌名字下面那行消耗（房主算好的「行动 1」「附赠 1」）、「唤出」下面那行小字在纸上看得清：深色字（夜里浅色）、加粗，和纸面的对比度 ≥ 4.5（白天 / 夜里 × 常态 / 沙暴 / 下雨 / 雪 / 雾）（#339 主人截图：单机、联机一起改）", { timeout: 90000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  // 技能里多一个「唤出阿特」：单独做成纸板大按钮（hd2d-shell.js · pickSummon），消耗写在下面那行小字里
+  await page.evaluate(() => {
+    const menu = OnlineGame.actionMenu;
+    OnlineGame.actionMenu = async (request) => {
+      const r = await menu(request);
+      if (!request.skill) r.choices.options = [{ value: "ruby_summon", label: "唤出阿特", cost: "行动 1 · 附赠 1" }].concat(r.choices.options);
+      return r;
+    };
+  });
+  await asPlayer(page);
+  await page.waitForFunction(() => document.querySelectorAll(".ol-battle .skills .sk[data-olp-tex] .cost").length >= 2 && !!document.querySelector(".ol-battle .summonbtn[data-olp-tex] small"), null, { timeout: 30000 });
+  for (const light of ["day", "night"]) for (const [weather, paper] of Object.entries({ none: "none", sand: "sand", acid: "rain", snow: "snow", glow: "fog" })) {
+    await page.evaluate(([light, weather]) => { fixture.view.state.light = light; fixture.view.state.weather = weather; fixture.emit(); }, [light, weather]);
+    await page.waitForFunction(([light, paper]) => document.body.dataset.olpTime === light && document.body.dataset.olpWeather === paper, [light, paper]);
+    const r = await page.evaluate(() => {
+      const hud = document.querySelector(".ol-battle > .g-hud"), body = getComputedStyle(document.body), look = el => ({ text: el.textContent, color: getComputedStyle(el).color, weight: Number(getComputedStyle(el).fontWeight) });
+      // 「唤出」的颜色跟着这个人的主属性（online-battle.js · paintSummon：--el = 属性色，没有是危险黄）：每一种都量一遍，量完放回去
+      const sb = hud.querySelector(".summonbtn"), small = sb.querySelector("small"), keep = sb.style.getPropertyValue("--el");
+      const summon = Object.entries(HD2DUI.UI.elements).concat([["无", ""]]).map(([k, c]) => { sb.style.setProperty("--el", c || "var(--sk-hazard, #f2c230)"); return Object.assign({ el: k }, look(small)); });
+      if (keep) sb.style.setProperty("--el", keep); else sb.style.removeProperty("--el");
+      return { cost: [...hud.querySelectorAll(".skills .sk .cost")].map(look), kraft: body.getPropertyValue("--olp-kraft").trim(), board: body.getPropertyValue("--olp-board").trim(), summon };
+    });
+    const tag = `${light} · ${weather}`;
+    assert.deepEqual(r.cost.map(c => c.text), ["行动 1", "附赠 1"], tag);
+    for (const c of r.cost) {
+      assert.ok(contrast(c.color, r.kraft) >= 4.5, `${tag}：消耗「${c.text}」的字 ${c.color} 在牛皮纸 ${r.kraft} 上对比度只有 ${contrast(c.color, r.kraft).toFixed(2)}`);
+      assert.ok(c.weight >= 700, `${tag}：消耗「${c.text}」要加粗：${c.weight}`);
+    }
+    for (const s of r.summon) {
+      assert.ok(contrast(s.color, r.board) >= 4.5, `${tag}：「唤出」（${s.el}）下面那行「${s.text}」${s.color} 在纸板 ${r.board} 上对比度只有 ${contrast(s.color, r.board).toFixed(2)}`);
+      assert.ok(s.weight >= 700, `${tag}：「唤出」下面那行要加粗：${s.weight}`);
+    }
+    // 截图：换了配色以后纸纹在空闲时画（#321），画好之前还贴着上一套（夜里的浅色字压在白天的牛皮纸上，截出来像是看不清）——等这一套画好再拍
+    if (weather === "none") { await page.waitForFunction(() => OnlinePaper.pending() === 0, null, { timeout: 30000 }); await settle(page); await shot(page, "paper-cost-" + light); }
+  }
+  assert.deepEqual(o.errors, []);
+});
+
 test("队伍收起后只剩一列头像贴纸（后面没有白卡片）；收起后右边缘的竖标签「记录 · 聊天」字清楚，未读数是红章", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);
@@ -916,6 +957,30 @@ test("电脑上不变（#311）：技能栏照旧默认展开、不跟着轮次�
   assert.equal(await page.isVisible(".hd2d-party .pm .meta"), true, "队伍栏有名字");
   assert.deepEqual(await page.locator(".hd2d-party .olp-party-tools [data-online]").evaluateAll(els => els.map(e => e.dataset.info)), ["sheet", "armory", "bag"]);
   assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null);
+  assert.deepEqual(o.errors, []);
+});
+
+test("3D 白卡让开浮在战场上的面板（#339 第 4 步）：纸片画面把顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉量好交给新画面（HD2DField.cover）；收起队伍、拉开抽屉跟着再交；离开纸片画面交 null", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await asPlayer(page);
+  await page.waitForFunction(() => document.body.classList.contains("ol-paper") && HD2DField.covers.some(c => c && c.length === 5));
+  await settle(page);
+  const last = () => page.evaluate(() => HD2DField.covers[HD2DField.covers.length - 1]);
+  const measured = () => page.evaluate(() => ["#online-paper .olp-top", "#online-paper .olp-tags", ".ol-battle > .g-hud.hd2d-shell > .hd2d-party", ".ol-battle > .g-hud.hd2d-shell", "#online-side"]
+    .map(s => { const r = document.querySelector(s).getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) }; }));
+  assert.deepEqual(await last(), await measured(), "交的就是这五块现在的矩形（配置在 OnlinePaper.PAPER.cover）");
+  // 收起队伍（只剩一列头像）：再交一次，队伍那块窄了
+  const party = (await last())[2];
+  await page.click(".ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-toggle");
+  await page.waitForFunction(w => { const c = HD2DField.covers[HD2DField.covers.length - 1]; return !!c && c[2].right - c[2].left < w - 60; }, party.right - party.left);
+  // 拉开抽屉：右边那块宽了
+  await page.click("#online-side .ol-side-collapse");
+  await page.waitForFunction(() => { const c = HD2DField.covers[HD2DField.covers.length - 1]; return !!c && c[4].right - c[4].left > 200; });
+  await settle(page);
+  assert.deepEqual(await last(), await measured());
+  // 关掉新画面（离开纸片画面）：交 null，新画面不再让
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("ol-paper") && HD2DField.covers[HD2DField.covers.length - 1] === null);
   assert.deepEqual(o.errors, []);
 });
 
