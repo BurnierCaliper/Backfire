@@ -59,14 +59,15 @@ test("完成任务得到赫心融合体；回到任务板（不会进首领战�
   assert.equal(run.stage, "board");
 });
 
-test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
+test("抽取机（30% 抽到角色）：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
   const { c, run, R, G } = fresh("G4");
   assert.equal(R.drawInfo(run).canDraw, false);
-  c.bagAdd("heart_fusion", 30);
+  c.bagAdd("heart_fusion", 100);
   let ups = 0, joins = 0;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 100; i++) {
     const before = run.party.length + run.reserve.length;
     const r = R.drawHero(run);
+    if (r.kind !== "character") { assert.ok(["weapon_material", "craft_material"].includes(r.kind)); continue; }
     const h = run.party.concat(run.reserve).find(x => x.kit === r.kit);
     if (r.levelUp) { ups++; assert.ok(h.level >= 2); }
     else { joins++; assert.equal(run.party.length + run.reserve.length, before + 1); assert.equal(h.level, G.recruitLevel); }
@@ -83,7 +84,8 @@ test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；�
   }
   // 抽到重复角色升级也会排上升级选择
   const leveled = run.party.concat(run.reserve).find(h => h.level >= 4);
-  if (leveled) assert.ok((leveled.pending || []).some(p => p.level === 4));
+  assert.ok(leveled, "100 抽里应该有人升到 4 级");
+  assert.ok((leveled.pending || []).some(p => p.level === 4));
 });
 
 test("武器升级照跑团模式：要实物材料 + 加工费；商店常备材料", () => {
@@ -124,7 +126,7 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
 test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭。
   // 日期也固定：每日挑战完成了给材料、奎支、融合体（多抽一次人），战况跟着日期变，以前没固定，2026-10-23 这样的日子就会全灭
-  const { c, run, R } = fresh("G7b", null, "2026-10-22T12:00:00");
+  const { c, run, R } = fresh("G7c", null, "2026-10-22T12:00:00");
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {
@@ -223,7 +225,7 @@ test("换日期也稳定：本机时钟假装是 10-22、10-23（不固定换题
     const c = H.load();
     pretendToday(c, day);
     assert.equal(vm.runInContext("new Date().getDate()", c), Number(day.slice(8)), "本机时钟拨到了这一天");
-    const g = fresh320("G7b", c);
+    const g = fresh320("G7c", c);
     autoPlay320(g);
     const { run } = g;
     return plain({ stage: run.stage, tasksDone: run.tasksDone, day: run.day, daily: run.growthDaily.key, kuizhi: c.S.state.kuizhi,

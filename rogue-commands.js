@@ -62,6 +62,7 @@ const RogueCommands = (function () {
     afterVictory: (c, run) => Rogue.afterVictory(run, c.goOn),
     finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
     drawHero: (_c, run) => Rogue.drawHero(run).notes,
+    drawMany: (c, run) => { const r = Rogue.drawMany(run, c.n); return { notes: r.notes, results: r.results, kuizhi: r.kuizhi }; },
     swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null)
   };
   const queries = {
@@ -99,7 +100,8 @@ const RogueCommands = (function () {
     canShortRestBefore: (_c, run) => Rogue.canShortRestBefore(run),
     canShortRestAtNode: (_c, run) => Rogue.canShortRestAtNode(run),
     watchOptions: (_c, run) => Rogue.watchOptions(run),
-    drawInfo: (_c, run) => Rogue.drawInfo(run)
+    drawInfo: (_c, run) => Rogue.drawInfo(run),
+    drawRates: (_c, run) => Rogue.drawRates(run)
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },

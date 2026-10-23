@@ -718,6 +718,11 @@
       const buyList = r.shop ? `<ul>${arrOf(r.shop).map(row => `<li>${esc(row.name)} · ${esc(row.price)} 奎支${row.team ? " · 归队伍公用" : ""} ${rogueAct("买", { action: "buy", key: row.key, qty: 1, payer }, lack(purse, row.price))}</li>`).join("")}</ul>${redeem}` : "";
       const shop = r.shop && payer ? `<section class="ol-rogue-box" aria-label="商店"><h3>商店（你有 ${esc(purse)} 奎支）</h3>${sellTabs("rogue", rogueSellView(r), buyList, () => sellModelRogue(r, payer))}</section>` : "";
       const smith = r.smith && payer ? `<section class="ol-rogue-box" aria-label="工匠"><h3>${esc(r.smith.name)}（你有 ${esc(purse)} 奎支）</h3><ul>${r.smith.upgrades.map(o => `<li>${esc(o.name)} Lv${esc(o.level)} ${o.max ? "已满级" : rogueAct(`升到 ${o.level + 1} 级（${o.cost}）`, { action: "upgradeWeapon", kit: o.kit, smith: r.smith.id }, lack(purse, o.cost))}</li>`).join("")}${r.smith.offers.map(o => `<li>改装件 ${esc(o.name)}<small>${esc(o.text)}</small> ${o.sold ? "已卖出" : rogueAct(`买（${o.price}）`, { action: "buyPart", smith: r.smith.id, index: o.index, payer }, lack(purse, o.price))}</li>`).join("")}</ul></section>` : "";
+      const bp = r.smith && r.smith.bp;
+      // 领图纸：进度 x/need；攒满了列出还没有的图纸（rogue.js · claimBlueprint 校验），领完就只显示「图纸已领完」
+      const bpBox = bp && payer ? `<section class="ol-rogue-box ol-smith-bp" aria-label="领图纸"><h3>图纸 ${bp.done ? "已领完" : `${esc(bp.progress)}/${esc(bp.need)}`}</h3>${bp.done ? "" : bp.canClaim && bp.options.length
+        ? `<ul>${bp.options.map(o => `<li>${esc(o.name)}<small>${esc(o.text)}</small> ${rogueAct("领图纸", { action: "claimBlueprint", smith: r.smith.id, blueprint: o.id, payer })}</li>`).join("")}</ul>`
+        : `<p class="ol-muted">${rogueAct("领图纸", { action: "claimBlueprint", smith: r.smith.id, payer }, `再升级 ${Math.max(0, bp.need - bp.progress)} 次`)}</p>`}</section>` : "";
       const slots = r.smith ? r.smith.slots || [] : [];
       const parts = r.parts && r.parts.length && payer ? `<section class="ol-rogue-box" aria-label="改装件"><h3>你的改装件</h3><ul>${r.parts.map((p, i) => `<li>${esc(p.name)} ×${esc(p.have)}<small>${esc(p.text)}</small> ${rogueAct(`卖掉（${p.sell}）`, { action: "sellPart", part: p.id, payer })}${slots.length ? `<select id="ol-rp-${i}" data-ol-cmp="${esc(p.id)}" aria-label="装到哪个槽">${slots.map(x => option(`${x.kit}:${x.slot}`, `${x.name} 槽 ${x.slot + 1}${x.cur ? "（现在：" + x.cur + "）" : ""}`, false)).join("")}</select>${button(`装上（${p.install}）`, "roguePartInstall", `data-part="${esc(p.id)}" data-select="ol-rp-${i}" data-smith="${esc(r.smith.id)}"`, disabled() || !!lack(purse, p.install))}${why(lack(purse, p.install))}<span class="pt-cmp" id="ol-rp-${i}-cmp">${partCompare(r, p.id, slots[0])}</span>` : ""}</li>`).join("")}</ul></section>` : "";
       const filled = slots.filter(x => x.cur);
@@ -728,7 +733,7 @@
       // 工坊：按钮打开浮层（背包在标题工具栏「背包」）（workshop-ui.js / backpack-ui.js，和房主同一套渲染器；数据是 viewFor 的 craft / bag / materialBar …）
       const workshop = payer && r.workshopAvailable && wk ? `<section class="ol-rogue-box ol-ws-entry" aria-label="工坊"><div class="ol-attr-btns">${button("工坊", "rogueWorkshop", "", false, true)}</div></section>` : "";
       const log = (r.log || []).length ? `<section class="ol-rogue-box" aria-label="最近发生"><h3>最近发生</h3><ul>${r.log.map(t => `<li>${esc(t)}</li>`).join("")}</ul></section>` : "";
-      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + parts + unmount + clinic + cwEntry + workshop + log;
+      return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + bpBox + parts + unmount + clinic + cwEntry + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
     const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];

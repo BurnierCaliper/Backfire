@@ -208,8 +208,9 @@ const Rogue = (function () {
     run.boardNo = 0;
     run.tasksDone = 0;
     run.extra = false;
-    run.smithUses = {};      // 工匠 id → 在他那里升级过几次
-    run.smithClaimed = {};   // 工匠 id → 已经领过的图纸 id
+    run.smithUses = {};      // 工匠 id → 在他那里一共升级过几次（关系变好的折扣看这个）
+    run.smithBp = {};        // 工匠 id → 上次领图纸之后在他那里升级了几次（领图纸的计数，领一张归零）
+    run.smithClaimed = {};   // 工匠 id → 已经从他那里领过的图纸 id 列表
     run.blueprints = [];     // 领到、还没装上的图纸 id
     run.installed = {};      // 武器 kit → 装上的图纸 id
     if (opt.daily) {
@@ -252,7 +253,7 @@ const Rogue = (function () {
       // 每天的赫心融合体从「过了一天」开始发：开局当天不发（开局抽不了，靠完成任务 / 过天获得）
       run.lastFusionDay = Number(run.day) || 1;
       grantDailyFusion(run);
-      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在角色抽取机里抽角色。`);
+      log(run, `长线养成：从任务板接任务赚钱升级。每天获得${ITEM_CATALOG[G().fusionItem].name}，可以在抽取机里抽取。`);
       makeBoard(run);
       return;
     }
@@ -273,11 +274,12 @@ const Rogue = (function () {
         types.push(pickWeighted(tpl.mix || { battle: 1 }, prev && prev !== "battle" ? [prev] : null));
       }
       types.push(tpl.elite ? "elite" : "battle");
-      // 每个任务正好一个休息点（能长休的地方）：插在中间，不在第一站、也不在最后一站
+      // 模板休息点（能长休的地方）：插在中间，不在第一站、也不在最后一站；之后 spaceRests 再按小时补
       types.splice(between(1, types.length - 1), 0, "rest");
       const weather = rollTaskWeather(run);
       insertChecks(types);
       const cols = buildRoute(types, tpl);   // 放在最后掷：主干、天气和以前完全一样
+      const added = spaceRests(types, cols); // 按小时补休息点：任何一条路线连续不长休都不超过 restGapMax 小时（不掷随机数）
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
@@ -285,6 +287,7 @@ const Rogue = (function () {
         days: tpl.days, diff: tpl.diff || 0, key: !!tpl.key,
         reward: clone(tpl.reward), supply: clone(tpl.supply || {}),
         nodeTypes: types,    // 主干：任务板上不给玩家看
+        noPayCols: added,    // 按小时补的休息点在哪几列：在那里「离开」没有奎支（模板原有的休息点照常给）
         cols                 // 路线图：每一列可选的节点（接下任务后在地图上一列一列选）
       };
     });
@@ -325,7 +328,7 @@ const Rogue = (function () {
 
   /** 路线图（类似《杀戮尖塔》，从左到右）：主干的每一站是一列，中间的列多给 1–2 个可选节点。
    *  第一列、休息点那一列、最后一列（战斗 / 精英战）都只有一个节点：
-   *  所以不管怎么走都正好经过一次休息点，终点都是任务目标。相邻两列的连线见 routeLinks。 */
+   *  所以不管怎么走都经过同样的休息点（模板的一个 + spaceRests 按小时补的），终点都是任务目标。相邻两列的连线见 routeLinks。 */
   const ROUTE = { width: [[.25, 1], [.8, 2], [1, 3]], extra: { check: 1 } };
   function buildRoute(types, tpl) {
     return types.map((t, c) => {
@@ -341,6 +344,56 @@ const Rogue = (function () {
       }
       return opts;
     });
+  }
+  /* ---------- 休息点间隔：按小时算 ----------
+   * 一段 = 从任务起点（或上一个休息点）走到下一个休息点（或任务终点）累计的小时：每走一站路程 travel 小时 + 节点本身的小时。
+   * 力竭 20 小时起算，这里留 2 小时余量：任何一条路线上任何一段都不超过 18 小时。 */
+  const restGapMax = () => Number(C.hours.restGapMax) || 18;   // rogue-data.js · ROGUE_CONFIG.hours.restGapMax
+  const nodeHours = (t) => (NODE[t] && NODE[t].hours) || 0;
+  const travelMax = () => Number(C.hours.travel) || 0;   // 按没有向导的最坏情况算
+  /** 普通任务：一列一列往后看，按连线（routeLinks）算走到这一列每个节点时距上次休息的最坏小时（和 worstRestGap 同一个 DP，精确覆盖所有路线）；
+   *  这一列走完后要是连走到下一个休息点（最后一列：任务终点）都会超，就在这一列前面插一个休息点（单节点列，所有路线必经）。
+   *  不掷随机数，种子流不变。返回补进去的休息点在第几列 */
+  function spaceRests(types, cols) {
+    const T = travelMax(), MAX = restGapMax();
+    const added = [];   // 补进去的休息点最后落在第几列
+    let best = null;    // 上一列每个节点走完时距上次休息的最坏小时（休息点 = 0）
+    for (let c = 0; c < cols.length; c++) {
+      const last = c === cols.length - 1;
+      let nb;
+      if (c === 0) nb = cols[0].map(t => (t === "rest" ? 0 : nodeHours(t)));
+      else {
+        nb = cols[c].map(() => -Infinity);
+        routeLinks(cols[c - 1].length, cols[c].length).forEach(([i, j]) => { nb[j] = Math.max(nb[j], best[i]); });
+        nb = nb.map((v, j) => (cols[c][j] === "rest" ? 0 : v + T + nodeHours(cols[c][j])));
+      }
+      // 走完这一列：不是最后一列就还得能走到下一个休息点（+ 路程），最后一列只要不超
+      if (c > 0 && types[c] !== "rest" && Math.max(...nb) + (last ? 0 : T) > MAX) {
+        types.splice(c, 0, "rest");
+        cols.splice(c, 0, ["rest"]);
+        added.push(c);
+        best = [0];
+        continue;   // 下一轮重新看原来这一列（前面是刚补的休息点）
+      }
+      best = nb;
+    }
+    return added;
+  }
+  /** 一条路线（每列一组可选节点）上最坏的不长休小时数：检查所有路线（按连线做最大值 DP） */
+  function worstRestGap(cols) {
+    const T = travelMax();
+    let best = cols[0].map(t => (t === "rest" ? 0 : nodeHours(t)));
+    let worst = Math.max(...best);
+    for (let c = 1; c < cols.length; c++) {
+      const nb = cols[c].map(() => -Infinity);
+      routeLinks(cols[c - 1].length, cols[c].length).forEach(([i, j]) => { nb[j] = Math.max(nb[j], best[i]); });
+      best = nb.map((v, j) => {
+        const h = v + T + (cols[c][j] === "rest" ? 0 : nodeHours(cols[c][j]));
+        worst = Math.max(worst, h);
+        return cols[c][j] === "rest" ? 0 : h;
+      });
+    }
+    return worst;
   }
   /** 第 c 列有 k 个节点、第 c+1 列有 m 个：按上下位置比例连线，互不交叉。返回 [[i, j], …] */
   function routeLinks(k, m) {
@@ -463,7 +516,8 @@ const Rogue = (function () {
     const cols = task.cols || task.nodeTypes.map(t => [t]);
     run.task = Object.assign(clone(task), {
       index: 0, cols: clone(cols),
-      nodes: cols.map(col => col.length === 1 ? { type: col[0], done: false } : null),
+      // 按小时补的休息点（task.noPayCols）：节点上记 noPay，在那里「离开」无报酬
+      nodes: cols.map((col, i) => col.length === 1 ? Object.assign({ type: col[0], done: false }, col[0] === "rest" && (task.noPayCols || []).indexOf(i) >= 0 ? { noPay: true } : {}) : null),
       pick: cols.map(col => col.length === 1 ? 0 : null)
     });
     // 长线养成的任务经验按接任务时的队伍平均等级定下来，完成时照这个数发（任务卡上写多少就发多少）
@@ -1148,7 +1202,24 @@ const Rogue = (function () {
     t.pick = t.pick || [];
     t.pick.push(0);
   }
+  /** 悬赏：从任务起点或上一个休息点到现在（路线上最后一站走完）累计的小时 */
+  function huntHoursSinceRest(t) {
+    let h = 0;
+    for (let i = t.nodes.length - 1; i >= 0; i--) {
+      if (t.nodes[i].type === "rest") return h;
+      h += nodeHours(t.nodes[i].type) + (i > 0 ? travelMax() : 0);
+    }
+    return h;
+  }
   /** 刚走完路线上的最后一站：决定下一站是什么（目标那一战之后就没有了 → 任务完成） */
+  /** 悬赏检定之间随机的那一站（ROGUE_BOUNTY.other；随机休息点整个任务最多一次，强制补过也算） */
+  function pushHuntOther(run, t, h) {
+    const w = Object.assign({}, BOUNTY().other);
+    if (h.restUsed) delete w.rest;
+    const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
+    if (type === "rest") h.restUsed = true;
+    pushHuntNode(t, { type });
+  }
   function huntNext(run, node, notes) {
     const t = run.task, h = t.hunt;
     if (!node || node.target) return;
@@ -1168,14 +1239,35 @@ const Rogue = (function () {
           return { preset, name: "【目标】" + ((p && p.name) || preset) };
         });
         notes.push(h.found >= h.need ? `线索凑齐了：找到了悬赏目标 ${h.target.name}！` : `虽然没问出什么，${h.target.name} 却自己找上门来了！`);
-        pushHuntNode(t, { type: "elite", target: true });
+        // 目标那一战打完就结束：走过去要是会超 restGapMax，先插一个休息点
+        if (huntHoursSinceRest(t) + travelMax() + nodeHours("elite") > restGapMax()) {
+          h.targetAfterRest = true;
+          h.restUsed = true;
+          notes.push(`已经连续赶了 ${huntHoursSinceRest(t)} 小时路，先找个地方歇一歇，养足精神再去对付它。`);
+          pushHuntNode(t, { type: "rest", noPay: true });
+        } else pushHuntNode(t, { type: "elite", target: true });
         return;
       }
-      const w = Object.assign({}, BOUNTY().other);
-      if (h.restUsed) delete w.rest;
-      const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
-      if (type === "rest") h.restUsed = true;
-      pushHuntNode(t, { type });
+      // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 restGapMax 就这一站强制是休息点
+      // 强制的休息点是额外插的一站，不占随机那一站：休息点 → 随机站 → 检定（h.otherAfterRest）；补过之后随机站不再抽休息点（h.restUsed）
+      const T = travelMax(), worstOther = Math.max(...Object.keys(BOUNTY().other).filter(k => k !== "rest").map(nodeHours));
+      if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > restGapMax()) {
+        h.restUsed = true;
+        h.otherAfterRest = true;   // 强制休息点是额外的一站：走完它照常接随机那一站，再接检定
+        pushHuntNode(t, { type: "rest", noPay: true });
+        return;
+      }
+      pushHuntOther(run, t, h);
+      return;
+    }
+    if (h.otherAfterRest) {
+      h.otherAfterRest = false;
+      pushHuntOther(run, t, h);
+      return;
+    }
+    if (h.targetAfterRest) {
+      h.targetAfterRest = false;
+      pushHuntNode(t, { type: "elite", target: true });
       return;
     }
     const ex = h.lastFailProfs || (h.lastFailProf ? [h.lastFailProf] : []);
@@ -1407,16 +1499,24 @@ const Rogue = (function () {
     const pick = (o) => (o && typeof o === "object" ? Object.assign({}, o) : undefined);
     return { food: pick(plan && plan.food), sleep: pick(plan && plan.sleep), spit: pick(plan && plan.spit), ammo: pick(plan && plan.ammo) };
   }
+  /** 按小时补的休息点（node.noPay）：长休不消耗水和食物（悬赏不额外给补给，作者裁定）。模板原有的休息点照常消耗 */
+  function freeRestHere(run) {
+    const node = currentNode(run);
+    return !!(node && node.type === "rest" && node.noPay);
+  }
+  function restChoiceAt(run, plan) {
+    return Object.assign(restChoice(plan), freeRestHere(run) ? { free: true } : {});
+  }
   function restPlan(run, plan) {
-    return withParty(run, () => longRestNeeds(restChoice(plan))).out;
+    return withParty(run, () => longRestNeeds(restChoiceAt(run, plan))).out;
   }
   /** 长休界面：每个角色的需求、选择和可选的食物 / 睡眠道具 */
   function restOptions(run, plan) {
-    return withParty(run, () => longRestOptions(restChoice(plan))).out;
+    return withParty(run, () => longRestOptions(restChoiceAt(run, plan))).out;
   }
   function canLongRest(run, plan) { return restPlan(run, plan).ok; }
   /** 营地画面（长休前，ledger.js · campStatus）：把队伍摆上场算一份，不改动本局 */
-  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoice(plan))).out; }
+  function campStatusOf(run, plan) { return withParty(run, () => campStatus(restChoiceAt(run, plan))).out; }
   /** 角色资料面板（skill-text.js）：把队伍摆上场算一份，不改动本局 */
   function sheetData(run) {
     if (typeof SkillText === "undefined") return [];
@@ -1428,7 +1528,7 @@ const Rogue = (function () {
     return withParty(run, () => SkillText.armoryData()).out;
   }
   function doLongRest(run, notes, watch, plan, ambush) {
-    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoice(plan), { hours: C.hours.longRest, watch: watch || null }), notes));
+    const r = withParty(run, () => ledgerLongRest(Object.assign(restChoiceAt(run, plan), { hours: C.hours.longRest, watch: watch || null }), notes));
     // 长休结算画面（rest-report.js）：玩家看的，坚毅只给一句模糊的话
     if (r.out && r.out.report) run.lastRest = Object.assign(r.out.report, ambush ? { ambush } : {});
     const e = run.task && run.task.escort;
@@ -1515,10 +1615,12 @@ const Rogue = (function () {
       notes.push(`下次长休被偷袭的概率 ${Math.round(run.ambushChance * 100)}%。`);
       doLongRest(run, notes, watch, plan);
     } else if (mode === "leave") {
-      // 不休息直接走：拿一笔奎支，不花时间
-      const pay = Number(C.restSkipKuizhi) || 0;
-      state.kuizhi = (Number(state.kuizhi) || 0) + pay;
-      notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
+      // 不休息直接走，不花时间：模板原有的休息点拿一笔奎支，按小时补的（noPay）无报酬（restSkipPay）
+      const pay = restSkipPay(run);
+      if (pay > 0) {
+        state.kuizhi = (Number(state.kuizhi) || 0) + pay;
+        notes.push(`没有停下休息，顺手做了点零活：获得 ${pay} 奎支（现有 ${state.kuizhi}）。`);
+      } else notes.push("没有停下休息，直接上路：这里没什么零活可做，无报酬。");
     } else {
       const can = canShortRestAtNode(run);
       if (!can.ok) throw new Error(can.why);
@@ -1530,6 +1632,16 @@ const Rogue = (function () {
     return logAll(run, notes);
   }
 
+  /** 在当前休息点「离开」能拿多少奎支：按小时补的休息点（node.noPay）是 0，模板原有的休息点是 restSkipKuizhi */
+  function restSkipPay(run) {
+    const node = currentNode(run);
+    return node && node.noPay ? 0 : Number(C.restSkipKuizhi) || 0;
+  }
+  /** 「离开」按钮上的说明：「获得 250 奎支」/「无报酬」 */
+  function restSkipLabel(run) {
+    const pay = restSkipPay(run);
+    return pay > 0 ? `获得 ${pay} 奎支` : "无报酬";
+  }
   /** 休息点的短休按钮：没人有次数时不能点（以前照样白过一站） */
   function canShortRestAtNode(run) {
     if (!shortRestLeftAll(run).some(x => x.left > 0)) return { ok: false, why: "今天大家的短休次数都用完了" };
@@ -2277,7 +2389,8 @@ const Rogue = (function () {
   }
   /* 工匠名单与客制化图纸（rogue-data.js · ROGUE_SMITHS / ROGUE_SMITH_RULES）
    *   任务板：每次回到任务板随机来 onBoard 位不同的工匠；任务里的工匠节点是随机的一位。
-   *   在同一位工匠那里升级满 blueprintAfter 次，就能从他的图纸里挑一张；
+   *   在同一位工匠那里升级满 blueprintAfter 次，就能从他还没给过的图纸里挑一张；领完计数归零，
+   *   再升级满 blueprintAfter 次领下一张；不会给已经有的图纸，他的图纸都有了就不再计数。
    *   图纸花 installCost 装到武器上（任何工匠处都能装），拿着这把武器时生效。 */
   const SR = () => (typeof ROGUE_SMITH_RULES !== "undefined" ? ROGUE_SMITH_RULES : { onBoard: 3, blueprintAfter: 5, installCost: 5000 });
   const smithById = (id) => (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).find(s => s.id === id) || null;
@@ -2293,6 +2406,20 @@ const Rogue = (function () {
     run.smithClaimed = run.smithClaimed || {};
     run.blueprints = run.blueprints || [];
     run.installed = run.installed || {};
+    // 旧存档：smithClaimed 记的是单个图纸 id；没有 smithBp（领过的从 0 算，没领过的沿用累计次数）
+    Object.keys(run.smithClaimed).forEach(id => {
+      const v = run.smithClaimed[id];
+      run.smithClaimed[id] = Array.isArray(v) ? v : v ? [v] : [];
+    });
+    if (!run.smithBp) {
+      run.smithBp = {};
+      Object.keys(run.smithUses).forEach(id => { run.smithBp[id] = (run.smithClaimed[id] || []).length ? 0 : (run.smithUses[id] || 0); });
+    }
+  }
+  /** 这位工匠的图纸里已经有的（从他那里领过的，或者手里 / 武器上已经有的同一张） */
+  function smithOwned(run, s) {
+    const have = new Set([].concat(run.smithClaimed[s.id] || [], run.blueprints || [], Object.values(run.installed || {})));
+    return (s.blueprints || []).map(b => b.id).filter(id => have.has(id));
   }
   /** 按权重抽不重复的工匠：设定里的所在地和本幕区域一致时机会翻倍；摩尔玛之类权重低的很少见 */
   function drawSmiths(run, n) {
@@ -2331,12 +2458,16 @@ const Rogue = (function () {
     const s = smithById(id);
     if (!s) return null;
     const uses = run.smithUses[id] || 0;
-    const claimed = run.smithClaimed[id] || null;
+    const claimed = (run.smithClaimed[id] || []).slice();
+    const owned = smithOwned(run, s);
+    const done = owned.length >= (s.blueprints || []).length;   // 他的图纸都有了：不再计数
+    const progress = done ? 0 : (run.smithBp[id] || 0);
     const pr = s.price || {};
     return {
-      id, name: s.name, blurb: s.blurb || "", uses, need: SR().blueprintAfter,
-      claimed, canClaim: !claimed && uses >= SR().blueprintAfter,
-      blueprints: (s.blueprints || []).map(b => blueprintById(b.id)),
+      id, name: s.name, blurb: s.blurb || "", uses, progress, need: SR().blueprintAfter,
+      claimed, owned, done, canClaim: !done && progress >= SR().blueprintAfter,
+      blueprints: (s.blueprints || []).filter(b => owned.indexOf(b.id) < 0).map(b => blueprintById(b.id)),   // 还能领的（不给重复的）
+      allBlueprints: (s.blueprints || []).map(b => blueprintById(b.id)),
       canInstall: s.canInstall !== false,
       needsIntro: !!pr.needsIntro && !(run.smithIntro || {})[id],
       priceNote: smithPriceNote(run, s)
@@ -2396,6 +2527,8 @@ const Rogue = (function () {
     if (before) withParty(run, () => LevelUp.note("weapon", findKit(h.kit, state.units), before, { weapon: opt.name }));
     clampDur(run, h, kit);   // 旧存档里装在 3 级武器上的图纸升到 4 级才生效：大杀器这类会压低耐久上限
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
+    const pre = smithInfo(run, sid);
+    if (!pre.done && pre.progress < pre.need) run.smithBp[sid] = pre.progress + 1;   // 图纸都有了 / 已经攒满等着领：不再加
     const s = smithInfo(run, sid);
     const matText = opt.mats ? `消耗 ${opt.mats.map(m => `${m.name}×${m.need}`).join("、")}，` : "";
     const notes = [`${s.name} 把 ${opt.name} 升到 ${opt.level + 1} 级，${matText}花掉 ${opt.cost} 奎支${opt.mats ? "加工费" : ""}。`];
@@ -2403,18 +2536,20 @@ const Rogue = (function () {
       notes.push(`帮 ${s.name} 建庇护所，花了 ${opt.hours} 小时。`);
       passHours(run, opt.hours, notes);
     }
-    if (s.canClaim && s.uses === s.need) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
+    if (s.canClaim && !pre.canClaim) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
     return logAll(run, notes);
   }
-  /** 领图纸：在同一位工匠那里升级满次数后，从他的图纸里挑一张（每位工匠只能领一次） */
+  /** 领图纸：在同一位工匠那里升级满次数后，从他还没给过的图纸里挑一张；领完计数归零 */
   function claimBlueprint(run, smithId, bpId) {
     ensureSmithState(run);
     const sid = requireSmith(run, smithId);
     const s = smithInfo(run, sid);
-    if (!s.canClaim) throw new Error(s.claimed ? "这位工匠的图纸已经领过了" : `还要在他这里升级 ${s.need - s.uses} 次`);
+    if (s.owned.indexOf(bpId) >= 0) throw new Error("这张图纸已经有了");
+    if (!s.canClaim) throw new Error(s.done ? "这位工匠的图纸都已经领过了" : `还要在他这里升级 ${s.need - s.progress} 次`);
     const bp = s.blueprints.find(b => b.id === bpId);
     if (!bp) throw new Error("没有这张图纸");
-    run.smithClaimed[sid] = bpId;
+    run.smithClaimed[sid] = (run.smithClaimed[sid] || []).concat(bpId);
+    run.smithBp[sid] = 0;
     run.blueprints.push(bpId);
     return logAll(run, [`从 ${s.name} 那里拿到图纸「${bp.name}」（${bp.text}）。装到武器上要 ${SR().installCost} 奎支。`]);
   }
@@ -2605,7 +2740,7 @@ const Rogue = (function () {
     run.party.forEach(h => { h.xp = (h.xp || 0) + pay.xp; });
     if (run.growth && G().fusionPerTask > 0) {
       bagAdd(G().fusionItem, G().fusionPerTask);
-      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去角色抽取机抽角色。`);
+      notes.push(`获得 ${ITEM_CATALOG[G().fusionItem].name}×${G().fusionPerTask}（现有 ${bagCount(G().fusionItem)}），可以去抽取机抽取。`);
     }
     const ei = escortInfo(run, t);
     if (ei && ei.intact) {
@@ -2650,7 +2785,7 @@ const Rogue = (function () {
    * 每天按日期种子刷 3 个：1 个角色任务 + 2 个通用任务。
    * 角色任务：从持有角色里随机挑一个，用该角色完成 1 次指定类型的任务。
    * 通用任务：造成（最高等级×100）点持有属性伤害 / 15 击破 / 击杀杂兵 / 击杀精英 等。
-   * 每个完成：随机武器材料 + 1000 奎支；三个全完成：额外 1 个赫心融合体。 */
+   * 每个完成：随机武器材料 + 1 个赫心融合体 + 1000 奎支；三个全完成：额外 5 个赫心融合体（ROGUE_GACHA.dailyTaskFusion / dailyAllFusion）。 */
   const GROWTH_DAILY_TYPES = ["battle", "elite", "check"];
   const GROWTH_CHAR_TASKS = [
     { id: "char_task", name: (n) => `${n} 完成任务`, desc: (n, type) => `使用 ${n} 完成 1 次${ROGUE_NODE_TYPES[type]?.label || type}` },
@@ -2769,22 +2904,20 @@ const Rogue = (function () {
     if (!task || task.done) return;
     task.done = true;
     task.progress = task.target;
-    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶
-    const roll = Math.random();
-    const mat = roll < 0.50 ? "mat_metal"
-      : roll < 0.80 ? "mat_alloy"
-      : roll < 0.94 ? "mat_polymer"
-      : roll < 0.98 ? "mat_crystal"
-      : "mat_heart";
+    // 材料概率：50% 金属 / 30% 精炼合金 / 14% 聚合材料 / 4% 稀有晶体 / 2% 赫心结晶（ROGUE_GACHA.weaponMats，抽取机共用这张表）
+    const mat = rollWeaponMat(Math.random());
+    const fName = (ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体";
+    const per = gachaCfg().dailyTaskFusion, bonus = gachaCfg().dailyAllFusion;
     bagAdd(mat, 1);
+    if (per > 0) bagAdd(G().fusionItem, per);
     state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1 和 1000 奎支。`);
+    notes.push(`每日挑战「${task.name}」完成：获得 ${(ITEM_CATALOG[mat]||{}).name || mat}×1${per > 0 ? `、${fName}×${per}` : ""} 和 1000 奎支。`);
     const all = run.growthDaily.tasks.every(t => t.done);
     if (all && !run.growthDaily.allDone) {
       run.growthDaily.allDone = true;
-      bagAdd(G().fusionItem, 1);
+      if (bonus > 0) bagAdd(G().fusionItem, bonus);
       state.kuizhi = (Number(state.kuizhi) || 0) + 1000;
-      notes.push(`三个每日挑战全部完成：额外获得 ${(ITEM_CATALOG[G().fusionItem]||{}).name || "赫心融合体"}×1 和 1000 奎支。`);
+      notes.push(`三个每日挑战全部完成：额外获得 ${bonus > 0 ? `${fName}×${bonus} 和 ` : ""}1000 奎支。`);
     }
   }
 function advanceDays(run, n) {
@@ -2967,11 +3100,48 @@ function advanceDays(run, n) {
     return out;
   }
 
-  /* ---------- 长线养成：角色抽取机、候补 ---------- */
+  /* ---------- 长线养成：抽取机、候补 ---------- */
   function requireGrowth(run) {
     if (!run || !run.growth) throw new Error("只有长线养成有这个");
   }
-  /** 抽取机的状态：{ fusion, cost, canDraw, why, pool: [{ kit, name, owned, level }] } */
+  /* 抽取机概率表：数字只在 rogue-data.js · ROGUE_GACHA 一处 */
+  const gachaCfg = () => ROGUE_GACHA;
+  /** 按武器材料表（每日挑战同一张）把 [0,1) 的 roll 换成材料 id */
+  function rollWeaponMat(roll) {
+    const t = gachaCfg().weaponMats, sum = t.reduce((a, m) => a + m.w, 0);
+    let acc = 0;
+    for (const m of t) { acc += m.w / sum; if (roll < acc) return m.id; }
+    return t[t.length - 1].id;
+  }
+  function craftMatIds() {
+    const c = gachaCfg().craftMats;
+    if (Array.isArray(c) && c.length) return c.slice();
+    return (typeof CRAFT_MATERIALS !== "undefined" ? CRAFT_MATERIALS : []).map(m => m.id);
+  }
+  function gachaKuizhi(light) {
+    const g = gachaCfg();
+    if (g.kuizhiMode === "flat") return (Number(g.kuizhiFlat.base) || 0) + (Number((g.kuizhiFlat.extra || {})[light]) || 0);
+    return Number(g.kuizhiByLight[light]) || 0;
+  }
+  /** 这一抽的大类概率：{ hero, weapon, craft }（所有角色满级时 hero 那份按比例分给两种材料） */
+  function drawRates(run) {
+    const sh = gachaCfg().share;
+    const all = run ? run.party.concat(run.reserve || []) : [];
+    const maxed = !!run && heroPool().every(c => { const h = all.find(x => x.kit === c.kit); return h && (h.level || 1) >= G().maxLevel; });
+    if (!maxed) {
+      // 保底（#340 同 PR，主人定）：可用角色（队伍 + 候补，永久死亡的已移出）越少，出角色的概率越高；剩下的按 weapon:craft 分
+      const n = run ? all.length : Infinity;
+      const tier = (gachaCfg().pity || []).filter(t => n < t.below).sort((a, b) => a.below - b.below)[0];
+      if (tier) {
+        const rest = sh.weapon + sh.craft, left = 1 - tier.hero;
+        return { hero: tier.hero, weapon: left * sh.weapon / rest, craft: left * sh.craft / rest };
+      }
+      return { hero: sh.hero, weapon: sh.weapon, craft: sh.craft };
+    }
+    const rest = sh.weapon + sh.craft;
+    return { hero: 0, weapon: sh.weapon / rest, craft: sh.craft / rest };
+  }
+  /** 抽取机的状态：{ fusion, cost, canDraw, why, allMaxed, rates, pool: [{ kit, name, owned, level }] } */
   function drawInfo(run) {
     requireGrowth(run);
     const fusion = bagCount(G().fusionItem);
@@ -2980,24 +3150,12 @@ function advanceDays(run, n) {
       const h = all.find(x => x.kit === c.kit);
       return { kit: c.kit, name: c.name, owned: !!h, level: h ? h.level || 1 : 0 };
     });
+    const allMaxed = pool.every(p => p.owned && p.level >= G().maxLevel);
     const why = run.stage !== "board" ? "回到任务板前才能用抽取机"
-      : fusion < G().drawCost ? `${ITEM_CATALOG[G().fusionItem].name}不够（要 ${G().drawCost}，有 ${fusion}）`
-      : pool.every(p => p.owned && p.level >= G().maxLevel) ? "所有角色都满级了" : null;
-    return { fusion, cost: G().drawCost, canDraw: !why, why, pool };
+      : fusion < G().drawCost ? `${ITEM_CATALOG[G().fusionItem].name}不够（要 ${G().drawCost}，有 ${fusion}）` : null;
+    return { fusion, cost: G().drawCost, canDraw: !why, why, allMaxed, rates: drawRates(run), pool };
   }
-  /** 抽一次：所有角色等概率；新角色入队（满员进候补），已有的角色 +1 级（满级的不会抽到） */
-  function drawHero(run) {
-    const info = drawInfo(run);
-    if (!info.canDraw) throw new Error(info.why);
-    const cand = info.pool.filter(p => !(p.owned && p.level >= G().maxLevel)).map(p => p.kit);
-    run.draws = (run.draws || 0) + 1;
-    const kit = withRng(`${run.seed}:draw:${run.draws}`, () => pick(cand));
-    bagAdd(G().fusionItem, -G().drawCost);
-    const notes = [`投入 ${ITEM_CATALOG[G().fusionItem].name}×${G().drawCost}，抽取机吐出了……${heroName(kit)}！`];
-    const r = applyHeroDraw(run, kit, notes);
-    return { kit, levelUp: r.levelUp, notes: logAll(run, notes) };
-  }
-  /** 抽到角色：新角色有空位直接上场（满员进候补）；已有的 +1 级，在候补里且队伍有空位的直接上场（#340） */
+  /** 抽到角色：新角色入队（满员进候补）；已有的 +1 级，在候补里且队伍有空位就直接上场（#340） */
   function applyHeroDraw(run, kit, notes) {
     const h = run.party.concat(run.reserve || []).find(x => x.kit === kit);
     if (h) {
@@ -3012,26 +3170,71 @@ function advanceDays(run, n) {
         notes.push(`队伍有空位：${heroName(kit)} 从候补直接上场。`);
       }
       return { levelUp: true, level: h.level };
-    } else {
-      // 以前永久死亡过的角色：从 1 级重新开始
-      const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
-      const startLv = wasDead ? 1 : G().recruitLevel;
-      const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
-      if (wasDead) {
-        notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
-        const di = run.deadKits.indexOf(kit);
-        if (di >= 0) run.deadKits.splice(di, 1);
-      }
-      if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
-      if (run.party.length < G().partyMax) {
-        run.party.push(nh);
-        notes.push(`${heroName(kit)} 加入队伍（${nh.level} 级）。`);
-      } else {
-        run.reserve.push(nh);
-        notes.push(`${heroName(kit)} 加入候补（队伍已满 ${G().partyMax} 人，任务板前可以换上场）。`);
-      }
-      return { levelUp: false, level: nh.level };
     }
+    // 以前永久死亡过的角色：从 1 级重新开始
+    const wasDead = (run.deadKits || []).indexOf(kit) >= 0;
+    const startLv = wasDead ? 1 : G().recruitLevel;
+    const nh = initHero({ kit, weapons: SaveStore.weaponsOf(kit), level: startLv, xp: 0, hp: null, shp: null, weaponState: {}, weaponLevels: wasDead ? {} : null });
+    if (wasDead) {
+      notes.push(`${heroName(kit)} 曾永久死亡，从 1 级重新培养。`);
+      const di = run.deadKits.indexOf(kit);
+      if (di >= 0) run.deadKits.splice(di, 1);
+    }
+    if (nh.level > 1) queueLevelRewards(nh, 1, nh.level, notes, run);
+    if (run.party.length < G().partyMax) {
+      run.party.push(nh);
+      notes.push(`${heroName(kit)} 加入队伍（${nh.level} 级）。`);
+    } else {
+      run.reserve.push(nh);
+      notes.push(`${heroName(kit)} 加入候补（队伍已满 ${G().partyMax} 人，任务板前可以换上场）。`);
+    }
+    return { levelUp: false, level: nh.level };
+  }
+  /** 抽一次（不检查融合体，调用方已经检查并扣过）。随机数用 `${seed}:draw:${第几抽}` 固定 */
+  function drawOnce(run, notes) {
+    run.draws = (run.draws || 0) + 1;
+    const rates = drawRates(run);
+    const all = run.party.concat(run.reserve || []);
+    const cand = heroPool().map(c => c.kit).filter(k => { const h = all.find(x => x.kit === k); return !(h && (h.level || 1) >= G().maxLevel); });
+    const roll = withRng(`${run.seed}:draw:${run.draws}`, () => {
+      const r = Math.random();
+      const type = r < rates.hero && cand.length ? "hero" : r < rates.hero + rates.weapon ? "weapon" : "craft";
+      const id = type === "hero" ? pick(cand) : type === "weapon" ? rollWeaponMat(Math.random()) : pick(craftMatIds());
+      return { type, id };
+    });
+    const lights = gachaCfg().light;
+    const light = roll.type === "hero" ? lights.hero : roll.type === "craft" ? lights.craft : (lights[roll.id] || "gray");
+    const kuizhi = gachaKuizhi(light);
+    const res = { no: run.draws, kind: { hero: "character", weapon: "weapon_material", craft: "craft_material" }[roll.type], type: roll.type, id: roll.id, name: roll.type === "hero" ? heroName(roll.id) : ((ITEM_CATALOG[roll.id] || {}).name || roll.id), qty: 1, light, rarity: light, kuizhi };
+    notes.push(`抽取机吐出了……${res.name}！`);
+    if (roll.type === "hero") {
+      res.kit = roll.id;
+      Object.assign(res, applyHeroDraw(run, roll.id, notes));
+    } else {
+      bagAdd(roll.id, 1);
+      notes.push(`获得 ${res.name}×1（现有 ${bagCount(roll.id)}）。`);
+    }
+    if (kuizhi > 0) { state.kuizhi = (Number(state.kuizhi) || 0) + kuizhi; notes.push(`附赠 ${kuizhi} 奎支。`); }
+    return res;
+  }
+  /** 连抽 n 次（十连给 10）：融合体不够 n×cost 时直接报错，什么都不动。
+   *  → { results: [{ no, kind: "character"|"weapon_material"|"craft_material", type: "hero"|"weapon"|"craft", id, kit?, name, qty, light, rarity, kuizhi, levelUp?, level? }], kuizhi, notes } */
+  function drawMany(run, n) {
+    if (typeof n !== "number" || !Number.isInteger(n) || n < 1) throw new Error("抽取次数要是正整数");
+    const info = drawInfo(run);
+    if (run.stage !== "board") throw new Error(info.why);
+    const need = n * G().drawCost;
+    if (info.fusion < need) throw new Error(`${ITEM_CATALOG[G().fusionItem].name}不够（${n} 抽要 ${need}，有 ${info.fusion}）`);
+    bagAdd(G().fusionItem, -need);
+    const notes = [`投入 ${ITEM_CATALOG[G().fusionItem].name}×${need}，抽 ${n} 次。`];
+    const results = [];
+    for (let i = 0; i < n; i++) results.push(drawOnce(run, notes));
+    return { results, kuizhi: results.reduce((a, r) => a + r.kuizhi, 0), notes: logAll(run, notes) };
+  }
+  /** 抽一次（兼容旧接口）：30% 角色 / 40% 武器材料 / 30% 制作材料；返回那一条结果再加 notes */
+  function drawHero(run) {
+    const r = drawMany(run, 1);
+    return Object.assign({}, r.results[0], { notes: r.notes });
   }
   /** 换人：候补 inKit 换下队伍里的 outKit（outKit 不给就是直接加入，队伍要有空位）；inKit 不给就是 outKit 下场 */
   function swapHero(run, outKit, inKit) {
@@ -3132,7 +3335,7 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, freeRestHere, restSkipPay, restSkipLabel, worstRestGap, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
     interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
@@ -3140,7 +3343,7 @@ function advanceDays(run, n) {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
+    drawInfo, drawHero, drawMany, drawRates, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook
