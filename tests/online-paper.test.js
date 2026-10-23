@@ -148,9 +148,9 @@ test("纸片美术的纯函数：撕边的点都在纸里面、同一个种子�
   assert.ok(a.every(([x, y]) => x >= 0 && x <= 120 && y >= 0 && y <= 40), "都在纸里面");
   assert.ok(a.filter(([, y]) => y < 10).some(([, y]) => y > 2), "撕开的那一边更毛（往里缩得更多）");
   const r = P.rng(1); assert.ok([r(), r(), r()].every(v => v > 0 && v < 1));
-  assert.equal(P.texture(null, "card", 10, 10), "");
-  assert.equal(P.texture({ createElement: () => ({}) }, "card", 10, 10), "", "没有 canvas");
-  assert.equal(P.texture({ createElement: () => ({}) }, "nope", 10, 10), "");
+  assert.equal(P.texture(null, "card"), "");
+  assert.equal(P.texture({ createElement: () => ({}) }, "card", { time: "day", weather: "none" }), "", "没有 canvas");
+  assert.equal(P.texture({ createElement: () => ({}) }, "nope"), "");
   assert.equal(P.dress(null), 0);
   // 每种纸用的颜色都在配色表里；贴纹理的面板都有种类
   Object.values(P.PAPER.art.kinds).forEach(k => assert.ok(P.PAPER.palette.day[k.color] && P.PAPER.palette.night[k.color], k.color));
@@ -248,153 +248,226 @@ test("单机 / 主持人 / 新画面关着一条都套不上：online-paper.css 
   assert.equal(P.PAPER.bodyClass, "ol-paper");
 });
 
-/* ---------- #321：纸纹按尺寸分档缓存、缺的挪到空闲时画（不堵主线程） ---------- */
-/** 假网页：canvas 记下画了几张（createElement("canvas")）、toBlob / toDataURL 各叫了几次；toBlob 同步回一个真的 Blob（URL.createObjectURL 认它） */
+/* ---------- #321：纸纹是每种纸 × 每套配色一张能无缝平铺的小纹理（不按面板大小画）；撕边 clip-path、影子 drop-shadow ---------- */
+/** 假网页：canvas 记下画了几张（createElement("canvas")）、多大、2D 上下文叫了哪些方法 / 设了哪些属性、putImageData 的那块像素，
+ *  toBlob / toDataURL 各叫了几次；toBlob 同步回一个真的 Blob（URL.createObjectURL 认它）。纹理缓存在模块里，各条测试用不同的配色 */
 function paperDoc() {
-  const log = { canvases: 0, blobs: 0, dataUrls: 0 }, els = new Map();
+  const log = { canvases: 0, blobs: 0, dataUrls: 0, sizes: [], calls: [], sets: [], images: [] }, els = new Map();
   const ctx2d = () => new Proxy({}, {
-    get: (t, k) => k === "createImageData" ? (w, h) => ({ data: new Uint8ClampedArray(w * h * 4) })
+    get: (t, k) => k === "createImageData" ? (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) })
+      : k === "putImageData" ? (img) => { log.calls.push("putImageData"); log.images.push(img); }
       : k === "createRadialGradient" ? () => ({ addColorStop() {} })
-      : k in t ? t[k] : () => {},
-    set: (t, k, v) => { t[k] = v; return true; }
+      : k in t ? t[k] : () => { log.calls.push(String(k)); },
+    set: (t, k, v) => { log.sets.push(String(k)); t[k] = v; return true; }
   });
   const doc = {
     createElement(tag) {
+      if (tag === "i") return { tag, className: "", attrs: {}, parentNode: null, setAttribute(k, v) { this.attrs[k] = v; } };
       if (tag !== "canvas") return {};
       log.canvases++;
-      return { width: 0, height: 0, getContext: () => ctx2d(),
+      const c = { width: 0, height: 0, getContext: () => { log.sizes.push([c.width, c.height]); return ctx2d(); },
         toBlob(cb) { log.blobs++; cb(new Blob(["png"], { type: "image/png" })); },
         toDataURL() { log.dataUrls++; return "data:image/png;base64,AAAA"; } };
+      return c;
     },
     querySelectorAll(sel) {
       if (sel === "[data-olp-tex]") return [...els.values()].flat().filter(e => e.dataset.olpTex);
       return els.get(sel) || [];
     }
   };
-  /** 一块面板：sel 选择器、w × h 大小（之后改 el.offsetWidth / offsetHeight 就是变了大小） */
+  /** 一块面板：sel 选择器、w × h 大小（之后改 el.offsetWidth / offsetHeight 就是变了大小）；kids = 补进去的子节点 */
   const panel = (sel, w, h) => {
-    const el = { offsetWidth: w, offsetHeight: h, isConnected: true, dataset: {}, vars: {}, style: { setProperty(k, v) { el.vars[k] = v; } }, closest: () => null };
+    const el = { offsetWidth: w, offsetHeight: h, isConnected: true, dataset: {}, vars: {}, kids: [], style: { setProperty(k, v) { el.vars[k] = v; } }, closest: () => null,
+      appendChild(c) { el.kids.push(c); c.parentNode = el; return c; } };
     els.set(sel, (els.get(sel) || []).concat([el]));
     return el;
   };
   return { doc, log, panel };
 }
 const texUrl = el => (/^url\("(.*)"\)$/.exec(el.vars["--olp-tex"] || "") || [])[1] || "";
+const kindsN = () => Object.keys(P.PAPER.art.kinds).length;
 
-test("#321 纸纹按尺寸分档：宽高各自往上取到一档（越小档越细，24 像素以上的面板拉伸不超过 1/8）；同一档同一个键；技能栏 976 × 235 ↔ 976 × 288 互相「合适」（差不到 reuse），差太多、换了种类 / 配色就不合适", () => {
+test("#321 纸纹只看种类和配色：每种纸 × 每套配色一张平铺纹理（PAPER.art.tile 见方），和面板多大无关；整个游戏最多「种类 × 配色」张", () => {
   const A = P.PAPER.art;
-  assert.deepEqual(A.bucket, { steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 }, "档在配置表里");
-  assert.deepEqual([28, 29, 44, 120, 121, 150, 235, 240, 241, 288, 300, 976, 1024, 1025].map(P.bucket), [28, 32, 44, 120, 128, 160, 240, 240, 256, 288, 320, 1024, 1024, 1088]);
-  for (const v of [24, 25, 31, 60, 63, 64, 65, 127, 129, 200, 255, 257, 400, 511, 513, 700, 1025, 1500]) {
-    assert.ok(P.bucket(v) >= v && P.bucket(v) / v < 1.125, `${v} → ${P.bucket(v)}：只往上取、拉伸不超过 1/8（不算撕边外的影子，最紧的那种）`);
-  }
-  const day = { time: "day", weather: "none" };
-  assert.equal(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 990, 229, day).key, "同一档：同一张纹理");
-  assert.notEqual(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 976, 288, day).key);
-  assert.notEqual(P.texSpec("dock", 976, 235, day).key, P.texSpec("dock", 976, 235, { time: "night", weather: "none" }).key, "换了配色：另一张");
-  assert.deepEqual([P.texSpec("dock", 976, 235, day).w, P.texSpec("dock", 976, 235, day).h], [1024, 240], "按档的大小画");
-  assert.equal(P.texSpec("nope", 10, 10, day), null);
-  assert.equal(P.texSpec("dock", 0, 10, day), null);
-  // 合适：同一种纸、同一套配色，宽高（连撕边外的影子）各自差不到 reuse
-  const at = (w, h, th) => Object.assign(P.texSpec("dock", w, h, th || day), {});
-  assert.equal(A.reuse, 0.25);
-  assert.ok(P.fits(at(976, 235), "dock", "day|none", 976, 288), "选了技能变高：照旧用 235 那张");
-  assert.ok(P.fits(at(976, 288), "dock", "day|none", 976, 235), "取消技能变矮：照旧用 288 那张");
-  assert.ok(!P.fits(at(976, 235), "dock", "day|none", 976, 400), "差太多：另画一张");
-  assert.ok(!P.fits(at(976, 235), "kraft", "day|none", 976, 235), "种类不一样");
-  assert.ok(!P.fits(at(976, 235), "dock", "night|none", 976, 235), "配色不一样");
-  assert.ok(!P.fits(null, "dock", "day|none", 976, 235));
+  assert.equal(A.tile, 256, "平铺纹理的边长在配置表里");
+  assert.equal(typeof P.tileSpec, "function");
+  const day = { time: "day", weather: "none" }, night = { time: "night", weather: "none" };
+  const s = P.tileSpec("dock", day);
+  assert.deepEqual([s.kind, s.th, s.base], ["dock", "day|none", P.themeVars(day)["--olp-kraft"]]);
+  assert.ok(!("w" in s) && !("h" in s), "不带面板大小");
+  assert.notEqual(P.tileSpec("dock", night).key, s.key, "换了配色：另一张");
+  assert.notEqual(P.tileSpec("kraft", day).key, s.key, "同一个颜色的另一种纸：另一张（褶皱、撕边不一样）");
+  assert.equal(P.tileSpec("dock", day).key, s.key, "同一种纸、同一套配色：同一张");
+  assert.equal(P.tileSpec("nope", day), null);
+  // 上限：种类 × 配色（白天 / 夜晚 × 没有天气 / 沙暴 / 雨 / 雪 / 雾）
+  const themes = [];
+  ["day", "night"].forEach(time => ["none", "sand", "rain", "snow", "fog"].forEach(weather => themes.push({ time, weather })));
+  const keys = new Set();
+  themes.forEach(th => Object.keys(A.kinds).forEach(k => keys.add(P.tileSpec(k, th).key)));
+  assert.equal(keys.size, kindsN() * themes.length);
 });
 
-test("#321 dress：缺的那一档不在 dress 里画（不堵主线程），等 flush / 空闲时画，用 toBlob + URL.createObjectURL（不用 toDataURL）；技能栏高度在 235 ↔ 288 之间跳不重画；同一档的新面板直接从缓存贴；差太多才画新的，画好之前照旧贴着上一张", () => {
-  const { doc, log, panel } = paperDoc(), th = { time: "day", weather: "sand" }, T = [["#dock", "dock"], ["#dock2", "dock"]];
-  const dock = panel("#dock", 976, 235);
-  assert.equal(P.dress(doc, T, th), 0, "第一次：缓存里没有，这一下什么都不贴");
-  assert.equal(log.canvases, 0, "dress 里不画（选技能 / 取消时不卡）");
-  assert.equal(P.pending(), 1, "记下缺这一档");
-  assert.equal(P.dress(doc, T, th), 0);
-  assert.equal(P.pending(), 1, "再刷新一次还是那一档：不重复排");
-  assert.equal(P.flush(), 1);
-  assert.equal(P.pending(), 0);
-  assert.equal(log.canvases, 2, "画了一张（一张大的 + 算折面的小画布）");
-  assert.deepEqual([log.blobs, log.dataUrls], [1, 0], "toBlob 编码，不用同步的 toDataURL");
+test("#321 dress：开局把这一套配色的每一种纸都排上，dress 里不画；空闲时（Node 里没有 requestIdleCallback：setTimeout）每种只画一张、toBlob 编码；之后选技能 / 取消（技能栏 235 ↔ 288）、开新的说明框、窗口拖大拖小都不再画", async () => {
+  const { doc, log, panel } = paperDoc(), th = { time: "night", weather: "rain" }, T = [["#dock", "dock"], ["#tag", "tag"], ["#tip", "paper"], ["#end", "board"]];
+  const dock = panel("#dock", 976, 235), tag = panel("#tag", 150, 44), end = panel("#end", 140, 60);
+  assert.equal(P.dress(doc, T, th), 0, "第一次：还没有，这一下什么都不贴");
+  assert.equal(log.canvases, 0, "dress 里不画");
+  assert.equal(P.pending(), kindsN(), "这一套的每一种纸都排上了");
+  for (let i = 0; i < 200 && P.pending() > 0; i++) await new Promise(r => setTimeout(r, 2));
+  assert.equal(P.pending(), 0, "空闲时画完了");
+  assert.equal(log.canvases, kindsN(), "每种纸一张（一张 canvas，不再有算折面的小画布）");
+  assert.ok(log.sizes.every(([w, h]) => w === 256 && h === 256), "都是 256 见方：" + JSON.stringify(log.sizes.slice(0, 3)));
+  assert.deepEqual([log.blobs, log.dataUrls], [kindsN(), 0], "toBlob 编码，不用同步的 toDataURL");
+  assert.match(texUrl(dock), /^blob:/, "画好就贴上：" + texUrl(dock));
+  assert.deepEqual([dock.dataset.olpTex, tag.dataset.olpTex, end.dataset.olpTex], ["dock", "tag", "board"]);
+  assert.equal(P.dress(doc, T, th), 0, "都贴着了：不再动");
   const first = texUrl(dock);
-  assert.match(first, /^blob:/, "URL.createObjectURL 拿的地址：" + first);
-  assert.equal(dock.dataset.olpTex, "dock");
-  assert.equal(dock.vars["--olp-pad"], P.PAPER.art.pad + "px");
-  // 选技能 / 取消：高度 235 → 288 → 235 → 288，一直是这一张，不画
-  for (const h of [288, 235, 288, 241, 290]) {
-    dock.offsetHeight = h;
+  // 选技能 / 取消、技能栏收起展开、窗口拖大拖小：一张都不画，纹理还是那一张
+  for (const [w, h] of [[976, 288], [976, 235], [976, 288], [976, 400], [976, 90], [600, 700], [1500, 235], [333, 97]]) {
+    dock.offsetWidth = w; dock.offsetHeight = h;
     P.dress(doc, T, th);
-    assert.equal(texUrl(dock), first, `高度 ${h}：还是那一张`);
+    assert.equal(texUrl(dock), first, `${w} × ${h}：还是那一张`);
   }
-  P.flush();
-  assert.deepEqual([log.canvases, P.pending()], [2, 0], "一张都没再画");
-  // 同一档的另一块面板（980 × 239 和 976 × 235 是同一档）：直接从缓存贴
-  const dock2 = panel("#dock2", 980, 239);
-  assert.equal(P.dress(doc, T, th), 1, "马上贴上");
-  assert.equal(texUrl(dock2), first);
-  assert.equal(log.canvases, 2);
-  // 差太多（高 400）：记下缺新的一档；画好之前照旧贴着上一张
-  dock.offsetHeight = 400;
-  assert.equal(P.dress(doc, T, th), 0);
-  assert.equal(texUrl(dock), first, "新的画好之前照旧贴着上一张");
-  assert.equal(P.pending(), 1);
-  P.flush();
-  assert.equal(log.canvases, 4, "画了新的一张");
-  assert.notEqual(texUrl(dock), first);
-  assert.match(texUrl(dock), /^blob:/);
-  assert.equal(texUrl(dock2), first, "别的面板不动");
-  // 面板不在了 / 又变回合适的大小：排着的那一张不画
-  dock.offsetHeight = 700;
-  P.dress(doc, T, th);
-  dock.offsetHeight = 400;
-  P.dress(doc, T, th);
-  assert.equal(P.flush(), 1, "排着一张");
-  assert.equal(log.canvases, 4, "没人要了：不画");
-  // 没有 toBlob（旧浏览器）：照样画好（toDataURL），也是在 flush / 空闲时
+  // 开新的面板（说明框、悬停的小卡片……），什么大小都直接从缓存贴
+  const tip = panel("#tip", 287, 133), tag2 = panel("#tag", 91, 37);
+  assert.equal(P.dress(doc, T, th), 2, "新面板马上贴上");
+  assert.equal(tip.dataset.olpTex, "paper");
+  assert.equal(texUrl(tag2), texUrl(tag), "同一种纸、同一套配色：同一张");
+  assert.deepEqual([log.canvases, P.pending(), P.flush()], [kindsN(), 0, 0], "一张都没再画");
+});
+
+test("#321 平铺纹理左右、上下接得上（最边上那一列 / 行和另一边的差，和挨着的两列 / 行差不多，不是一道缝）；全在一块像素里算、只 putImageData 一次：不用 shadowBlur、filter、描线、drawImage", () => {
+  const S = P.PAPER.art.tile;
+  for (const [kind, th] of [["dock", { time: "day", weather: "sand" }], ["board", { time: "day", weather: "none" }], ["receipt", { time: "day", weather: "rain" }]]) {
+    const { doc, log } = paperDoc();
+    assert.match(P.texture(doc, kind, th), /^data:image\/png/, kind + "：画出来了");
+    assert.deepEqual(log.sizes, [[S, S]], kind + "：一张 tile 见方");
+    assert.deepEqual(log.calls, ["putImageData"], kind + "：只 putImageData 一次：" + log.calls.join(","));
+    assert.ok(!log.sets.some(k => /shadow|filter|stroke|lineWidth/.test(k)), kind + "：没设影子 / 滤镜 / 描线：" + log.sets.join(","));
+    const d = log.images[0].data, lum = (x, y) => { const i = (y * S + x) * 4; return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; };
+    let seamX = 0, seamY = 0, inX = 0, inY = 0;
+    for (let i = 0; i < S; i++) { seamX += Math.abs(lum(0, i) - lum(S - 1, i)); seamY += Math.abs(lum(i, 0) - lum(i, S - 1)); }
+    for (let y = 0; y < S; y++) for (let x = 0; x < S - 1; x++) { inX += Math.abs(lum(x, y) - lum(x + 1, y)); inY += Math.abs(lum(y, x) - lum(y, x + 1)); }
+    seamX /= S; seamY /= S; inX /= S * (S - 1); inY /= S * (S - 1);
+    assert.ok(inX > 0.3, kind + "：纹理不是一块平的颜色：" + inX);
+    assert.ok(seamX < inX * 1.6 && seamY < inY * 1.6, `${kind}：接缝 ${seamX.toFixed(2)} / ${seamY.toFixed(2)}，挨着的 ${inX.toFixed(2)} / ${inY.toFixed(2)}`);
+    // 同一种纸、同一套配色再要一次：缓存里拿，不画
+    assert.equal(P.texture(doc, kind, th), P.texture(doc, kind, th));
+    assert.equal(log.canvases, 1);
+  }
+  // 没有 toBlob（旧浏览器）：dress 照样在空闲时画好（toDataURL）
   const old = paperDoc();
   old.doc.createElement = (orig => tag => { const c = orig(tag); delete c.toBlob; return c; })(old.doc.createElement);
   const p = old.panel("#p", 130, 50);
-  P.dress(old.doc, [["#p", "card"]], th);
+  P.dress(old.doc, [["#p", "card"]], { time: "day", weather: "snow" });
   assert.equal(old.log.canvases, 0);
-  P.flush();
+  assert.equal(P.flush(), kindsN());
   assert.match(texUrl(p), /^data:image\/png/);
 });
 
-test("#321 窗口拖着缩放：缺的纹理等大小停下来（PAPER.art.settle 毫秒没有再缺新的）才画，中间那些尺寸不画；没有 requestIdleCallback 就 setTimeout，一次一张", async () => {
-  const A = P.PAPER.art, keep = A.settle;
-  A.settle = 30;
-  try {
-    const { doc, log, panel } = paperDoc(), th = { time: "night", weather: "snow" }, T = [["#top", "tapebar"]];
-    const top = panel("#top", 600, 44);
-    for (let w = 600; w <= 1500; w += 150) {   // 一路拉宽：每一下都差太多
-      top.offsetWidth = w;
-      P.dress(doc, T, th);
-      await new Promise(r => setTimeout(r, 5));
-    }
-    assert.equal(log.canvases, 0, "还在拖：一张都没画");
-    await new Promise(r => setTimeout(r, A.settle + 60));
-    assert.equal(log.canvases, 2, "停下来以后只画最后那个大小");
-    assert.equal(P.pending(), 0);
-    assert.equal(P.texSpec("tapebar", 1500, 44, th).w, P.bucket(1500));
-    assert.match(texUrl(top), /^blob:/);
-  } finally { A.settle = keep; }
+test("#321 撕边是 CSS clip-path：按面板大小生成的 polygon（沿着边是百分比、往里缩的深度是像素）；撕开的边更毛、收据底边是锯齿、按钮那种没有；技能栏 235 ↔ 288 接着用同一个，差太多才换（只换 CSS 变量，不画纹理）", () => {
+  const A = P.PAPER.art;
+  assert.deepEqual([A.bucket, A.reuse], [{ steps: [[64, 4], [128, 8], [256, 16], [512, 32]], big: 64 }, 0.25], "分档、接着用的范围在配置表里");
+  assert.deepEqual([28, 29, 44, 120, 121, 150, 235, 240, 241, 288, 300, 976, 1024, 1025].map(P.bucket), [28, 32, 44, 120, 128, 160, 240, 240, 256, 288, 320, 1024, 1024, 1088]);
+  const c = P.tornClip("dock", 976, 235);
+  assert.deepEqual([c.kind, c.w, c.h], ["dock", 1024, 240], "按那一档的大小生成点");
+  assert.match(c.css, /^polygon\(.*\)$/);
+  /** 拆开 polygon 的点：[x, y]，每个是 { pct, px, back }（百分比 / 像素 / 从 100% 往回减的像素） */
+  const parse = css => css.slice(8, -1).split(", ").map(pt => pt.match(/calc\(100% - [\d.]+px\)|[\d.]+%|[\d.]+px/g).map(v =>
+    /^calc/.test(v) ? { back: parseFloat(v.slice(12)) } : /%$/.test(v) ? { pct: parseFloat(v) } : { px: parseFloat(v) }));
+  const pts = parse(c.css);
+  assert.ok(pts.every(p => p.length === 2), "每个点两个数");
+  assert.ok(pts.every(([x, y]) => (x.pct != null) !== (y.pct != null)), "沿着边的那个是百分比、另一个是像素");
+  const top = pts.filter(([x, y]) => x.pct != null && y.px != null), left = pts.filter(([x, y]) => x.px != null && y.pct != null);
+  assert.ok(top.length > 200, "技能栏上边是撕开的：点密（每 4 像素一个）：" + top.length);
+  assert.ok(top.every(([, y]) => y.px <= A.kinds.dock.torn.top) && top.some(([, y]) => y.px > A.kinds.dock.jag), "上边撕得更深（最多 torn.top 像素）");
+  assert.ok(left.every(([x]) => x.px <= A.kinds.dock.jag), "别的边只毛一点");
+  // 收据：底边锯齿（一高一低，齿深 zig.depth）
+  const bottom = parse(P.tornClip("receipt", 330, 560).css).filter(([x, y]) => x.pct != null && y.back != null).map(([, y]) => y.back);
+  assert.ok(bottom.some(v => v >= A.kinds.receipt.zig.depth) && bottom.some(v => v < 1.6), "锯齿：有深有浅");
+  assert.equal(P.tornClip("board", 120, 40), null, "按钮那种（flat）不撕边");
+  assert.equal(P.tornClip("nope", 120, 40), null);
+  assert.equal(P.tornClip("dock", 0, 40), null);
+  assert.equal(P.tornClip("dock", 990, 229), c, "同一档：同一个（记着）");
+  // 接着用：同一种纸，宽高各自差不到 reuse
+  assert.ok(P.fits(c, "dock", 976, 288), "选了技能变高：接着用");
+  assert.ok(!P.fits(c, "dock", 976, 400), "差太多：换");
+  assert.ok(!P.fits(c, "kraft", 976, 235), "种类不一样");
+  assert.ok(!P.fits(null, "dock", 976, 235));
+  // dress：撕边写成 --olp-clip；技能栏 235 ↔ 288 不换，差太多才换；都不画纹理
+  const { doc, log, panel } = paperDoc(), th = { time: "night", weather: "sand" }, T = [["#dock", "dock"], ["#btn", "board"]];
+  const dock = panel("#dock", 976, 235), btn = panel("#btn", 140, 60);
+  P.dress(doc, T, th); P.flush();
+  const painted = log.canvases;
+  assert.equal(dock.vars["--olp-clip"], c.css);
+  assert.equal(btn.vars["--olp-clip"], undefined, "按钮不撕边");
+  const was = dock.vars["--olp-clip"];
+  for (const h of [288, 235, 288, 241]) { dock.offsetHeight = h; P.dress(doc, T, th); assert.equal(dock.vars["--olp-clip"], was, `高度 ${h}：撕边不换`); }
+  dock.offsetHeight = 400;
+  P.dress(doc, T, th);
+  assert.notEqual(dock.vars["--olp-clip"], was, "差太多：换一个撕边");
+  assert.equal(dock.vars["--olp-clip"], P.tornClip("dock", 976, 400).css);
+  assert.deepEqual([log.canvases, P.pending()], [painted, 0], "换撕边不画纹理");
 });
 
-test("#321 缓存最多 PAPER.art.cache 张：从最久没用的扔，页面上还贴着的不扔；扔掉的 blob: 地址交还给浏览器（URL.revokeObjectURL）", () => {
-  const A = P.PAPER.art, keep = A.cache, revoke = URL.revokeObjectURL, gone = [];
-  A.cache = 3;
-  URL.revokeObjectURL = u => { gone.push(u); return revoke.call(URL, u); };
-  try {
-    const { doc, panel } = paperDoc(), th = { time: "night", weather: "fog" }, T = [["#a", "receipt"]];
-    const a = panel("#a", 100, 100);
-    const urls = [];
-    for (const w of [100, 200, 400, 800, 1600]) { a.offsetWidth = w; P.dress(doc, T, th); P.flush(); urls.push(texUrl(a)); }   // 每一下都差太多
-    assert.equal(new Set(urls).size, 5, "五个大小、五张");
-    assert.ok(urls.slice(0, 2).every(u => gone.includes(u)), "最久没用的两张扔掉、交还了");
-    assert.ok(!gone.includes(urls[4]), "页面上贴着的不扔");
-  } finally { A.cache = keep; URL.revokeObjectURL = revoke; }
+test("#321 影子是 CSS drop-shadow：大面板（ply）补一层 .olp-ply（只补一个，被拿掉了再补），小纸片、按钮不补；配色变量里有影子（--olp-ply-fx）、平铺大小（--olp-tile）、雪天的霜（--olp-frost，内阴影）", () => {
+  const A = P.PAPER.art;
+  assert.deepEqual(Object.keys(A.kinds).filter(k => A.kinds[k].ply), ["tapebar", "kraft", "dock", "paper", "receipt"], "大面板");
+  const { doc, panel } = paperDoc(), th = { time: "night", weather: "fog" }, T = [["#dock", "dock"], ["#side", "receipt"], ["#tag", "tag"], ["#card", "card"], ["#end", "board"]];
+  const dock = panel("#dock", 976, 235), side = panel("#side", 330, 560), tag = panel("#tag", 150, 44), card = panel("#card", 236, 90), end = panel("#end", 140, 60);
+  P.dress(doc, T, th); P.flush(); P.dress(doc, T, th); P.dress(doc, T, th);
+  const plies = el => el.kids.filter(k => k.className === "olp-ply");
+  assert.deepEqual([dock, side].map(el => plies(el).length), [1, 1], "大面板补一层（叫几次都只一个）");
+  assert.deepEqual(plies(dock)[0].attrs, { "aria-hidden": "true" }, "读屏不念");
+  assert.deepEqual([tag, card, end].map(el => el.kids.length), [0, 0, 0], "小纸片（影子挂在自己身上）、按钮不补");
+  // 被拿掉了（面板里面整块重画）：下一次 dress 再补一个
+  plies(dock)[0].parentNode = null; dock.kids.length = 0;
+  P.dress(doc, T, th);
+  assert.equal(plies(dock).length, 1, "再补上");
+  // 配色变量：每一套都有，名字一样
+  const day = P.themeVars({ time: "day", weather: "none" }), snow = P.themeVars({ time: "night", weather: "snow" });
+  assert.equal(day["--olp-tile"], A.tile + "px");
+  assert.equal(day["--olp-ply-fx"], "drop-shadow(2px 5px 3.5px rgba(0, 0, 0, 0.42)) drop-shadow(-1px 1px 1px rgba(0, 0, 0, 0.22))", "两层影子（模糊按 canvas 的一半）");
+  assert.equal(snow["--olp-frost"], A.weather.snow.frost, "雪天：纸边一层霜");
+  assert.match(snow["--olp-frost"], /^inset /, "霜是内阴影");
+  assert.equal(day["--olp-frost"], "inset 0 0 0 transparent", "别的天气没有");
+  assert.deepEqual(Object.keys(snow).sort(), Object.keys(day).sort());
+});
+
+test("#321 换配色（夜里下雪 → 白天起雾 → 回到夜里下雪）：换到没画过的一套才画那一套的每一种纸各一张，回到画过的那一套不再画，直接换回那一张", () => {
+  const { doc, log, panel } = paperDoc(), T = [["#dock", "dock"], ["#tag", "tag"]];
+  const a = { time: "night", weather: "snow" }, b = { time: "day", weather: "fog" };
+  const dock = panel("#dock", 976, 235);
+  panel("#tag", 150, 44);
+  P.dress(doc, T, a); P.flush();
+  const first = texUrl(dock);
+  assert.equal(log.canvases, kindsN());
+  P.dress(doc, T, b);
+  assert.equal(texUrl(dock), first, "新的一套画好之前照旧贴着上一套");
+  assert.equal(P.flush(), kindsN());
+  assert.notEqual(texUrl(dock), first, "画好换上");
+  P.dress(doc, T, a);
+  assert.equal(texUrl(dock), first, "回到画过的那一套：马上换回那一张");
+  assert.deepEqual([P.flush(), log.canvases], [0, 2 * kindsN()], "一共只画了两套");
+});
+
+test("#321 online-paper.css：纸纹平铺（--olp-tile、repeat，不再拉到 100% 100%）；撕边 clip-path、霜是内阴影；.olp-ply 挂 drop-shadow；小纸片的影子挂在自己身上；收起的抽屉也留着影子层", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const css = fs.readFileSync(path.join(__dirname, "..", "online-paper.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.doesNotMatch(css, /var\(--olp-tex\)[^;]*100% 100%/, "纹理不再拉伸");
+  assert.doesNotMatch(css, /--olp-pad/, "纹理不再比面板大一圈（影子不画进位图）");
+  const before = /\[data-olp-tex\]::before \{([^}]*)\}/.exec(css);
+  assert.ok(before, "面板的纸纹那一层");
+  assert.match(before[1], /background: var\(--olp-tex\) 0 0 \/ var\(--olp-tile, 256px\) repeat;/);
+  assert.match(before[1], /inset: 0;/);
+  assert.match(before[1], /clip-path: var\(--olp-clip, none\);/);
+  assert.match(before[1], /box-shadow: var\(--olp-frost, none\);/);
+  assert.match(css, /:is\(\.olp-tools-b, \.olp-menu-b, \.summonbtn, \.endturn\)\[data-olp-tex\] \{[^}]*background-size: var\(--olp-tile, 256px\) !important; background-repeat: repeat !important;/, "按钮：平铺当底图");
+  assert.match(css, /\[data-olp-tex\] > \.olp-ply \{[^}]*z-index: -2;[^}]*filter: var\(--olp-ply-fx, none\);/, "影子层在纸下面、挂 drop-shadow");
+  assert.match(css, /\[data-olp-tex\] > \.olp-ply::before \{[^}]*clip-path: var\(--olp-clip, none\);/, "影子跟着撕边");
+  assert.match(css, /:is\(\.olp-tag-card, \.olp-move, \.pm, \.olp-party-tools \.ol-button, \.sk\)\[data-olp-tex\] \{ filter: var\(--olp-ply-fx, none\); \}/, "小纸片的影子挂在自己身上");
+  assert.match(css, /\.ol-side\[data-olp-tex\] > \.olp-ply \{ display: block !important; \}/, "收起的抽屉（里面别的都藏起来）也留着影子层");
+  assert.doesNotMatch(css, /shadowBlur/);
 });
 
 test("新加的 HTML 里没有坚毅生命：顶栏、吊牌、下拉只拿传进来的公开字段", () => {

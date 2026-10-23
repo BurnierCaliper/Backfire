@@ -392,14 +392,15 @@
     }
     // 放大到 S × S（双线性插值，跨过边从另一边取：和样稿一样糊一点），乘上纸的底色；瓦楞纸的竖纹
     const c0 = rgbOf(spec.base) || [204, 204, 204], buf = new Float32Array(S * S * 3), r = s / S, at = (x, y) => f[((y + s) % s) * s + ((x + s) % s)];
-    const cn = K.corrugated ? Math.max(1, Math.round(S / K.corrugated)) : 0, cstep = cn ? S / cn : 0;
+    // 竖纹：间距取到正好铺满一张（cn 道），每道 3 像素宽，排在每一段的正中（接缝落在两道竖纹中间）
+    const cn = K.corrugated ? Math.max(1, Math.round(S / K.corrugated)) : 0, cstep = cn ? S / cn : 0, coff = cn ? cstep - (cstep - 3) / 2 : 0;
     for (let y = 0; y < S; y++) {
       const v = (y + 0.5) * r - 0.5, y0 = Math.floor(v), ty = v - y0;
       for (let x = 0; x < S; x++) {
         const u = (x + 0.5) * r - 0.5, x0 = Math.floor(u), tx = u - x0;
         const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * tx, b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * tx;
         let k = 1 + a + (b - a) * ty;
-        if (cn && x % cstep < 3) k *= 0.93;
+        if (cn && (x + coff) % cstep < 3) k *= 0.93;
         const i = (y * S + x) * 3;
         buf[i] = c0[0] * k; buf[i + 1] = c0[1] * k; buf[i + 2] = c0[2] * k;
       }
