@@ -626,6 +626,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("浏览器 · 跑团战场配置：场景下拉框默认「跟着地图（当前：矿外）」，选项是这个区域的场景；选了就用选的；换区域选项跟着变，新区域没有的回到默认", async (t) => {
   if (!browser) { if (process.env.REQUIRE_UI === "1") throw new Error("UI 验收需要 Playwright"); t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));

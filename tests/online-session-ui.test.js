@@ -87,6 +87,7 @@ async function fixture(t) {
   const pages = [], contexts = [], errors = [], wire = [];
   for (const width of [1440, 1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } }); contexts.push(context);
+    await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
     const page = await context.newPage(); pages.push(page);
     page.on("pageerror", error => errors.push(error.message)); page.on("dialog", dialog => dialog.accept());
     page.on("websocket", ws => ws.on("framereceived", frame => { try { wire.push({ page: pages.indexOf(page), data: JSON.parse(frame.payload) }); } catch (_) {} }));

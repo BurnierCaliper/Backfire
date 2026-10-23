@@ -34,7 +34,7 @@ function one(act, kind, size, index, options = {}) {
     row.outcome = result.winner === "player" ? "win" : result.winner === "enemy" ? "lose" : result.winner === "timeout" ? "timeout" : "error";
     row.raw = s.battleScore.total;
     const settled = row.outcome === "timeout" ? { grade: c.battleGrade(), xpBonus: 0 } : c.settleBattleRewards(row.outcome);
-    Object.assign(row, { win: row.outcome === "win", score: s.battleScore.total, fatigue: s.battleScore.parts.fatigue || 0, turns: s.turnNo, grade: settled.grade.grade, xpBonus: settled.xpBonus, flawless: !!s.battleScore.flawless, actualUnitsAfter: B.fieldSnapshot(c) });
+    Object.assign(row, { win: row.outcome === "win", score: s.battleScore.total, fatigue: s.battleScore.parts.fatigue || 0, turns: s.turnNo, grade: settled.grade.grade, xpBonus: settled.xpBonus, flawless: !!s.battleScore.flawless, counterMaster: !!s.battleScore.counterMaster, actualUnitsAfter: B.fieldSnapshot(c) });
     if (row.outcome === "timeout") { row.endReason = "Declared battle round limit reached"; row.terrainAfter = B.clone({ gaps: s.gaps, props: s.props, fields: s.fields }); row.lastRoundLog = (s.logPages || []).slice(-1).flatMap(p => (p.lines || []).map(l => l.text || String(l))); }
     if (c.__errors.length) throw new Error(`Rule console.error: ${c.__errors.join(" | ")}`);
   } catch (e) { row.outcome = "error"; row.win = false; row.error = e.stack || String(e); }

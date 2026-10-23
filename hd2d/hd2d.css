@@ -213,6 +213,29 @@
 }
 .hd2d-tower.short { border-left-color: #d8322a; }
 .hd2d-tower .mech-ico { pointer-events: auto; }
+/* ---------- 白色单位卡（#316）----------
+ * 正式画面（单机、联机玩家、联机纸片画面）的 3D 铭牌就是旧画面的单位卡：unit-card.js 画的 .unit-wrap / .unit，内容、样式全是旧画面 game.css 的那一份，这里只管它挂在 3D 铭牌里的样子：
+ *   · 普通单位的卡片宽 --cw（场景按 hd2d-layout.js 的 CONFIG.card 设：两区 196、三区起 148、手机 150，布局按同一个宽排站位）；配置物、中立生物照旧画面自己的大小
+ *   · 新战场那一层（.hd2d-theme）换了 --ink / --muted 和字体：卡上换回旧画面的（game.css 的 :root、body），白卡和旧画面一模一样
+ *   · 整张卡接鼠标（点 = 点单位卡、悬停 = 单位说明，hd2d-scene.js 接的那一份，卡上没有旧画面的监听）；选目标的描边 / 变暗、谁在行动用旧画面的
+ *     is-targetable / is-hover / is-dim / is-actor（hd2d-scene.js · markPlates 加），铭牌自己的 dimmed 就不再叠一层（近景里别的区照旧糊一点） */
+.hd2d-plate.card, .hd2d-plate.card .pl-in { width: max-content; }
+.hd2d-plate.card .unit-wrap { pointer-events: auto; cursor: pointer; outline: none; text-align: left; --ink: #1b1f24; --muted: #9d9081; font: 16px/normal var(--ui, sans-serif); }
+.hd2d-plate.card .unit-wrap:focus-visible .unit { outline: 2px solid #fff; outline-offset: 2px; }
+.hd2d-labels .unit:not(.prop):not(.mini) { width: var(--cw, 196px); }
+.hd2d-plate.card.dimmed .pl-in { opacity: 1; filter: none; }
+.hd2d-plate.card.dim .pl-in { filter: blur(1.6px) saturate(.75); }
+/* 卡片动画（#330）：旧画面单位卡的动画（game.css 的 .unit-wrap.hit / .knock / .parry / .enter / .high-warn / .slow-move / .dead / .ko-held / .gone）原样套在 3D 白卡上，
+ * 位移写在白卡的 transform 上（hd2d-play.js · HD2DPlay.cards）。这里只补两样：
+ *   冲撞中的铭牌压在别的铭牌上面（旧画面是 .unit-wrap.lunge 的 z-index；3D 铭牌的 z-index 由 CSS2DRenderer 每帧写在行内，这里盖过去）
+ *   被打倒、还在淡出的白卡（hd2d-field.js 先留着的）不接鼠标（旧画面 .unit-wrap.dead 的 pointer-events，被上面整张卡接鼠标的那一条盖掉了，这里补回来） */
+.hd2d-plate.fx-front { z-index: 2147483000 !important; }
+.hd2d-plate.card .unit-wrap.dead { pointer-events: none; cursor: default; }
+/* 区域预警（#330，旧画面区角上的 .zthreat）：地台前沿立一块，写什么攻击、谁标的（下一回合就落地的 .rd 更红）；地台上的红框在场景里画（hd2d-scene.js 的 THREAT） */
+.hd2d-threat { display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+.hd2d-threat span { padding: 2px 7px; white-space: nowrap; font: 700 11px/1.3 var(--ui-sans); color: #fff; background: #c44747; border: 2px solid var(--ink); border-radius: 9px; box-shadow: 2px 3px 0 rgba(0, 0, 0, .45); }
+.hd2d-threat span.rd { background: #e05a4f; }
+.hd2d-threat span i { margin-left: 5px; font-style: normal; font-weight: 400; opacity: .85; }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }

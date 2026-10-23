@@ -458,3 +458,28 @@ test("接线（#241）：页面在 #242 的登记处和采矿场的美术包后�
   const src = fs.readFileSync(path.join(DIR, "hd2d-scenes-city.js"), "utf8").replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "");
   assert.ok(!/\bshp\b|\.units\b|\.plate\b/.test(src), "美术包不碰单位数据");
 });
+
+test("外城区的房子放大到 3 倍（主人 10/23：长宽高三边都是以前的 3 倍）：SLUM.scale = 3，每间的宽 / 高 / 深都在放大后的范围里；排间距跟着放大；房子照旧都在战场外面、门朝战场那边", () => {
+  const Cy = city(), S = Cy.SLUM, k = S.scale;
+  assert.equal(k, 3);
+  const b = { minX: -7, maxX: 7, minZ: -3.5, maxZ: 3.5 };
+  const at = art().around(b, S.margin);
+  [1, 7, 42, 1234].forEach(seed => {
+    const plan = Cy.slumPlan(b, seed);
+    assert.ok(plan.length >= 8, "还是一圈房子");
+    plan.forEach(h => {
+      const D = S[h.kind];
+      [["w", D.w], ["h", D.h], ["d", D.d]].forEach(([key, [lo, hi]]) => {
+        assert.ok(h[key] >= lo * k - 1e-9 && h[key] <= hi * k + 1e-9, `${h.kind} 的 ${key} = ${h[key]} 在 ${lo * k}–${hi * k}`);
+      });
+      assert.equal(h.s, k, "屋顶厚、烟囱粗跟着放大");
+      const side = Math.abs(Math.abs(h.rot) - Math.PI / 2) < 0.3;
+      if (side) assert.ok(Math.abs(h.x - at.cx) - h.d / 2 >= at.sideX - 1e-9, "左右两边的房子不压到战场");
+      else assert.ok(h.z + h.d / 2 <= at.back + 1e-9, "后面的房子不压到战场");
+    });
+    // 后面第一排：相邻两间的中心距离平均是放大后的 step（不会挤成一团）
+    const row = plan.filter(h => Math.abs(h.rot) < 0.3).sort((a, c) => a.x - c.x);
+    const gaps = row.slice(1).map((h, i) => h.x - row[i].x).filter(g => g > 0);
+    assert.ok(gaps.reduce((a, g) => a + g, 0) / gaps.length > S.rows[0].step * k * 0.4, "间距跟着放大");
+  });
+});

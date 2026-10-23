@@ -712,6 +712,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("画面：标题画面点「规则说明」打开图鉴的「规则」，能按分类筛、能搜，点开看章节", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));
@@ -735,4 +736,13 @@ test("画面：标题画面点「规则说明」打开图鉴的「规则」，�
   await page.click('.bx [data-mode="rules"]');
   assert.equal(await page.textContent(".bx-head h3"), "规则说明");
   assert.deepEqual(errors, []);
+});
+
+test("规则页「单局里的休息点」：补的休息点离开无报酬、长休不耗补给，上限读 ROGUE_CONFIG.hours.restGapMax", () => {
+  const c = loadRules();
+  const sec = chapter(c, "rest").sections.find(s => s.title === "单局里的休息点");
+  const t = sec.lines.join("\n");
+  assert.match(t, /补出来的休息点[^\n]*离开无报酬/);
+  assert.match(t, /不消耗水和食物/);
+  assert.ok(t.includes(`不超过 ${c.S.ROGUE_CONFIG.hours.restGapMax} 小时`), t);
 });

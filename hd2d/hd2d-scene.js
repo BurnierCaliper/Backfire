@@ -22,8 +22,14 @@
  *   onGapClick(间隔的键) / onEmptyClick()             点间隔（危墙 / 桥梁……）、点空地
  *   sc.setMarks({ targets, dim, aim, zones, hoverZone, gaps })   // 选目标 / 选区的标记（hd2d-field.js · marksOf）：铭牌描边 / 变暗 / 瞄准，地台、间隔亮框
  *   onZoomOut()                                       远景到头了还往外拉（滚轮往后 / 双指捏小）：正式画面拿它转回旧画面（#261 追加，云雾转场）；不给 = 照旧停在远景
+ *   onCardSize(Map 单位 id → { w, h })                白卡（#316）：布局给了卡片快照（u.card）时铭牌就是旧画面的单位卡（UnitCard 画），画出来量到的卡片大小和布局按的不一样，
+ *                                                     告诉外面按量到的重排（hd2d-field.js）
  *   sc.overhead({ elevation, dist, secs, ease }) / sc.descend({ secs, ease })   转场：镜头升到战场正上方往下看 / 从正上方降回远景（数值在 hd2d-field.js 的 MIST）；
  *                                                     转场占着镜头（state.lock）：拖动、滚轮、双指、推镜头都不接，重排只换铭牌，降回远景了才交还
+ * 旧画面单位卡的动画（#330；白卡自己的冲撞 / 受击…… 在 hd2d-play.js，这里只管 3D 里的）：
+ *   setBattle 的 meta.move = 换了区的铭牌滑多少秒（hd2d-field.js 按演出倍率给；0 = 直接摆过去）：锚点在两个地台之间插值（hd2d-fx.js · slideAt），镜头不动
+ *   布局的 zone.threats（区域预警）：地台上一圈红框（下回合就落地的一明一暗）+ 前沿一块预警字；sc.zoneFx(区号, "warn", { secs }) 地台闪一下（高能自爆预警）
+ *   被打倒、还在淡出的（卡片快照 dead，hd2d-field.js 先留着的）：脚下的影子拿掉
  * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
  * 系统开了「减少动态效果」（prefers-reduced-motion）时，待机动画、飘浮物、天气粒子、乌云、胶片颗粒都停住；雷照打，但闪光减弱、只闪一下，镜头不抖；
  * 换镜头不插值，直接切过去。
@@ -80,6 +86,13 @@ const MARK = {
   hover: { inset: 0.42, width: 0.26, color: 0x7dffd8, glow: 2.2, opacity: 0.85 },
   gap: { inset: -0.12, width: 0.14, color: 0xf2c230, glow: 1.8, opacity: 0.7, pulse: 0.2, speed: 4 }
 };
+/** 区域预警（#330，旧画面 game.css 的 .g-zone.threat / .threat-ready 和区角上的 .zthreat）：敌人已经标定、之后回合才落地的范围攻击（布局的 zone.threats = 投影里的 zoneView[区].threats）——
+ *  地台顶面靠边一圈红框（inset 离边多远、width 多宽，颜色 × glow 亮到泛光抓得到，opacity 透明度）；ready（下一回合就落地）换亮一点的红、一明一暗（pulse 幅度、speed 快慢：
+ *  旧画面 1 秒一个来回；减少动态效果时不闪）。地台前沿右边立一块预警字（.hd2d-threat，和旧画面一样的标签：写什么攻击、谁标的；front / side 往外多少 × 地台边长、lift 离顶面多高） */
+const THREAT = { inset: 0.05, width: 0.24, color: 0xc44747, glow: 1.7, opacity: 0.75, ready: { color: 0xe05a4f, glow: 2.4, opacity: 0.95, pulse: 0.4, speed: Math.PI }, front: 0.44, side: 0.3, lift: 0.06 };
+/** 地台闪一下（#330，场景的 zoneFx）：warn = 高能自爆预警（旧画面卡片闪的薄荷色 #84f3d2，game.css 的 .high-warn；余波打的是同一区）——
+ *  地台顶面靠边一圈框，flashes 下（总共 secs 秒，hd2d-field.js 按演出倍率给）。减少动态效果时不闪 */
+const ZONE_FX = { warn: { inset: 0.12, width: 0.32, color: 0x84f3d2, glow: 2.6, opacity: 0.95, flashes: 2, secs: 0.6 } };
 /** 当前行动的光圈：慢慢转；选中的单位脚下一圈白圈 */
 const RING = { radius: 1.05, spin: 0.45, pulse: 0.05 };
 /** 脚下的接触阴影：一小块很实的核心 + 一圈软的 */
@@ -485,7 +498,39 @@ export function createHd2dScene(container, options) {
     const u = id != null && state.layout ? state.layout.units.find(x => x.id === id) : null;
     if (u && u.zone !== state.zone) setZone(u.zone);
   }
-  function syncPlates() {
+  /** 铭牌和脚下那几样（接触阴影、沙纹、行动光圈、选中圈）摆到 a（{ x, y, z, g 脚下地台的高度 }，世界坐标）；p.cur = 现在摆在哪 */
+  function placeAt(p, a) {
+    p.cur = a;
+    p.group.position.set(a.x, a.y, a.z);
+    const g = a.g;
+    p.core.position.set(a.x, g + 0.02, a.z); p.soft.position.set(a.x, g + 0.015, a.z);
+    p.ripple.position.set(a.x, g + 0.03, a.z);
+    p.ring.position.set(a.x, g + 0.04, a.z); p.pick.position.set(a.x, g + 0.035, a.z);
+  }
+  /** 换区移动（#330，旧画面单位卡从一个区滑到另一个区）：铭牌的 3D 锚点从现在的地方滑到 u 站的地方，state.meta.move 秒（hd2d-field.js 按演出倍率给：
+   *  跳过、不是演出中的刷新是 0 = 直接摆过去），后排抬高也跟着慢慢变。刚建好的铭牌、换了棋盘（fresh）、减少动态效果时不滑；
+   *  滑到一半又重排（演出的每一下都会）：去的地方没变就接着滑，变了就从滑到的地方接着滑过去。插值在 hd2d-fx.js · slide / slideAt，frame 里每帧摆 */
+  function slideTo(p, u, fresh) {
+    const to = { x: u.x, y: u.y, z: u.z, g: u.groundY }, FXM = window.HD2DFx, t = now();
+    const same = (a, b) => !!a && !!b && Math.abs(a.x - b.x) < 1e-3 && Math.abs(a.y - b.y) < 1e-3 && Math.abs(a.z - b.z) < 1e-3 && Math.abs(a.g - b.g) < 1e-3;
+    if (p.slide && same(p.slide.to, to) && !fresh) { p.at = to; return; }
+    const was = p.slide && FXM ? FXM.slideAt(p.slide, t) : p.cur;
+    const secs = Number(state.meta.move) || 0;
+    p.slide = !fresh && was && !same(was, to) && secs > 0 && state.motion && FXM && FXM.slide ? FXM.slide(was, to, secs, t) : null;
+    if (p.slide) p.slide.lift0 = p.lift;
+    p.at = to;
+    placeAt(p, p.slide ? FXM.slideAt(p.slide, t) : to);
+  }
+  /** 滑动中的铭牌这一帧摆到哪（#330，frame 里每帧叫）：锚点按 hd2d-fx.js · slideAt，后排抬高从原来的慢慢变到这一段的；到了就停 */
+  function slideStep(p, t) {
+    const FXM = window.HD2DFx;
+    if (!p.slide || !FXM) return;
+    const a = FXM.slideAt(p.slide, t);
+    placeAt(p, a);
+    setLift(p, p.slide.lift0 + ((Number.isFinite(p.liftTo) ? p.liftTo : p.slide.lift0) - p.slide.lift0) * a.k);
+    if (a.done) p.slide = null;
+  }
+  function syncPlates(fresh) {
     const live = new Set();
     const size = state.layout.plateSize || L.plateSize(view()), big = L.plateSize(state.layout.view || view(), true);
     labels.domElement.style.setProperty("--pw", size.w + "px");
@@ -494,29 +539,32 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--bh", big.h + "px");
     labels.domElement.style.setProperty("--mi", MECH.icon + "px");   // 首领机制的图标（#283）
     labels.domElement.style.setProperty("--mg", MECH.gap + "px");
+    if (state.layout.cardW > 0) labels.domElement.style.setProperty("--cw", state.layout.cardW + "px");   // 白卡（#316）的宽：布局按同一个宽排站位
     const UC = window.UnitCard;
     state.layout.units.forEach(u => {
       live.add(u.id);
-      let p = state.plates.get(u.id);
-      if (!p) { p = makePlate(u); state.plates.set(u.id, p); }
-      const key = JSON.stringify(u.plate);
-      if (key !== p.key) {
-        p.key = key; p.bob.innerHTML = plateHtml(u.plate);
-        // 新点名的图标「啪」地弹一下（unit-card.js · alertNew，记在这块铭牌上；第一次画只记下）；提示音旧画面的单位卡已经响过
-        if (UC && UC.alertNew) UC.alertNew(p.bob.querySelector(":scope > .pl-mechs"), u.plate.mechs ? u.plate.mechs.marks : [], "mark", { quiet: true }, p.mechMemo);
+      let p = state.plates.get(u.id), made = false;
+      if (!p) { p = makePlate(u); state.plates.set(u.id, p); made = true; }
+      // 白卡（#316，正式画面给了卡片快照）：旧画面的单位卡；原型页没有卡片快照，照旧画铭牌
+      if (u.card && UC && UC.create) syncCard(p, u, UC);
+      else {
+        const key = JSON.stringify(u.plate);
+        if (key !== p.key) {
+          p.key = key; p.bob.innerHTML = plateHtml(u.plate);
+          // 新点名的图标「啪」地弹一下（unit-card.js · alertNew，记在这块铭牌上；第一次画只记下）；提示音旧画面的单位卡已经响过
+          if (UC && UC.alertNew) UC.alertNew(p.bob.querySelector(":scope > .pl-mechs"), u.plate.mechs ? u.plate.mechs.marks : [], "mark", { quiet: true }, p.mechMemo);
+        }
+        p.el.classList.toggle("has-mech", !!u.plate.mechs);
       }
-      p.el.classList.toggle("has-mech", !!u.plate.mechs);
       p.u = u;
-      p.group.position.set(u.x, u.y, u.z);
+      slideTo(p, u, fresh || made);   // 换了区：在两个地台之间滑过去（#330）
       if (!p.liftSet) setLift(p, u.lift);   // 后排抬高：铭牌下面一根细杆连到脚下（每一段镜头的抬高在 goTo 里换）
-      const g = u.groundY;
-      p.core.position.set(u.x, g + 0.02, u.z); p.soft.position.set(u.x, g + 0.015, u.z);
-      p.ripple.position.set(u.x, g + 0.03, u.z);
-      p.ring.position.set(u.x, g + 0.04, u.z); p.pick.position.set(u.x, g + 0.035, u.z);
       p.ripple.visible = u.submerged;
       const air = u.flying ? 0.45 : u.submerged ? 0.3 : 1;     // 飞着的影子淡、小；下潜的几乎没有
       p.core.material.opacity = SHADOW.coreOpacity * air; p.soft.material.opacity = SHADOW.softOpacity * (u.flying ? 0.7 : air);
       p.core.scale.setScalar(SHADOW.core * (u.flying ? 0.8 : 1)); p.soft.scale.set(SHADOW.soft * 1.15, SHADOW.soft, 1);
+      // 被打倒、还在淡出的敌人（#330，hd2d-field.js 先留着的：白卡自己照旧画面淡掉）：脚下的影子先拿掉
+      p.core.visible = p.soft.visible = !(u.card && u.card.dead);
       p.el.classList.toggle("foe", u.side === "foe");
       p.el.classList.toggle("sub", u.submerged);
       p.el.classList.toggle("dying", u.plate.flags.some(f => f.key === "dying"));
@@ -524,6 +572,44 @@ export function createHd2dScene(container, options) {
     state.plates.forEach((p, id) => { if (!live.has(id)) { disposePlate(p); state.plates.delete(id); } });
     if (state.selectedId != null && !state.plates.has(state.selectedId)) state.selectedId = null;
     markPlates();
+  }
+  /** 白卡（#316）：这块铭牌换成旧画面的单位卡——UnitCard.create / update（单机、联机玩家的旧画面画单位卡的同一份），快照是正式画面给的（hd2d-field.js：
+   *  单机是 game.js 的快照、联机玩家是收到的包过 online-battle.js · snapUnit / snapProp，坚毅生命在那边就拿掉了）。卡上不接旧画面的点击 / 悬停：
+   *  整张卡就是这块铭牌能点的地方（data-hit），点 / 悬停 / 键盘照旧走这块铭牌的那一份（正式画面交给 game.js / 联机的回调，只算一次）。
+   *  首领机制的图标、新点名「啪」地弹一下都在卡里（unit-card.js），提示音旧画面的卡已经响过（quiet）。内容变了就等画出来以后量一下卡片本来的大小（frame 里）*/
+  function syncCard(p, u, UC) {
+    if (!p.card) {
+      p.bob.innerHTML = "";
+      p.card = UC.create(u.card);
+      const w = p.card.wrap;
+      w.setAttribute("data-hit", "");
+      w.setAttribute("role", "button");
+      w.setAttribute("tabindex", "0");
+      p.bob.appendChild(w);
+      p.el.classList.add("card");
+      p.key = "";
+    }
+    const key = JSON.stringify(u.card);
+    if (key === p.key) return;
+    p.key = key;
+    UC.update(p.card, u.card, { quiet: true });
+    p.card.wrap.setAttribute("aria-label", String((UC.headOf ? UC.headOf(u.card) : u.card).name || ""));
+    p.measure = true;
+  }
+  /** 白卡画出来以后量一下卡片本来的大小（不算缩放）：和布局按的（u.size：估的，或者上一次量的）差了一像素以上就交给外面（hd2d-field.js 按量到的重排，
+   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量 */
+  function measureCards() {
+    let out = null;
+    state.plates.forEach((p, id) => {
+      if (!p.measure || !p.card || !p.u) return;
+      const w = p.card.wrap.offsetWidth, h = p.card.wrap.offsetHeight;
+      if (!(w > 0 && h > 0)) return;
+      p.measure = false;
+      p.size = { w, h };
+      const s = p.u.size;
+      if (!s || Math.abs(s.w - w) > 1 || Math.abs(s.h - h) > 1) (out = out || new Map()).set(id, p.size);
+    });
+    if (out && options.onCardSize) options.onCardSize(out);
   }
   /** 当前行动 / 选中 / 悬停：铭牌加样式，脚下的光圈开关；悬停 / 选中的铭牌叠在最上面（CSS2DRenderer 按 renderOrder 先排）。
    *  近景：选中的区的铭牌放大（.big），别的区的变淡、糊掉（.dim）——按这一段镜头（state.pose.plates）定 */
@@ -535,6 +621,16 @@ export function createHd2dScene(container, options) {
       p.big = !!(q && q.big); p.dim = !!(q && q.dim);
       // 特写（#237）：这个单位的铭牌再放大 zoom 倍、在最上面；别的压到它的藏起来
       p.close = !!(q && q.close); p.hide = !!(q && q.hide); p.zoom = q && q.zoom > 0 ? q.zoom : 1;
+      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大已经算在里面），每帧按 L.cardScale 再乘远近
+      p.base = q && q.scale > 0 ? q.scale : null;
+      // 白卡：当前行动 / 能点的目标 / 鼠标停着的目标 / 不是目标变暗，用旧画面单位卡的那几个样式（game.css 的 is-actor / is-targetable / is-hover / is-dim）
+      if (p.card) {
+        const w = p.card.wrap;
+        w.classList.toggle("is-actor", actor);
+        w.classList.toggle("is-targetable", mk.targets.has(p.id));
+        w.classList.toggle("is-hover", mk.aim === p.id);
+        w.classList.toggle("is-dim", mk.dim.has(p.id));
+      }
       p.el.classList.toggle("actor", actor); p.ring.visible = actor;
       p.el.classList.toggle("sel", sel); p.el.classList.toggle("hover", p.hover);
       p.el.classList.toggle("big", p.big); p.el.classList.toggle("dim", p.dim);
@@ -591,8 +687,9 @@ export function createHd2dScene(container, options) {
     const c = layout.camera, wsig = [Object.values(layout.bounds).map(v => v.toFixed(2)).join(","), c ? [c.dist, c.pos.x, c.pos.y, c.pos.z].map(v => v.toFixed(2)).join(",") : "", state.backdropSig].join("|");
     if (wsig !== state.weatherSig) { state.weatherSig = wsig; weather.setBounds(layout.bounds, { camera: layout.camera, farPoint: state.backdrop.farPoint }); }
     weather.set(fx, state.meta.theme);
-    syncPlates();
+    syncPlates(newBoard);   // 换了棋盘：铭牌直接摆过去，不滑（#330）
     syncTowers();   // 首领机制·踩塔（正式画面，#283）
+    syncThreats();  // 区域预警（#330）
     placeMarks();
     // 特写的单位不在了（被打倒、藏起来）：退出特写，镜头平滑拉回正常的近景（#237）
     const wasClose = state.close, reset = newBoard || state.wantFit;
@@ -869,6 +966,80 @@ export function createHd2dScene(container, options) {
     t.ring.material.dispose();
   }
 
+  /** 区域预警（#330，数值在 THREAT）：被标定的区（布局的 zone.threats），地台顶面靠边一圈红框（下一回合就落地的换亮红、一明一暗），
+   *  地台前沿右边立一块预警字（和旧画面区角上的 .zthreat 一样：写什么攻击、谁标的）。区号 → { el, label, mesh, shape, key, ready } */
+  const threatMarks = new Map();
+  function syncThreats() {
+    const seen = new Set();
+    (state.layout ? state.layout.zones : []).forEach(z => {
+      const list = (z.threats || []).filter(t => t && t.label);
+      if (!list.length) return;
+      seen.add(z.id);
+      const ready = list.some(t => t.ready);
+      let t = threatMarks.get(z.id);
+      if (!t) {
+        const el = document.createElement("div");
+        el.className = "hd2d-threat";
+        const label = new CSS2DObject(el);
+        label.center.set(0.5, 0.5);
+        scene.add(label);
+        t = { el, label, mesh: null, shape: "", key: "", ready: false };
+        threatMarks.set(z.id, t);
+      }
+      // 红框：形状跟着不规则的外轮廓，ready 换一套颜色（换了才重建）
+      const shape = z.id + "|" + outlineSig(z) + "|" + (ready ? "ready" : "");
+      if (t.shape !== shape) {
+        if (t.mesh) { scene.remove(t.mesh); t.mesh.geometry.dispose(); t.mesh.material.dispose(); }
+        const cfg = ready ? Object.assign({}, THREAT, THREAT.ready) : THREAT;
+        t.mesh = frameMesh(frameGeo(outlinePts(z), cfg.inset, cfg.width), cfg);
+        t.mesh.userData.cfg = cfg;
+        scene.add(t.mesh);
+        t.shape = shape;
+      }
+      t.ready = ready;
+      t.mesh.position.set(z.cx, z.topY + 0.032, z.cz);
+      const html = list.map(x => `<span class="${x.ready ? "rd" : ""}">${esc(x.label)}${x.from ? `<i>${esc(x.from)}</i>` : ""}</span>`).join("");
+      if (t.key !== html) { t.key = html; t.el.innerHTML = html; }
+      t.el.classList.toggle("ready", ready);
+      t.label.position.set(z.cx + z.w * THREAT.side, z.topY + THREAT.lift, z.cz + z.d * THREAT.front);
+    });
+    threatMarks.forEach((t, id) => { if (!seen.has(id)) { dropThreat(t); threatMarks.delete(id); } });
+  }
+  function dropThreat(t) {
+    scene.remove(t.label);   // 触发 removed 事件，把 DOM 摘掉
+    if (t.mesh) { scene.remove(t.mesh); t.mesh.geometry.dispose(); t.mesh.material.dispose(); }
+  }
+
+  /** 地台闪一下（#330，数值在 ZONE_FX）：kind = warn（高能自爆预警，薄荷色框闪 flashes 下）；o.secs = 总共多久（hd2d-field.js 按演出倍率给，不给 = ZONE_FX 的）。
+   *  减少动态效果时不闪。返回闪没闪 */
+  const zoneFlashes = [];
+  function zoneFx(id, kind, o) {
+    const cfg = ZONE_FX[kind], z = state.layout && state.layout.zones.find(q => q.id === Number(id));
+    if (!cfg || !z || !state.motion) return false;
+    const mesh = frameMesh(frameGeo(outlinePts(z), cfg.inset, cfg.width), cfg);
+    mesh.position.set(z.cx, z.topY + 0.038, z.cz);
+    mesh.material.opacity = 0;
+    scene.add(mesh);
+    zoneFlashes.push({ mesh, cfg, t0: now(), secs: o && o.secs > 0 ? o.secs : cfg.secs });
+    return true;
+  }
+  function dropFlash(f) { scene.remove(f.mesh); f.mesh.geometry.dispose(); f.mesh.material.dispose(); }
+  /** 区域预警的红框（frame 里每帧叫）：下一回合就落地的一明一暗（t = 动画时间；moving = 没开减少动态效果，开着就停在最亮） */
+  function pulseThreats(t, moving) {
+    threatMarks.forEach(m => {
+      const c = m.mesh && m.mesh.userData.cfg;
+      if (c && c.pulse) m.mesh.material.opacity = c.opacity - (moving ? (0.5 + 0.5 * Math.sin(t * c.speed)) * c.pulse : 0);
+    });
+  }
+  /** 地台闪一下（frame 里每帧叫，t = 现在的秒数）：闪 flashes 下（|sin|，从暗到亮再到暗），闪完拿掉 */
+  function stepFlashes(t) {
+    for (let i = zoneFlashes.length - 1; i >= 0; i--) {
+      const f = zoneFlashes[i], k = (t - f.t0) / f.secs;
+      if (k >= 1) { dropFlash(f); zoneFlashes.splice(i, 1); continue; }
+      f.mesh.material.opacity = f.cfg.opacity * Math.abs(Math.sin(Math.max(0, k) * f.cfg.flashes * Math.PI));
+    }
+  }
+
   /** 滚轮 / 双指走了一段（step：1 拉近 / −1 拉远，一次手势一下）：在三段之间跳（状态机 camStep）；远景到头了还往外拉（hd2d-camera.js · pastFar）、
    *  外面又接（正式画面，#261）就交给外面转回旧画面——原型不接，照旧停在远景。转场占着镜头时不理 */
   function zoomStep(step) {
@@ -1074,18 +1245,21 @@ export function createHd2dScene(container, options) {
       controls.update();
     }
     // 铭牌：DOM 自己就正对镜头；这里管飞行的上下浮动、影子跟着缩放、行动光圈旋转，以及按远近缩放 / 变淡（近景里别的区再淡一截）
-    const focus = camera.position.distanceTo(controls.target);
+    const focus = camera.position.distanceTo(controls.target), tNow = now();
     state.plates.forEach(p => {
       const u = p.u;
+      slideStep(p, tNow);   // 换区移动（#330）：滑动中摆到滑到的地方
       const bob = u.flying ? Math.sin(animT * 2 + u.x) * 0.1 : 0;
-      p.group.position.y = u.y + bob;
+      p.group.position.y = (p.cur ? p.cur.y : u.y) + bob;
       if (u.flying) p.soft.scale.x = SHADOW.soft * (1.15 - bob * 0.6);
       if (u.submerged) p.ripple.scale.setScalar(1.2 + ((animT * 0.6) % 1) * 0.5);
       if (p.ring.visible) { p.ring.rotation.z = animT * RING.spin; p.ring.scale.setScalar(1 + Math.sin(animT * 2.4) * RING.pulse); }
       const d = camera.position.distanceTo(p.group.position);
-      const sc = L.plateScale({ pos: camera.position, dist: focus }, p.group.position) * p.zoom;   // 特写的那块再乘 zoom
+      // 白卡（#316）：这一段的基础缩放 × 远近，夹在 L.CONFIG.card 的范围里（布局、镜头按同一个公式排的）；原型的铭牌照旧，特写的那块再乘 zoom
+      const sc = p.base != null ? L.cardScale({ pos: camera.position, dist: focus }, p.group.position, p.base) : L.plateScale({ pos: camera.position, dist: focus }, p.group.position) * p.zoom;
       if (Math.abs(sc - p.sc) > 0.004) { p.sc = sc; p.inner.style.transform = "scale(" + sc.toFixed(3) + ")"; }
-      const op = (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
+      // 白卡和旧画面一样不透明（不按远近变淡）；近景里别的区的照样淡一截
+      const op = p.card ? (p.dim ? PLATE.dim : 1) : (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
       p.el.style.opacity = u.submerged ? Math.min(op, 0.82).toFixed(2) : op.toFixed(2);
     });
     // 景深：焦点 = 镜头到它看的那一点 + 这一段的 shift（远景是战场中间，中景 / 近景对准选中的区）；糊多少按这一段的（C.CAMERA[段].dof）。
@@ -1108,6 +1282,8 @@ export function createHd2dScene(container, options) {
     markMeshes.forEach(m => { const c = m.userData.cfg; if (m.visible && c.pulse) m.material.opacity = c.opacity + (moving ? Math.sin(animT * c.speed) * c.pulse : 0); });
     // 踩塔的环：最后一回合一明一暗（减少动态效果时不闪）
     towerMarks.forEach(t => { t.ring.material.opacity = TOWER.opacity - (t.ready && moving ? (0.5 + 0.5 * Math.sin(animT * TOWER.speed)) * TOWER.pulse : 0); });
+    pulseThreats(animT, moving);   // 区域预警（#330）：下一回合就落地的红框一明一暗
+    stepFlashes(tNow);             // 地台闪一下（#330，高能自爆预警）
     // 打雷那一下镜头轻微抖动：天气给的像素换成焦点处的世界长度，沿镜头的左右 / 上下挪。
     // 只挪这一帧的渲染（铭牌跟着一起抖），渲染完挪回去，OrbitControls 看不到
     const sh = weather.shake, shaking = sh.x !== 0 || sh.y !== 0;
@@ -1121,6 +1297,7 @@ export function createHd2dScene(container, options) {
     composer.render(dt);
     labels.render(scene, camera);
     if (shaking) { camera.position.sub(shakeV); camera.updateMatrixWorld(); }
+    measureCards();   // 白卡（#316）：刚画出来 / 内容变了的卡量一下大小，和布局按的不一样就让外面重排
   }
 
   const ro = new ResizeObserver(resize);
@@ -1158,10 +1335,15 @@ export function createHd2dScene(container, options) {
     plateOf(id) {
       const p = state.plates.get(id);
       if (!p || !p.u) return null;
-      const g = p.group.position;
-      return { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
+      const g = p.group.position, out = { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
+      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
+      const sz = p.size || p.u.size;
+      if (p.card && sz && p.base != null) Object.assign(out, { w: sz.w, h: sz.h, s: p.base });
+      return out;
     },
     zoneOf(id) { return state.layout ? state.layout.zones.find(z => z.id === Number(id)) || null : null; },
+    /** 地台闪一下（#330，高能自爆预警：sc.zoneFx(区号, "warn", { secs })；数值在 ZONE_FX，减少动态效果时不闪） */
+    zoneFx,
     /** 这一刻的镜头（hd2d-camera.js · poseFrom：玩家拖动过的也算），带上这一段是远 / 中 / 近（推镜头只推远景 / 中景） */
     poseNow() {
       return Object.assign(C.poseFrom(camera.position, controls.target, camera.fov, state.cur || state.pose), { tier: state.tier });
@@ -1217,6 +1399,7 @@ export function createHd2dScene(container, options) {
       if (moveRaf) cancelAnimationFrame(moveRaf);
       state.plates.forEach(disposePlate); clearWorld(); clearMarks(); weather.dispose();
       towerMarks.forEach(dropTower); towerMarks.clear(); towerGeo.dispose();
+      threatMarks.forEach(dropThreat); threatMarks.clear(); zoneFlashes.forEach(dropFlash); zoneFlashes.length = 0;
       if (state.backdrop) { scene.remove(state.backdrop.group); state.backdrop.dispose(); }
       if (focusRing) { scene.remove(focusRing); focusRing.geometry.dispose(); focusRing.material.dispose(); }
       Object.values(tex).forEach(t => t.dispose()); shadowGeo.dispose(); ringGeo.dispose();
