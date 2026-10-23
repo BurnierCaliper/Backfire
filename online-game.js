@@ -187,7 +187,8 @@
   function configureGM() {
     GMCommands.configure({ requireHost: ctx => { if (!isHost() || ctx !== gmContext) error("只有主持人可以执行此操作"); return true; },
       enemyEndTurn: () => { if (!manualResolve) error("当前不是主持人敌人行动阶段"); const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); },
-      setEncounter: cmd => GAME.setupBattle(GAME.level, cmd.encounter) });
+      // 遭遇里没写等级（「Lv随队」）的敌人：联机跑团按队伍平均等级（battle-templates.js · btPartyLevel，作者 10/20 定），不跟顶栏手选的等级
+      setEncounter: cmd => GAME.setupBattle((typeof btPartyLevel === "function" && btPartyLevel()) || GAME.level, cmd.encounter) });
   }
   function configureActions() {
     actionMenu = OnlineActions.create({ game: GAME, validation: HotseatValidation, inspect: HotseatValidation.inspect,
