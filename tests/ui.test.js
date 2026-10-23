@@ -1834,6 +1834,7 @@ test("诊所 · 义体浮层：休整时打开、确认后安装、再拆掉（�
     cyberwareLoadExamples();
     const run = Rogue.newRun({ party: ["kolt", "helu"], seed: "CW-UI" });
     run.stage = "camp"; state.kuizhi = 20000;
+    run.party.forEach(h => { h.level = 5; });   // #315：5 级起才能在诊所装 / 拆义体
     Rogue.save(run); RunFlow.resume();
   });
   await page.click('[data-cw-open="kolt"]');

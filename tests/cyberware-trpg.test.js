@@ -12,6 +12,8 @@ const read = f => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
 function field() {
   const c = H.load();
   c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 2 }], seed: "CWTRPG" });
+  // #315：5 级起才能在诊所装 / 拆义体
+  c.S.state.units.forEach(u => { if (u.isPlayer) { u.level = 5; c.applyLevelStats(u); } });
   c.S.TRPG.active = true; c.S.TRPG.clinicOpen = true;
   c.S.state.kuizhi = 777;
   c.LEDGER.purse = { kolt: 50000, helu: 3 };
