@@ -573,9 +573,9 @@
     const info = query("smithInfo", { smith: id });
     if (!info) return "";
     const k = money();
-    const progress = info.claimed
-      ? `已领图纸「${esc(Rogue.blueprintById(info.claimed).name)}」`
-      : info.canClaim ? "可以领一张图纸" : `在他这里升级 ${info.uses}/${info.need} 次可领图纸`;
+    const got = info.claimed.length ? `已领「${info.claimed.map(x => esc((Rogue.blueprintById(x) || {}).name || x)).join("」「")}」` : "";
+    // 摘要行只放短进度（窄屏不折乱）；已领的图纸名放到展开后的说明里
+    const progress = info.done ? "图纸已领完" : info.canClaim ? `图纸 ${info.need}/${info.need} 可领` : `图纸 ${info.progress}/${info.need}`;
     const rows = info.needsIntro
       ? `<p class="r-hint">他不帮陌生人强化武器。</p><button class="g-btn" data-intro="${esc(id)}">给他看看你的武器</button>`
       : Rogue.smithOptions(run, id).map(o =>
@@ -583,12 +583,12 @@
         <span class="s-have"></span>
         <span class="s-price">${o.max ? "满级" : o.cost}</span>
         <button class="g-btn" data-upgrade="${esc(o.kit)}" data-smith="${esc(id)}" ${o.max || k < o.cost || (o.mats && !o.enough) ? "disabled" : ""}>升到 ${o.level + 1} 级</button></div>`).join("");
-    const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（只能挑一张）：</p>
+    const claim = info.canClaim ? `<p class="r-hint">${esc(info.name)} 愿意把自己的客制化图纸给你一张（挑一张；领完计数归零，再升级满 ${info.need} 次可领下一张）：</p>
       <div class="r-choices">${info.blueprints.map(b =>
         `<button class="g-btn" data-claim="${esc(b.id)}" data-smith="${esc(id)}">${esc(b.name)}<small>${esc(b.text)}</small></button>`).join("")}</div>` : "";
     return `<details class="smith"${open || info.canClaim ? " open" : ""}>
       <summary><b>${esc(info.name)}</b><span class="sm-prog${info.canClaim ? " ready" : ""}">${progress}</span></summary>
-      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}</p>
+      <p class="sm-lore">${esc(info.blurb)}${info.priceNote ? `<br><span class="sm-price">${esc(info.priceNote)}</span>` : ""}${got ? `<br>${got}` : ""}</p>
       ${claim}
       <div class="shop">${rows}</div>
       ${partShelf(id)}
@@ -617,7 +617,7 @@
     const ids = run.smiths || [];
     if (!ids.length) return "";
     return `<h2>工匠</h2>
-      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${money()} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸。</p>
+      <p class="r-hint">这次回城遇到 ${ids.length} 位工匠。手里有 ${money()} 奎支。在同一位工匠那里升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次，他会给你一张客制化图纸；领完计数归零，再升级满 ${ROGUE_SMITH_RULES.blueprintAfter} 次给下一张（不给重复的，都领完就不再计数）。</p>
       ${ids.map(id => smithCard(id, false)).join("")}
       ${installRows(ids.find(id => query("smithInfo", { smith: id }).canInstall) || ids[0])}
       ${partRows(ids[0])}`;

@@ -376,7 +376,7 @@ const ROGUE_SMITH = {
 
 /* 武器工匠（设定照作者给的人物表）。
  *   ROGUE_SMITH_RULES.onBoard        每次回到任务板时随机出现几位不同的工匠（已定：3）
- *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的客制化里挑一张图纸（已定：5，代替设定里的任务线）
+ *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他还没给过的客制化里挑一张图纸；领完计数归零，再满几次领下一张，不重复，都领完不再计数（已定：5，代替设定里的任务线）
  *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格（已定：5000）
  * 每位工匠：
  *   home      所在的地方（单局在这个区域时出现的机会翻倍）       weight  出现的权重（默认 1）

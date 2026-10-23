@@ -26,7 +26,7 @@
   // 个人行为：花自己的钱、动自己的东西（choose 是升级选择，不花钱）
   const PERSONAL = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware"];
   // 玩家可以自己发的个人指令（其余的个人行为由房主代自己的角色做）
-  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "sellItem", "buybackItem", "choose"];
+  const REMOTE = ["buy", "redeem", "learnRecipe", "salvage", "setCraftJob", "buyPart", "sellPart", "installPart", "removePart", "upgradeWeapon", "installBlueprint", "repairWeapon", "healHero", "modifyHero", "installCyberware", "removeCyberware", "sellItem", "buybackItem", "choose", "claimBlueprint"];
   // 卖东西 / 回购（rogue.js · sellItem / buybackItem）：钱和归属由 setSellHooks 直接记进各人钱包，不走 PERSONAL 那套换钱包
   const SELL = ["sellItem", "buybackItem"];
   let enabled = false, resolving = false, hostId = "";
@@ -494,8 +494,12 @@
     const pointsOf = kit => { r._pointsPayer = kit; try { return Rogue.shopPoints(r); } finally { delete r._pointsPayer; } };
     const points = shop && mine[0] ? Object.assign(pointsOf(mine[0]), { redeem: Rogue.redeemList() }) : null;
     const smithId = (Rogue.presentSmiths(r) || [])[0] || null;
+    const sInfo = smithId ? Rogue.smithInfo(r, smithId) || {} : null;
     const smith = smithId ? {
-      id: smithId, name: (Rogue.smithInfo(r, smithId) || {}).name || "工匠",
+      id: smithId, name: sInfo.name || "工匠",
+      // 领图纸进度（rogue.js · smithInfo 的规则）：只在能领时附上可选图纸，省包体
+      bp: (sInfo.allBlueprints || []).length ? { progress: sInfo.progress || 0, need: sInfo.need || 0, done: !!sInfo.done, canClaim: !!sInfo.canClaim,
+        options: sInfo.canClaim ? (sInfo.blueprints || []).filter(Boolean).map(b => ({ id: b.id, name: b.name, text: b.text })) : [] } : null,
       upgrades: Rogue.smithOptions(r, smithId).filter(o => mine.includes(o.owner)).map(o => ({ kit: o.kit, name: o.name, level: o.level, cost: o.cost, max: !!o.max })),
       offers: Rogue.partOffers(r, smithId).map((o, i) => ({ index: i, id: o.id, name: typeof weaponPartLabel === "function" ? weaponPartLabel(o.id) : o.id, text: typeof weaponPartText === "function" ? weaponPartText(o.id) : "", price: o.price, sold: !!o.sold })),
       slots: r.party.filter(h => mine.includes(h.kit)).flatMap(h => (h.weapons || []).flatMap(k => (typeof weaponPartRow === "function" ? weaponPartRow(h, k) : []).map((cur, slot) => ({ kit: k, name: name(k), slot, cur: cur ? (typeof weaponPartLabel === "function" ? weaponPartLabel(cur) : cur) : "" }))))

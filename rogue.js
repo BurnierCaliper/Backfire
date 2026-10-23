@@ -208,8 +208,9 @@ const Rogue = (function () {
     run.boardNo = 0;
     run.tasksDone = 0;
     run.extra = false;
-    run.smithUses = {};      // 工匠 id → 在他那里升级过几次
-    run.smithClaimed = {};   // 工匠 id → 已经领过的图纸 id
+    run.smithUses = {};      // 工匠 id → 在他那里一共升级过几次（关系变好的折扣看这个）
+    run.smithBp = {};        // 工匠 id → 上次领图纸之后在他那里升级了几次（领图纸的计数，领一张归零）
+    run.smithClaimed = {};   // 工匠 id → 已经从他那里领过的图纸 id 列表
     run.blueprints = [];     // 领到、还没装上的图纸 id
     run.installed = {};      // 武器 kit → 装上的图纸 id
     if (opt.daily) {
@@ -2365,7 +2366,8 @@ const Rogue = (function () {
   }
   /* 工匠名单与客制化图纸（rogue-data.js · ROGUE_SMITHS / ROGUE_SMITH_RULES）
    *   任务板：每次回到任务板随机来 onBoard 位不同的工匠；任务里的工匠节点是随机的一位。
-   *   在同一位工匠那里升级满 blueprintAfter 次，就能从他的图纸里挑一张；
+   *   在同一位工匠那里升级满 blueprintAfter 次，就能从他还没给过的图纸里挑一张；领完计数归零，
+   *   再升级满 blueprintAfter 次领下一张；不会给已经有的图纸，他的图纸都有了就不再计数。
    *   图纸花 installCost 装到武器上（任何工匠处都能装），拿着这把武器时生效。 */
   const SR = () => (typeof ROGUE_SMITH_RULES !== "undefined" ? ROGUE_SMITH_RULES : { onBoard: 3, blueprintAfter: 5, installCost: 5000 });
   const smithById = (id) => (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).find(s => s.id === id) || null;
@@ -2381,6 +2383,20 @@ const Rogue = (function () {
     run.smithClaimed = run.smithClaimed || {};
     run.blueprints = run.blueprints || [];
     run.installed = run.installed || {};
+    // 旧存档：smithClaimed 记的是单个图纸 id；没有 smithBp（领过的从 0 算，没领过的沿用累计次数）
+    Object.keys(run.smithClaimed).forEach(id => {
+      const v = run.smithClaimed[id];
+      run.smithClaimed[id] = Array.isArray(v) ? v : v ? [v] : [];
+    });
+    if (!run.smithBp) {
+      run.smithBp = {};
+      Object.keys(run.smithUses).forEach(id => { run.smithBp[id] = (run.smithClaimed[id] || []).length ? 0 : (run.smithUses[id] || 0); });
+    }
+  }
+  /** 这位工匠的图纸里已经有的（从他那里领过的，或者手里 / 武器上已经有的同一张） */
+  function smithOwned(run, s) {
+    const have = new Set([].concat(run.smithClaimed[s.id] || [], run.blueprints || [], Object.values(run.installed || {})));
+    return (s.blueprints || []).map(b => b.id).filter(id => have.has(id));
   }
   /** 按权重抽不重复的工匠：设定里的所在地和本幕区域一致时机会翻倍；摩尔玛之类权重低的很少见 */
   function drawSmiths(run, n) {
@@ -2419,12 +2435,16 @@ const Rogue = (function () {
     const s = smithById(id);
     if (!s) return null;
     const uses = run.smithUses[id] || 0;
-    const claimed = run.smithClaimed[id] || null;
+    const claimed = (run.smithClaimed[id] || []).slice();
+    const owned = smithOwned(run, s);
+    const done = owned.length >= (s.blueprints || []).length;   // 他的图纸都有了：不再计数
+    const progress = done ? 0 : (run.smithBp[id] || 0);
     const pr = s.price || {};
     return {
-      id, name: s.name, blurb: s.blurb || "", uses, need: SR().blueprintAfter,
-      claimed, canClaim: !claimed && uses >= SR().blueprintAfter,
-      blueprints: (s.blueprints || []).map(b => blueprintById(b.id)),
+      id, name: s.name, blurb: s.blurb || "", uses, progress, need: SR().blueprintAfter,
+      claimed, owned, done, canClaim: !done && progress >= SR().blueprintAfter,
+      blueprints: (s.blueprints || []).filter(b => owned.indexOf(b.id) < 0).map(b => blueprintById(b.id)),   // 还能领的（不给重复的）
+      allBlueprints: (s.blueprints || []).map(b => blueprintById(b.id)),
       canInstall: s.canInstall !== false,
       needsIntro: !!pr.needsIntro && !(run.smithIntro || {})[id],
       priceNote: smithPriceNote(run, s)
@@ -2484,6 +2504,8 @@ const Rogue = (function () {
     if (before) withParty(run, () => LevelUp.note("weapon", findKit(h.kit, state.units), before, { weapon: opt.name }));
     clampDur(run, h, kit);   // 旧存档里装在 3 级武器上的图纸升到 4 级才生效：大杀器这类会压低耐久上限
     run.smithUses[sid] = (run.smithUses[sid] || 0) + 1;
+    const pre = smithInfo(run, sid);
+    if (!pre.done && pre.progress < pre.need) run.smithBp[sid] = pre.progress + 1;   // 图纸都有了 / 已经攒满等着领：不再加
     const s = smithInfo(run, sid);
     const matText = opt.mats ? `消耗 ${opt.mats.map(m => `${m.name}×${m.need}`).join("、")}，` : "";
     const notes = [`${s.name} 把 ${opt.name} 升到 ${opt.level + 1} 级，${matText}花掉 ${opt.cost} 奎支${opt.mats ? "加工费" : ""}。`];
@@ -2491,18 +2513,20 @@ const Rogue = (function () {
       notes.push(`帮 ${s.name} 建庇护所，花了 ${opt.hours} 小时。`);
       passHours(run, opt.hours, notes);
     }
-    if (s.canClaim && s.uses === s.need) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
+    if (s.canClaim && !pre.canClaim) notes.push(`${s.name} 愿意把自己的客制化图纸给你一张（在他这里升级满 ${s.need} 次）。`);
     return logAll(run, notes);
   }
-  /** 领图纸：在同一位工匠那里升级满次数后，从他的图纸里挑一张（每位工匠只能领一次） */
+  /** 领图纸：在同一位工匠那里升级满次数后，从他还没给过的图纸里挑一张；领完计数归零 */
   function claimBlueprint(run, smithId, bpId) {
     ensureSmithState(run);
     const sid = requireSmith(run, smithId);
     const s = smithInfo(run, sid);
-    if (!s.canClaim) throw new Error(s.claimed ? "这位工匠的图纸已经领过了" : `还要在他这里升级 ${s.need - s.uses} 次`);
+    if (s.owned.indexOf(bpId) >= 0) throw new Error("这张图纸已经有了");
+    if (!s.canClaim) throw new Error(s.done ? "这位工匠的图纸都已经领过了" : `还要在他这里升级 ${s.need - s.progress} 次`);
     const bp = s.blueprints.find(b => b.id === bpId);
     if (!bp) throw new Error("没有这张图纸");
-    run.smithClaimed[sid] = bpId;
+    run.smithClaimed[sid] = (run.smithClaimed[sid] || []).concat(bpId);
+    run.smithBp[sid] = 0;
     run.blueprints.push(bpId);
     return logAll(run, [`从 ${s.name} 那里拿到图纸「${bp.name}」（${bp.text}）。装到武器上要 ${SR().installCost} 奎支。`]);
   }
