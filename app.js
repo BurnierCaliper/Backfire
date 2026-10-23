@@ -511,7 +511,8 @@ function statusLine(u) {
   return s.length ? s.join(" · ") : "无状态";
 }
 
-function gainHighFromHits(target, res, extra) {
+/** reason：日志里写的来源（高能余波这类只有一段的），不给就写「第 N 段能量伤害」 */
+function gainHighFromHits(target, res, extra, reason) {
   if (!target || !res) return;
   if (!(target.statuses && target.statuses.high)) return;   // 只有高能状态才吃能量伤害涨高能值（蓄能不算）
   if ((res.element || "") !== "energy") return;
@@ -519,8 +520,14 @@ function gainHighFromHits(target, res, extra) {
   const damaging = hits.filter(h => (h.dealt || 0) > 0);
   if (!damaging.length) return;
   damaging.forEach((h, i) => {
-    extra.push(addHighEnergy(target, `第${i + 1}段能量伤害`));
+    extra.push(addHighEnergy(target, reason || `第${i + 1}段能量伤害`));
   });
+}
+
+/** 本回合刚被施加高能（施加时记下 highApplyTurn）：这一回合受到的能量伤害不累积高能值（瑞比扳机的说明）。
+ *  现在只有高能余波用它（applyTypedDotIn · highGain）；打中（dealTo → gainHighFromHits）没有这条判断 */
+function highFreshThisTurn(unit) {
+  return !!unit && unit.highApplyTurn != null && Number(unit.highApplyTurn) === Number(state.turnNo);
 }
 
 function tagHighFrom(unit, kit) {
@@ -697,7 +704,8 @@ function explodeHigh(unit, total, opt) {
       // 先打标记再结算：演出里铭牌一变灰就走「慢慢消失」
       if (!u.isPlayer && aoe >= lifeB && aoe >= maxB * 0.5) u.killBig = true;
       // 余波打死的敌人算高能状态的所有者的击杀（不是引爆的那个人）；没有所有者就不改它们各自的最后一击
-      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner });
+      // 余波是能量伤害：带高能状态的单位照打中时的口径累积高能值，先累积、再判它会不会连锁自爆（applyTypedDotIn · highGain）
+      const hitIt = () => applyTypedDot(u, aoe, "energy", notes, `${u.name} 被高能余波击中 ${aoe}`, { by: boomOwner, highGain: "余波能量伤害" });
       if (envBoom) withEnvOwner(opt.envBy, hitIt); else hitIt();
       // 被余波炸死的敌人同样显示负血量，炸掉一半以上血量的慢慢消失
       if (!u.isPlayer && (u.dead || totalHp(u) <= 0)) {   // dead 要等稍后清场才标，这里看血量
@@ -3434,7 +3442,11 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
     else if ("by" in opts) creditPlayerHit(unit, opts.by);
     else creditPlayerHit(unit, actingPlayerId());
   }
-  notes.push(...applyCombat(unit, res, null));
+  // opts.highGain（高能自爆的余波）要先累积高能值再判自爆：applyCombat 里会判一次，这里像行动中那样先记下（_highDefer），
+  // 下面累积完再判（flushHighBooms：这一下打死、已经清了场的敌人照样带着高能自爆）
+  if (opts.highGain) state._highDefer = (Number(state._highDefer) || 0) + 1;
+  try { notes.push(...applyCombat(unit, res, null)); }
+  finally { if (opts.highGain) state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
   if (rotOwner) {
     const after = byType();
     rotOwner.resources = rotOwner.resources || {};
@@ -3459,7 +3471,11 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
+  // opts.highGain（值是日志里写的来源）：带高能状态的单位照打中时的口径累积高能值（gainHighFromHits），累积完再判自爆；
+  // 本回合刚被施加高能的不累积
+  if (opts.highGain && !highFreshThisTurn(unit)) gainHighFromHits(unit, res, notes, opts.highGain);
   checkHighBoom(unit);
+  if (opts.highGain && !state._highDefer) flushHighBooms();
   // 共振分享、高压场地都按「真的受到的伤害」：没受到伤害（免疫、濒死倒地、0 伤）就不触发
   if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
