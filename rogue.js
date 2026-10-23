@@ -1571,7 +1571,7 @@ const Rogue = (function () {
       notes.push(`下次长休被偷袭的概率 ${Math.round(run.ambushChance * 100)}%。`);
       doLongRest(run, notes, watch, plan);
     } else if (mode === "leave") {
-      // 不休息直接走：拿一笔奎支，不花时间
+      // 不休息直接走，不花时间：模板原有的休息点拿一笔奎支，按小时补的（noPay）无报酬（restSkipPay）
       const pay = restSkipPay(run);
       if (pay > 0) {
         state.kuizhi = (Number(state.kuizhi) || 0) + pay;
