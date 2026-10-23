@@ -22,6 +22,8 @@
  *   onGapClick(间隔的键) / onEmptyClick()             点间隔（危墙 / 桥梁……）、点空地
  *   sc.setMarks({ targets, dim, aim, zones, hoverZone, gaps })   // 选目标 / 选区的标记（hd2d-field.js · marksOf）：铭牌描边 / 变暗 / 瞄准，地台、间隔亮框
  *   onZoomOut()                                       远景到头了还往外拉（滚轮往后 / 双指捏小）：正式画面拿它转回旧画面（#261 追加，云雾转场）；不给 = 照旧停在远景
+ *   onCardSize(Map 单位 id → { w, h })                白卡（#316）：布局给了卡片快照（u.card）时铭牌就是旧画面的单位卡（UnitCard 画），画出来量到的卡片大小和布局按的不一样，
+ *                                                     告诉外面按量到的重排（hd2d-field.js）
  *   sc.overhead({ elevation, dist, secs, ease }) / sc.descend({ secs, ease })   转场：镜头升到战场正上方往下看 / 从正上方降回远景（数值在 hd2d-field.js 的 MIST）；
  *                                                     转场占着镜头（state.lock）：拖动、滚轮、双指、推镜头都不接，重排只换铭牌，降回远景了才交还
  * 镜头是这个玩家自己的视角：滚轮在三段之间跳、点地台 / 铭牌选区，都只动这边的画面，不写进战斗状态，也不同步给别人。
@@ -494,18 +496,23 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--bh", big.h + "px");
     labels.domElement.style.setProperty("--mi", MECH.icon + "px");   // 首领机制的图标（#283）
     labels.domElement.style.setProperty("--mg", MECH.gap + "px");
+    if (state.layout.cardW > 0) labels.domElement.style.setProperty("--cw", state.layout.cardW + "px");   // 白卡（#316）的宽：布局按同一个宽排站位
     const UC = window.UnitCard;
     state.layout.units.forEach(u => {
       live.add(u.id);
       let p = state.plates.get(u.id);
       if (!p) { p = makePlate(u); state.plates.set(u.id, p); }
-      const key = JSON.stringify(u.plate);
-      if (key !== p.key) {
-        p.key = key; p.bob.innerHTML = plateHtml(u.plate);
-        // 新点名的图标「啪」地弹一下（unit-card.js · alertNew，记在这块铭牌上；第一次画只记下）；提示音旧画面的单位卡已经响过
-        if (UC && UC.alertNew) UC.alertNew(p.bob.querySelector(":scope > .pl-mechs"), u.plate.mechs ? u.plate.mechs.marks : [], "mark", { quiet: true }, p.mechMemo);
+      // 白卡（#316，正式画面给了卡片快照）：旧画面的单位卡；原型页没有卡片快照，照旧画铭牌
+      if (u.card && UC && UC.create) syncCard(p, u, UC);
+      else {
+        const key = JSON.stringify(u.plate);
+        if (key !== p.key) {
+          p.key = key; p.bob.innerHTML = plateHtml(u.plate);
+          // 新点名的图标「啪」地弹一下（unit-card.js · alertNew，记在这块铭牌上；第一次画只记下）；提示音旧画面的单位卡已经响过
+          if (UC && UC.alertNew) UC.alertNew(p.bob.querySelector(":scope > .pl-mechs"), u.plate.mechs ? u.plate.mechs.marks : [], "mark", { quiet: true }, p.mechMemo);
+        }
+        p.el.classList.toggle("has-mech", !!u.plate.mechs);
       }
-      p.el.classList.toggle("has-mech", !!u.plate.mechs);
       p.u = u;
       p.group.position.set(u.x, u.y, u.z);
       if (!p.liftSet) setLift(p, u.lift);   // 后排抬高：铭牌下面一根细杆连到脚下（每一段镜头的抬高在 goTo 里换）
@@ -525,6 +532,44 @@ export function createHd2dScene(container, options) {
     if (state.selectedId != null && !state.plates.has(state.selectedId)) state.selectedId = null;
     markPlates();
   }
+  /** 白卡（#316）：这块铭牌换成旧画面的单位卡——UnitCard.create / update（单机、联机玩家的旧画面画单位卡的同一份），快照是正式画面给的（hd2d-field.js：
+   *  单机是 game.js 的快照、联机玩家是收到的包过 online-battle.js · snapUnit / snapProp，坚毅生命在那边就拿掉了）。卡上不接旧画面的点击 / 悬停：
+   *  整张卡就是这块铭牌能点的地方（data-hit），点 / 悬停 / 键盘照旧走这块铭牌的那一份（正式画面交给 game.js / 联机的回调，只算一次）。
+   *  首领机制的图标、新点名「啪」地弹一下都在卡里（unit-card.js），提示音旧画面的卡已经响过（quiet）。内容变了就等画出来以后量一下卡片本来的大小（frame 里）*/
+  function syncCard(p, u, UC) {
+    if (!p.card) {
+      p.bob.innerHTML = "";
+      p.card = UC.create(u.card);
+      const w = p.card.wrap;
+      w.setAttribute("data-hit", "");
+      w.setAttribute("role", "button");
+      w.setAttribute("tabindex", "0");
+      p.bob.appendChild(w);
+      p.el.classList.add("card");
+      p.key = "";
+    }
+    const key = JSON.stringify(u.card);
+    if (key === p.key) return;
+    p.key = key;
+    UC.update(p.card, u.card, { quiet: true });
+    p.card.wrap.setAttribute("aria-label", String((UC.headOf ? UC.headOf(u.card) : u.card).name || ""));
+    p.measure = true;
+  }
+  /** 白卡画出来以后量一下卡片本来的大小（不算缩放）：和布局按的（u.size：估的，或者上一次量的）差了一像素以上就交给外面（hd2d-field.js 按量到的重排，
+   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量 */
+  function measureCards() {
+    let out = null;
+    state.plates.forEach((p, id) => {
+      if (!p.measure || !p.card || !p.u) return;
+      const w = p.card.wrap.offsetWidth, h = p.card.wrap.offsetHeight;
+      if (!(w > 0 && h > 0)) return;
+      p.measure = false;
+      p.size = { w, h };
+      const s = p.u.size;
+      if (!s || Math.abs(s.w - w) > 1 || Math.abs(s.h - h) > 1) (out = out || new Map()).set(id, p.size);
+    });
+    if (out && options.onCardSize) options.onCardSize(out);
+  }
   /** 当前行动 / 选中 / 悬停：铭牌加样式，脚下的光圈开关；悬停 / 选中的铭牌叠在最上面（CSS2DRenderer 按 renderOrder 先排）。
    *  近景：选中的区的铭牌放大（.big），别的区的变淡、糊掉（.dim）——按这一段镜头（state.pose.plates）定 */
   function markPlates() {
@@ -535,6 +580,16 @@ export function createHd2dScene(container, options) {
       p.big = !!(q && q.big); p.dim = !!(q && q.dim);
       // 特写（#237）：这个单位的铭牌再放大 zoom 倍、在最上面；别的压到它的藏起来
       p.close = !!(q && q.close); p.hide = !!(q && q.hide); p.zoom = q && q.zoom > 0 ? q.zoom : 1;
+      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大已经算在里面），每帧按 L.cardScale 再乘远近
+      p.base = q && q.scale > 0 ? q.scale : null;
+      // 白卡：当前行动 / 能点的目标 / 鼠标停着的目标 / 不是目标变暗，用旧画面单位卡的那几个样式（game.css 的 is-actor / is-targetable / is-hover / is-dim）
+      if (p.card) {
+        const w = p.card.wrap;
+        w.classList.toggle("is-actor", actor);
+        w.classList.toggle("is-targetable", mk.targets.has(p.id));
+        w.classList.toggle("is-hover", mk.aim === p.id);
+        w.classList.toggle("is-dim", mk.dim.has(p.id));
+      }
       p.el.classList.toggle("actor", actor); p.ring.visible = actor;
       p.el.classList.toggle("sel", sel); p.el.classList.toggle("hover", p.hover);
       p.el.classList.toggle("big", p.big); p.el.classList.toggle("dim", p.dim);
@@ -1083,9 +1138,11 @@ export function createHd2dScene(container, options) {
       if (u.submerged) p.ripple.scale.setScalar(1.2 + ((animT * 0.6) % 1) * 0.5);
       if (p.ring.visible) { p.ring.rotation.z = animT * RING.spin; p.ring.scale.setScalar(1 + Math.sin(animT * 2.4) * RING.pulse); }
       const d = camera.position.distanceTo(p.group.position);
-      const sc = L.plateScale({ pos: camera.position, dist: focus }, p.group.position) * p.zoom;   // 特写的那块再乘 zoom
+      // 白卡（#316）：这一段的基础缩放 × 远近，夹在 L.CONFIG.card 的范围里（布局、镜头按同一个公式排的）；原型的铭牌照旧，特写的那块再乘 zoom
+      const sc = p.base != null ? L.cardScale({ pos: camera.position, dist: focus }, p.group.position, p.base) : L.plateScale({ pos: camera.position, dist: focus }, p.group.position) * p.zoom;
       if (Math.abs(sc - p.sc) > 0.004) { p.sc = sc; p.inner.style.transform = "scale(" + sc.toFixed(3) + ")"; }
-      const op = (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
+      // 白卡和旧画面一样不透明（不按远近变淡）；近景里别的区的照样淡一截
+      const op = p.card ? (p.dim ? PLATE.dim : 1) : (1 - (1 - PLATE.fadeMin) * THREE.MathUtils.clamp((d - focus) / PLATE.fadeRange, 0, 1)) * (p.dim ? PLATE.dim : 1);
       p.el.style.opacity = u.submerged ? Math.min(op, 0.82).toFixed(2) : op.toFixed(2);
     });
     // 景深：焦点 = 镜头到它看的那一点 + 这一段的 shift（远景是战场中间，中景 / 近景对准选中的区）；糊多少按这一段的（C.CAMERA[段].dof）。
@@ -1121,6 +1178,7 @@ export function createHd2dScene(container, options) {
     composer.render(dt);
     labels.render(scene, camera);
     if (shaking) { camera.position.sub(shakeV); camera.updateMatrixWorld(); }
+    measureCards();   // 白卡（#316）：刚画出来 / 内容变了的卡量一下大小，和布局按的不一样就让外面重排
   }
 
   const ro = new ResizeObserver(resize);
@@ -1158,8 +1216,11 @@ export function createHd2dScene(container, options) {
     plateOf(id) {
       const p = state.plates.get(id);
       if (!p || !p.u) return null;
-      const g = p.group.position;
-      return { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
+      const g = p.group.position, out = { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
+      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
+      const sz = p.size || p.u.size;
+      if (p.card && sz && p.base != null) Object.assign(out, { w: sz.w, h: sz.h, s: p.base });
+      return out;
     },
     zoneOf(id) { return state.layout ? state.layout.zones.find(z => z.id === Number(id)) || null : null; },
     /** 这一刻的镜头（hd2d-camera.js · poseFrom：玩家拖动过的也算），带上这一段是远 / 中 / 近（推镜头只推远景 / 中景） */

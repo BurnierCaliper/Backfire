@@ -229,6 +229,7 @@ test("单机战斗画面（Roguelike 同一套）：首领头上四个读条图�
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   const bossId = await localBoss(page, origin);
   const card = await page.$eval(`#g-field .unit-wrap[data-id="${bossId}"]`, CARD);
@@ -269,6 +270,7 @@ test("最后一回合（本回合落下）：图标写「!」并轻轻脉动，�
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   const bossId = await localBoss(page, origin);
   await page.evaluate(() => { const b = state.units.find(u => !u.isPlayer && u.mechanics); b.mechanics.find(m => m.type === "share").st.due = state.turnNo; GAME.refresh(); });
@@ -306,6 +308,7 @@ test("触屏：点一下头顶的图标弹出说明（不会选中这个单位�
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   await localBoss(page, origin);
   const pick = await page.evaluate(() => ({ actor: GAME.actorId, other: state.units.find(u => u.isPlayer && !u.hidden && u.id !== GAME.actorId).id }));
@@ -335,6 +338,7 @@ test("点名瞬间（单机）：开战那一刻被点名的人头上的图标�
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   const bossId = await localBoss(page, origin, { spy: true });
   await page.waitForFunction(() => window.__pops.length > 0 && window.__pings > 0);
@@ -405,6 +409,7 @@ async function onlineBoss(t, opts) {
   const pages = [], errors = [];
   for (let i = 0; i < 2; i++) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+    await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
     const p = await context.newPage(); pages.push(p);
     p.on("pageerror", e => errors.push(e.message)); p.on("dialog", d => d.accept());
     await p.goto(origin + "/game.html"); await p.waitForFunction(() => !!window.OnlineGame && !!window.GAME);

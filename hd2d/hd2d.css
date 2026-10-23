@@ -213,6 +213,18 @@
 }
 .hd2d-tower.short { border-left-color: #d8322a; }
 .hd2d-tower .mech-ico { pointer-events: auto; }
+/* ---------- 白色单位卡（#316）----------
+ * 正式画面（单机、联机玩家、联机纸片画面）的 3D 铭牌就是旧画面的单位卡：unit-card.js 画的 .unit-wrap / .unit，内容、样式全是旧画面 game.css 的那一份，这里只管它挂在 3D 铭牌里的样子：
+ *   · 普通单位的卡片宽 --cw（场景按 hd2d-layout.js 的 CONFIG.card 设：两区 196、三区起 148、手机 150，布局按同一个宽排站位）；配置物、中立生物照旧画面自己的大小
+ *   · 新战场那一层（.hd2d-theme）换了 --ink / --muted 和字体：卡上换回旧画面的（game.css 的 :root、body），白卡和旧画面一模一样
+ *   · 整张卡接鼠标（点 = 点单位卡、悬停 = 单位说明，hd2d-scene.js 接的那一份，卡上没有旧画面的监听）；选目标的描边 / 变暗、谁在行动用旧画面的
+ *     is-targetable / is-hover / is-dim / is-actor（hd2d-scene.js · markPlates 加），铭牌自己的 dimmed 就不再叠一层（近景里别的区照旧糊一点） */
+.hd2d-plate.card, .hd2d-plate.card .pl-in { width: max-content; }
+.hd2d-plate.card .unit-wrap { pointer-events: auto; cursor: pointer; outline: none; text-align: left; --ink: #1b1f24; --muted: #9d9081; font: 16px/normal var(--ui, sans-serif); }
+.hd2d-plate.card .unit-wrap:focus-visible .unit { outline: 2px solid #fff; outline-offset: 2px; }
+.hd2d-labels .unit:not(.prop):not(.mini) { width: var(--cw, 196px); }
+.hd2d-plate.card.dimmed .pl-in { opacity: 1; filter: none; }
+.hd2d-plate.card.dim .pl-in { filter: blur(1.6px) saturate(.75); }
 /* 减少动态效果：铭牌不浮动、小箭头不动（场景那边其它动画也停） */
 .hd2d-labels.still .pl-bob, .hd2d-labels.still .pl-mark { animation: none; }
 @media (prefers-reduced-motion: reduce) { .pl-bob, .pl-mark { animation: none; } }
