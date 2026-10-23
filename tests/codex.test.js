@@ -92,3 +92,19 @@ test("角色图鉴：11 名角色都有介绍和 1–5 星难度，带完整的�
   // 搜索也能搜到角色（技能名、介绍）
   assert.deepEqual(JSON.parse(JSON.stringify(heroes.filter(h => c.codexMatch(h, "咖啡")).map(h => h.kit))), ["yuito"]);
 });
+
+test("效果图鉴「单位特殊性」：下潜和飞行收在同一类（主人 10/23），写明打不到、谐波 / 塌陷例外（被迫解除 +1 击破）、自己攻击时解除；说明和 effects.js 的规则一致", () => {
+  const c = H.load();
+  const unit = c.codexEffectEntries().filter(e => e.group === "unit").map(e => e.name);
+  assert.ok(unit.includes("飞行") && unit.includes("下潜"), "飞行、下潜都在「单位特殊性」");
+  const dive = c.codexEffectEntries().find(e => e.name === "下潜").lines.join("\n");
+  assert.match(dive, /不能被选为攻击目标/);
+  assert.match(dive, /范围攻击也打不到/);
+  assert.match(dive, /谐波/); assert.match(dive, /塌陷/);
+  assert.match(dive, /被迫解除，并受到 1 击破/);
+  assert.match(dive, /发动攻击时浮上来/);
+  assert.match(c.S.CODEX_EFFECT_GROUPS.find(g => g.id === "unit").note, /下潜/);
+  // 和规则对得上：effects.js 的说明里同样写着谐波、塌陷，被迫解除受 1 击破
+  const fx = require("fs").readFileSync(require("path").join(__dirname, "..", "effects.js"), "utf8");
+  assert.match(fx, /谐波攻击（单体、范围都算）照样打得到；塌陷区域的伤害也打得到。被这两种打到时下潜被迫解除，受到 1 击破/);
+});
