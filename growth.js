@@ -475,7 +475,9 @@ function cyberRateOf(attrs, level) {
   return derivedFromAttrs(attrs || {}, level || 1).cyber / 100;
 }
 function cyberConvertLimit(fleshMax, rate) {
-  return Math.floor((Number(fleshMax) || 0) * (Number(rate) || 0));
+  // 加 1e-9 再取整：浮点乘积恰好是整数时会落在 x.9999…，少给 1 点。装了义体（(上限 − 义体占用) × 原生命 ÷ 现上限 × 现上限）
+  // 和没装义体（改造率 × 生命上限，例如 0.7 × 90）都会碰上
+  return Math.floor((Number(fleshMax) || 0) * (Number(rate) || 0) + 1e-9);
 }
 /** 方案不合法返回原因，合法返回 null */
 function cyberPlanError(plan, fleshMax, rate) {

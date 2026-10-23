@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定；app.js · `applyBonusPenalties`（新）/ `refreshEconomy` / `refreshEnemyEconomy` / `performAssistBlock` 日志；vehicle.js · `vehicleBonusFloor`（新）/ `vehicleEconomy`；codex.js · `CODEX_EFFECTS` 不稳；rulebook.js「行动点与附赠动作」「协助格挡」两章；tests/bonus-penalty.test.js、tests/enemy-race-perks.test.js）
+  - **以前**：不稳、空手格挡成功的下一回合直接把附赠动作清零；玩家这边清零后才加沙暴顺风 +1（所以照样有 1 个），敌人那边最后才清零，两边顺序不一样。
+  - **现在**：所有附赠加成（沙暴顺风、警戒、千里马、单局图纸、绯秋 · 剑术+ 留到这回合的附赠、敌人载具驾驶员最少 1 个）先算完，再按惩罚各 −1：不稳 −1、空手格挡 −1，两个都有 −2，最少 0。我方和敌人同一个顺序（`app.js · applyBonusPenalties`）。作者裁定剑术+ 留下的和驾驶员托底也算加成：以前剑术+ 是扣完再加（不稳 + 空手 + 留 1 个，有 1 个；现在 1 + 1 − 2 = 0），驾驶员是扣完再托到 1（不稳照样 1 个；现在托底 1 再扣 → 0）。易怒蛮牛发作的那回合，载具驾驶员和别的敌人一样没有附赠（作者裁定：特性写的是失去附赠，不托底到 1；以前最后托底会留 1 个）。日志写实际扣掉的数：本来就是 0、没东西可扣时不写「−1」，写「本来就没有附赠动作，没有可扣的」。易怒蛮牛本身（发作后那回合没有附赠）的规则没变，只是驾驶员不再托底到 1。
+  - **文字**：效果图鉴「不稳」、规则页（rulebook.js「行动点与附赠动作」「协助格挡 · 挡住以后」）、空手格挡成功的日志、敌人回合的提示都改成「−1」。
+  - **测试**：tests/bonus-penalty.test.js——各自单独、两个都有、配沙暴顺风、最少 0、敌人一侧（用精英机甲触灵（机枪），基础 1 附赠，测得出顺序）、剑术+ 留下的先加再扣、驾驶员先托底再扣、驾驶员发作易怒蛮牛那回合是 0、日志的数和实际扣掉的一样、新文字的正面断言；tests/enemy-race-perks.test.js 千里马那条的期望从 0 改成 1。
+
+- **诊所能换的肉体不再因浮点误差少给 1 点**（PR #275 审查发现；growth.js · `cyberConvertLimit`；app.js · `performAssistBlock` 日志；codex.js 相位条目；party.js · `RACE_CHECK_PERKS`；tests/clinic-float.test.js、tests/rulebook.test.js）
+  - **以前**：(改造率上限 − 义体占用) × 原生命上限恰好是整数时，浮点乘积落在 x.9999…，向下取整少给 1 点（例：体质 3、智力 5、5 级、装打击义体.vol1，应该能换 2 点，诊所给 1 点）。没装义体也会少给：改造率 70% × 生命上限 90 / 170 给 62 / 118，应该是 63 / 119（体质 8、智力 7、10 / 20 级）。
+  - **现在**：`growth.js · cyberConvertLimit` 取整前加 1e-9，恰好整数时给足。规则不变，只修计算。
+  - **顺带改文字**：空手格挡成功的日志不再写「架势照扣（最少留 1）」，改成「架势照常扣（可能被打进失衡）」，和实际结算一致；效果图鉴「相位·波谷」写明是 −50% 加算；猫类人-猫的特长文字改成「侦察 / 躲藏」，和实际的优势项一致。
+  - **测试**：tests/clinic-float.test.js——审查里的例子、几千种组合逐项比对（和诊所一样用现上限 = 原生命 − 义体扣的生命）、`cyberConvertLimit` 修之前真的少 1 的输入（20 × (0.5 − 0.4) = 2、90 × 0.7 = 63）、三处文字；tests/rulebook.test.js 诊所那条的容差去掉，改成严格相等。
+
 - **义体（植入体）的安装和拆除 5 级起才解锁，高档义体还要角色等级到它的档位才能装（.vol2 10 级、.vol3 15 级、.vol4 20 级）；血量层改造照旧 1 级就能用**（#315，主人原话「把植入体安装及拆除的功能设置成从 5 级开始解锁。这和血量层改造不同，血量层改造从一级就可以使用」，后来追加「不同档位的义体也是得到了对应等级才可以安装这样比较好」（推翻 issue 正文第 7 点「档位不另加等级要求」）。改了 cyberware.js（配置 `CYBERWARE_UNLOCK_LEVEL = 5`；新函数 `cyberwareLockWhy`（5 级总开关）、`cyberwareInstallLevel`（这一档要几级：直接用档位数 `def.tier`，和 5 级取高的，不另写表）、`cyberwareTierNeed`（档位等级）；`cyberwareInstallPreview` / `cyberwareInstall` / `cyberwareRemove` 等级不够时不执行、不扣钱、写原因，预览多 `locked` / `needLevel`；`cyberwareView` 多 `locked` / `unlockLevel`，`cyberwareShopView` 多 `locked` / `needLevel`；`cyberwareCodexInfo` 诊所说明写这件几级起能装）、online-view.js（`projectCyberware` 白名单放行 `locked` / `unlockLevel` / `needLevel`）、cyberware-ui.js（`lockOf` / `levelTag`；拆除、安装 / 以新换旧按钮灰掉写「5 级解锁」或「需要 10 级」之类，目录上面一行说明）、rulebook.js（规则页「义体与改造率」·「义体」一节加一句，档位表加一列「角色几级能装」，读 `CYBERWARE_UNLOCK_LEVEL` / `cyberwareInstallLevel`）；测试 tests/cyberware-unlock.test.js（新）；原来几条义体测试（tests/cyberware-ui.test.js、cyberware-online.test.js、cyberware-trpg.test.js、cyberware-vol.test.js、cyberware-campaign-memory.test.js，浏览器的 tests/ui.test.js、online-ui.test.js）里装 / 拆义体的角色从 1 级调到 5 级（cyberware-vol.test.js 里装 .vol2 / .vol4 的调到 10 / 20 级），改造率的数字跟着变（例：柯尔特装示例义体 40% → 23.9%）；tests/rulebook.test.js 的档位表多核对一列）
   - **以前**：装、拆义体没有等级限制，1 级的角色在诊所（单局、跑团，单机、联机都一样）就能买、装、拆任何一档。
   - **现在**：
