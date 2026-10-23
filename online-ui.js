@@ -1592,7 +1592,8 @@
       if (!field3d) return;
       field3d.actor(ui.acting ? ui.current || null : null);
       field3d.marks(marksOf3d(ui));
-      field3d.view();
+      // 正在播行动包（#330）：换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相（和单机的新画面一样）
+      field3d.view({ animate: animating });
     }
     /** 新画面开着时播一个行动包（hd2d-play.js，和原型页同一份）：出招前的画面留着，第一下打中时换成包里的 state（铭牌的血条跟着掉），播完回到这一包 */
     async function play3d(packet, generation) {
