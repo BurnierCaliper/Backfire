@@ -116,7 +116,12 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
 });
 
 test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
-  const { c, run, R } = fresh("G7b");   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭
+  // 每日任务按本机日期出题（rogue.js growthDailyKey 用 new Date()），会改变这一局的随机走向：
+  // 日期固定下来，结果才不随跑测试的那天变。种子换过：决一死战拦下所有攻击后原种子 G7 全灭；
+  // 补休息点（悬赏强制休息后多一站）后 G7b 在部分日期全灭，换成固定日期下 main 和这条分支都能走完的 G7c
+  const c = H.fixDate(H.load(), "2026-01-01");
+  const R = c.Rogue;
+  const run = R.newRun({ party: ["kolt", "helu"], seed: "G7c", growth: true });
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {

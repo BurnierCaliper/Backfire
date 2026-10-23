@@ -284,3 +284,30 @@ test("悬赏强制的休息点是额外的一站：后面先接随机站（不�
   }
   assert.ok(forced > 100, "强制休息点 " + forced);
 });
+
+test("补的休息点长休没吃食物，也没有食物的坚毅加成；模板原有的休息点吃美食照常 +坚毅", () => {
+  const { c, R, run } = mainWithInserted();
+  R.acceptTask(run, "main");
+  c.bagAdd("food_gourmet", 20);
+  let free = 0, paid = 0;
+  for (let g = 0; g < 10; g++) {
+    const n = walkTo(R, run, x => x.type === "rest");
+    if (!n) break;
+    run.party.forEach(h => { h.shp = 0; });
+    const food = Object.fromEntries(run.party.map(h => [h.kit, "food_gourmet"]));
+    const watch = R.watchOptions(run)[0].kit;
+    const log = R.restAtNode(run, "long", { watch, food }).join("\n");
+    const lines = [...log.matchAll(/坚毅 0 → (\d+)（(\d+) 小时 × (\d+)/g)];
+    assert.ok(lines.length >= 1, log);
+    if (n.noPay) {
+      free++;
+      assert.doesNotMatch(log, /食物 \+/);
+      // 坚毅从 0 起：恢复量不超过 小时 × 每小时，没有食物那一份
+      lines.forEach(m => assert.ok(Number(m[1]) <= Number(m[2]) * Number(m[3]), m[0]));
+    } else {
+      paid++;
+      assert.match(log, /食物 \+\d+/);
+    }
+  }
+  assert.ok(free >= 1); assert.equal(paid, 1);
+});

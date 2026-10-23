@@ -747,7 +747,8 @@ function ledgerLongRest(plan, notes) {
     h.upOnShp = false;
     h.stunned = false;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
-    const foodBonus = ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
+    // 不耗补给的长休（plan.free）没吃食物，也就没有食物的坚毅加成
+    const foodBonus = plan.free && !plan.force ? 0 : ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
     const sid = sleepFor(plan, h.kit);
     const hasBag = !!sid;
     const perHour = 2 + (hasBag ? Number(ITEM_CATALOG[sid].sleep) || 0 : 0);
