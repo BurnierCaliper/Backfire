@@ -636,11 +636,15 @@ function vehicleRiderActs(u) { return !!(u && u.vehId && u.fused && !u.dead && !
 function vehicleRiderActors() {
   return (state.units || []).filter(vehicleRiderActs);
 }
-/** 驾驶员每回合有 1 个附赠（移动 / 冲撞用）：refreshEnemyEconomy 末尾调用 */
+/** 驾驶员每回合最少 1 个附赠（移动 / 冲撞用）：refreshEnemyEconomy 在扣不稳 / 空手格挡之前调用（加成先算完再扣） */
+function vehicleBonusFloor(u, bonus) {
+  if (!u || u.isPlayer || !u.vehMerged) return bonus;
+  return Math.max(1, Number(bonus) || 0);
+}
+/** refreshEnemyEconomy 末尾调用：只对齐上限，不再托底（托底在扣之前，扣完可以是 0） */
 function vehicleEconomy(u) {
   if (!u || u.isPlayer || !u.vehMerged) return;
-  u.bonus = Math.max(1, Number(u.bonus) || 0);
-  u.bonusMax = Math.max(u.bonus, Number(u.bonusMax) || 0);
+  u.bonusMax = Math.max(Number(u.bonus) || 0, Number(u.bonusMax) || 0);
 }
 
 function vehicleAiPlan(u) {
