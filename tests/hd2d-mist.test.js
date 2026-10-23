@@ -98,7 +98,7 @@ async function page(opts) {
   const { ctx, st } = battle();
   const F = ctx.HD2DField, P = fakeDoc(), T = clock();
   const mem = new Map([[F.FIELD.storageKey, opts.on ? "on" : "off"]]), writes = [];
-  const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); writes.push(String(v)); } };
+  const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); if (k === F.FIELD.storageKey) writes.push(String(v)); } };   // writes：只记开关（不记锁）
   const log = { calls: [], scenes: [], loads: 0, refresh: 0 };
   ctx.GAME = { depth: 0, snapAll: () => null, refresh: () => { log.refresh++; }, fieldInput: { unit() {}, hover() {}, zone() {}, zoneHover() {} } };
   const load = opts.load || (() => { log.loads++; return Promise.resolve(fakeScene(log)); });
@@ -422,10 +422,17 @@ test("减少动态效果：开关、远景再往外拉、旧战场往前滚都�
   assert.equal(btn.textContent, "新画面 开");
   assert.equal(p.mist(), null);
   assert.equal(T.q.length, 0);
-  // 开关：直接关掉
+  // 开关：直接关掉（锁上：旧战场往前滚不再打开，主人 10/23）
   p.click();
   assert.equal(F.on(), false);
-  // 旧战场往前滚：直接打开
+  T.advance(1);
+  p.wheel(wheelEv(-200));
+  await settle(); await settle();
+  assert.equal(F.on(), false, "开关关掉的：往前滚不打开");
+  // 远景再往外拉回到旧画面的不锁：旧战场往前滚直接打开
+  p.click(); await settle(); await settle();
+  p.scene().options.onZoomOut();
+  assert.equal(F.on(), false);
   T.advance(1);
   p.wheel(wheelEv(-200));
   await settle(); await settle();
@@ -457,7 +464,7 @@ test("开关和滚轮走同一套逻辑（switchTo）：新 → 旧（开关 / �
   assert.deepEqual(inByToggle.trace.map(t => t[0]), ["cover", "swap", "clear", null]);
   // 源码：三个入口都叫 switchTo；开关不再自己拆 / 建
   const src = code(read("hd2d/hd2d-field.js"));
-  assert.match(src, /function toggle\(\) \{ switchTo\(S\.want \? "old" : "new"\); \}/, "开关");
+  assert.match(src, /function toggle\(\) \{ const to = S\.want \? "old" : "new"; if \(T\.busy\) return; setLocked\(to === "old", env\.storage\); switchTo\(to\); \}/, "开关（关掉时另记一个锁，主人 10/23）");
   assert.match(src, /onZoomOut: \(\) => \{ if \(switchTo\("old"\) && T\.gesture\) T\.gesture\.ate = true; \}/, "新画面远景再往外拉");
   assert.match(src, /if \(switchTo\("new"\)\) T\.gesture\.ate = true;/, "旧战场往前滚");
   assert.equal((src.match(/switchTo\(/g) || []).length, 4, "定义 + 三个入口");
@@ -582,4 +589,32 @@ test("场景：转场占着镜头（state.lock）——升到正上方用 hd2d-c
   const tf = [/\.hd2d-mist > i \{[^}]*transform: ([^;]+);/, /\.hd2d-mist\.in > i \{[^}]*transform: ([^;]+);/, /\.hd2d-mist\.out > i \{[^}]*transform: ([^;]+);/]
     .map(re => shape(re.exec(mistCss)[1]));
   tf.forEach(t => assert.equal(t, "translate() translate() scale()", "transform 的排法：" + t));
+});
+
+test("右上角开关关掉新画面（主人 10/23）：本机记一个锁，旧战场上往前滚不再转到新画面（滚轮照旧是浏览器自己的）；点开关打开就解锁。远景再往外拉（滚轮）回到旧画面的不锁，往前滚照样能回去", async () => {
+  const p = await page({ on: true, reduced: true }), { F, T, mem } = p, W = F.MIST.wheel;
+  assert.equal(F.on(), true);
+  const forward = () => { T.advance(1); return p.wheel(wheelEv(-(W.step + 5))); };
+  // 1. 点开关关掉 → 锁上；往前滚不转
+  p.click(); await settle(); await settle();
+  assert.equal(F.on(), false, "关掉了");
+  assert.equal(mem.get(F.FIELD.lockKey), "1", "记了锁");
+  assert.equal(F.locked({ getItem: k => mem.get(k) }), true);
+  let ev = forward(); await settle(); await settle();
+  assert.equal(ev.prevented, 0, "滚轮照旧是浏览器自己的（不拦）");
+  assert.equal(F.on(), false, "锁着：滚轮不转到新画面");
+  assert.equal(F.transition().busy, false);
+  // 2. 点开关打开 → 解锁
+  p.click(); await settle(); await settle();
+  assert.equal(F.on(), true, "点开关照样能开");
+  assert.equal(mem.get(F.FIELD.lockKey), "0", "解锁");
+  // 3. 远景再往外拉回到旧画面（场景的 onZoomOut 走 switchTo("old")）：不锁，往前滚能回去
+  assert.equal(F.switchTo("old"), true); await settle(); await settle();
+  assert.equal(F.on(), false);
+  assert.equal(mem.get(F.FIELD.lockKey), "0", "滚轮回到旧画面的不锁");
+  ev = forward(); await settle(); await settle();
+  assert.ok(ev.prevented, "往前滚拦下来转到新画面");
+  assert.equal(F.on(), true, "没锁：滚轮转回新画面");
+  // 4. 刷新页面（重新 boot）：锁记在本机，还在
+  assert.equal(F.FIELD.lockKey !== F.FIELD.storageKey, true);
 });
