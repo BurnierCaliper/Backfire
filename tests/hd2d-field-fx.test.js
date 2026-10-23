@@ -383,7 +383,7 @@ test("首领机制在新画面下都有，内容和旧画面一致：铭牌上�
   assert.match(sc, /UC\.alertNew\(p\.bob\.querySelector\(":scope > \.pl-mechs"\), u\.plate\.mechs \? u\.plate\.mechs\.marks : \[\], "mark", \{ quiet: true \}, p\.mechMemo\)/);
   assert.match(sc, /const html = UIX && UIX\.towersHtml \? UIX\.towersHtml\(list, UC\) : "";/);
   assert.match(sc, /UC\.alertNew\(t\.el, list, "zone", \{ quiet: true \}, t\.memo\)/);
-  assert.match(sc, /syncPlates\(\);\s*syncTowers\(\);/, "每次排战场都画踩塔");
+  assert.match(sc, /syncPlates\(newBoard\);\s*syncTowers\(\);/, "每次排战场都画踩塔");
   assert.match(scene, /^const MECH = \{[^}]*\};$/m, "图标的大小、离卡片多高在配置表 MECH");
   assert.match(scene, /^const TOWER = \{[^}]*\};$/m, "踩塔的环 / 图标的数值在配置表 TOWER");
   // 只弹不响：unit-card.js 的 alertNew 认 quiet（旧画面不传，照旧响）
@@ -396,7 +396,7 @@ test("首领机制横幅和援军倒计时：新画面下照旧是 game.js 每�
   // game.js：setView 每一帧都画横幅（不看新画面开没开）；援军倒计时也放进同一摞
   const g = read("game.js");
   assert.match(fnSrc(g, "paintMechBar"), /UnitCard\.paintBanner\(\$\("g-field"\), snaps\)/);
-  assert.match(fnSrc(g, "setView"), /paintMechBar\(snaps\);[\s\S]*if \(window\.HD2DField\) HD2DField\.view\(snaps\);/);
+  assert.match(fnSrc(g, "setView"), /paintMechBar\(snaps\);[\s\S]*if \(window\.HD2DField\) HD2DField\.view\(snaps, \{ animate: !!animate \}\);/);
   assert.match(g, /const top = field && window\.UnitCard && UnitCard\.topStack \? UnitCard\.topStack\(field\) : field;/, "援军倒计时在同一摞里");
   // 新画面开着：横幅那一摞是 #g-field 的孩子，和 3D 战场并排；内容就是旧画面那一份
   const snaps = P.st.units.map(u => Object.assign(snapOf(u), { casts: ctx.bossCastsBy(u), marks: ctx.bossMarksOn(u) }));

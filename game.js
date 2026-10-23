@@ -723,6 +723,8 @@
         if (!p.dead && s.dead) {
           beats.push({ kind: "kill", id });
           if (G.koHold && !s.isPlayer) c.wrap.classList.add("ko-held");   // 这段演完再淡出（releaseKOs）
+          // 新画面（#330）：3D 战场上也先留着它（这段演完再淡出；不在演出里就马上开始淡出），淡完才拿掉
+          if (!s.isPlayer && field3d() && typeof HD2DField.ko === "function") HD2DField.ko(id, { hold: !!G.koHold, slow: !!s.killBig });
         }
         if (!p.dying && s.dying && !s.dead) beats.push({ kind: "down", id });
         const healed = sumCur(s) - sumCur(p);
@@ -748,8 +750,9 @@
     paintSandStir(snaps);
     paintMechBar(snaps);
     fitZones();
-    // 新画面（HD-2D，hd2d/hd2d-field.js）：这一帧的快照也交给它（演出的每一下、refreshAll 的现在的状态），它自己看开没开、投影后再排
-    if (window.HD2DField) HD2DField.view(snaps);
+    // 新画面（HD-2D，hd2d/hd2d-field.js）：这一帧的快照也交给它（演出的每一下、refreshAll 的现在的状态），它自己看开没开、投影后再排；
+    // animate（#330）：和旧卡的换区移动一样——演的时候换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相
+    if (window.HD2DField) HD2DField.view(snaps, { animate: !!animate });
     return beats;
   }
 
@@ -820,6 +823,11 @@
   }
   /** 新画面（HD-2D，hd2d/hd2d-field.js）开着没有：开着时战场那一格是 3D 战场，旧的区和单位卡照旧排、只是看不见 */
   const field3d = () => !!(window.HD2DField && HD2DField.on());
+  /** 新画面开着：3D 铭牌上的白卡也照旧画面的单位卡动（#330，hd2d/hd2d-play.js · HD2DPlay.cards：冲撞、后坐、受击、格挡、登场、慢动作……；
+   *  跳过、演出倍率 0、减少动态效果时它自己不演）；关着 = null。旧卡的动画照旧（看不见，但位置、样式照旧排） */
+  const cards3d = () => (field3d() && typeof HD2DField.cards === "function" ? HD2DField.cards() : null);
+  /** 新画面开着时：跳过、减少动态效果不震屏（#330；3D 战场在 #g-field 里，震屏 / 顿帧挂在 #g-app 上，画布和铭牌一起震、一起变色）。旧画面照旧 */
+  const noQuake3d = () => field3d() && (G.skip || (typeof HD2DField.still === "function" && HD2DField.still()));
   /** 新画面开着：单位 / 危墙在 3D 战场上的屏幕矩形（铭牌、间隔按这一刻的镜头投影），和 centerOf 一样的写法；找不到返回 null */
   function field3dRect(id) {
     const b = HD2DField.rectOf(id);
@@ -956,6 +964,9 @@
       c.wrap.classList.add("knock");
     }
     c.wrap.classList.add("hit");
+    // 新画面（#330）：3D 白卡也闪一下属性色、顺着挨打的方向被打退（方向按 3D 铭牌在屏幕上的位置）
+    const k3 = cards3d();
+    if (k3) k3.hit(id, element || "physical", !!big, from && !G.skip ? from : null);
     // 属性受击特效（hit-fx.js）：火焰窜起、电弧、冰晶、酸液……
     const box = boxOf(id) || (field3d() ? null : c.wrap.getBoundingClientRect());   // 新画面开着：按 3D 的铭牌（看不见的单位卡不算）
     if (box && !G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", box, { big: !!big });
@@ -1150,6 +1161,9 @@
   async function dashTo(id, t, o) {
     o = o || {};
     const c = cards.get(id), a = rectOf(id);
+    // 新画面（#330）：3D 白卡照样往后一收再朝 t 扑上去（按屏幕投影的方向），同一个钟、同样的时长，和下面看不见的旧卡一起走
+    const k3 = cards3d();
+    if (k3 && a && t) k3.dash(id, t, o);
     if (!c || !a || !t) return;
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
     const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
@@ -1171,7 +1185,8 @@
   }
   /** 一张卡往 (dx, dy) 挪一下再回来（夕夏处决往后退、维塔斯扯下往后拉） */
   function nudgeCard(id, dx, dy, ms) {
-    const c = cards.get(id);
+    const c = cards.get(id), k3 = cards3d();
+    if (k3) k3.nudge(id, dx, dy, ms);   // 新画面（#330）：3D 白卡也挪一下
     if (!c || G.skip) return;
     const token = String(fxRandom());
     c.wrap.dataset.dash = token;
@@ -1182,14 +1197,15 @@
   }
   /** 画面震：power ≥ 1 大震，否则小震 */
   function shakeField(power) {
-    if (G.sim || G.skip) return;
+    if (G.sim || G.skip || noQuake3d()) return;
     const app = $("g-app"), cls = power >= 1 ? "quake" : "quake-s";
     app.classList.remove("quake", "quake-s"); void app.offsetWidth; app.classList.add(cls);
     realTimeout(() => app.classList.remove(cls), power >= 1 ? 600 : 340);
   }
   /** 卡片上临时挂一个样式（发抖、被打飞、消失……），ms 后摘掉 */
   function flashClass(id, name, ms) {
-    const c = cards.get(id);
+    const c = cards.get(id), k3 = cards3d();
+    if (k3) k3.cls(id, name, ms);   // 新画面（#330）：3D 白卡挂同一个样式（game.css 的 .unit-wrap.fx-*）
     if (!c || G.skip) return;
     c.wrap.classList.remove(name); void c.wrap.offsetWidth; c.wrap.classList.add(name);
     realTimeout(() => c.wrap.classList.remove(name), sp(ms || 500) + 40);
@@ -1249,6 +1265,8 @@
   }
   /** 远程：往后一顿再回来（后坐力） */
   function recoil(c, a, t, px) {
+    const k3 = cards3d();
+    if (k3) k3.recoil(c.id, t, px);   // 新画面（#330）：3D 白卡也往后一顿
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8;
     const token = String(fxRandom());
     c.wrap.dataset.dash = token;
@@ -1272,7 +1290,8 @@
     }, sp(hold));
   }
   async function lunge(actorId, targetId) {
-    const a = centerOf(actorId), t = centerOf(targetId), c = cards.get(actorId);
+    const a = centerOf(actorId), t = centerOf(targetId), c = cards.get(actorId), k3 = cards3d();
+    if (k3) k3.lunge(actorId, targetId);   // 新画面（#330）：3D 白卡也朝目标那张卡冲一下
     if (!a || !t || !c) return;
     const dx = t.x - a.x, dy = t.y - a.y;
     const len = Math.max(1, Math.hypot(dx, dy));
@@ -1356,6 +1375,8 @@
 
   /** 一段演出放完：留着的被打倒的敌人开始淡出，红叉跟着一起淡（卡片的淡出见 game.css · .unit-wrap.dead） */
   function releaseKOs() {
+    // 新画面（#330）：3D 战场上留着的也开始淡出（hd2d-field.js 自己摘 3D 白卡的 .ko-held，淡完拿掉）
+    if (window.HD2DField && typeof HD2DField.releaseKOs === "function") HD2DField.releaseKOs();
     document.querySelectorAll(".unit-wrap.ko-held").forEach(w => w.classList.remove("ko-held"));
     G.koHandles.forEach(k => (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500)));
     G.koHandles = [];
@@ -1449,8 +1470,9 @@
       G.slow = 1.7;
       for (let i = 0; i < opps.length; i++) {
         const o = opps[i];
-        const moverCard = cards.get(o.targetId);
+        const moverCard = cards.get(o.targetId), k3 = cards3d();
         if (moverCard) moverCard.wrap.classList.add("slow-move");
+        if (k3) k3.slow(o.targetId, true);   // 新画面（#330）：3D 白卡也压暗（慢动作；换区滑过去的时长跟着 G.slow 变慢）
         banner(`${esc(o.name || "敌人")} · 借机攻击 → ` + whoHtml(unitById(o.targetId)));
         // 借机攻击也按招式演（匕首狂徒一刀、狼队长一爪），打中的人往外一歪
         const os = strikePlan({ actorId: o.attackerId, targetId: o.targetId, skillName: "借机攻击" }, [{ kind: "dmg", main: true, value: 1, unitId: o.targetId, element: oppElement(o) }], null);
@@ -1459,6 +1481,7 @@
         hit(o.targetId, os ? os.move.el : "physical", false, null, oFrom);
         if (os && window.AttackFx) AttackFx.impact(rectOf(o.targetId), os.move, { from: oFrom });
         if (moverCard) moverCard.wrap.classList.remove("slow-move");
+        if (k3) k3.slow(o.targetId, false);
       }
       G.slow = prevSlow;
       if (!meta.slow) $("g-app").classList.remove("hitstop");
@@ -1511,8 +1534,9 @@
     const parried = parriedOf(meta, tape);
     if (parried) {
       if (window.Sfx) Sfx.parry();
-      const pc = cards.get(blockerId || meta.targetId);
+      const pc = cards.get(blockerId || meta.targetId), k3 = cards3d();
       if (pc) { pc.wrap.classList.remove("parry"); void pc.wrap.offsetWidth; pc.wrap.classList.add("parry"); }
+      if (k3) k3.parry(blockerId || meta.targetId);   // 新画面（#330）：挡下来的那张 3D 白卡也一闪
       if (window.AttackFx && !G.sim) {
         const b = rectOf(blockerId || meta.targetId), a = rectOf(meta.actorId);
         // 协助格挡：火花在两人连线的中点；自己格挡（空手格挡、敌人格挡）：火花在格挡的人身上
@@ -1610,8 +1634,9 @@
           await wait(chain ? 40 : 55);
         } else if (e.kind === "partner") {
           // 伙伴登场：亮相、停一下，再冲向目标
-          const pc = cards.get(e.unitId);
+          const pc = cards.get(e.unitId), k3 = cards3d();
           if (pc) { pc.wrap.classList.remove("enter"); void pc.wrap.offsetWidth; pc.wrap.classList.add("enter"); }
+          if (k3) k3.enter(e.unitId);   // 新画面（#330）：3D 白卡也亮个相
           if (!paperPop(e.unitId, e)) popup(e.unitId, e.text || "支援！", "txt e-" + e.element, { dur: 1.2 });
           if (window.Sfx && !G.sim) Sfx.parry();
           await wait(420);
@@ -1638,20 +1663,24 @@
           }
         } else if (e.kind === "highboom") {
           // 自爆前先预警：单位卡闪两下（薄荷色描边 + 高能液体发白），再炸
-          const bc = cards.get(e.unitId);
+          const bc = cards.get(e.unitId), warn3d = field3d() && typeof HD2DField.warn === "function";
           if (bc && !G.skip) {
             bc.wrap.classList.remove("high-warn"); void bc.wrap.offsetWidth; bc.wrap.classList.add("high-warn");
+            if (warn3d) HD2DField.warn(e.unitId, true);   // 新画面（#330）：3D 白卡闪两下，脚下的地台跟着闪
             if (window.Sfx && !G.sim) Sfx.ui("toggle");
             await wait(300);
             if (window.Sfx && !G.sim) Sfx.ui("toggle");
             await wait(chain ? 300 : 360);
             bc.wrap.classList.remove("high-warn");
+            if (warn3d) HD2DField.warn(e.unitId, false);
           }
           procBadge(e.unitId, "high");
-          // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
+          // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清（新画面开着时跳过、减少动态效果不震）
           const app = $("g-app");
-          app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
-          realTimeout(() => app.classList.remove("quake"), 700);
+          if (!noQuake3d()) {
+            app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
+            realTimeout(() => app.classList.remove("quake"), 700);
+          }
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
           comboHit(e, Math.floor(Number(e.value) || 0));
