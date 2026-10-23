@@ -20,6 +20,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function open(t, { mobile = false, mount = true } = {}) {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -225,6 +226,7 @@ test("D2 UI: owner's generic choice carries distinct JSON extra and has no assis
 async function realBattle(t, count, mobile = false, mode = "coop") {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.setDefaultTimeout(10000);
@@ -427,6 +429,7 @@ test("D2 integration: switching to a non-host while retreat confirmation is open
 test("D2 integration: a non-GM's winning hit records the TRPG result, saves it and returns to exploration", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.setDefaultTimeout(10000);

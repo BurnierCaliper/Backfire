@@ -149,8 +149,11 @@
   /** 战场周围的贫民窟（hd2d-scene-art.js · around 给的范围外面，margin 是再让开多少）：
    *   rows     后面几排：每排离「后面最近到哪」再往后 gap，横着每隔 step（± jitter 成）一间，往左右各伸出战场半宽 + reach
    *   side     左右两边各几列：每列离「左右最近到哪」再往外 gap，从后面一直排到战场前后的正中（不排到前面，不挡人）
-   *   shack / house   铁皮棚屋 / 矮房子的宽、高、深的范围（世界单位）；house = 几成是矮房子（其余是铁皮棚屋） */
+   *   shack / house   铁皮棚屋 / 矮房子的宽、高、深的范围（世界单位，放大以前）；house = 几成是矮房子（其余是铁皮棚屋）
+   *   scale    整体放大（主人 10/23：房子太小，长宽高都放大到 3 倍）：每间的宽 / 高 / 深、屋顶厚、烟囱粗，连同排与排、间与间的距离、
+   *            往左右伸出去的 reach 一起乘（不然放大了会挤在一起）；离战场让开的 margin 不乘 */
   const SLUM = {
+    scale: 3,
     margin: { back: 0.5, side: 0.9 },
     rows: [{ gap: 0, step: 1.7, jitter: 0.25 }, { gap: 2.0, step: 2.0, jitter: 0.3 }],
     reach: 8,
@@ -580,22 +583,22 @@
    * 返回 [{ kind: "shack" / "house", x, z（中心）, w, h, d, rot }]
    */
   function slumPlan(b, seed) {
-    const S = SLUM, R = A.rand(seed), at = A.around(b, S.margin), out = [];
-    const one = (kind, x, z, rot, D) => out.push({ kind, x, z, w: D.w, h: D.h, d: D.d, rot });
-    const size = () => { const kind = R() < S.houses ? "house" : "shack", D = S[kind]; return { kind, w: A.span(R, D.w), h: A.span(R, D.h), d: A.span(R, D.d) }; };
+    const S = SLUM, k = S.scale || 1, R = A.rand(seed), at = A.around(b, S.margin), out = [];
+    const one = (kind, x, z, rot, D) => out.push({ kind, x, z, w: D.w, h: D.h, d: D.d, rot, s: k });
+    const size = () => { const kind = R() < S.houses ? "house" : "shack", D = S[kind]; return { kind, w: A.span(R, D.w) * k, h: A.span(R, D.h) * k, d: A.span(R, D.d) * k }; };
     S.rows.forEach((row, i) => {
-      const from = at.cx - at.hx - S.reach, to = at.cx + at.hx + S.reach;
-      for (let x = from + R() * row.step * 0.5; x < to; x += row.step * (1 + (R() - 0.5) * 2 * row.jitter)) {
+      const from = at.cx - at.hx - S.reach * k, to = at.cx + at.hx + S.reach * k, step = row.step * k;
+      for (let x = from + R() * step * 0.5; x < to; x += step * (1 + (R() - 0.5) * 2 * row.jitter)) {
         const D = size();
-        one(D.kind, x, at.back - row.gap - HUT.eave * D.d - (i ? R() * 0.4 : 0), (R() - 0.5) * 0.25, D);
+        one(D.kind, x, at.back - row.gap * k - HUT.eave * D.d - (i ? R() * 0.4 * k : 0), (R() - 0.5) * 0.25, D);
       }
     });
     [-1, 1].forEach(sx => S.side.forEach(col => {
       for (let z = at.back; z < at.cz;) {
         const D = size();
         z += D.w * 0.6;
-        one(D.kind, at.cx + sx * (at.sideX + col.gap + HUT.eave * D.d), z, -sx * Math.PI / 2 + (R() - 0.5) * 0.2, D);
-        z += D.w * 0.6 + col.step * 0.3 * R();
+        one(D.kind, at.cx + sx * (at.sideX + col.gap * k + HUT.eave * D.d), z, -sx * Math.PI / 2 + (R() - 0.5) * 0.2, D);
+        z += D.w * 0.6 + col.step * k * 0.3 * R();
       }
     }));
     return out;
@@ -618,11 +621,11 @@
   }
   /** 一间铁皮棚屋 / 矮房子：方盒子（铁皮的 / 砖墙的），单坡屋顶往前伸出一截，前面一个黑门洞、矮房子再开一两个窗洞；屋顶上压几块石头 */
   function hut(kit, M, h, R) {
-    const THREE = kit.THREE, g = new THREE.Group(), pick = (list) => list[Math.floor(R() * list.length)];
+    const THREE = kit.THREE, g = new THREE.Group(), pick = (list) => list[Math.floor(R() * list.length)], k = h.s || 1;   // k：SLUM.scale（屋顶厚、烟囱粗跟着放大）
     const body = new THREE.Mesh(new THREE.BoxGeometry(h.w, h.h, h.d), h.kind === "house" ? pick(M.wall) : pick(M.sheet));
     body.position.y = h.h / 2; g.add(body);
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(h.w * HUT.roof.w, 0.05, h.d * HUT.roof.d), pick(M.roof));
-    roof.position.set(0, h.h + 0.05, h.d * HUT.lean); roof.rotation.x = HUT.tilt[h.kind]; g.add(roof);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(h.w * HUT.roof.w, 0.05 * k, h.d * HUT.roof.d), pick(M.roof));
+    roof.position.set(0, h.h + 0.05 * k, h.d * HUT.lean); roof.rotation.x = HUT.tilt[h.kind]; g.add(roof);
     const hole = () => (R() < M.lit ? M.glow : M.dark);   // 傍晚 / 夜里一部分透出暖光
     const door = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.door[0], h.h * HUT.door[1]), hole());
     door.position.set((R() - 0.5) * h.w * 0.4, h.h * HUT.door[1] / 2, h.d / 2 + 0.006); g.add(door);
@@ -630,7 +633,7 @@
       const win = new THREE.Mesh(new THREE.PlaneGeometry(h.w * HUT.win[0], h.h * HUT.win[1]), hole());
       win.position.set(door.position.x > 0 ? -h.w * 0.25 : h.w * 0.25, h.h * 0.6, h.d / 2 + 0.006); g.add(win);
     } else if (R() < SLUM.flue) {   // 棚屋顶上的烟囱管
-      const flue = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, h.h * 0.5, 6), M.dark);
+      const flue = new THREE.Mesh(new THREE.CylinderGeometry(0.045 * k, 0.045 * k, h.h * 0.5, 6), M.dark);
       flue.position.set((R() - 0.5) * h.w * 0.6, h.h * 1.2, -h.d * 0.2); g.add(flue);
     }
     return g;

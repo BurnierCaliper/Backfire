@@ -76,11 +76,11 @@ test("浏览器 · 用 file:// 打开 game.html：点开关就建好 3D 战场�
   page.on("pageerror", e => errors.push(e.message));
   page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
   try {
+    await require("./old-screen")(page);   // #316 起默认开：页面加载前先记着「关」，下面点开关打开
     await page.goto("file://" + path.join(ROOT, "game.html"));
     await page.waitForFunction(() => !!window.GAME && !!window.HD2DField);
     assert.equal(await page.evaluate(() => location.protocol), "file:");
     await page.evaluate(() => {
-      try { localStorage.removeItem(HD2DField.FIELD.storageKey); } catch (e) {}
       Screens.show("battle");
       GAME.startCustomBattle("双击打开", () => { BattleSim.setup({ party: ["ruby", "yuito"], enemies: [{ id: "thug_knife", lv: 3, zone: 2 }], seed: "FILE", region: "第一采矿场" }); return {}; });
     });

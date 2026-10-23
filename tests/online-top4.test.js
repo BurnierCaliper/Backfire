@@ -95,6 +95,7 @@ test("联机战斗画面：焦点在按钮上按空格不结束行动；焦点�
   await new Promise(resolve => website.listen(0, "127.0.0.1", resolve));
   t.after(async () => { await browser.close(); await new Promise(resolve => website.close(resolve)); });
   const page = await browser.newPage();
+  await require("./old-screen")(page);   // #316：新画面默认开，这里测的是旧画面
   await page.goto(`http://127.0.0.1:${website.address().port}/game.html`);
   await page.waitForFunction(() => !!window.OnlineBattle);
   await page.evaluate(() => {

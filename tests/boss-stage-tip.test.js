@@ -263,6 +263,7 @@ test("单机战斗画面：沙灵聚合体一阶段的悬停说明只写一阶�
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const origin = await site(t);
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } }); t.after(() => context.close());
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   const page = await context.newPage(); const errors = []; page.on("pageerror", e => errors.push(e.message));
   await page.goto(origin + "/game.html"); await page.waitForFunction(() => !!window.GAME && !!window.UnitTip);
   await page.evaluate(() => {
@@ -300,6 +301,7 @@ test("联机玩家画面：悬停说明和单机一样只写当前阶段——�
   const pages = [], errors = [];
   for (let i = 0; i < 2; i++) {
     const context = await browser.newContext({ viewport: { width: 1280, height: 900 } }); t.after(() => context.close());
+    await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
     const p = await context.newPage(); pages.push(p);
     p.on("pageerror", e => errors.push(e.message)); p.on("dialog", d => d.accept());
     await p.goto(origin + "/game.html"); await p.waitForFunction(() => !!window.OnlineGame && !!window.GAME);

@@ -113,7 +113,7 @@ test("单局诊所：以新换旧走同一个 installCyberware，记录写明拆
   rr.stage = "camp";
   c.S.state.kuizhi = 100000;
   const h = rr.party.find(x => x.kit === "kolt");
-  h.cyberOverinstall = true;   // 1 级角色装 .vol2 会超上限：这里只看以新换旧
+  h.level = 10;   // #315：5 级起才能在诊所装 / 拆义体，装 .vol2 要 10 级（10 级的柯尔特装 .vol2 不超上限）
   c.Commands.dispatch({ type: "run", action: "installCyberware", kit: "kolt", id: "shot_v1" }, { run: rr });
   assert.equal(c.S.state.kuizhi, 97000);
   const pk = J(R.cyberwarePacketFor(rr, "kolt"));
@@ -126,7 +126,8 @@ test("单局诊所：以新换旧走同一个 installCyberware，记录写明拆
 
 test("安装负担重时给警告：超出改造率上限要专长；有专长才能装，并写「这会给身体带来极大负担。」", () => {
   const c = H.load();
-  const u = hero(5);   // 原生命上限 38，上限 60%：.vol4（20 ÷ 38 + 15% = 67.6%）超上限
+  // #315：装 .vol4 要 20 级。原生命上限 128，上限 60%：身上已有 .vol4 射击义体（20 ÷ 128 + 15% ≈ 30.6%），再装 .vol4 打击义体共 61.3%，超上限
+  const u = hero(20, { cyberware: [{ id: "shot_v4" }] });
   const pv = J(c.cyberwareInstallPreview(u, "strike_v4"));
   assert.equal(pv.ok, false); assert.equal(pv.overinstall, true); assert.equal(pv.burden, "heavy");
   assert.match(pv.error, /超出改造率上限/);
@@ -482,6 +483,7 @@ test("诊所浮层：同系列写「以新换旧」，确认框列出先拆哪�
   const R = c.Rogue, rr = R.newRun({ party: ["kolt", "helu"], seed: "CWVUI" });
   rr.stage = "camp";
   c.S.state.kuizhi = 100000;
+  rr.party[0].level = 10;   // #315：5 级起才能在诊所装 / 拆义体，以新换旧成 .vol2 要 10 级
   rr.party[0].cyberOverinstall = true;
   R.installCyberware(rr, "kolt", "strike_v1");
   const U = c.CyberwareUI;
@@ -568,6 +570,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("画面：图鉴里有「义体」这一本，按种类筛、能搜 .vol2，点开看详情（写坚毅消耗的规则，不写谁还剩多少）", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));
