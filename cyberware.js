@@ -296,12 +296,14 @@ function cyberwareOfSkill(skillId) {
   const d = cyberwareDef(s.slice(CYBERWARE_SKILL_PREFIX.length));
   return d && typeof cwKind(d).run === "function" ? d : null;
 }
-/** 注册时把选目标的一边、射程登记进 engine.js 的两张表（和专长技能一样） */
+/** 注册时把选目标的一边、射程登记进 engine.js 的两张表（和专长技能一样）；谐波攻击再登记进 SKILL_HITS_SUBMERGED */
 function cwRegisterSkill(d) {
   const k = cwKind(d), sid = CYBERWARE_SKILL_PREFIX + d.id;
   if (typeof SKILL_TARGET_SIDE !== "undefined" && k.target) SKILL_TARGET_SIDE[sid] = k.target;
   const rg = typeof k.range === "function" ? k.range(d) : null;
   if (typeof SKILL_RANGE !== "undefined" && rg) SKILL_RANGE[sid] = rg;
+  // 谐波的义体攻击打得到下潜中的单位（单体伤害型的 targetWhy 也照这个拦）：选目标的名单里留着它们（#360）
+  if (typeof SKILL_HITS_SUBMERGED !== "undefined" && k.target && d.element === "harmonic") SKILL_HITS_SUBMERGED[sid] = true;
 }
 function cwCostText(c) {
   c = c || {};

@@ -313,6 +313,11 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .sandstir-pop .r em { font-style: normal; font-size: 10px; color: #3fe0ff; }
 .sandstir-pop .r small { font-size: 10px; color: #a8977b; }
 .sandstir-pop footer { margin-top: 6px; font-size: 10px; color: #a8977b; border-top: 1px dashed #4d4337; padding-top: 5px; }
+/* 选目标时（#360，game.js · markStir）：能选的那几只描危险黄（鼠标变准星），别的变暗（和单位卡的 is-dim 一样 0.45）；有能选的，区角的按钮也描黄 */
+.sandstir-wrap.has-target .sandstir { border-color: #f2c230; color: #fff4c2; }
+.sandstir-pop .r.is-targetable { cursor: crosshair; background: rgba(242, 194, 48, .16); box-shadow: inset 0 0 0 1px #f2c230; }
+.sandstir-pop .r.is-targetable:hover { background: rgba(242, 194, 48, .3); }
+.sandstir-pop .r.is-dim { opacity: .45; }
 .grp.prop { min-height: 0; }
 .unit-wrap { position: relative; isolation: isolate; }
 .unit-wrap::after {                   /* 选中 / 可选 / 预告：铭牌背后大一圈的底板 */
