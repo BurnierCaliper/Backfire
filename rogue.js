@@ -59,7 +59,7 @@ const Rogue = (function () {
   /** 现在幕间能不能改走下水道：背包里有地图（联机：队里任何一个人名下有，或者公用的），这一局还没进过。长线养成没有幕间 */
   const canEnterSewer = (run) => !run.growth && !!ITEM_CATALOG[SEWER().item] && bagCount(SEWER().item) > 0 && !sewerEntered(run);
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
-  const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
+  const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, fusionPerDay: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
   let growthOn = false;   // 当前载入的是长线养成：经验照跑团模式（growth.js · grantXpToPlayers、app.js 战斗结算看这个）
   /** 队伍平均等级（四舍五入） */
   function partyLevel(run) {
@@ -2774,9 +2774,11 @@ const Rogue = (function () {
     const today = Number(run.day) || 1;
     const last = Number(run.lastFusionDay) || 0;
     if (today <= last) return;
-    const n = today - last;
-    bagAdd(G().fusionItem, n);
+    const per = G().fusionPerDay == null ? 1 : Math.max(0, Number(G().fusionPerDay) || 0);
+    const n = (today - last) * per;
     run.lastFusionDay = today;
+    if (n <= 0) return;
+    bagAdd(G().fusionItem, n);
     const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
     (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
   }

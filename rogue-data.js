@@ -271,11 +271,13 @@ const ROGUE_SOLO = {
  *   完成任务得到赫心融合体，在抽取机里抽（概率见下面 ROGUE_GACHA）：抽到角色时新角色入队（满员进候补），抽到已有的角色 +1 级
  *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
  *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
+ *   fusionPerDay  每过一天发几个赫心融合体
  *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
 const ROGUE_GROWTH = {
   startParty: 2,
   partyMax: 4,
   fusionPerTask: 1,
+  fusionPerDay: 1,
   drawCost: 1,
   recruitLevel: 1,
   maxLevel: 20,
