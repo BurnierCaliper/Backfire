@@ -807,6 +807,8 @@ function applyAbyssFall(unit, prevZone, notes) {
     }
   }
   unit.zone = back;
+  // 驻波墙：掉下去再回来不算又穿过一次（进深渊那一下已经在移动里算过）
+  if (state._waveLedger && unit.id != null && state._waveLedger[unit.id] != null) state._waveLedger[unit.id] = back;
   notes.push(`${unit.name} 坠入深渊，失去最大生命 10%（${loss}）并回到 ${back} 区。`);
   // 倒地统一结算：力竭 3 即死；起身中的人这 10% 改扣坚毅生命（以前不扣、也不会死）
   applyKnockdown(unit, notes, { shpLoss: loss, cause: "坠落" });
@@ -2347,6 +2349,7 @@ function turnEnd() {
     notes.push(...refillBatteryFactionShields());
   }
   glowStoreTurnEnd(notes);   // 微光 · 蓄能：连续两个回合结束高能值都超过血量才自爆
+  expireWaveWalls(notes);    // 频域造物：这一整轮结束，驻波墙消失、原来的配置物恢复
   releaseButtons(notes);
   notes.push(...advancePhaseWeather());
   settleBossStuns(notes);
@@ -3837,6 +3840,16 @@ function passGap(unit, from, dest) {
   return { fail: false, notes };
 }
 
+/** 不是自己走的移动沿哪条路走（crossGapsForced 用；被推过驻波墙也按这条路算）：有一条一样短、不隔危墙 / 关着的门的就走那条。
+ *  不在这块棋盘上的区返回 null */
+function forcedPath(from, dest) {
+  from = Number(from); dest = Number(dest);
+  const shut = (a, b) => { const g = getGap(a, b); return g.type === "wall" || (g.type === "door" && !g.open); };
+  const any = zonePath(from, dest);
+  if (!any) return null;
+  const free = zonePath(from, dest, (a, b) => !shut(a, b));
+  return free && free.length <= any.length ? free : any;
+}
 /** 不是自己走的移动（被推 / 拉、紧追跟上、冲刺类技能）沿最短路线过间隔，一条一条结算：
  *  危墙 / 关着的门：过不去（有一条一样短、不隔墙的路就走那条）。
  *  空隙：飞行单位照过；配置物掉下去消失；地面单位 fall 时坠落（被迫做地面移动），否则只是过不去。
@@ -3847,10 +3860,8 @@ function crossGapsForced(obj, from, dest, notes, fall, flyOver) {
   if (from === dest) return true;
   const isProp = !obj || !Array.isArray(obj.layers) || (state.props || []).includes(obj);
   const shut = (a, b) => { const g = getGap(a, b); return g.type === "wall" || (g.type === "door" && !g.open); };
-  const any = zonePath(from, dest);
-  if (!any) return true;   // 不在这块棋盘上的区（旧存档 / 计算器）：照旧直接挪
-  const free = zonePath(from, dest, (a, b) => !shut(a, b));
-  const path = free && free.length <= any.length ? free : any;
+  const path = forcedPath(from, dest);
+  if (!path) return true;   // 不在这块棋盘上的区（旧存档 / 计算器）：照旧直接挪
   const name = (obj && obj.name) || "配置物";
   for (let i = 0; i < path.length - 1; i++) {
     const g = getGap(path[i], path[i + 1]);
@@ -3883,13 +3894,186 @@ function crossGapsForced(obj, from, dest, notes, fall, flyOver) {
   return true;
 }
 
+/* ---------- 驻波墙（Helumica「频域造物」，作者 10/23 定）----------
+ * 间隔的一种临时状态：g.type = "wave"，g.wave = { el, mode, by, until, saved }
+ *   el 过滤的属性；mode "dampen" 降幅 / "amplify" 增幅；by 放墙的人；until 到哪一回合结束时消失（WAVE_WALL.rounds）
+ *   saved 被暂时取代的那个间隔（危墙 / 机关门 / 不稳桥梁 / 空隙 / 畅通，连耐久、门的开关一起），消失时原样还回去
+ * 驻波墙不挡移动：type 不是 wall / door / void / bridge，走路、推拉、射击、技能里的移动都当畅通（空隙不用检定、桥不扣耐久）。
+ * 攻击穿墙：dealTo 按危墙挡远程攻击的判定找连线（waveWallsOnLine），伤害修正在 engine.js · resolveAttack（WAVE_WALL）；
+ * 单位穿墙：wavePassUnit（挂状态、推进聚焦）。主持人中途改掉这条间隔：以主持人改的为准，墙不再恢复 */
+function isWaveGap(g) { return !!(g && g.type === "wave" && g.wave); }
+/** 被驻波墙暂时取代的那个间隔本来是什么（机关门的按钮、战斗模板都看它）；没有驻波墙就是它自己 */
+function waveGapBase(g) { return isWaveGap(g) && g.wave.saved ? g.wave.saved : g; }
+function anyWaveWall() { return Object.keys(state.gaps || {}).some(k => isWaveGap(state.gaps[k])); }
+const WAVE_STATUS_CN = { unstable: "不稳", weak: "虚弱", sturdy: "坚挺", inspire: "振奋" };
+/** 「驻波墙·火·降幅」 */
+function waveWallName(w) {
+  return `驻波墙·${ELE[w && w.el] || (w && w.el) || "?"}·${w && w.mode === "amplify" ? "增幅" : "降幅"}`;
+}
+/** 一道驻波墙的说明（悬停、技能里写的都是它）：数值读 WAVE_WALL */
+function waveWallText(w) {
+  if (!w) return "";
+  const el = ELE[w.el] || w.el;
+  const sts = (w.mode === "amplify" ? WAVE_WALL.amplifyStatus : WAVE_WALL.dampenStatus).map(k => WAVE_STATUS_CN[k] || k).join("和");
+  const hit = w.mode === "amplify"
+    ? `穿过这道墙的${el}属性伤害 +${Math.round(WAVE_WALL.amplifyPct * 100)}%（和其他百分比加算），击破照常`
+    : `穿过这道墙的${el}属性伤害 −${Math.round(WAVE_WALL.dampenPct * 100)}%（和其他百分比加算），并且不造成任何击破`;
+  const base = w.saved && w.saved.type && w.saved.type !== "open" ? `，原来的${gapLabel(w.saved.type)}恢复` : "";
+  return `${hit}；其他属性照常。不挡移动，任何单位穿过时${w.mode === "amplify" ? "获得" : "受到"}${sts}，带聚焦的单位推进一步序列。这一整轮结束时消失${base}。`;
+}
+/** 间隔现在的样子（选间隙那一步、消失时的记录用）：「危墙（耐久 12）」「机关门（关着）」「畅通」 */
+function gapStateText(g) {
+  if (!g) return gapLabel("open");
+  if (isWaveGap(g)) return waveWallName(g.wave);
+  if (g.type === "wall" || g.type === "bridge") return `${gapLabel(g.type)}（耐久 ${Number(g.hp) || 0}）`;
+  if (g.type === "door") return `${gapLabel(g.type)}（${g.open ? "开着" : "关着"}）`;
+  return gapLabel(g.type || "open");
+}
+/** 在 key 这条间隔放一道驻波墙：原来的配置物整个记下来（已经是驻波墙的，换成新的属性 / 增降幅，记着的还是最早那个）。
+ *  返回 null；放不了返回原因 */
+function placeWaveWall(key, el, mode, by, notes) {
+  key = String(key || "");
+  if (!boardGapKeys().includes(key)) return "这块战场上没有这条间隙。";
+  if (!WAVE_WALL.elements.includes(el)) return "驻波墙要选一种属性。";
+  if (mode !== "dampen" && mode !== "amplify") return "驻波墙要选降幅或增幅。";
+  const g = state.gaps[key] = state.gaps[key] || emptyGap();
+  let saved;
+  if (isWaveGap(g)) saved = g.wave.saved;
+  else {
+    const base = {};
+    Object.keys(g).forEach(k => { if (k !== "wave") base[k] = g[k]; });
+    saved = JSON.parse(JSON.stringify(base));
+  }
+  const before = gapStateText(g);
+  Object.keys(g).forEach(k => delete g[k]);
+  Object.assign(g, { type: "wave", hp: 0, maxHp: 0, open: true, lastFrom: null,
+    wave: { el, mode, by: by != null ? by : null, until: (Number(state.turnNo) || 1) + Math.max(1, Number(WAVE_WALL.rounds) || 1) - 1, saved } });
+  if (notes) {
+    notes.push(`频域造物：${key} 区之间${before === gapLabel("open") ? "" : `的${before}被暂时取代，`}出现${waveWallName(g.wave)}。`);
+    notes.push(waveWallText(g.wave));
+  }
+  return null;
+}
+/** 回合结束：到期的驻波墙消失，原来的配置物原样恢复（危墙的耐久、门的开关、桥、空隙都还原）。
+ *  单位总是站在区里，间隔上不会站人：恢复成危墙 / 关着的门 / 空隙时，谁在哪一区就还在哪一区（墙在期间走过去的人留在对面） */
+function expireWaveWalls(notes) {
+  Object.keys(state.gaps || {}).forEach(k => {
+    const g = state.gaps[k];
+    if (!g || !g.wave) return;
+    if (g.type !== "wave") { delete g.wave; return; }   // 主持人中途改过这条间隔：以主持人改的为准
+    if (Number(g.wave.until) > (Number(state.turnNo) || 1)) return;
+    const name = waveWallName(g.wave);
+    const saved = JSON.parse(JSON.stringify(g.wave.saved || emptyGap()));
+    Object.keys(g).forEach(x => delete g[x]);
+    Object.assign(g, saved);
+    notes.push(`${k} 区之间的${name}消失${g.type && g.type !== "open" ? `，${gapStateText(g)}恢复原样` : ""}。`);
+  });
+}
+/** 攻击者所在区 → 目标所在区的连线经过的驻波墙，返回 [{ key, el, mode }]（同区是空的）。
+ *  照危墙挡远程攻击的判定（lineBlocked）：在不隔危墙 / 关着的门的最短路线里找；这样的路线不止一条时（方形棋盘的对角）
+ *  走经过驻波墙最少的那条——有一条一样短、没有驻波墙的就不算穿墙。一次攻击穿过两道墙，两道都算 */
+function waveWallsOnLine(aZone, bZone) {
+  aZone = Number(aZone); bZone = Number(bZone);
+  if (aZone === bZone || !anyWaveWall()) return [];
+  const d0 = zoneDist(aZone, bZone);
+  if (!(d0 > 0 && d0 < 99)) return [];
+  const shut = (x, y) => { const g = getGap(x, y); return g.type === "wall" || (g.type === "door" && !g.open); };
+  const paths = [];
+  const walk = (z, path) => {
+    if (paths.length >= 64) return;
+    if (z === bZone) { paths.push(path); return; }
+    const d = zoneDist(z, bZone);
+    zoneNeighbors(z).forEach(n => { if (zoneDist(n, bZone) === d - 1) walk(n, path.concat(n)); });
+  };
+  walk(aZone, [aZone]);
+  const open = paths.filter(p => p.every((z, i) => i === 0 || !shut(p[i - 1], z)));
+  let best = null;
+  (open.length ? open : paths).forEach(p => {
+    const walls = [];
+    for (let i = 1; i < p.length; i++) {
+      const g = getGap(p[i - 1], p[i]);
+      if (isWaveGap(g)) walls.push({ key: gapKey(p[i - 1], p[i]), el: g.wave.el, mode: g.wave.mode });
+    }
+    if (!best || walls.length < best.length) best = walls;
+  });
+  return best || [];
+}
+function waveGiveStatus(by, u, key, notes) {
+  // 和效果道具挂状态同一套（items.js · itemApplyStatus）：不稳叠两个转晕眩、高压场地上不稳直接晕眩、共振共享……照常
+  if (typeof itemApplyStatus === "function") { itemApplyStatus(by, u, key, notes); return; }
+  u.statuses = u.statuses || {};
+  if (key === "unstable") { if (applyUnstable(u, notes)) notes.push(`${u.name} 陷入不稳。`); return; }
+  u.statuses[key] = true;
+  notes.push(`${u.name} 获得${WAVE_STATUS_CN[key] || key}。`);
+}
+/** 单位穿过 key 这条间隔上的驻波墙：降幅墙受到不稳和虚弱，增幅墙获得坚挺和振奋（敌我都算；自己走、被推 / 拉 / 击退、技能里的移动都算）；
+ *  带聚焦的单位推进一步序列（stepFocus：和协助攻击的直接推进一样，一次行动对同一个聚焦只推进一步）。配置物不算 */
+function wavePassUnit(u, key, notes) {
+  const g = (state.gaps || {})[key];
+  if (!isWaveGap(g) || !u || !(state.units || []).includes(u) || u.dead || u.hidden) return;
+  const w = g.wave;
+  notes.push(`${u.name} 穿过 ${key} 区之间的${waveWallName(w)}。`);
+  const by = w.by != null ? unitById(w.by) : null;
+  (w.mode === "amplify" ? WAVE_WALL.amplifyStatus : WAVE_WALL.dampenStatus).forEach(k => waveGiveStatus(by, u, k, notes));
+  if ((u.focuses || []).length) u.focuses.slice().forEach(f => stepFocus(u, f, notes, "穿过驻波墙"));
+}
+/** 沿 path（区号数组）走过去：路上每条有驻波墙的间隔各结算一次 */
+function wavePassPath(u, path, notes) {
+  if (!Array.isArray(path)) return;
+  for (let i = 1; i < path.length; i++) wavePassUnit(u, gapKey(path[i - 1], path[i]), notes);
+}
+/** 技能里直接换区的那一段按哪条路算：有不隔危墙 / 关着的门的最短路线就走那条 */
+function waveRoute(from, dest) {
+  const shut = (x, y) => { const g = getGap(x, y); return g.type === "wall" || (g.type === "door" && !g.open); };
+  return zonePath(from, dest, (x, y) => !shut(x, y)) || zonePath(from, dest);
+}
+/* 技能里直接改所在区的移动（突进、逃离、燕飞、猛扑……）不走 doMoveInner / displaceTo：一次行动（runSkill / doMove）开始时记下
+ * 每个在场单位在哪一区（state._waveLedger），出手之前（dealTo）和行动结束时补算——从记下的区沿最短的路走到现在的区，路上的驻波墙照样生效。
+ * 走路、被推 / 拉、紧追当场结算（waveMoved），顺手把记下的区更新成新位置，不会重复算。场上没有驻波墙时什么都不记 */
+function waveLedgerOpen() {
+  if (state._waveLedger || !anyWaveWall()) return false;
+  const led = {};
+  (state.units || []).forEach(u => { if (u && u.id != null && u.zone != null && !u.dead && !u.hidden && !u.fused && !u._removed) led[u.id] = Number(u.zone); });
+  state._waveLedger = led;
+  return true;
+}
+function waveLedgerSync(notes) {
+  const led = state._waveLedger;
+  if (!led) return;
+  const out = notes || [];
+  (state.units || []).forEach(u => {
+    if (!u || u.id == null) return;
+    // 不在场上的不记（收回的武器人、倒下的）：再上场时从那一区重新记，不算穿墙
+    if (u.zone == null || u.dead || u.hidden || u.fused || u._removed) { delete led[u.id]; return; }
+    const now = Number(u.zone), was = led[u.id];
+    led[u.id] = now;
+    if (was == null || was === now) return;   // 这次行动里才上场的（唤出、援军）不算穿墙
+    wavePassPath(u, waveRoute(was, now), out);
+  });
+  if (!notes && out.length) appendLog(out.join("\n"));
+}
+function waveLedgerClose(own) {
+  if (!own) return;
+  try { waveLedgerSync(); } finally { state._waveLedger = null; }
+}
+/** 走路 / 被推 / 紧追这类当场结算的移动：path = 这次走的路（区号数组，含起点终点）。
+ *  这个单位之前在技能里直接换过区、还没补算的那一段先补上，再沿这次的路过墙 */
+function waveMoved(u, path, notes) {
+  if (!u || !Array.isArray(path) || path.length < 2) return;
+  const led = state._waveLedger;
+  if (led && u.id != null && led[u.id] != null && led[u.id] !== Number(path[0])) wavePassPath(u, waveRoute(led[u.id], path[0]), notes);
+  wavePassPath(u, path, notes);
+  if (led && u.id != null) led[u.id] = Number(path[path.length - 1]);
+}
+
 function toggleDevice(p, reason) {
   if (!p || (p.kind !== "button" && p.kind !== "lever")) return;
   if (gMissingDoor(p)) {
-    const key = Object.keys(state.gaps).find(k => state.gaps[k].type === "door") || "1-2";
+    const key = Object.keys(state.gaps).find(k => waveGapBase(state.gaps[k]).type === "door") || "1-2";
     p.link = key;
   }
-  const gap = state.gaps[p.link] || getGap(1, 2);
+  // 门被驻波墙暂时取代时：拨的是记着的那扇门（墙消失后照这个开关恢复）
+  const gap = waveGapBase(state.gaps[p.link] || getGap(1, 2));
   // 按钮：改变状态直到整个回合结束（回合结束时恢复原样），按住期间再按没有效果；拉杆：切换一次
   if (p.kind === "button") {
     if (p.held) {
@@ -3960,7 +4144,7 @@ function hackTurret(u, p) {
 function releaseButtons(notes) {
   (state.props || []).filter(p => p.kind === "button" && p.held).forEach(p => {
     p.held = false;
-    const gap = state.gaps[p.link];
+    const gap = waveGapBase(state.gaps[p.link]);   // 门被驻波墙暂时取代：拨记着的那扇门
     if (!gap || gap.type !== "door") return;
     gap.open = !gap.open;
     notes.push(`${p.name} 弹起：间隔 ${p.link} 的门恢复${gap.open ? "打开" : "关闭"}。`);
@@ -3968,7 +4152,7 @@ function releaseButtons(notes) {
 }
 
 function gMissingDoor(p) {
-  const g = state.gaps[p.link];
+  const g = waveGapBase(state.gaps[p.link]);
   return !g || g.type !== "door";
 }
 
@@ -4216,8 +4400,20 @@ function dealToStructure(attacker, target, opt) {
   if (typeof featBreakBonus === "function") {
     try { br = featBreakBonus(attacker, target, opt, flags, br, zoneDist(attacker.zone, target.zone, state.zoneMode), false); } catch (e) {}
   }
+  // 驻波墙：打配置物 / 危墙也照样过墙（这一属性：增幅每道 +25%、降幅每道 −50%，加在一起；降幅没有击破）
+  const waves = attacker && attacker.zone != null && target.zone != null && !flags.diffract && !flags.locked && !flags.lob
+    ? waveWallsOnLine(attacker.zone, target.zone).filter(w => w.el === (opt.element || "physical")) : [];
+  const waveAmp = waves.filter(w => w.mode === "amplify").length, waveDamp = waves.length - waveAmp;
+  if (waves.length) dmg *= Math.max(0, 1 + WAVE_WALL.amplifyPct * waveAmp - WAVE_WALL.dampenPct * waveDamp);
+  if (waveDamp) br = 0;
   target._hit = true;
   const lines = hitStructureCore(attacker, target.structToken, { element: opt.element || "physical", dmg: Math.max(1, Math.floor(dmg)), brk: Math.max(0, br) });
+  if (waves.length) {
+    const parts = [];
+    if (waveAmp) parts.push(`伤害 +${Math.round(WAVE_WALL.amplifyPct * waveAmp * 100)}%`);
+    if (waveDamp) parts.push(`伤害 −${Math.round(WAVE_WALL.dampenPct * waveDamp * 100)}%，不造成击破`);
+    lines.unshift(`穿过${waves.map(w => waveWallName(w)).join("、")}：${parts.join("；")}。`);
+  }
   return { structure: true, lines, extra: [], res: { ok: true, structure: true, total: Math.max(0, Math.floor(dmg)), breakDealt: 0, perHit: [], log: [], flags } };
 }
 /** 技能结算完：技能分支出错、替身一下都没挨 → 照以前的通用打法打一下（行动点已经扣了，不白扣）；
@@ -4524,7 +4720,12 @@ function doMove(unit, dest, moveOpt) {
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = unit.id;
   let lines;
-  try { lines = withLogSink(() => doMoveInner(unit, dest, moveOpt)); } finally { LOG_ACTOR_ID = prevActor; }
+  try {
+    lines = withLogSink(() => {
+      const waveOwn = waveLedgerOpen();   // 驻波墙：走路引起的别的移动（借机攻击击退、紧追……）也补算穿墙
+      try { doMoveInner(unit, dest, moveOpt); } finally { waveLedgerClose(waveOwn); }
+    });
+  } finally { LOG_ACTOR_ID = prevActor; }
   if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
   // 「X：1 区 → 2 区」挪到最前面，花费跟在后面
   const i = lines.findIndex(s => /区 → \d+ 区/.test(s));
@@ -4682,6 +4883,7 @@ function doMoveInner(unit, dest, moveOpt) {
   }
   unit.zone = dest;
   if (unit.kit === "ecmo" && unit.resources && unit.resources.probe) (unit.resources.probeZones = unit.resources.probeZones || []).push(Number(dest));
+  waveMoved(unit, [from, dest], notes);   // 驻波墙（频域造物）：穿过就挂状态、推进聚焦
   convertUnstableInHv(unit, notes);
   if (!moveOpt.noOpp) triggerLeaveOpportunity(unit, from, notes);
   if (typeof bpAfterEnemyMove === "function") bpAfterEnemyMove(unit, notes);   // 单局图纸：稳妥的距离
@@ -4737,6 +4939,7 @@ function chaseFollow(unit, notes) {
     if (crossGapsForced(c, from, unit.zone, crossing, false)) {
       c.zone = Number(unit.zone);
       notes.push(`${c.name} 紧追 ${unit.name}：${from} 区 → ${unit.zone} 区（不耗行动）。`, ...crossing);
+      waveMoved(c, forcedPath(from, c.zone) || [from, c.zone], notes);
       enterFrozenGround(c, notes);
       applyAbyssFall(c, from, notes);
       if (typeof afterMove === "function") afterMove(c, notes);
@@ -5286,6 +5489,7 @@ function displaceTo(obj, dest, notes, reason, opts) {
   }
   obj.zone = dest;
   notes.push(`${obj.name}${reason ? " " + reason : " 被移动"}：${from} 区 → ${dest} 区。`, ...crossing);
+  if (!obj.kind) waveMoved(obj, forcedPath(from, dest) || [from, dest], notes);   // 被推 / 拉 / 击退过驻波墙也算
   quicksandAfterZoneChange(obj, notes, "被带出流沙");
   if (!obj.kind) obj._pushedTurn = state.turnNo;   // 伏咬沙鱼：这回合被推过的猎物多 1 击破
   if (!obj.kind && typeof ambushOnEnter === "function") ambushOnEnter(obj, notes);   // 被推进伏咬沙鱼的区
@@ -7972,6 +8176,8 @@ function dealToInner(attacker, target, opt) {
   if (!("_origBaseBreak" in opt)) opt._origBaseBreak = opt.baseBreak;
   opt.flags = makeDealFlags(opt.flags);
   if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
+  // 驻波墙：这次行动里技能直接换过区的单位，出手之前先把穿墙补算上（借机攻击是走的人离开那一下打的，不在这里补）
+  if (state._waveLedger && !opt.flags.opportunity) waveLedgerSync();
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -8124,6 +8330,14 @@ function dealToInner(attacker, target, opt) {
       appendLog(block);
       return { res: { ok: false, total: 0, breakDealt: 0, log: [block], perHit: [] }, extra: [block] };
     }
+  }
+  // 驻波墙（频域造物）：这一击的连线穿过了哪几道（判定和上面的危墙一样：衍射、锁定的机制伤害、越墙抛射不算穿墙；
+  // 范围攻击按每个目标各自算；借机攻击按走的人离开的那一区算）。每次都重算（等协助格挡的那一击落下时墙可能已经不在了），
+  // 伤害 / 击破的修正在 engine.js · resolveAttack
+  delete opt.flags.waveWalls;
+  if (attacker && target && target.zone != null && attacker.zone != null && !opt.flags.diffract && !opt.flags.locked && !opt.flags.lob) {
+    const ww = waveWallsOnLine(attacker.zone, opt.wallZone != null ? opt.wallZone : target.zone);
+    if (ww.length) opt.flags.waveWalls = ww.map(w => ({ el: w.el, mode: w.mode }));
   }
   if (typeof featArmAttack === "function" && target && !target.isPlayer) featArmAttack(attacker, target, opt);   // 无可阻挡（feats.js）：不能被格挡
   if (attacker && attacker.isPlayer && target && !target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
@@ -9159,6 +9373,35 @@ function heluScanOptions(z) {
   });
   return opts;
 }
+
+/* ---------- Helumica「规则干涉」（6 级）：1 距离以内一区变成干涉场（作者 10/23 定）----------
+ * 场地能不能改照 fieldChangeWhy（深渊、损毁地面、固有场地、被锁定的改不了）。
+ * 分析过当前战场（用过环境扫描，resources.scanned）并且干涉场取代了这一区原本的「别的」场地：同区自选一个单位（敌我都行）
+ * 立刻获得附赠动作，可以超过上限。原本没有场地、原本就是干涉场都不给 */
+const HELU_RULE = { range: 1, bonus: 1 };
+/** 干涉场会取代掉的场地（主场地里除了干涉场以外开着的；高地、深渊、隔离、塌陷这些和场地共存的不算） */
+function heluRuleReplaced(z) {
+  const f = (state.fields || {})[z];
+  if (!f) return [];
+  const names = { fireOn: "火场", electric: "高压场地", acid: "酸液地面", ice: "冻土", quicksand: "流沙", coral: "沙珊瑚台地", energy: "能量场", heal: "治愈场地" };
+  return FIELD_EFFECT_KEYS.filter(k => k !== "harmonic" && (k === "fireOn" ? fieldFireOn(f) : f[k])).map(k => names[k] || k);
+}
+/** 这一下给不给附赠动作：分析过战场、这一区的场地改得了、并且会取代掉别的场地 */
+function heluRuleBonusOk(a, z) {
+  return !!(res(a).scanned && z != null && !fieldChangeWhy(Number(z), "harmonic") && heluRuleReplaced(Number(z)).length);
+}
+/** 同区能拿附赠动作的单位：敌我都行（在场、没倒下的） */
+function heluRuleUnits(z) {
+  return fieldUnits().filter(u => Number(u.zone) === Number(z) && !u.dead && !u.hidden && !u.fused && !u._removed);
+}
+/** 频域造物：选间隙那一步的选项（任意间隙，不限距离；写出现在是什么，会被暂时取代） */
+function heluForgeGapOptions() {
+  return boardGapKeys().map(k => {
+    const g = (state.gaps || {})[k];
+    const now = gapStateText(g);
+    return { value: k, label: `${k.replace("-", "–")} 区之间：${now}${!g || g.type === "open" ? "" : isWaveGap(g) ? "（换成新的驻波墙）" : "（暂时取代）"}` };
+  });
+}
 /** Helumica 协助攻击附带的环境扫描：排进队列，由画面（或模拟器）问完选项再结算 */
 function queueHeluScan(a, zone, lines) {
   if (!a || zone == null) return;
@@ -9478,6 +9721,34 @@ function skillFlowSteps(id, actor, picks) {
       steps.push({ key: "sign", type: "choice", optional: false, label: "干涉场：区里所有单位的下次伤害",
         options: [{ value: "+", label: "+25%（叠一层正向干涉）" }, { value: "-", label: "−25%（叠一层反向干涉）" }] });
     }
+    return steps;
+  }
+  if (id === "helu_rule") {
+    // 规则干涉：先选区（1 距离以内、场地改得了的）；分析过战场、并且会取代别的场地时，再选那一区的一个单位（敌我都行）拿附赠动作
+    const steps = [{ key: "dest", type: "zone", optional: false, label: "哪一区变成干涉场（距离 ≤1，只列出场地能改变的区）",
+      zones: envZones(actor, "harmonic", HELU_RULE.range) }];
+    const z = picks.dest != null ? Number(picks.dest) : null;
+    if (z != null && heluRuleBonusOk(actor, z) && heluRuleUnits(z).length) {
+      steps.push({ key: "target", type: "unit", optional: false,
+        label: `干涉场取代${heluRuleReplaced(z).join("、")}：${z} 区自选一个单位立刻获得 ${HELU_RULE.bonus} 个附赠动作（敌我都行，可以超过上限）`,
+        units: heluRuleUnits(z) });
+    }
+    return steps;
+  }
+  if (id === "helu_forge") {
+    // 频域造物：选间隙（任意间隙，不限距离）→ 选一种属性 → 降幅还是增幅
+    const steps = [{ key: "gap", type: "choice", optional: false, label: "在哪一条间隙创造驻波墙（任意间隙；已有的配置物会被暂时取代）",
+      options: heluForgeGapOptions() }];
+    if (picks.gap == null) return steps;
+    steps.push({ key: "element", type: "choice", optional: false, label: "驻波墙过滤哪一种属性",
+      options: WAVE_WALL.elements.map(el => ({ value: el, label: ELE[el] || el })) });
+    if (picks.element == null) return steps;
+    const el = ELE[picks.element] || picks.element;
+    steps.push({ key: "mode", type: "choice", optional: false, label: `${el}属性：降幅还是增幅`,
+      options: [
+        { value: "dampen", label: `降幅：穿过的${el}伤害 −${Math.round(WAVE_WALL.dampenPct * 100)}%、不造成击破；穿过的单位受到不稳和虚弱` },
+        { value: "amplify", label: `增幅：穿过的${el}伤害 +${Math.round(WAVE_WALL.amplifyPct * 100)}%、击破照常；穿过的单位获得坚挺和振奋` }
+      ] });
     return steps;
   }
   if (id === "ecmo_focus") {
@@ -11200,6 +11471,10 @@ const SKILL_REQUIREMENT = {
   helu_storm:     (a) => state.weather !== "sand" ? weatherChangeWhy("sand")
     : !res(a).scanned ? "沙暴中再用要先做一次环境扫描才能调转风向"
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
+  helu_rule:      (a) => envZones(a, "harmonic", HELU_RULE.range).length ? null
+    : "距离 1 以内没有能变成干涉场的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）",
+  helu_forge:     (a) => !res(a).scanned ? "只有扫描过当前战场（用过环境扫描）才能使用"
+    : !boardGapKeys().length ? "这块战场没有间隙" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
   kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
@@ -11567,6 +11842,21 @@ function skillTargetError(a, id, t) {
     if (!tgt || !tgt.isPlayer) return "只有目标是我方单位时才能消耗废料给行动点";
     if (!koltScrapFull(k)) return `废料还没达到上限（${koltScrapTotal(k)} / ${koltScrapCap(k)}），不能消耗废料给行动点`;
   }
+  // 规则干涉：区要在 1 距离以内、场地改得了；要给附赠动作时，拿附赠的单位要在那一区（敌我都行）。不合法就在扣行动点之前拦下
+  if (id === "helu_rule") {
+    const z = flp.dest != null ? Number(flp.dest) : null;
+    if (z == null || !envZones(a, "harmonic", HELU_RULE.range).includes(z)) return "要选距离 1 以内、场地能变成干涉场的区域";
+    if (heluRuleBonusOk(a, z) && heluRuleUnits(z).length) {
+      const tg = flp.target ? unitById(flp.target) : t;
+      if (!tg || !heluRuleUnits(z).includes(tg)) return `要选 ${z} 区里获得附赠动作的单位`;
+    }
+  }
+  // 频域造物：间隙、属性、降幅 / 增幅都要选好
+  if (id === "helu_forge") {
+    if (!boardGapKeys().includes(String(flp.gap))) return "要选创造驻波墙的间隙";
+    if (!WAVE_WALL.elements.includes(flp.element)) return "要选驻波墙过滤的属性";
+    if (flp.mode !== "dampen" && flp.mode !== "amplify") return "要选降幅还是增幅";
+  }
   // 巨刃划空打配置物 / 危墙：要在 1 距离以内，不能打自己这边的铁壁 / 防护罩（以前能打自己的铁壁）
   if (id === "chuan_blade") {
     const ref = flp.target || state.targetId;
@@ -11633,10 +11923,13 @@ function runSkill(id, optRun) {
       if (apShare) state._apShare = apShare;
       // 高能自爆等这次行动完整打完再判（嵌套的行动由最外层统一判）
       state._highDefer = (Number(state._highDefer) || 0) + 1;
+      // 驻波墙：这次行动开始时记下各单位在哪一区，技能里直接换区的移动出手前 / 行动结束时补算穿墙（最外层这一次记）
+      const waveOwn = waveLedgerOpen();
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
       finally {
         state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
         if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
+        waveLedgerClose(waveOwn);
       }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
@@ -11917,6 +12210,8 @@ function runSkillInner(id, optRun) {
   const hitOne = (actor, target, opt) => {
     // 命中过程中立刻写出的日志（击杀、经验、掉落……）先收起来，排在这一击的结果后面
     let out;
+    // 驻波墙：技能里直接换过区（突进、逃离……）还没补算的穿墙，先结算、先写（不然写在这一击的结果后面）
+    if (state._waveLedger) waveLedgerSync(lines);
     // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的；这一击之前攒下的话先写出去
     if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
     appendLog(lines.splice(0).join("\n"));
@@ -13605,6 +13900,32 @@ function runSkillInner(id, optRun) {
       const fl = state.skillFlow;
       a.resources.scanned = true;
       heluScanAct(a, Object.assign({}, (fl && fl.picks) || {}), lines);
+    } else if (id === "helu_rule") {
+      // 规则干涉：选的区变成干涉场；分析过战场、并且干涉场取代了别的场地 → 同区自选的一个单位（敌我都行）立刻 +1 附赠动作，可以超过上限
+      const fl = state.skillFlow, p = (fl && fl.picks) || {};
+      const z = Number(p.dest);
+      const replaced = heluRuleReplaced(z);
+      const wasHarm = !!(state.fields[z] || {}).harmonic;
+      const bonusOk = heluRuleBonusOk(a, z);   // 改之前看：改完就没有「被取代的场地」了
+      const ferr = setZoneField(z, "harmonic", { by: a.id });
+      if (ferr) lines.push(ferr);
+      else {
+        lines.push(`规则干涉：${z} 区${replaced.length ? `的${replaced.join("、")}被取代，` : ""}变成干涉场。`);
+        if (!replaced.length) lines.push(`${z} 区${wasHarm ? "本来就是干涉场" : "原本没有场地"}，没有取代别的场地：不给附赠动作。`);
+        else if (!bonusOk) lines.push("还没分析过当前战场（环境扫描）：不给附赠动作。");
+        else {
+          const tg = p.target ? unitById(p.target) : t;
+          if (tg && heluRuleUnits(z).includes(tg)) {
+            tg.bonus = (Number(tg.bonus) || 0) + HELU_RULE.bonus;   // 可以超过上限（bonusMax 不动，画面按 max(上限, 现有) 画）
+            lines.push(`干涉场取代了别的场地：${tg.name} 立刻获得 ${HELU_RULE.bonus} 个附赠动作（可以超过上限），现在 ${tg.bonus} 个。`);
+          } else lines.push(`${z} 区没有可以获得附赠动作的单位。`);
+        }
+      }
+    } else if (id === "helu_forge") {
+      // 频域造物：在选的间隙创造驻波墙（不挡移动，暂时取代原来的配置物），这一整轮结束时消失（expireWaveWalls）
+      const fl = state.skillFlow, p = (fl && fl.picks) || {};
+      const werr = placeWaveWall(p.gap, p.element, p.mode, a.id, lines);
+      if (werr) lines.push(werr);
     } else if (id === "helu_summon") {
       const w = spawnWeapon(a, "ecmo");
       lines.push(w ? "Ecmo/7418 已进入战场。" : "Ecmo 已在场。");

@@ -335,6 +335,21 @@
 /* 天气的 2D 层傍晚 / 夜晚借 weather-fx.css 的夜晚样子（hd2d-wfx.js 给这一层加 .g-app.is-night）：正式画面的 game.css / hotseat.css 给 .g-app 排了整页的网格、定了高度，
  * 这一层不吃那些，还是铺满 3D 画面的一层 */
 .hd2d-field .hd2d-wfx.g-app { display: block; height: auto; padding: 0; overflow: hidden; grid-template: none; }
+/* 驻波墙（Helumica「频域造物」，#345）：3D 场景包里还没有它的模型，间隔正上方贴一块字牌（hd2d-field.js · syncWaveTags 每一帧按镜头摆位）。
+ * 降幅偏冷、增幅偏暖，描边是过滤的属性的颜色（和旧画面 game.css · .g-gap.gap-wave 一样）；整层不挡鼠标，只有字牌接悬停说明 */
+.hd2d-wave-tags { position: absolute; inset: 0; z-index: 1; overflow: hidden; pointer-events: none; }
+.hd2d-wave-tag {
+  --wave-el: #9a74b0;
+  position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: help; white-space: nowrap;
+  padding: 2px 6px; font: 700 11px/1.25 var(--ui-sans); color: #3b2f52; text-align: center;
+  background: repeating-linear-gradient(90deg, #e6def3 0 5px, #d3c6ea 5px 10px);
+  border: 2px solid var(--wave-el); box-shadow: 2px 2px 0 rgba(0, 0, 0, .45);
+}
+.hd2d-wave-tag.wave-amplify { color: #5a3f12; background: repeating-linear-gradient(90deg, #f7e8cb 0 5px, #ebd09c 5px 10px); }
+.hd2d-wave-tag b { display: block; color: var(--wave-el); filter: brightness(.8); }
+.hd2d-wave-tag.el-fire { --wave-el: #c86b6b; } .hd2d-wave-tag.el-acid { --wave-el: #6a9a6a; } .hd2d-wave-tag.el-electric { --wave-el: #c2b25a; }
+.hd2d-wave-tag.el-ice { --wave-el: #6b95b8; } .hd2d-wave-tag.el-energy { --wave-el: #5aa0a6; } .hd2d-wave-tag.el-physical { --wave-el: #c8844a; }
+.hd2d-wave-tag.el-harmonic { --wave-el: #9a74b0; }
 /* 镜头按钮（远 / 中 / 近 + 看的那个区）：右下角，样子照原型顶栏的镜头按钮；中景 / 近景时两边的换区箭头（键盘左右键也行） */
 .hd2d-cam {
   position: absolute; right: 10px; bottom: 10px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 4px 6px;

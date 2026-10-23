@@ -97,7 +97,7 @@
     [/^veh_burn$/, "spread"],
     [/^veh_ram$/, "smash"],
     [/^veh_(board|pull|leave|cover)/, "none"],
-    [/^(\w+_summon|\w+_return|ruby_unmecha|mint_mecha|xia_engine|xia_selfburn|hiaki_sheath|nora_soothe|latte_ice|helu_(wave|storm|scan)|ecmo_probe|ras_(super|rampage)|edc_(drain|siphon)|longge_(safety|drink|reload)|chuan_pulse|torque_divert|kolt_scrap|wing_boost|wing_relay|ruby_relay|ruby_refuel|weapon_retrieve|sand_pull|__move|__item|__stand)$/, "none"]
+    [/^(\w+_summon|\w+_return|ruby_unmecha|mint_mecha|xia_engine|xia_selfburn|hiaki_sheath|nora_soothe|latte_ice|helu_(wave|storm|scan|rule|forge)|ecmo_probe|ras_(super|rampage)|edc_(drain|siphon)|longge_(safety|drink|reload)|chuan_pulse|torque_divert|kolt_scrap|wing_boost|wing_relay|ruby_relay|ruby_refuel|weapon_retrieve|sand_pull|__move|__item|__stand)$/, "none"]
   ];
 
   // 敌人招式：按招式名（和 id、种类）里的字挑。顺序有讲究：「电击挥砍」是刀、「枪管近战」是砸

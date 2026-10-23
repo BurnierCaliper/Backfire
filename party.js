@@ -685,6 +685,7 @@ function skillCost(id) {
     kolt_assist: {}, kolt_summon: { ap: 1, bonus: 1 }, kolt_scrap: { ap: 1 }, kolt_rot: { ap: 1 }, kolt_mod: { ap: 1 },
     torque_boost: { ap: 1 }, torque_swap: { ap: 1 }, torque_strip: { ap: 1 }, torque_return: { ap: 1 },
     helu_aa: { ap: 1 }, helu_wave: { ap: 1 }, helu_storm: { ap: 1 }, helu_scan: { ap: 1 }, helu_assist: {},
+    helu_rule: { ap: 1 }, helu_forge: { ap: 1 },   // 卡面特别写出来的技能都花行动点（作者 10/23）
     helu_summon: { ap: 1, bonus: 1 },
     ecmo_bite: { ap: 1 }, ecmo_focus: { ap: 1 }, ecmo_boom: { ap: 1 }, ecmo_return: { ap: 1 },
     ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
@@ -982,6 +983,8 @@ function skillList(unit) {
     add({ id: "helu_wave", name: "驻波", hint: "进入相位；已扫描战场则可推进相位阶段" });
     add({ id: "helu_storm", name: "大气干扰", hint: "进入沙暴；已环境扫描过则可在沙暴中调转风向", minLv: 3 });
     add({ id: "helu_scan", name: "环境扫描", hint: "选一区：扫描出配置物，或远程引爆 / 操控配置物、震动危墙桥梁、激发场地", minLv: 2 });
+    add({ id: "helu_rule", name: "规则干涉", hint: "1距离以内一区变成干涉场 · 已扫描战场且取代了别的场地：同区自选任意单位（敌我都行）+1 附赠动作，可超上限", minLv: 6 });
+    add({ id: "helu_forge", name: "频域造物", hint: "需扫描过战场 · 任意间隙创造驻波墙（不挡移动，暂时取代危墙 / 门 / 桥 / 空隙）· 选一种属性：降幅（穿过的伤害减半、无击破，穿过者不稳+虚弱）/ 增幅（+25%，穿过者坚挺+振奋）· 聚焦穿过推进一步 · 这一整轮结束时消失", minLv: 9 });
     add({ id: "helu_summon", name: "唤出 Ecmo", hint: "武器生物化" });
   }
   if (unit.kit === "ecmo") {
