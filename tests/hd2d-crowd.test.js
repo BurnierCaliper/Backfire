@@ -37,6 +37,7 @@ const MORE = [{ id: "thug_hammer", lv: 1 }, { id: "thug_knife", lv: 1 }, { id: "
 /** 小 DOM 的页面：旧画面的单位卡（unit-card.js）、联机玩家的战斗画面（online-battle.js 的 snapUnit / snapProp） */
 function page() {
   const P = MD.create('<main id="g-field"></main>');
+  P.window.wake = () => {};   // 场景源码抠出来的片段会叫按需渲染的 wake()（#321）：这里没有画面
   const ctx = vm.createContext(P.window);
   ["icons.js", "hud-icons.js", "unit-card.js", "online-battle.js"].forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
   return { ctx, doc: P.document, UC: P.window.UnitCard, OB: P.window.OnlineBattle };
