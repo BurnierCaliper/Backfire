@@ -921,10 +921,12 @@
     const fits = {};
     if (cards) {
       // 远景最多退到只框地台时的 farBack 倍（以前不封顶：卡不跟着变小，一个区挤满了会越退越远）。放不下的区一轮一轮往下降一档（crowdStep），
-      // 每一轮重新取景、重排站位：镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
-      const K = CONFIG.card, lim = camera.dist * K.crowd.farBack, sizeOf = (u) => cardAt(u, K.tier.far, fits[u.zone]);
+      // 每一轮从只框地台的镜头重新取景、重排站位（退远了地台变小、一排站得下的人更少，接着退远的镜头排只会越摞越高）：
+      // 镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
+      const K = CONFIG.card, cam0 = camera, lim = cam0.dist * K.crowd.farBack, sizeOf = (u) => cardAt(u, K.tier.far, fits[u.zone]);
       const box = { x0: 0, x1: view.width, y0: view.top, y1: view.height - view.bottom }, all = new Set(zones.map(z => z.id));
       for (let round = 0; round < K.crowd.passes; round++) {
+        if (round) { camera = cam0; units = arrange(camera, fits); }
         for (let pass = 0; pass < 3; pass++) {
           const next = fitView(b, view, (cam) => [...liftPlates(units, cam, sizeOf, K.maxLift.far).values()].map(r => r.rect), { maxDist: lim, from: round ? camera : null });
           const same = Math.abs(next.dist - camera.dist) < 1e-3 && Math.hypot(next.target.x - camera.target.x, next.target.y - camera.target.y, next.target.z - camera.target.z) < 1e-3;
