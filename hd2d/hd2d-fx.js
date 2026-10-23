@@ -10,6 +10,9 @@
  *   HD2DFx.cues(packet, { before, bigHit })   → 这一下怎么演：谁打谁、招式、每一段打中谁、要弹哪些数字、谁被击倒、有没有格挡
  *   HD2DFx.numberOf(e, { level, bigHit })     → 演出带里的一下（投影过的）弹什么数字（cues 和正式画面 game.js 的新画面都用它，#283）
  *   HD2DFx.placeNumbers(numbers, rectOf, view) → 每个数字摆在哪、多大（近景大、远景小；几个数字同时出来两两不压住，也不压住画面上还没消失的）
+ * 卡片动画（#330：3D 白卡照旧画面的单位卡动；DOM 那一半在 hd2d-play.js · HD2DPlay.cards，数值在 FX.card）：
+ *   HD2DFx.dashOf(a, t, o) / knockOf(r, from, big) / dirOf(a, t)   冲撞的两步、受击往哪退（屏幕像素）
+ *   HD2DFx.moveSecs(clock, { animate, reduced }) / slide(from, to, secs, t0) / slideAt(s, now)   换区移动滑多久、铭牌的 3D 锚点滑到哪了（hd2d-scene.js 每帧问）
  * 坚毅生命（shp）的具体数值绝不显示：投影里本来就没有（projectTape 遇到打在坚毅生命上的、濒死的，干脆不给数），这里也只认投影里的 value。
  * 不碰 three.js 和 DOM：Node 里 require 来测（tests/hd2d-fx.test.js），浏览器里是全局的 HD2DFx（在 hd2d-layout.js 之后加载）。 */
 (function (root, factory) {
@@ -40,7 +43,25 @@
    *   push        出手时镜头稍微推一下（tiers 里的段：远景 / 中景；近景已经够近不推）：看的那一点往攻击者和目标中间挪 toward，距离乘 dist；
    *               推过去攻击者或目标的铭牌出了画面就少推一点，退 steps 次还不行就不推。in / out = 推过去、拉回来各多少秒（跟着演出倍率），ease 缓动；
    *               on = 开关（页面上的「推镜头」按钮、网址 ?push=0）；减少动态效果、跳过时不推
-   *   speeds      页面上「演出 n×」按钮轮流切的速度（演出倍率 = 1 / 速度，交给 AttackFx.setClock） */
+   *   speeds      页面上「演出 n×」按钮轮流切的速度（演出倍率 = 1 / 速度，交给 AttackFx.setClock）
+   *   card        3D 铭牌（白卡，#316）上的卡片动画（#330：旧画面单位卡有的动画新画面也要有，hd2d-play.js · HD2DPlay.cards 照这里演）。
+   *               数都照旧画面：game.js 的 dashTo / lunge / recoil / nudgeCard / hit / placeCard、game.css 的 .unit-wrap.dead / .dead-slow / .gone。
+   *               位移是屏幕像素（白卡外面那一层按镜头远近缩放过，演的时候按这张卡这一刻的缩放换回卡片自己的像素），时长是毫秒（跟着演出倍率）：
+   *     dash      近身冲撞：先往后一收 back 像素（歪 backRot 度，backMs 毫秒），再扑上去（歪 rot 度，inMs 毫秒）冲 reach 像素（heavy 重的 heavyReach），
+   *               至少 min、不超过两张卡中心的距离减半张卡宽；到了停 hold 毫秒再用 home 毫秒回位；keep（冲过去就消失的）停 keepHold 毫秒、悄悄回位
+   *     lunge     冲一下（没挑出招式演出的出手、协助格挡冲上去挡）：朝目标 px 像素，过去 ms 毫秒、回来 back 毫秒
+   *     recoil    远程后坐：往后 px 像素（支援 / 挂效果拉线时 link 像素），ms 毫秒过去，停 hold、home 毫秒回位
+   *     nudge     专属演出里挪一下（往后退、往后拉）：默认 ms 毫秒；过去占 in、停到 hold（× ms），home 毫秒回位
+   *     knock     受击击退：顺着挨打的方向 px 像素（大伤害 big），竖直方向再乘 flatY；歪 rot 度（大伤害 bigRot）
+   *     flashVar  受击闪一下的颜色：属性 → game.css 里的颜色变量（和 game.js 的 ELE_VAR 一样）
+   *     warn      高能自爆预警：卡片闪两下（game.css 的 .high-warn，一下 ms 毫秒），脚下的地台跟着闪（hd2d-scene.js 的 ZONE_FX.warn）；
+   *               闪完再等 gap 毫秒才炸（game.js 是 300 + 360 毫秒）
+   *     enter     登场亮相（game.css 的 .enter）要多久：这么久里同一张卡不再亮第二遍（伙伴登场既是新出现的单位、又是「支援！」那一下）
+   *     move      换区移动：铭牌的 3D 锚点从一个地台滑到另一个 secs 秒（× 演出倍率：2× 快一半、借机攻击的慢放跟着慢），ease 缓动（slideAt 里的名字）
+   *     ko        被打倒的敌人留在场上多久：这一段演完（ko-held）以后淡出要 fade 毫秒（一记重击打死的 slow）、已经不在画面数据里了快点淡掉 gone 毫秒——
+   *               和 game.css 的 transition 一样（延迟 + 时长：.dead 0.5 + 1.2 秒、.dead-slow 1.4 + 2.4 秒、.gone 0.45 秒），淡完从 3D 战场上拿掉
+   *     quake     震屏（game.css 的 .quake / .quake-s）挂多久摘掉（毫秒，和 game.js · shakeField 一样）：大震 ms、小震 small
+   *     front     冲撞中的铭牌压在别的铭牌上面：铭牌上加的 class（hd2d.css；旧画面是 .unit-wrap.lunge 的 z-index） */
   const FX = {
     anchorY: 0.42,
     num: {
@@ -60,7 +81,21 @@
     timing: { hitGap: 170, koDelay: 120 },
     paper: { on: true, squash: { min: 0.8 }, size: { k: 0.5, min: 36, max: 110 }, shadow: { w: 2.2, flat: 1, opacity: 0.3, dur: 460 } },
     push: { on: true, tiers: ["far", "mid"], toward: 0.35, dist: 0.86, steps: 4, in: 0.28, out: 0.42, ease: "inOutCubic" },
-    speeds: [1, 2]
+    speeds: [1, 2],
+    card: {
+      dash: { back: 12, backRot: 2.5, rot: 1.5, backMs: 90, inMs: 100, reach: 92, heavyReach: 112, min: 16, hold: 130, keepHold: 560, home: 240 },
+      lunge: { px: 26, ms: 130, back: 90 },
+      recoil: { px: 8, link: 5, ms: 70, hold: 110, home: 220 },
+      nudge: { ms: 240, in: 0.4, hold: 0.9, home: 260 },
+      knock: { px: 11, big: 17, flatY: 0.75, rot: 1.8, bigRot: 3.2 },
+      flashVar: { fire: "--fire", acid: "--acid", electric: "--electric", ice: "--icee", energy: "--energy", physical: "--physical", harmonic: "--harmonic" },
+      warn: { ms: 300, gap: 360 },
+      enter: { ms: 420 },
+      move: { secs: 0.75, ease: "outCubic" },
+      ko: { fade: 1700, slow: 3800, gone: 450 },
+      quake: { ms: 600, small: 340 },
+      front: "fx-front"
+    }
   };
 
   const D2R = Math.PI / 180;
@@ -182,8 +217,9 @@
    * packet = 联机玩家收到的那一份（OnlineView.projectPacket）：只读 packet.fx（招式）、packet.tape（弹字：伤害 / 击破 / 治疗 / 状态字）、packet.state.units（等级、谁还在）。
    * opts.before = 出招前画面上的那一份（上一个包的 state）：两边比一比，谁被击倒了。
    * opts.bigHit(等级, 伤害) = 规则的 bigHitInfo（app.js · spawnPopup 判「大伤害」用的同一个公式；只用投影里的等级和伤害数字）
-   * 返回 { actor, target, move, script, parried, blocker, waves: [{ unitId, el }], numbers: [{ unitId, kind, text, el, wave }], ko: [id] }
+   * 返回 { actor, target, move, script, parried, blocker, waves: [{ unitId, el }], numbers: [{ unitId, kind, text, el, wave, boom }], ko: [id], booms: [id], enters: [id] }
    *   waves = 每一段主攻击打中谁（打中的那一下：刀光 / 冲击星 + 受击粒子 + 这一段的数字）
+   *   booms = 高能自爆的（#330：照旧画面先预警闪两下再炸，「高能自爆」那个数字 boom = true，等炸的那一下才弹）；enters = 登场支援的伙伴（卡片亮个相）
    */
   function cues(packet, opts) {
     opts = opts || {};
@@ -191,7 +227,7 @@
     const units = (packet && packet.state && Array.isArray(packet.state.units)) ? packet.state.units : [];
     const byId = new Map(units.map(u => [u.id, u]));
     const out = { actor: fx ? fx.actor : null, target: fx ? fx.target : null, move: fx ? fx.move : null, script: fx && fx.script || null,
-      parried: !!(fx && fx.parried), blocker: fx && fx.blocker || null, waves: [], numbers: [], ko: [] };
+      parried: !!(fx && fx.parried), blocker: fx && fx.blocker || null, waves: [], numbers: [], ko: [], booms: [], enters: [] };
     let wave = -1;
     tape.forEach(e => {
       const el = typeof e.element === "string" ? e.element : "physical";
@@ -199,7 +235,9 @@
       const u = byId.get(e.unitId);
       // 大伤害要看挨打的人的等级：包里没有这个人就不算大伤害
       const n = numberOf(e, { level: u ? u.level : undefined, bigHit: u ? opts.bigHit : null });
-      if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }));
+      if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }, e.kind === "highboom" ? { boom: true } : {}));
+      if (e.kind === "highboom" && !out.booms.includes(e.unitId)) out.booms.push(e.unitId);
+      if (e.kind === "partner" && !out.enters.includes(e.unitId)) out.enters.push(e.unitId);
     });
     if (out.parried && out.target) out.numbers.push(Object.assign(parryOf(out.blocker || out.target), { wave: Math.max(0, wave) }));
     // 击倒：出招前还站着、结算后不在了（死了 / 被移出）的，只算这一下碰到的单位
@@ -333,5 +371,49 @@
     return null;
   }
 
-  return { FX, lens, rectOf, zoneRect, adapter, cues, numberOf, parryOf, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf };
+  /* ---------- 卡片动画（#330）：3D 白卡怎么动（纯函数；DOM 那一半在 hd2d-play.js · HD2DPlay.cards）---------- */
+  /** 从 a 到 t（屏幕矩形 / 点，{ x, y }）的方向（单位向量）和距离 */
+  function dirOf(a, t) {
+    const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1;
+    return { ux: dx / d, uy: dy / d, d };
+  }
+  /**
+   * 近身冲撞（game.js · dashTo 的算法）：a = 出手的人、t = 冲向的那一点（屏幕矩形，{ x, y, w, h }），o = { heavy 冲得远一点, reach 冲多远（999 = 一直冲到 t） }。
+   * 返回两步的位移（屏幕像素）和歪几度：back 先往后一收、hit 扑到
+   */
+  function dashOf(a, t, o) {
+    o = o || {};
+    const D = FX.card.dash, v = dirOf(a, t);
+    const reach = o.reach >= 999 ? v.d : Math.max(D.min, Math.min(v.d - Math.min(a.w || 0, t.w || 0) * 0.5, o.reach || (o.heavy ? D.heavyReach : D.reach)));
+    return { back: { x: -v.ux * D.back, y: -v.uy * D.back, rot: -v.ux * D.backRot }, hit: { x: v.ux * reach, y: v.uy * reach, rot: v.ux * D.rot }, reach };
+  }
+  /** 受击击退（game.js · hit 的 from）：r = 挨打的这张卡的屏幕矩形，from = 打过来的人（{ x, y }）；顺着挨打的方向退 kx / ky 像素、歪 kr 度 */
+  function knockOf(r, from, big) {
+    const K = FX.card.knock;
+    const cx = r.left != null && r.width > 0 ? r.left + r.width / 2 : r.x, cy = r.top != null && r.height > 0 ? r.top + r.height / 2 : r.y;
+    const v = dirOf(from, { x: cx, y: cy }), k = big ? K.big : K.px;
+    return { kx: v.ux * k, ky: v.uy * k * K.flatY, kr: (cx - from.x >= 0 ? 1 : -1) * (big ? K.bigRot : K.rot) };
+  }
+  /** 换区移动这一次滑多久（秒）：要演（animate）、没跳过（演出倍率 clock > 0）、没开减少动态效果才滑，时长跟着演出倍率；不滑 = 0（直接摆过去） */
+  function moveSecs(clock, o) {
+    o = o || {};
+    const c = Number(clock);
+    return o.animate && !o.reduced && Number.isFinite(c) && c > 0 ? FX.card.move.secs * c : 0;
+  }
+  /** 滑动的缓动 */
+  const SLIDE_EASE = { linear: (t) => t, outCubic: (t) => 1 - Math.pow(1 - t, 3) };
+  /** 铭牌的锚点从 from 滑到 to（{ x, y, z, g 脚下地台的高度 }，世界坐标）：secs 秒，t0 = 开始的时刻（秒）。不滑（secs 不大于 0）返回 null */
+  function slide(from, to, secs, t0) {
+    return from && to && secs > 0 ? { from: Object.assign({}, from), to: Object.assign({}, to), secs, t0: Number(t0) || 0, ease: FX.card.move.ease } : null;
+  }
+  /** 滑动开始后到了 now（秒）锚点在哪：{ x, y, z, g, k 走了几成（缓动后）, done 到了没有 } */
+  function slideAt(s, now) {
+    if (!s) return null;
+    const p = s.secs > 0 ? clamp((now - s.t0) / s.secs, 0, 1) : 1, k = (SLIDE_EASE[s.ease] || SLIDE_EASE.linear)(p);
+    const at = (key) => { const a = Number(s.from[key]) || 0, b = Number(s.to[key]) || 0; return a + (b - a) * k; };
+    return { x: at("x"), y: at("y"), z: at("z"), g: at("g"), k, done: p >= 1 };
+  }
+
+  return { FX, lens, rectOf, zoneRect, adapter, cues, numberOf, parryOf, placeNumbers, textWidth, sizeOf, colorOf, paperOf, pushPose, posOf,
+    dirOf, dashOf, knockOf, moveSecs, slide, slideAt };
 });

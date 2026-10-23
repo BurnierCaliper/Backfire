@@ -510,7 +510,7 @@ const RULEBOOK_CHAPTERS = [
         { title: "被动升级", lines: [`武器等级 + 羁绊到 ${plus}（升级后的被动名字后面带 +，内容见角色图鉴）。`] },
         { title: "客制化图纸", lines: [
           `武器等级 + 羁绊到 ${BLUEPRINT_MIN_LEVEL} 级起才能装客制化图纸，一把武器装一张；不到 ${BLUEPRINT_MIN_LEVEL} 级的武器上装着的图纸不生效。图纸可能改 atk、架势、耐久，看各自的说明。`,
-          `单局里在同一位工匠那里升级满 ${SR.blueprintAfter} 次，可以从他的图纸里挑一张；请工匠装上要 ${SR.installCost} 奎支。`
+          `单局里在同一位工匠那里升级满 ${SR.blueprintAfter} 次，可以从他还没给过的图纸里挑一张；领完计数归零，再升级满 ${SR.blueprintAfter} 次可以领下一张。不会领到已经有的图纸，他的图纸都有了就不再计数。请工匠装上要 ${SR.installCost} 奎支。`
         ] }
       ];
     } },
@@ -658,7 +658,8 @@ const RULEBOOK_CHAPTERS = [
         ], table: { head: ["种族", "水", "食物"], rows } },
         { title: "单局里的休息点", lines: [
           `在任务路线的休息点长休可能被偷袭：第一次 ${rbPct(A.base)}，每次没被偷袭 +${rbPct(A.step)}，被偷袭后回到 ${rbPct(A.base)}；有人守夜一定不会被偷袭。被偷袭就先打一场遭遇战（我方跳过第一回合），赢了再长休。`,
-          `不想休息可以直接走，顺手打零工拿 ${ROGUE_CONFIG.restSkipKuizhi} 奎支，不花时间。`,
+          `不想休息可以直接走，顺手打零工拿 ${ROGUE_CONFIG.restSkipKuizhi} 奎支，不花时间。按小时补出来的休息点（悬赏里强制的也是）没有零活：离开无报酬，但在那里长休不消耗水和食物。`,
+          `照着任务路线走（不算短休、撤退和首领战之后），连续不长休不超过 ${ROGUE_CONFIG.hours.restGapMax} 小时：路线会在需要的地方补休息点。`,
           "任务之间回到城里休整：可以买补给、去诊所、用维修工具包。"
         ] }
       ];

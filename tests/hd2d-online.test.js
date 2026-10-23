@@ -250,14 +250,15 @@ test("联机玩家开 / 关新画面：同一个开关（#g-hd2d-toggle 挪到�
   assert.ok(P.ol.classList.contains("hd2d-on"), "联机的战斗画面加 hd2d-on（旧的单位卡看不见）");
   assert.equal(P.app.classList.contains("hd2d-on"), false, "单机的 #g-app 不动");
   assert.equal(P.btn.textContent, "新画面 开");
-  assert.deepEqual(P.writes, [[P.F.FIELD.storageKey, "on"]], "开关只记在本机");
+  assert.deepEqual(P.writes, [[P.F.FIELD.lockKey, "0"], [P.F.FIELD.storageKey, "on"]], "开关只记在本机（点开关打开时顺带解锁，也是本机的，主人 10/23）");
   // 再点：转回旧画面（镜头升到正上方 → 云雾 → 拆掉）
   P.btn._on.click.forEach(f => f({}));
   assert.equal(P.F.transition().to, "old");
   await P.drain();
   assert.ok(sc.disposed && !P.ol.classList.contains("hd2d-on"), "拆干净，旧战场回来");
   assert.equal(P.btn.textContent, "新画面 关");
-  assert.deepEqual(P.writes.map(w => w[1]), ["on", "off"]);
+  assert.deepEqual(P.writes.filter(w => w[0] === P.F.FIELD.storageKey).map(w => w[1]), ["on", "off"]);
+  assert.equal(P.writes.filter(w => w[0] === P.F.FIELD.lockKey).pop()[1], "1", "点开关关掉：记了锁（主人 10/23）");
   assert.deepEqual(P.calls, [], "开 / 关新画面、转场都不经过联机的 api（不发给别人）");
   // 离开战斗（探索、离开房间）：拆下来，开关放回单机顶栏原来的位置
   P.U.paintField3d(null);

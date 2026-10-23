@@ -709,12 +709,13 @@ test("开炮：灼烧只有 50%（掷不中不灼烧）；距离 3 以外打不�
   assert.match(f.c.vehicleSkillWhy(a, "veh_fire", Object.assign({}, k, { zone: 1 })) || "", /^$/);
 });
 
-test("焚烧：同区所有敌对单位 0.5×atk 火、灼烧 1（不打同阵营）", () => {
+test("焚烧：同区所有敌对单位 0.5×atk 火、掷中 35% 时灼烧 1（不打同阵营）", () => {
   const f = riotField(2, 2, { lv: 5 });
   const [a, b] = riots(f);
   const p = car(f, 2, 5); f.c.vehicleBoard(a, p); f.c.vehicleBoard(b, p);
   const k = f.P("kolt"), hl = f.P("helu"); k.zone = 2; hl.zone = 2; fleshOnly(k); fleshOnly(hl);
   const kh = f.c.totalHp(k), hh = f.c.totalHp(hl), ah = f.c.totalHp(a);
+  rnd(f, 0.3);   // 0.3 < 35%：每人都掷中
   use(f, b, "veh_burn");
   // 0.5 × 11 = 5.5 → 火打肉体 ×1.5 ≈ 8
   [[k, kh], [hl, hh]].forEach(([u, h0]) => {
