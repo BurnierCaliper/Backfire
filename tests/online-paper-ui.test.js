@@ -116,7 +116,7 @@ async function paperPage(t, opt) {
     })();
   }, [SHP, SHP_MAX, opt.on !== false]);
   for (const f of ["icons.js", "hud-icons.js", "unit-card.js", "unit-tip.js", "daylight.js", "party-cards.js", "hotseat-ui.js", "online-battle.js", "pause-menu.js", "matchup-ui.js",
-    "lore-ui.js", "check-request-ui.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js", "online-paper.js", "online-ui.js"]) await page.addScriptTag({ path: file(f) });
+    "lore-ui.js", "check-request-ui.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js", "paper-ui.js", "online-paper.js", "online-ui.js"]) await page.addScriptTag({ path: file(f) });
   // 热座栏：和 online-game.js · mountOrder 一样，玩家看的是收到的包里的 view
   await page.evaluate(() => {
     window.hotseat = HotseatUI.mount({ getView: () => Object.assign({}, fixture.view.packet.view, { enabled: !!fixture.view.active && fixture.view.screen === "battle", configured: true, network: true, canConfigure: false, canDisable: false }),
