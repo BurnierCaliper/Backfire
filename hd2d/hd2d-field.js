@@ -31,6 +31,7 @@
  *   HD2DField.marksOf(marks, layout, actorId)               game.js 的标记 → 场景要的（纯函数）
  *   HD2DField.wire(input)                                   场景的点击 / 悬停 → GAME.fieldInput（纯函数）
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
+ *   HD2DField.waveTagsOf(v)                                 画面那一份里的驻波墙 → 间隔上贴的字牌（纯函数，#345：3D 场景包还没有驻波墙的模型）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  *   HD2DField.packetView(pv, { OB, OV })                    联机玩家收到的那一份 → 画面用的（纯函数，#289）
  * 页面（game.js 调）：on() / view(snaps, { animate }) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
@@ -632,6 +633,7 @@
   }
   /** 拆掉 3D 战场，旧画面露出来；refresh = 让旧画面再画一遍（单机：game.js 把天气叠加层放回去） */
   function teardown(refresh) {
+    stopWaveTags();
     if (S.sc) { try { S.sc.dispose(); } catch (e) {} }
     if (S.wfx) { try { S.wfx.dispose(); } catch (e) {} }
     if (S.stage && S.stage.remove) S.stage.remove();
@@ -676,6 +678,7 @@
     syncWeather();
     koMarks();
     arrivals(!!animate);
+    syncWaveTags();   // 驻波墙的字牌（#345）
   }
   /** 这一刻的演出倍率（1 正常、0.5 两倍速、0 跳过）：单机是 game.js 的 G.fxClock，联机玩家是他那边给的钟；都没有按 1 */
   function clockNow() {
@@ -1040,6 +1043,67 @@
   /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
   function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
 
+  /* ---------- 驻波墙（Helumica「频域造物」，#345）----------
+   * 打好的 3D 场景包里还没有驻波墙的模型（hd2d-world.js · buildGap 按畅通画）：在间隔那一块地的正上方贴一块字牌「驻波墙 火·降幅」
+   * （降幅冷色、增幅暖色、描边是属性色，和旧画面的竖条一样，hd2d.css · .hd2d-wave-tag），每一帧按这一刻的镜头投影（gapRect）摆位。
+   * 悬停说明走和铭牌一样的入口（场景回调 onUnitHover("gap:…")：单机 game.js · unitTipHtml，联机 online-ui.js · unitTip）。
+   * 只读画面那一份（投影过的 gaps[key].wave：属性、降幅 / 增幅），不碰规则的 state */
+  const WAVE_TAG = { ele: { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" } };
+  /** 画面那一份里的驻波墙 → 要贴的字牌（纯函数）：[{ key, el, mode, label }] */
+  function waveTagsOf(v) {
+    const gaps = (v && v.gaps) || {};
+    return Object.keys(gaps).sort().filter(k => gaps[k] && gaps[k].type === "wave" && gaps[k].wave).map(k => {
+      const w = gaps[k].wave, amp = w.mode === "amplify", known = own(WAVE_TAG.ele, w.el);
+      return { key: k, el: known ? w.el : "physical", mode: amp ? "amplify" : "dampen", label: `${known ? WAVE_TAG.ele[w.el] : "?"}·${amp ? "增幅" : "降幅"}` };
+    });
+  }
+  let waveRaf = 0;
+  function stopWaveTags() { if (waveRaf && root.cancelAnimationFrame) root.cancelAnimationFrame(waveRaf); waveRaf = 0; }
+  /** 排完一次（paint）：字牌按画面那一份增删、改字；有驻波墙就每一帧跟着镜头摆位，没有就停 */
+  function syncWaveTags() {
+    const stage = S.stage, d = env.doc;
+    if (!stage || !d || typeof stage.querySelector !== "function") return;
+    const tags = waveTagsOf(S.view);
+    let box = stage.querySelector(".hd2d-wave-tags");
+    if (!tags.length) { if (box) box.remove(); stopWaveTags(); return; }
+    if (!box) { box = d.createElement("div"); box.className = "hd2d-wave-tags"; stage.appendChild(box); }
+    const want = new Set(tags.map(t => t.key));
+    box.querySelectorAll(".hd2d-wave-tag").forEach(n => { if (!want.has(n.dataset.key)) n.remove(); });
+    tags.forEach(t => {
+      let n = [...box.querySelectorAll(".hd2d-wave-tag")].find(x => x.dataset.key === t.key);
+      if (!n) {
+        n = d.createElement("div");
+        n.dataset.key = t.key;
+        const hover = (on) => { const inp = host.input ? host.input() : null; if (inp && inp.onUnitHover) inp.onUnitHover("gap:" + t.key, on, n); };
+        n.addEventListener("mouseenter", () => hover(true));
+        n.addEventListener("mouseleave", () => hover(false));
+        box.appendChild(n);
+      }
+      n.className = `hd2d-wave-tag wave-${t.mode} el-${t.el}`;
+      n.innerHTML = `驻波墙<b>${t.label}</b>`;   // 字都来自上面两张固定的表
+    });
+    placeWaveTags();
+    if (!waveRaf && typeof root.requestAnimationFrame === "function") {
+      const tick = () => {
+        waveRaf = 0;
+        if (!S.stage || !S.stage.querySelector(".hd2d-wave-tag")) return;
+        placeWaveTags();
+        waveRaf = root.requestAnimationFrame(tick);
+      };
+      waveRaf = root.requestAnimationFrame(tick);
+    }
+  }
+  /** 字牌摆到间隔那一块地在屏幕上的中心（按这一刻的镜头）；这条间隔不在布局里（换了棋盘）就藏起来 */
+  function placeWaveTags() {
+    if (!S.sc || !S.stage || !S.layout || !root.HD2DFx) return;
+    const lens = root.HD2DFx.lens(S.sc.lensNow());
+    S.stage.querySelectorAll(".hd2d-wave-tag").forEach(n => {
+      const g = S.layout.gaps.find(x => x.key === n.dataset.key), r = g ? gapRect(lens, g, null) : null;
+      n.hidden = !r;
+      if (r) { n.style.left = Math.round(r.x) + "px"; n.style.top = Math.round(r.y) + "px"; }
+    });
+  }
+
   /* ---------- 攻击演出：纸片风数字、纸片感、推镜头（#283，game.js · playTape 一下一下调；都交给 hd2d-play.js）---------- */
   /** 数字摆位要的画面：战场那一格在视口里的位置（数字和铭牌的矩形一样是视口坐标）、大小，上下被首领横幅 / 镜头按钮盖住的像素（场景的 insets） */
   function fxView() {
@@ -1076,7 +1140,7 @@
   }
 
   const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
-    cards, ko, releaseKOs, warn, quake, still };
+    cards, ko, releaseKOs, warn, quake, still, waveTagsOf };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

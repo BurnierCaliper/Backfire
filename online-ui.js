@@ -1575,7 +1575,10 @@
           const T = global.UnitTip;
           if (!T) return;
           if (!on || (global.matchMedia && global.matchMedia("(hover: none)").matches)) { T.hide(); return; }
-          const key = String(id), h = el ? unitTip({ dataset: key.indexOf("prop:") === 0 ? { propId: key.slice(5) } : { unitId: key } }) : "";
+          // 新画面上间隔的字牌（驻波墙，hd2d-field.js · syncWaveTags）悬停也走同一份说明
+          const key = String(id), node = key.indexOf("gap:") === 0 ? { classList: { contains: c => c === "g-gap" }, dataset: { key: key.slice(4) } }
+            : { dataset: key.indexOf("prop:") === 0 ? { propId: key.slice(5) } : { unitId: key } };
+          const h = el ? unitTip(node) : "";
           if (h) T.show(el, h); else T.hide();
         },
         zone: z => { if (animating) { skip3d(); return; } if (z != null) battleCb.onZone(z); },

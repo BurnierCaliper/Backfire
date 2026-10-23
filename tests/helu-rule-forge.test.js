@@ -361,6 +361,56 @@ test("驻波墙：联机下发间隔时带上属性、降幅 / 增幅和暂时�
   assert.doesNotMatch(JSON.stringify(out.gaps), /shp|until|"by"/);
 });
 
+test("联机 / 热座的权威校验：两个技能的分步照规则层的 skillFlowSteps 验，选错了在执行前拦下", () => {
+  const fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+  const { Hotseat } = require("../hotseat");
+  const c = H.load();
+  new vm.Script(fs.readFileSync(path.join(H.ROOT, "hotseat-validation.js"), "utf8")).runInContext(c);
+  const s = c.S.state; c.loadLiveParty(["helu", "kolt"]);
+  const a = s.units.find(u => u.kit === "helu"), b = s.units.find(u => u.kit === "kolt");
+  const enemy = c.enemyPresets().find(x => x.id === "thug_knife").build(1, 2);
+  enemy.zone = 2; s.units.push(enemy);
+  c.startCombat(); a.level = 9; a.zone = 1; a.ap = 4; a.bonus = 4; b.ap = 4; b.bonus = 4;
+  const session = Hotseat.create({ operators: ["a", "b"], gmId: "a", getUnits: () => s.units,
+    canStand: u => !c.standUpBlocked(u), assignments: { [a.id]: "a", [b.id]: "b" } });
+  session.beginRound(1); session.pick("a", a.id, 0); session.pick("b", b.id, 1); session.forceStart("a");
+  const validate = (cmd) => c.HotseatValidation.validateBattle(cmd, { session, sender: "a" });
+  const skill = (id, target, picks) => ({ type: "skill", actor: a.id, skill: id, target: target || null, picks: picks || {} });
+  // 频域造物：没扫描不能用；扫描后三步都要选、都要合法
+  assert.throws(() => validate(skill("helu_forge", null, { gap: "1-2", element: "fire", mode: "dampen" })), /扫描/);
+  a.resources = a.resources || {}; a.resources.scanned = true;
+  assert.equal(validate(skill("helu_forge", null, { gap: "1-2", element: "fire", mode: "dampen" })), true);
+  assert.throws(() => validate(skill("helu_forge", null, { gap: "1-2", element: "fire" })), /分步/);
+  assert.throws(() => validate(skill("helu_forge", null, { gap: "1-2", element: "plasma", mode: "dampen" })), /分步/);
+  assert.throws(() => validate(skill("helu_forge", null, { gap: "1-9", element: "fire", mode: "dampen" })), /分步/);
+  // 规则干涉：取代了别的场地时要选那一区的单位（敌人也行），技能目标要和分步一致
+  s.fields[2] = c.emptyField(); c.setZoneField(2, "fire");
+  assert.equal(validate(skill("helu_rule", enemy.id, { dest: 2, target: enemy.id })), true, "敌人也能选");
+  assert.throws(() => validate(skill("helu_rule", null, { dest: 2 })), /分步/, "要给附赠时必须选单位");
+  assert.throws(() => validate(skill("helu_rule", b.id, { dest: 2, target: b.id })), /分步/, "不在那一区的不能选");
+  s.fields[1] = c.emptyField();
+  assert.equal(validate(skill("helu_rule", null, { dest: 1 })), true, "没有场地可取代：只选区");
+});
+
+test("新画面（HD-2D）：间隔上贴驻波墙的字牌（属性、降幅 / 增幅），悬停走同一份说明", () => {
+  const F = require("../hd2d/hd2d-field.js");
+  assert.deepEqual(plain(F.waveTagsOf({ gaps: {
+    "2-3": { type: "wave", wave: { el: "electric", mode: "amplify" } },
+    "1-2": { type: "wave", wave: { el: "fire", mode: "dampen" } },
+    "3-4": { type: "wall", hp: 3 }
+  } })), [
+    { key: "1-2", el: "fire", mode: "dampen", label: "火·降幅" },
+    { key: "2-3", el: "electric", mode: "amplify", label: "电·增幅" }
+  ]);
+  assert.deepEqual(plain(F.waveTagsOf({ gaps: { "1-2": { type: "open" } } })), []);
+  const fs = require("node:fs"), path = require("node:path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "hd2d", "hd2d-field.js"), "utf8");
+  assert.match(src, /arrivals\(!!animate\);\s*syncWaveTags\(\);/, "每次排完战场都同步字牌");
+  assert.match(src, /onUnitHover\("gap:" \+ t\.key, on, n\)/, "悬停字牌 = 悬停那条间隔");
+  const ui = fs.readFileSync(path.join(__dirname, "..", "online-ui.js"), "utf8");
+  assert.match(ui, /key\.indexOf\("gap:"\) === 0 \? \{ classList/, "联机玩家的新画面悬停字牌也有说明");
+});
+
 test("驻波墙：战场上看得出来（属性、增幅 / 降幅），悬停有说明；战斗模板只记原来的间隔", () => {
   const { c, st, helu } = field();
   st.gaps["1-2"] = { type: "bridge", hp: 14, maxHp: 20, open: false, lastFrom: null };
