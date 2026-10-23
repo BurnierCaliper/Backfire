@@ -3921,7 +3921,7 @@ function waveWallText(w) {
   const sts = (w.mode === "amplify" ? WAVE_WALL.amplifyStatus : WAVE_WALL.dampenStatus).map(k => WAVE_STATUS_CN[k] || k).join("和");
   const hit = w.mode === "amplify"
     ? `穿过这道墙的${el}属性伤害 +${Math.round(WAVE_WALL.amplifyPct * 100)}%（和其他百分比加算），击破照常`
-    : `穿过这道墙的${el}属性伤害 ×${WAVE_WALL.dampenMult}，并且不造成任何击破`;
+    : `穿过这道墙的${el}属性伤害 −${Math.round(WAVE_WALL.dampenPct * 100)}%（和其他百分比加算），并且不造成任何击破`;
   const base = w.saved && w.saved.type && w.saved.type !== "open" ? `，原来的${gapLabel(w.saved.type)}恢复` : "";
   return `${hit}；其他属性照常。不挡移动，任何单位穿过时${w.mode === "amplify" ? "获得" : "受到"}${sts}，带聚焦的单位推进一步序列。这一整轮结束时消失${base}。`;
 }
@@ -4404,18 +4404,18 @@ function dealToStructure(attacker, target, opt) {
   if (typeof featBreakBonus === "function") {
     try { br = featBreakBonus(attacker, target, opt, flags, br, zoneDist(attacker.zone, target.zone, state.zoneMode), false); } catch (e) {}
   }
-  // 驻波墙：打配置物 / 危墙也照样过墙（这一属性：增幅每道 +25%；降幅每道 ×0.5，并且没有击破）
+  // 驻波墙：打配置物 / 危墙也照样过墙（这一属性：增幅每道 +25%、降幅每道 −50%，加在一起；降幅没有击破）
   const waves = attacker && attacker.zone != null && target.zone != null && !flags.diffract && !flags.locked && !flags.lob
     ? waveWallsOnLine(attacker.zone, target.zone).filter(w => w.el === (opt.element || "physical")) : [];
   const waveAmp = waves.filter(w => w.mode === "amplify").length, waveDamp = waves.length - waveAmp;
-  if (waveAmp) dmg *= 1 + WAVE_WALL.amplifyPct * waveAmp;
-  if (waveDamp) { dmg *= Math.pow(WAVE_WALL.dampenMult, waveDamp); br = 0; }
+  if (waves.length) dmg *= Math.max(0, 1 + WAVE_WALL.amplifyPct * waveAmp - WAVE_WALL.dampenPct * waveDamp);
+  if (waveDamp) br = 0;
   target._hit = true;
   const lines = hitStructureCore(attacker, target.structToken, { element: opt.element || "physical", dmg: Math.max(1, Math.floor(dmg)), brk: Math.max(0, br) });
   if (waves.length) {
     const parts = [];
     if (waveAmp) parts.push(`伤害 +${Math.round(WAVE_WALL.amplifyPct * waveAmp * 100)}%`);
-    if (waveDamp) parts.push(`伤害 ×${Math.pow(WAVE_WALL.dampenMult, waveDamp)}，不造成击破`);
+    if (waveDamp) parts.push(`伤害 −${Math.round(WAVE_WALL.dampenPct * waveDamp * 100)}%，不造成击破`);
     lines.unshift(`穿过${waves.map(w => waveWallName(w)).join("、")}：${parts.join("；")}。`);
   }
   return { structure: true, lines, extra: [], res: { ok: true, structure: true, total: Math.max(0, Math.floor(dmg)), breakDealt: 0, perHit: [], log: [], flags } };
@@ -9753,7 +9753,7 @@ function skillFlowSteps(id, actor, picks) {
     const el = ELE[picks.element] || picks.element;
     steps.push({ key: "mode", type: "choice", optional: false, label: `${el}属性：降幅还是增幅`,
       options: [
-        { value: "dampen", label: `降幅：穿过的${el}伤害 ×${WAVE_WALL.dampenMult}、不造成击破；穿过的单位受到不稳和虚弱` },
+        { value: "dampen", label: `降幅：穿过的${el}伤害 −${Math.round(WAVE_WALL.dampenPct * 100)}%、不造成击破；穿过的单位受到不稳和虚弱` },
         { value: "amplify", label: `增幅：穿过的${el}伤害 +${Math.round(WAVE_WALL.amplifyPct * 100)}%、击破照常；穿过的单位获得坚挺和振奋` }
       ] });
     return steps;

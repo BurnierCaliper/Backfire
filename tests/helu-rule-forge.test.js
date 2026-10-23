@@ -177,7 +177,8 @@ test("驻波墙·降幅：穿过的选定属性伤害减半、不造成击破；
   assert.ok(base.dmg > 0 && base.br > 0);
   wall(c, "1-2", "fire", "dampen", helu.id);
   const w = hit(c, helu, foe, "fire");
-  assert.equal(w.dmg, Math.floor(base.dmg * 0.5));
+  const pct0 = base.dmg / 40 - 1;   // 原来的百分比合计；降幅 −50% 和它加在一起（作者 10/23）
+  assert.equal(w.dmg, Math.floor(40 * Math.max(0, 1 + pct0 - 0.5) + 1e-9));
   assert.equal(w.br, 0, "降幅：不造成任何击破");
   const other = hit(c, helu, foe, "ice");
   assert.equal(other.dmg, baseIce.dmg, "别的属性不受影响");
@@ -206,14 +207,15 @@ test("驻波墙·增幅：穿过的选定属性伤害 +25%（和其他百分比�
   assert.equal(k.br, kBase.br);
 });
 
-test("驻波墙：一次攻击穿过两道墙，效果叠加两次（降幅 ×0.25、增幅 +50%）", () => {
+test("驻波墙：一次攻击穿过两道墙，效果叠加两次（降幅 −100% 归零、增幅 +50%；都和其他百分比加算，作者 10/23）", () => {
   const { c, helu, foe } = field(3);
   foe.zone = 3;
   const base = hit(c, helu, foe, "acid");
   wall(c, "1-2", "acid", "dampen", helu.id);
   wall(c, "2-3", "acid", "dampen", helu.id);
   const two = hit(c, helu, foe, "acid");
-  assert.equal(two.dmg, Math.floor(base.dmg * 0.25), "×0.5 再 ×0.5，不是 −100%");
+  const pct2 = base.dmg / 40 - 1;
+  assert.equal(two.dmg, Math.floor(40 * Math.max(0, 1 + pct2 - 1) + 1e-9), "−50% 两次 = −100%（加算），伤害归零");
   assert.equal(two.br, 0);
   wall(c, "1-2", "acid", "amplify", helu.id);
   wall(c, "2-3", "acid", "amplify", helu.id);
@@ -417,12 +419,12 @@ test("驻波墙：战场上看得出来（属性、增幅 / 降幅），悬停�
   wall(c, "1-2", "ice", "dampen", helu.id);
   const g = st.gaps["1-2"];
   assert.equal(c.waveWallName(g.wave), "驻波墙·冰·降幅");
-  assert.match(c.waveWallText(g.wave), /冰属性伤害 ×0\.5，并且不造成任何击破/);
+  assert.match(c.waveWallText(g.wave), /冰属性伤害 −50%（和其他百分比加算），并且不造成任何击破/);
   assert.match(c.waveWallText(g.wave), /不稳和虚弱/);
   assert.match(c.waveWallText(g.wave), /不稳桥梁恢复/);
   assert.equal(c.gapLabel("wave"), "驻波墙");
   const codex = c.S.CODEX_PROPS.find(x => x.id === "wave");
-  assert.ok(codex && codex.lines.some(l => /×0\.5/.test(l)) && codex.lines.some(l => /\+25%/.test(l)));
+  assert.ok(codex && codex.lines.some(l => /−50%/.test(l)) && codex.lines.some(l => /\+25%/.test(l)));
   const tpl = c.battleTemplateCapture("t");
   assert.equal(tpl.gaps["1-2"].type, "bridge", "战斗模板记的是被暂时取代的桥");
   // 画面：本机战场和联机玩家战场都按类型画（game.js · paintGaps、online-battle.js）

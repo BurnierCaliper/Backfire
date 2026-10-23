@@ -598,13 +598,13 @@ const INTERFERE_CAP = 1;
  *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
 const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
 /** 驻波墙（Helumica「频域造物」，作者 10/23 定；放墙、穿墙、消失在 app.js · placeWaveWall / wavePassUnit / expireWaveWalls）：
- *  dampenMult   降幅墙：穿过它的选定属性伤害 ×0.5，并且不造成任何击破；两道墙 ×0.5 再 ×0.5（= 25%），不会变成 −100%
+ *  dampenPct    降幅墙：穿过它的选定属性伤害 −50%，和其他百分比加算（作者 10/23：两道墙 −100% 直接归零，触发极少，保留这个免伤连招），并且不造成任何击破
  *  amplifyPct   增幅墙：穿过它的选定属性伤害 +25%，和其他百分比加算（两道墙 +50%），击破照常
  *  rounds       持续几个整轮：1 = 放下的这一整轮结束时消失（我方回合 + 敌人回合都过完）
  *  dampenStatus / amplifyStatus  单位穿过驻波墙时挂上的状态（降幅：不稳、虚弱；增幅：坚挺、振奋）
  *  elements     能选的属性 */
 const WAVE_WALL = {
-  dampenMult: 0.5, amplifyPct: 0.25, rounds: 1,
+  dampenPct: 0.5, amplifyPct: 0.25, rounds: 1,
   dampenStatus: ["unstable", "weak"], amplifyStatus: ["sturdy", "inspire"],
   elements: ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]
 };
@@ -990,6 +990,12 @@ function resolveAttack(ctx) {
       pct += wp;
       hAdd(`驻波墙（增幅${ELE[element] || element}${waveAmp > 1 ? ` ×${waveAmp} 道` : ""}）：${pctTxt(wp)}`);
     }
+    if (waveDamp) {
+      // 降幅也是百分比，和其他的加在一起（两道墙 −100%，伤害归零）
+      const wd = -WAVE_WALL.dampenPct * waveDamp;
+      pct += wd;
+      hAdd(`驻波墙（降幅${ELE[element] || element}${waveDamp > 1 ? ` ×${waveDamp} 道` : ""}）：${pctTxt(wd)}`);
+    }
 
     // 以百分比写的增伤 / 减伤（攻击方、受击方都算）一律和上面的加在一起，不连乘：
     // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
@@ -1035,11 +1041,6 @@ function resolveAttack(ctx) {
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
-    if (waveDamp) {
-      const wm = Math.pow(WAVE_WALL.dampenMult, waveDamp);
-      mul *= wm;
-      hAdd(`驻波墙（降幅${ELE[element] || element}${waveDamp > 1 ? ` ×${waveDamp} 道` : ""}）：伤害 ×${round2(wm)}。`);
-    }
     packet *= mul;
 
     packet = Math.max(0, packet);

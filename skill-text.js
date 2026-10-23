@@ -174,8 +174,8 @@
   };
 
   // 频域造物（驻波墙）的数值跟着 engine.js · WAVE_WALL 写
-  const WW = typeof WAVE_WALL !== "undefined" ? WAVE_WALL : { dampenMult: 0.5, amplifyPct: 0.25 };
-  const WW_DAMP = WW.dampenMult === 0.5 ? "减半" : `×${WW.dampenMult}`;
+  const WW = typeof WAVE_WALL !== "undefined" ? WAVE_WALL : { dampenPct: 0.5, amplifyPct: 0.25 };
+  const WW_DAMP = WW.dampenPct === 0.5 ? "减半" : `−${Math.round(WW.dampenPct * 100)}%`;
   const WW_AMP = Math.round(WW.amplifyPct * 100);
 
   const SKILL = {

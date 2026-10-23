@@ -59,12 +59,12 @@ const CODEX_PROPS = [
   {"id": "scrapwall", "name": "废铁墙", "place": "区域", "source": "亡命之王「回防命令」", "lines": ["亡命之王下令后，所有人回到他所在的区筑起废铁墙，挡住范围攻击。", "耐久由命令掷骰决定。"]},
   // 驻波墙：数值跟着 engine.js · WAVE_WALL 写（悬停一道具体的墙时另写它过滤的属性、降幅还是增幅，app.js · waveWallText）
   (() => {
-    const W = typeof WAVE_WALL !== "undefined" ? WAVE_WALL : { dampenMult: 0.5, amplifyPct: 0.25 };
+    const W = typeof WAVE_WALL !== "undefined" ? WAVE_WALL : { dampenPct: 0.5, amplifyPct: 0.25 };
     const amp = Math.round(W.amplifyPct * 100);
     return {"id": "wave", "name": "驻波墙", "place": "间隔", "source": "Helumica「频域造物」", "lines": [
       "扫描过当前战场后，在任意间隙创造（花 1 行动点，能放好几道）。驻波墙不挡移动：间隙里原来的危墙、机关门、不稳桥梁、空隙被暂时取代，取代期间都可以直接走过去。",
       "创造时选一种属性，再选降幅或增幅。攻击者和目标之间的连线经过这道间隙就算穿墙（判定和危墙挡远程攻击一样），范围攻击按每个目标各自算；一次攻击穿过两道墙，效果叠加两次。其他属性照常穿过。",
-      `降幅：这一属性的伤害 ×${W.dampenMult}（两道墙 ×${W.dampenMult * W.dampenMult}），也不造成任何击破；任何单位穿过时受到不稳和虚弱。`,
+      `降幅：这一属性的伤害 −${Math.round(W.dampenPct * 100)}%（和其他百分比加算，两道墙 −${Math.round(W.dampenPct * 200)}%），也不造成任何击破；任何单位穿过时受到不稳和虚弱。`,
       `增幅：这一属性的伤害 +${amp}%，和其他百分比加算（两道墙 +${amp * 2}%），击破照常；任何单位穿过时获得坚挺和振奋。`,
       "敌我都算，被推、被击退过去也算；受到聚焦的单位穿过时，立刻推进一步序列。",
       "这一整轮结束时消失（我方回合和敌人回合都过完），原来的配置物原样恢复（危墙的耐久、门的开关、桥、空隙）。"
