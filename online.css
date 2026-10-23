@@ -113,6 +113,10 @@ body.ol-has-side .ol-stage { right: 330px; }
 body.ol-has-side .ol-dock { right: 344px; }
 /* 主持人：战斗中选顺序的面板也不盖住右边的战斗记录 / 小队栏（窄屏时记录栏本来就是抽屉，不处理） */
 @media (min-width: 821px) { body.ol-host-online.ol-in-battle .hs-overlay { right: 320px; } }
+/* 主持人：战斗中选行动顺序、协助询问的卡片从战斗顶栏（game.css · .g-top，48px；窄屏 46px）下面开始，不盖住顶栏——
+ * 「探索环节」「撤退」随时点得到（#322：以前每回合选顺序时整个顶栏被盖住，点不到） */
+body.ol-host-online.ol-in-battle .hs-overlay:not(.hs-ask-mini) { top: calc(var(--hs-top-height, 0px) + 48px); }
+@media (max-width: 820px) { body.ol-host-online.ol-in-battle .hs-overlay:not(.hs-ask-mini) { top: calc(var(--hs-top-height, 0px) + 46px); } }
 /* 选行动顺序的面板不盖住右侧栏：选顺序时也能看记录、在小队里商量 */
 body.ol-has-side .hs-overlay { right: 330px; }
 .ol-side-tabs, .ol-host-tabs { display: flex; gap: 0; flex: none; border-bottom: 2px solid #4d4337; }
