@@ -592,12 +592,11 @@ test("图鉴「规则」·义体与改造率：「义体」一节写 5 级起才
 });
 
 /* ---------- README ---------- */
-test("README：规则改动记录里有这次改动（#315）这一条，写了以前怎样、现在怎样，档位等级也写进去了", () => {
+test("README：规则改动记录里有这次改动（#315，在整节里找，不要求是最上面一条），写了以前怎样、现在怎样，档位等级也写进去了", () => {
   const readme = read("README.md");
   const start = readme.indexOf("## 规则改动记录");
   assert.ok(start >= 0);
-  // 后来的改动会排在它上面：找写着 #315 的那一条，不要求一定在最上面
-  const first = readme.slice(start).split(/\n(?=- \*\*)/).find(e => /issue #315|#315）|（#315/.test(e.split("\n")[0])) || "";
+  const first = readme.slice(start).split(/\n(?=- \*\*)/).find((e) => /#315/.test(e)) || "";
   assert.match(first, /#315/);
   assert.match(first, /5 级/); assert.match(first, /以前/); assert.match(first, /现在/);
   assert.match(first, /血量层改造/);

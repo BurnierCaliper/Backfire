@@ -227,7 +227,7 @@ test("评分：分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35；固
   c.resetBattleRecords();
   const par = c.scorePar();
   assert.ok(par > 0);
-  const want = (act, fixed, k) => Math.ceil(((fixed + 150 * (act - 1)) * 0.65 + par * k * 0.35) / 10 - 1e-9) * 10;
+  const want = (act, fixed, k) => Math.ceil(((fixed + 150 * (act - 1)) * 0.65 + par * k * 0.35) * (fixed >= 1000 ? 1.15 : 1) / 10 - 1e-9) * 10;   // B 及以上 ×1.15（克制大师）
   const fixed = { C: [500, 0.7], B: [1000, 2.0], A: [1250, 2.6], S: [1500, 3.2], SS: [1750, 3.8], SSS: [2000, 4.4] };
   for (const act of [1, 4]) {
     st.scoreAct = act;

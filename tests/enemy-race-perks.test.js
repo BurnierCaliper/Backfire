@@ -247,7 +247,7 @@ test("环境适应（鼠类人·鼠）：每次场地伤害、冻土击破 50% �
   assert.equal(ice("鼠类人·鼠", 0.6), ih);
 });
 
-test("千里马（牛类人·马）：第一回合 +1 附赠，之后没有；不稳照样清掉；其他种族没有", () => {
+test("千里马（牛类人·马）：第一回合 +1 附赠，之后没有；不稳只扣 1（作者裁定，不再清零）；其他种族没有", () => {
   const { c, S, foe } = setup("captain_ox", "牛类人·马");
   S.combatPhase = "enemy";
   c.refreshEnemyEconomy(foe, []);
@@ -259,11 +259,11 @@ test("千里马（牛类人·马）：第一回合 +1 附赠，之后没有；�
   assert.equal(m.foe.bonus, 1, "杂兵本来没有附赠，第一回合有 1");
   m.c.refreshEnemyEconomy(m.foe, []);
   assert.equal(m.foe.bonus, 0);
-  // 不稳：第一回合失去全部附赠
+  // 不稳：所有加成算完再 −1，精英 1 + 千里马 1 − 1 = 1
   const u = setup("captain_ox", "牛类人·马");
   u.foe.statuses.unstable = true;
   u.c.refreshEnemyEconomy(u.foe, []);
-  assert.equal(u.foe.bonus, 0);
+  assert.equal(u.foe.bonus, 1);
   const n = setup("captain_ox", "牛类人·牛");
   n.c.refreshEnemyEconomy(n.foe, []);
   assert.equal(n.foe.bonus, 1);

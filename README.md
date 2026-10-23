@@ -368,6 +368,21 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
+  - **以前**：评价只看分数；分数线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000（和本场基准分混合），没有奖励克制或借天气的打法。
+  - **现在**：统计我方主动发起的攻击（一次行动打几下、打几个人都算一次；协助攻击、借机 / 反击、持续伤害、连带伤害、环境不算），其中有克制或吃到天气增益（任一即可）的占一半及以上、且至少 1 次攻击时，胜利结算在速杀 / 无伤 / 遭遇战之后整场分数再 ×1.5，结算画面写「克制大师」。不管有没有达成，B / A / S / SS / SSS 的分数线都 ×1.15（向上取整到 10），C 线不变。
+- **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定；app.js · `applyBonusPenalties`（新）/ `refreshEconomy` / `refreshEnemyEconomy` / `performAssistBlock` 日志；vehicle.js · `vehicleBonusFloor`（新）/ `vehicleEconomy`；codex.js · `CODEX_EFFECTS` 不稳；rulebook.js「行动点与附赠动作」「协助格挡」两章；tests/bonus-penalty.test.js、tests/enemy-race-perks.test.js）
+  - **以前**：不稳、空手格挡成功的下一回合直接把附赠动作清零；玩家这边清零后才加沙暴顺风 +1（所以照样有 1 个），敌人那边最后才清零，两边顺序不一样。
+  - **现在**：所有附赠加成（沙暴顺风、警戒、千里马、单局图纸、绯秋 · 剑术+ 留到这回合的附赠、敌人载具驾驶员最少 1 个）先算完，再按惩罚各 −1：不稳 −1、空手格挡 −1，两个都有 −2，最少 0。我方和敌人同一个顺序（`app.js · applyBonusPenalties`）。作者裁定剑术+ 留下的和驾驶员托底也算加成：以前剑术+ 是扣完再加（不稳 + 空手 + 留 1 个，有 1 个；现在 1 + 1 − 2 = 0），驾驶员是扣完再托到 1（不稳照样 1 个；现在托底 1 再扣 → 0）。易怒蛮牛发作的那回合，载具驾驶员和别的敌人一样没有附赠（作者裁定：特性写的是失去附赠，不托底到 1；以前最后托底会留 1 个）。日志写实际扣掉的数：本来就是 0、没东西可扣时不写「−1」，写「本来就没有附赠动作，没有可扣的」。易怒蛮牛本身（发作后那回合没有附赠）的规则没变，只是驾驶员不再托底到 1。
+  - **文字**：效果图鉴「不稳」、规则页（rulebook.js「行动点与附赠动作」「协助格挡 · 挡住以后」）、空手格挡成功的日志、敌人回合的提示都改成「−1」。
+  - **测试**：tests/bonus-penalty.test.js——各自单独、两个都有、配沙暴顺风、最少 0、敌人一侧（用精英机甲触灵（机枪），基础 1 附赠，测得出顺序）、剑术+ 留下的先加再扣、驾驶员先托底再扣、驾驶员发作易怒蛮牛那回合是 0、日志的数和实际扣掉的一样、新文字的正面断言；tests/enemy-race-perks.test.js 千里马那条的期望从 0 改成 1。
+
+- **诊所能换的肉体不再因浮点误差少给 1 点**（PR #275 审查发现；growth.js · `cyberConvertLimit`；app.js · `performAssistBlock` 日志；codex.js 相位条目；party.js · `RACE_CHECK_PERKS`；tests/clinic-float.test.js、tests/rulebook.test.js）
+  - **以前**：(改造率上限 − 义体占用) × 原生命上限恰好是整数时，浮点乘积落在 x.9999…，向下取整少给 1 点（例：体质 3、智力 5、5 级、装打击义体.vol1，应该能换 2 点，诊所给 1 点）。没装义体也会少给：改造率 70% × 生命上限 90 / 170 给 62 / 118，应该是 63 / 119（体质 8、智力 7、10 / 20 级）。
+  - **现在**：`growth.js · cyberConvertLimit` 取整前加 1e-9，恰好整数时给足。规则不变，只修计算。
+  - **顺带改文字**：空手格挡成功的日志不再写「架势照扣（最少留 1）」，改成「架势照常扣（可能被打进失衡）」，和实际结算一致；效果图鉴「相位·波谷」写明是 −50% 加算；猫类人-猫的特长文字改成「侦察 / 躲藏」，和实际的优势项一致。
+  - **测试**：tests/clinic-float.test.js——审查里的例子、几千种组合逐项比对（和诊所一样用现上限 = 原生命 − 义体扣的生命）、`cyberConvertLimit` 修之前真的少 1 的输入（20 × (0.5 − 0.4) = 2、90 × 0.7 = 63）、三处文字；tests/rulebook.test.js 诊所那条的容差去掉，改成严格相等。
+
 - **新画面（HD-2D）设成默认；3D 战场上的铭牌改回旧画面的白色单位卡（大小、内容和旧画面一样）**（主人提，issue #316；hd2d/hd2d-field.js：`FIELD.defaultOn` 改成 `true`，新增 `FIELD.cardKeys` / `cardsOf`，`packetView` 带上卡片快照，`layoutOpts` / `paint` 把卡片快照和量到的卡片大小交给布局，`onCardSize` 按量到的重排；hd2d/hd2d-scene.js：新增 `syncCard` / `measureCards`，`syncPlates` 有卡片快照就用 `UnitCard.create` / `update` 画卡，`markPlates` 给卡加旧画面的 `is-actor` / `is-targetable` / `is-hover` / `is-dim`，每帧按 `L.cardScale` 缩放，`plateOf` 给卡片大小；hd2d/hd2d-layout.js：新增 `CONFIG.card`、`cardScale` / `cardSize` / `cardAt`，`build` 按卡排列数 / 抬高 / 取景（`fitView` 能把卡也装进去），`columnsOf` / `plateRect` / `liftPlates` 认白卡的尺寸；hd2d/hd2d-camera.js：中景 / 近景 / 特写按卡片大小和每段的基础缩放；hd2d/hd2d-fx.js：攻击演出的位置按卡片大小；hd2d/hd2d.css：白卡挂在铭牌里的样子；测试：tests/hd2d-field.test.js 改「默认开」的断言、新增「本机没选过：默认开」，tests/hd2d-mist.test.js / tests/hd2d-online.test.js 的假页面「关着」改成本机明确记着 `off`，新增 tests/hd2d-card.test.js；以旧画面为前提的浏览器画面测试（Playwright）新增 tests/old-screen.js，页面加载前本机记着「新画面 关」）
   - **以前**：战斗顶栏的「新画面」开关默认关，本机没选过的人打开战斗看到的是旧画面。新画面 3D 战场上的铭牌是深色小牌（名字、血条、架势），血量数字、ATK、状态要悬停 / 选中才展开，看不到旧画面单位卡上的那些信息。
   - **现在**：

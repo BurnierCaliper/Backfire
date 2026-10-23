@@ -484,9 +484,7 @@ test("血量层改造：能换的肉体 = 改造率上限 × 肉体上限（装�
     // 照规则页的文字算
     const raw = cw.length ? Math.max(0, cap - c.cyberwareOccupancy(u)) * base : cap * fleshMax;
     const byText = Math.floor(raw + 1e-9);
-    // 文字的结果恰好是整数时，诊所的浮点误差会少算 1 点（规则代码的问题，见 PR #275 的说明，这里不改）
-    const edge = Math.abs(raw - Math.round(raw)) < 1e-9;
-    assert.ok(game === byText || (edge && game === byText - 1), `体质 ${con} 智力 ${int} Lv${lv} ${cw}：诊所 ${game}，文字 ${byText}`);
+    assert.equal(game, byText, `体质 ${con} 智力 ${int} Lv${lv} ${cw}：诊所 ${game}，文字 ${byText}`);
     n++;
   }
   assert.ok(n > 100);

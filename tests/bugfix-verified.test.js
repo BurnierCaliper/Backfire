@@ -113,7 +113,7 @@ test("坚挺：任何击破都不会把架势打到 1 以下，回合结束失�
   assert.equal(ch.statuses.sturdy, false);
 });
 
-test("不稳：失去附赠动作，触发一次后消失；叠两个变晕眩", () => {
+test("不稳：附赠动作 −1，触发一次后消失；叠两个变晕眩", () => {
   const { c, S } = setup(["chuan", "xia"]);
   const ch = kit(S, "chuan"), foe = S.units.find(u => !u.isPlayer);
   ch.statuses.unstable = true;

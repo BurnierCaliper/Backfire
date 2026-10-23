@@ -1664,16 +1664,14 @@ function refreshEnemyEconomy(u, notes) {
     }
     if (!u.flying && w > 0) bonus += 1;
   }
-  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳照样把它清掉）。
+  // 种族被动（enemies.js）：千里马第一回合 +1 附赠（在不稳之前加，不稳只扣 1，抵得掉）。
   // 只在真正的敌人回合开始（startEnemyPhase 传了 notes）才算一个回合；生成时的初始化不算
   if (notes && typeof raceBonusExtra === "function") bonus += raceBonusExtra(u);
-  // 不稳：敌人一样失去附赠动作，触发一次后消失
-  if (u.statuses && u.statuses.unstable) {
-    bonus = 0;
-    u.statuses.unstable = false;
-    if (notes) notes.push(`${u.name} 不稳：这回合失去附赠动作。`);
-  }
-  // 易怒蛮牛发作后这回合没有附赠
+  // 载具驾驶员每回合最少 1 个附赠（移动 / 冲撞）：也是加成，在扣之前托底
+  if (typeof vehicleBonusFloor === "function") bonus = vehicleBonusFloor(u, bonus);
+  // 不稳 / 空手格挡：和玩家同一个顺序，所有加成算完再各 −1
+  bonus = applyBonusPenalties(u, bonus, notes);
+  // 易怒蛮牛发作后这回合没有附赠（载具驾驶员也一样是 0）
   if (u.raceNoBonus) {
     u.raceNoBonus = false;
     bonus = 0;
@@ -1684,7 +1682,7 @@ function refreshEnemyEconomy(u, notes) {
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
   u.bonusMax = Math.max(u.bonus, bonus);
-  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员每回合有 1 个附赠（移动 / 冲撞）
+  if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员：附赠上限对齐（最少 1 已在扣之前托底）
 }
 
 function beginRound(notes) {
@@ -2638,10 +2636,15 @@ function bigHitInfo(level, dmg) {
 // 第一幕固定线 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
 // 基准分倍数拉开：基准分 400 左右时，相邻评价的间距和固定线一样（C→B 500，其余各 250）
 const SCORE_GRADES = [["SSS", 2000, 2, 4.4], ["SS", 1750, 2, 3.8], ["S", 1500, 2, 3.2], ["A", 1250, 1.5, 2.6], ["B", 1000, 1.2, 2.0], ["C", 500, 1, 0.7], ["D", 0, 1, 0]];
+// B 及以上（B / A / S / SS / SSS）的分数线再 ×1.15（克制大师上线时一起调高；不管这场有没有拿到克制大师）
+const SCORE_HIGH_LINE_MULT = 1.15;
+const SCORE_B_LINE = 1000;   // SCORE_GRADES 里 B 的第一幕固定线：固定线 ≥ 它的评价吃 ×1.15
+// 克制大师：我方主动发起的攻击里，克制或吃到天气增益的占一半及以上（至少 1 次攻击），胜利时整场分数再 ×1.5
+const SCORE_COUNTER_MASTER = { ratio: 0.5, mult: 1.5 };
 // 分数线里固定线和基准分各占多少
 const SCORE_LINE_MIX = { fixed: 0.65, par: 0.35 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境", counterMaster: "克制大师" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2724,7 +2727,7 @@ function markPartyHurt(target, result) {
 function applyFinishBonus() {
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
-  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0, ambush: false, ambushPts: 0 };
+  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0, ambush: false, ambushPts: 0, counterMaster: false, counterPts: 0 };
   if (bs.speedDone) return none;
   bs.speedDone = true;
   const turns = Number(state.turnNo) || 1;
@@ -2743,10 +2746,39 @@ function applyFinishBonus() {
   if (flawlessPts > 0) bs.parts.flawless = (bs.parts.flawless || 0) + flawlessPts;
   if (ambushPts > 0) bs.parts.ambush = (bs.parts.ambush || 0) + ambushPts;
   bs.total += speed + flawlessPts + ambushPts;
+  // 克制大师：速杀 / 无伤 / 遭遇战算完之后，整场分数再单独 ×1.5
+  const cm = counterMasterInfo();
+  const counterPts = cm.ok ? Math.floor(bs.total * (SCORE_COUNTER_MASTER.mult - 1) + 1e-6) : 0;
+  if (counterPts > 0) { bs.parts.counterMaster = (bs.parts.counterMaster || 0) + counterPts; bs.total += counterPts; }
+  bs.counterMaster = cm.ok;
   bs.speedMult = speedMult;
-  bs.finishMult = mult;
+  // 存之前取到两位小数：1.2 × 1.5 直接乘是 1.7999999999999998，结算日志会显示成「×1.7999999999999998」
+  bs.finishMult = Math.round(mult * (cm.ok ? SCORE_COUNTER_MASTER.mult : 1) * 100) / 100;
   bs.flawless = flawless;
-  return { extra: speed + flawlessPts + ambushPts, mult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts };
+  return { extra: speed + flawlessPts + ambushPts + counterPts, mult: bs.finishMult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts,
+    counterMaster: cm.ok, counterPts, counterQual: cm.qual, counterAttacks: cm.attacks };
+}
+/** 克制大师的计数：记一次我方主动发起的攻击（按行动序号，一次行动打几下、打几个人都只算一次）。
+ *  只算我方自己回合里、这次行动的出手者本人打在敌人身上的攻击本身：协助攻击、借机 / 反击、持续伤害、
+ *  连带伤害（高压场地、感电……）、配置物 / 环境都不算。这次行动里任何一下克制或吃到天气增益，这次攻击就算数 */
+function noteCounterAttack(attacker, target, res, flags) {
+  if (!attacker || !attacker.isPlayer || !target || target.isPlayer || attacker.envSrc || !res) return;
+  flags = flags || {};
+  if (flags.action === false || flags.environment || flags.assist || flags.opp || flags.opportunity) return;
+  if (state._assistBy || state.combatPhase === "enemy") return;
+  const acc = state.actionAcc;
+  if (!acc || !acc.actorIsPlayer || acc.actorId !== attacker.id) return;
+  state.battleScore = state.battleScore || { total: 0, parts: {} };
+  const cm = state.battleScore.cmActs = state.battleScore.cmActs || {};
+  const key = String(state.actionSeq || 0);
+  cm[key] = !!cm[key] || !!res.advantage || (Number(res.weatherUp) || 0) > 0;
+}
+/** { attacks 我方主动攻击次数, qual 其中克制 / 天气增益的次数, ok 是否达成克制大师 } */
+function counterMasterInfo() {
+  const cm = (state.battleScore && state.battleScore.cmActs) || {};
+  const vals = Object.keys(cm).map(k => cm[k]);
+  const attacks = vals.length, qual = vals.filter(Boolean).length;
+  return { attacks, qual, ok: attacks >= 1 && qual >= attacks * SCORE_COUNTER_MASTER.ratio - 1e-9 };
 }
 /** 旧接口：返回多出来的分 */
 function applySpeedBonus() { return applyFinishBonus().extra; }
@@ -2957,7 +2989,9 @@ function gradeLines(act, par) {
   const fm = typeof Chain !== "undefined" ? Chain.fixedMult() : 1;
   return SCORE_GRADES.map(([g, line, xp, k]) => {
     const fixed = line > 0 ? Math.round((line + step) * fm) : 0;
-    const v = fixed <= 0 ? 0 : par == null ? fixed : Math.ceil((fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par) / 10 - 1e-9) * 10;
+    const raw = fixed <= 0 ? 0 : par == null ? fixed : fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par;
+    const hi = line >= SCORE_B_LINE ? SCORE_HIGH_LINE_MULT : 1;   // B 及以上 ×1.15
+    const v = raw <= 0 ? 0 : par == null && hi === 1 ? raw : Math.ceil(raw * hi / 10 - 1e-9) * 10;
     return [g, v, xp, fixed, k];
   });
 }
@@ -5316,6 +5350,20 @@ function recoverFromStun(u, notes) {
 function ambushSkipRound() {
   return !!state.ambush && (Number(state.turnNo) || 1) <= 1;
 }
+/** 附赠动作的惩罚（玩家、敌人共用，所有加成算完之后调用）：
+ *  不稳 −1（触发一次后消失）、空手格挡成功后的下一回合 −1；两个都有 −2；最少 0 */
+function applyBonusPenalties(u, bonus, notes) {
+  // 所有加成（含剑术+ 留下的、载具驾驶员最少 1）都算完以后再扣；最少扣到 0，日志写实际扣掉的数
+  bonus = Math.max(0, Number(bonus) || 0);
+  const take = (label) => {
+    const n = Math.min(1, bonus);
+    bonus -= n;
+    if (notes) notes.push(n > 0 ? `${u.name} ${label}：这回合附赠动作 −${n}。` : `${u.name} ${label}：本来就没有附赠动作，没有可扣的。`);
+  };
+  if (u.statuses && u.statuses.unstable) { u.statuses.unstable = false; take("不稳"); }
+  if (u.loseBonusNext) { u.loseBonusNext = false; take("空手格挡"); }
+  return bonus;
+}
 function refreshEconomy(u) {
   if (!u || !u.isPlayer) return;
   if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
@@ -5335,15 +5383,6 @@ function refreshEconomy(u) {
     return;
   }
   let ap = isSoloHero(u) ? soloCfg().apPerRound : 1, bonus = 1;   // 单人模式：主角每回合 2 行动点
-  if (u.loseBonusNext) {
-    bonus = 0;
-    u.loseBonusNext = false;
-  }
-  // 不稳：失去这回合的附赠动作，触发一次后消失（以前误写成 u.self === "unstable"，从来没生效）
-  if (u.statuses && u.statuses.unstable) {
-    bonus = 0;
-    u.statuses.unstable = false;
-  }
   const iso = state.fields[u.zone] && state.fields[u.zone].isolate;
   if (!iso && state.weather === "sand") {
     const w = sandWind(u.zone, state.zoneMode, state.sandDir);
@@ -5354,17 +5393,18 @@ function refreshEconomy(u) {
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof featAlertBonus === "function") bonus += featAlertBonus(u);   // 警戒（feats.js）：每场第一回合 +1 附赠
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
+  // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）；也是加成，在扣之前加
+  const carry = u.resources && u.resources.stanceCarry;
+  if (carry && carry.turn === Number(state.turnNo)) {
+    bonus += carry.n;
+    u.resources.stanceCarry = null;
+  }
+  bonus = applyBonusPenalties(u, bonus);   // 所有加成算完再扣：不稳、空手格挡各 −1
   if (loseAp) ap = 0;
   u.ap = Math.max(0, ap);
   u.apMax = u.ap;
   u.bonus = Math.max(0, bonus);
-  u.bonusMax = Math.max(u.bonus, bonus);
-  // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）
-  const carry = u.resources && u.resources.stanceCarry;
-  if (carry && carry.turn === Number(state.turnNo)) {
-    u.bonus += carry.n; u.bonusMax += carry.n;
-    u.resources.stanceCarry = null;
-  }
+  u.bonusMax = u.bonus;
 }
 
 function skillNameHint(id) {
@@ -6884,7 +6924,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     const ok = forced.ok != null ? !!forced.ok : roll <= chance;
     notes.push(`${helper.name} 空手格挡 ${target.name}：d100=${roll} 成功率 ${chance}% → ${ok ? "成功" : "失败"}`);
     if (ok) {
-      notes.push("空手格挡成功：目标仍受一半伤害，架势照扣（最少留 1）。格挡者下回合失去附赠行动。");
+      notes.push("空手格挡成功：目标仍受一半伤害，架势照常扣（可能被打进失衡）。格挡者下回合附赠行动 −1。");
       helper.loseBonusNext = true;
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
@@ -8394,6 +8434,7 @@ function dealTo(attacker, target, opt) {
         addScore("brk", brkReal * SCORE_RULES.brk * scoreTargetMul(target), attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
+      noteCounterAttack(attacker, target, res, flags);
     }
     if (target && target.isPlayer) scoreWeatherHelp(attacker, target, res, false);
     if (target && target.isPlayer) {
