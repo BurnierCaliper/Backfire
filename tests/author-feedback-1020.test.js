@@ -160,3 +160,190 @@ test("柯尔特满血减伤：被动被图纸放弃时规则不减伤，仪表�
   assert.equal(c.koltPrideCut(kolt), 0);
   assert.doesNotMatch(JSON.stringify(online()), /shp|坚毅/i, "仪表的数据里没有坚毅生命");
 });
+
+/* ---------- 3. 协助攻击打死自爆小车：演出 ---------- */
+
+/** 柯尔特、Helumica 和敌人都在 1 区；记下弹字（画面层 game.js 也是这样接 spawnPopup 的：带上那一刻的 popTag） */
+function popSetup(enemies) {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies, seed: "FB20-BOOM" });
+  c.startCombat();
+  const S = c.S.state;
+  S.units.forEach(u => { u.zone = 1; });
+  const pops = [];
+  c.spawnPopup = (u, spec) => { if (u) pops.push(Object.assign({ unitId: u.id, tag: S.popTag || null }, spec || {})); };
+  return { c, S, pops, k: kit => S.units.find(u => u.kit === kit) };
+}
+const dmgPops = pops => pops.filter(p => p.kind === "dmg" && (Number(p.value) || 0) > 0);
+
+test("协助攻击打死自爆小车：先是打死它的那一下，再引爆（有自己的演出），炸到的人跟在后面；引爆的伤害标成爆炸、不算协助攻击本身（以前先炸后挨打，炸到的每个人都算主攻击）", () => {
+  const { c, S, pops, k } = popSetup([{ id: "boomcar", lv: 3, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
+  const kolt = k("kolt"), helu = k("helu"), car = k("boomcar"), thug = k("thug_knife");
+  car.atk = Math.max(8, Number(car.atk) || 0);   // 引爆伤害 = atk / 2：确保打得出数字
+  car.layers.forEach(l => { l.current = Math.min(l.current, 1); });   // 一下就打死
+  car.def = 0; car.stunned = true;
+  thug.layers.forEach(l => { l.max = l.current = 300; });
+  c.queueAssistAttack(kolt, car);
+  assert.equal(S.assistQueue.length, 1, "失衡的小车进了协助攻击队列");
+  c.finishAssist(helu.id, {});
+  assert.equal(car._exploded, true, "小车被协助攻击打死、死亡引爆");
+  const dmg = dmgPops(pops), onCar = dmg.filter(p => p.unitId === car.id), blast = dmg.filter(p => p.unitId !== car.id);
+  const killing = onCar.find(p => p.main), boom = pops.find(p => p.kind === "carboom");
+  assert.ok(killing, "协助攻击打小车的那一下是主攻击");
+  assert.ok(boom && boom.unitId === car.id && boom.text === "引爆", "引爆有自己的演出（在小车身上）");
+  assert.ok(blast.some(p => p.unitId === thug.id) && blast.length >= 2, "同区的人都挨了引爆");
+  assert.ok(blast.every(p => !p.main), "引爆的伤害不是主攻击");
+  assert.ok(blast.every(p => p.tag === "boom"), "引爆的弹字标成爆炸");
+  assert.ok(pops.indexOf(killing) < pops.indexOf(boom) && pops.indexOf(boom) < pops.indexOf(blast[0]), "顺序：打死它的那一下 → 引爆 → 炸到的人");
+  assert.equal(S.popTag || null, null, "爆炸标记用完还原");
+  assert.ok(!car._holdBoom && !car._boomPending, "等着炸的标记清掉了");
+  assert.match(S.logPages.flatMap(p => p.lines).map(l => l.text).join("\n"), /死亡引爆/);
+});
+
+test("自爆小车不是被一击打死的（持续伤害、别的爆炸、主持人击杀）：照旧当场引爆，同样有引爆的演出", () => {
+  const { c, pops, k } = popSetup([{ id: "boomcar", lv: 3, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
+  const car = k("boomcar"), thug = k("thug_knife");
+  thug.layers.forEach(l => { l.max = l.current = 300; });
+  car.layers.forEach(l => { l.current = 0; });
+  const t0 = c.totalHp(thug);
+  c.sweepDeadEnemies();
+  assert.equal(car._exploded, true);
+  assert.ok(c.totalHp(thug) < t0, "同区的狂徒挨了引爆");
+  assert.ok(pops.some(p => p.kind === "carboom" && p.unitId === car.id), "引爆的演出");
+  assert.ok(dmgPops(pops).every(p => p.tag === "boom" && !p.main), "炸到的人标成爆炸");
+});
+
+test("「引爆」只是战斗画面的演出：计算器页的弹字（app.js · spawnPopup）不为它多抽种子随机数，装了种子的模拟照旧复现", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "boomcar", lv: 3, zone: 1 }], seed: "FB20-RNG" });
+  const car = c.S.state.units.find(u => u.kit === "boomcar"), draws = () => c.S.RNG.fn.draws();
+  const d0 = draws();
+  c.spawnPopup(car, { kind: "carboom", text: "引爆", element: "energy" });
+  assert.equal(draws(), d0, "不抽随机数");
+  vm.runInContext("Math.random()", c);
+  assert.equal(draws(), d0 + 1, "（计数器本身管用）");
+});
+
+test("不在场上的替身打的不算主攻击：爆炸桶炸到人是连带伤害；我方操控的碎渣机炮那一炮照旧是主攻击", () => {
+  const { c, S, pops, k } = popSetup([{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const kolt = k("kolt"), thug = k("thug_knife");
+  thug.layers.forEach(l => { l.max = l.current = 300; });
+  const scrap = c.makeProp("scrap", 1, 1);
+  S.props.push(scrap);
+  c.scrapShot(scrap, thug, kolt);
+  const shots = dmgPops(pops).filter(p => p.unitId === thug.id);
+  assert.ok(shots.length >= 1 && shots.every(p => p.main), "机炮打出的是主攻击");
+  pops.length = 0;
+  const boom = c.makeProp("boom", 1, 1);
+  S.props.push(boom);
+  c.hitStructureCore(kolt, "prop:" + boom.id, { dmg: 10, brk: 1, element: "fire" });
+  const blast = dmgPops(pops).filter(p => p.unitId === thug.id);
+  assert.ok(blast.length >= 1 && blast.every(p => !p.main), "爆炸桶炸到人是连带伤害");
+});
+
+/** 从源码里抠出一个函数（按大括号配对；抠的函数的字符串里没有大括号） */
+function fnSrc(src, name) {
+  const at = src.indexOf("function " + name + "(");
+  assert.ok(at >= 0, "找不到 " + name);
+  let i = src.indexOf("{", at), depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}" && --depth === 0) break;
+  }
+  return src.slice(at, i + 1);
+}
+/** 协助攻击（结人）打死自爆小车的演出带（玩家画面收到的样子）：打死它的那一下 → 引爆 → 炸到的人（tag boom） */
+const BLAST_TAPE = [
+  { type: "pop", unitId: "car", kind: "dmg", value: 6, element: "ice", main: true },
+  { type: "pop", unitId: "car", kind: "carboom", text: "引爆", element: "energy" },
+  { type: "pop", unitId: "tou", kind: "dmg", value: 4, element: "energy", tag: "boom" },
+  { type: "pop", unitId: "thug", kind: "dmg", value: 4, element: "energy", tag: "boom" },
+  { type: "pop", unitId: "thug", kind: "break", value: 1, element: "energy", tag: "boom" }
+];
+const BLAST_STATE = { units: [{ id: "car", level: 3 }, { id: "tou", level: 3 }, { id: "thug", level: 1 }, { id: "yuito", level: 3 }] };
+
+test("攻击演出（game.js · strikePlan）：爆炸（tag boom）炸到的人不算这次出手的目标、不补打击形状；没有标主攻击时也只按自己打到的", () => {
+  const g = fs.readFileSync(path.join(H.ROOT, "game.js"), "utf8");
+  const seen = [];
+  const AttackFx = { resolve: info => { seen.push(info); return { kind: "shard", el: info.element }; }, scriptOf: () => null };
+  const view = new Map([["yuito", { id: "yuito", kit: "yuito", isPlayer: true, zone: 1 }], ["car", { id: "car", kit: "boomcar", zone: 1 }],
+    ["tou", { id: "tou", kit: "tou", isPlayer: true, zone: 1 }], ["thug", { id: "thug", kit: "thug_knife", zone: 1 }]]);
+  const strikePlan = vm.runInNewContext(`(function () { ${fnSrc(g, "strikePlan")} return strikePlan; })()`, {
+    window: { AttackFx }, AttackFx, G: { sim: false, view }, state: { zoneMode: 2 },
+    unitById: id => view.get(id), zoneDist: (a, b) => Math.abs(a - b), piercedId: () => null, ownerIdOf: () => null, toMap: x => new Map(x)
+  });
+  const meta = { actorId: "yuito", targetId: "car", _cmd: { type: "assistAnswer" } };
+  const st = strikePlan(meta, BLAST_TAPE, null);
+  assert.deepEqual(plain(st.targets), ["car"], "炸到的人不算这次出手的目标（以前挨个算进去）");
+  assert.deepEqual(st.mains.map(e => e.unitId), ["car"]);
+  // 没有标主攻击的那种演出带：退回按「这次打到的伤害」，照样不把炸到的人算进去
+  const loose = BLAST_TAPE.map(e => Object.assign({}, e, { main: false }));
+  assert.deepEqual(strikePlan(meta, loose, null).mains.map(e => e.unitId), ["car"]);
+  assert.equal(seen[seen.length - 1].targets, 1);
+});
+
+test("联机：引爆的演出（carboom、「引爆」）和爆炸标记（tag boom）照白名单发给玩家", () => {
+  const V = require("../online-view");
+  const out = plain(V.projectTape(BLAST_TAPE.concat([{ type: "pop", unitId: "thug", kind: "dmg", value: 4, element: "energy", tag: "<b>x</b>" }])));
+  assert.deepEqual(out[1], { type: "pop", kind: "carboom", unitId: "car", element: "energy", text: "引爆" });
+  assert.equal(out[0].tag, undefined, "打死它的那一下不是爆炸");
+  assert.deepEqual(out.slice(2, 5).map(e => e.tag), ["boom", "boom", "boom"]);
+  assert.equal(out[5].tag, undefined, "只认 boom");
+});
+
+test("新画面（hd2d/hd2d-fx.js · cues）：「引爆」和紧跟着炸到的那几下另成一组（blasts），不开新的一段、不算进打死小车的那一段", () => {
+  const F = require("../hd2d/hd2d-fx.js");
+  const tape = BLAST_TAPE.concat([{ type: "pop", unitId: "yuito", kind: "status", text: "振奋", element: "physical" }]);
+  const cue = F.cues({ fx: { actor: "yuito", target: "car", move: { kind: "shard", el: "ice" } }, state: BLAST_STATE, tape }, {});
+  assert.deepEqual(plain(cue.waves), [{ unitId: "car", el: "ice" }], "只有打死小车的那一段");
+  assert.deepEqual(plain(cue.blasts), ["car"]);
+  const show = list => list.map(n => n.unitId + ":" + n.text);
+  assert.deepEqual(show(cue.numbers.filter(n => n.blast === 0)), ["car:引爆", "tou:4", "thug:4", "thug:击破1"], "引爆这一组：「引爆」+ 炸到的人");
+  assert.deepEqual(show(cue.numbers.filter(n => n.blast == null)), ["car:6", "yuito:振奋"], "别的照旧跟着那一段");
+});
+
+test("新画面（hd2d/hd2d-play.js · play）：打死小车的那一段演完才炸开——震屏、爆炸形状、爆炸声，炸到的人的数字这时才弹；不在炸到的人身上补这次攻击的打击形状", async () => {
+  const log = [];
+  const el = () => ({ style: {}, childNodes: [], className: "", textContent: "", isConnected: true, setAttribute() {}, remove() { this.isConnected = false; },
+    appendChild(ch) { ch.isConnected = true; this.childNodes.push(ch); if (this.id === "hd2d-pop") log.push(["num", ch.textContent]); return ch; } });
+  const X = { car: 200, yuito: 350, tou: 500, thug: 800 };
+  const rect = id => (X[id] == null ? null : { id, x: X[id], y: 400, w: 120, h: 40, left: X[id] - 60, top: 380, width: 120, height: 40 });
+  const done = () => Promise.resolve();
+  const c = vm.createContext({ console, setTimeout: () => 0, clearTimeout() {}, performance: { now: () => 0 },
+    document: { createElement: el, body: el(), querySelector: () => null },
+    AttackFx: { after: done, windup: done, travel: done, link: done, area() {}, ko() {}, sparks() {}, clash() {}, skip() {}, setClock() {},
+      impact: (r, move) => log.push(["impact", move.kind, r && r.id]) },
+    HitFx: { burst() {}, clear() {} } });
+  c.window = c; c.self = c;
+  for (const f of ["hd2d/hd2d-layout.js", "hd2d/hd2d-fx.js", "hd2d/hd2d-play.js"]) load(c, f);
+  const packet = { fx: { actor: "yuito", target: "car", move: { kind: "shard", el: "ice" } }, state: BLAST_STATE, tape: BLAST_TAPE };
+  await c.HD2DPlay.play(packet, { rectOf: rect, zoneRectOf: () => null, track: id => () => rect(id), remember() {} }, {
+    view: () => ({ width: 1000, height: 600, top: 0, bottom: 0 }), sound: (kind, i) => log.push(["sound", kind, i]), quake: p => log.push(["quake", p]) });
+  const at = (...e) => log.findIndex(x => e.every((v, i) => x[i] === v));
+  assert.deepEqual(log.filter(x => x[0] === "impact"), [["impact", "shard", "car"], ["impact", "explode", "car"]], "打击形状只落在小车身上，然后小车炸开：" + JSON.stringify(log));
+  assert.ok(at("num", "6") < at("quake", 1) && at("quake", 1) < at("impact", "explode") && at("impact", "explode") < at("num", "引爆"), "先是打死它的那一下，再炸：" + JSON.stringify(log));
+  assert.ok(at("sound", "wave", 0) < at("sound", "blast", 0) && at("sound", "blast", 0) < at("num", "4"), "爆炸声在小车炸开时才响");
+  assert.deepEqual(log.filter(x => x[0] === "num").map(x => x[1]), ["6", "引爆", "4", "4", "击破1"]);
+});
+
+test("联机玩家的音效（online-sfx.js）：引爆响爆炸声；新画面里引爆和炸到的那几下等小车炸开时才响（blast），不跟着打死它的那一段", () => {
+  const heard = [];
+  const c = vm.createContext({ Sfx: { enabled: () => true, boom: () => heard.push("boom"), play: (e, o) => heard.push("play:" + e + (o && o.big ? "!" : "")), ui: k => heard.push("ui:" + k), stagger() {}, parry() {} } });
+  c.window = c;
+  load(c, "online-sfx.js");
+  const OS = c.OnlineSfx;
+  assert.deepEqual(plain(OS.popCalls({ type: "pop", kind: "carboom", unitId: "car" }, {})), [["boom"]], "引爆：爆炸声");
+  const s = OS.start({ tape: BLAST_TAPE, state: BLAST_STATE }, {});
+  s.wave(0);
+  assert.deepEqual(heard, ["play:ice"], "打死它的那一段只响这一下");
+  heard.length = 0;
+  s.blast(0);
+  assert.deepEqual(heard, ["boom", "play:energy", "play:energy"], "小车炸开：爆炸声 + 炸到的两下");
+});
+
+test("联机玩家旧画面（online-ui.js · playPacket / onlineCtx）：引爆在小车身上炸开（震屏 + 爆炸形状），爆炸炸到的人不算这次出手的目标", () => {
+  const src = fs.readFileSync(path.join(H.ROOT, "online-ui.js"), "utf8");
+  // 不用 assert.match：对不上时它会把整个文件打出来
+  assert.ok(/if \(event\.kind === "carboom"\) \{[\s\S]{0,400}?w\.classList\.add\("quake"\)[\s\S]{0,300}?AF\.impact\(rectOf\(card\), \{ kind: "explode"/.test(src), "引爆：震屏 + 爆炸形状");
+  assert.ok(/e\.tag !== "boom" && \/\^\(dmg\|break\|status\|fxword\)\$\/\.test\(e\.kind\)/.test(fnSrc(src, "onlineCtx")), "专属演出的目标不含爆炸炸到的人");
+});

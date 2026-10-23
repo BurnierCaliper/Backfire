@@ -36,6 +36,7 @@
    *   num.dur     弹出 / 停住 / 淡出各多少毫秒（跟着演出倍率走）
    *   num.colors  属性色（和 attack-fx.js 的 COL 一样，测试核对）、击破 / 治疗 / 格挡 / 墨线 / 贴纸底的颜色
    *   timing      每一段打中之间隔多久、击倒的红叉晚多久（毫秒，跟着演出倍率走）
+   *   blast       自爆小车的死亡引爆（carboom，作者 10/20）：打死它的那几段演完以后隔 gap 毫秒（跟着演出倍率）在小车身上炸开，爆炸形状照 attack-fx 的 move
    *   paper       纸片感（打中的那一下）：attack-fx 的画布按镜头俯角在竖直方向压扁一点（一张贴纸立在沙盘上、被斜着看：压扁 = cos(俯角)，
    *               远景 30° ≈ 0.87、中景 27° ≈ 0.89、近景 24° ≈ 0.91，不小于 squash.min），脚下地台上投一道淡影子（地上的椭圆：
    *               宽 = 贴纸大小 × shadow.w，高 = 宽 × sin(俯角) × shadow.flat，越平视越扁；透明度 opacity，显示 dur 毫秒，跟着演出倍率）。
@@ -79,6 +80,7 @@
       }
     },
     timing: { hitGap: 170, koDelay: 120 },
+    blast: { gap: 220, move: { kind: "explode", el: "energy", area: true } },
     paper: { on: true, squash: { min: 0.8 }, size: { k: 0.5, min: 36, max: 110 }, shadow: { w: 2.2, flat: 1, opacity: 0.3, dur: 460 } },
     push: { on: true, tiers: ["far", "mid"], toward: 0.35, dist: 0.86, steps: 4, in: 0.28, out: 0.42, ease: "inOutCubic" },
     speeds: [1, 2],
@@ -191,7 +193,7 @@
    * 演出带里的一下（投影过的：OnlineView.projectTape 的一项）要弹的数字 { unitId, kind, text, el }；不弹 = null。
    * o.level = 挨打的人的等级（画面上写着的 Lv），o.bigHit(等级, 伤害) = 规则的 bigHitInfo（大伤害：数字后面加 !!）。
    * 只认投影里的 value：打在坚毅生命上、濒死的那几下投影不给数，这里就不弹（只演打中）。
-   * 原型的 cues 和正式画面（game.js 的新画面，#283）都按这一份挑数字：伤害、击破、治疗、高能自爆、状态字 / 攻击效果字（「无效」算格挡），
+   * 原型的 cues 和正式画面（game.js 的新画面，#283）都按这一份挑数字：伤害、击破、治疗、高能自爆、自爆小车的「引爆」、状态字 / 攻击效果字（「无效」算格挡），
    * 登场支援、红弹 / 蓝弹这种投影白名单里的字也当状态字
    */
   function numberOf(e, o) {
@@ -208,6 +210,7 @@
     if (e.kind === "break") return value !== undefined && value > 0 ? out("brk", "击破" + value) : null;
     if (e.kind === "heal") return value !== undefined && value > 0 ? out("heal", "+" + value) : null;
     if (e.kind === "highboom") return out("big", "高能自爆");
+    if (e.kind === "carboom") return out("big", word || "引爆");   // 自爆小车死亡引爆
     if ((e.kind === "status" || e.kind === "fxword" || e.kind === "partner" || e.kind === "bullet") && word) return out(word === "无效" ? "block" : "word", word);
     return null;
   }
@@ -217,9 +220,11 @@
    * packet = 联机玩家收到的那一份（OnlineView.projectPacket）：只读 packet.fx（招式）、packet.tape（弹字：伤害 / 击破 / 治疗 / 状态字）、packet.state.units（等级、谁还在）。
    * opts.before = 出招前画面上的那一份（上一个包的 state）：两边比一比，谁被击倒了。
    * opts.bigHit(等级, 伤害) = 规则的 bigHitInfo（app.js · spawnPopup 判「大伤害」用的同一个公式；只用投影里的等级和伤害数字）
-   * 返回 { actor, target, move, script, parried, blocker, waves: [{ unitId, el }], numbers: [{ unitId, kind, text, el, wave, boom }], ko: [id], booms: [id], enters: [id] }
+   * 返回 { actor, target, move, script, parried, blocker, waves: [{ unitId, el }], numbers: [{ unitId, kind, text, el, wave, boom, blast }], ko: [id], booms: [id], blasts: [id], enters: [id] }
    *   waves = 每一段主攻击打中谁（打中的那一下：刀光 / 冲击星 + 受击粒子 + 这一段的数字）
    *   booms = 高能自爆的（#330：照旧画面先预警闪两下再炸，「高能自爆」那个数字 boom = true，等炸的那一下才弹）；enters = 登场支援的伙伴（卡片亮个相）
+   *   blasts = 死亡引爆的自爆小车（carboom，按先后）：「引爆」和紧跟着它炸到的那几下（tag "boom"）是一组，数字带 blast = 第几组，
+   *            不开新的一段、不算进打死它的那一段，等那几段演完、小车炸开时才弹（以前算成攻击本身，每个被炸到的人都补一遍打击形状）
    */
   function cues(packet, opts) {
     opts = opts || {};
@@ -227,15 +232,17 @@
     const units = (packet && packet.state && Array.isArray(packet.state.units)) ? packet.state.units : [];
     const byId = new Map(units.map(u => [u.id, u]));
     const out = { actor: fx ? fx.actor : null, target: fx ? fx.target : null, move: fx ? fx.move : null, script: fx && fx.script || null,
-      parried: !!(fx && fx.parried), blocker: fx && fx.blocker || null, waves: [], numbers: [], ko: [], booms: [], enters: [] };
-    let wave = -1;
+      parried: !!(fx && fx.parried), blocker: fx && fx.blocker || null, waves: [], numbers: [], ko: [], booms: [], blasts: [], enters: [] };
+    let wave = -1, blast = -1;
     tape.forEach(e => {
       const el = typeof e.element === "string" ? e.element : "physical";
-      if (e.kind === "dmg" && (e.main || wave < 0)) { wave++; out.waves.push({ unitId: e.unitId, el }); }
+      if (e.kind === "carboom") blast = out.blasts.push(e.unitId) - 1;
+      else if (e.tag !== "boom") blast = -1;
+      if (blast < 0 && e.kind === "dmg" && (e.main || wave < 0)) { wave++; out.waves.push({ unitId: e.unitId, el }); }
       const u = byId.get(e.unitId);
       // 大伤害要看挨打的人的等级：包里没有这个人就不算大伤害
       const n = numberOf(e, { level: u ? u.level : undefined, bigHit: u ? opts.bigHit : null });
-      if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }, e.kind === "highboom" ? { boom: true } : {}));
+      if (n) out.numbers.push(Object.assign(n, { wave: Math.max(0, wave) }, e.kind === "highboom" ? { boom: true } : {}, blast >= 0 ? { blast } : {}));
       if (e.kind === "highboom" && !out.booms.includes(e.unitId)) out.booms.push(e.unitId);
       if (e.kind === "partner" && !out.enters.includes(e.unitId)) out.enters.push(e.unitId);
     });

@@ -325,12 +325,12 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
       if (!obj(event) || get(event, "type") !== "pop" || !id(get(event, "unitId"))) return [];
-      const kind = get(event, "kind"); if (!["dmg", "heal", "break", "status", "fxword", "highboom", "partner", "bullet", "proc"].includes(kind)) return [];
+      const kind = get(event, "kind"); if (!["dmg", "heal", "break", "status", "fxword", "highboom", "carboom", "partner", "bullet", "proc"].includes(kind)) return [];
       const out = identifiers(event, { type: "pop", kind }, ["unitId", "targetId"]);
       if (kind === "proc") { const fx = get(event, "fx"); if (typeof fx !== "string" || !/^[a-zA-Z]{2,16}$/.test(fx)) return []; out.fx = fx; }
       enumField(event, out, "element", ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]);
@@ -342,6 +342,7 @@
         const n = number(get(event, "value")); if (n !== undefined) out.value = n;
       }
       if (kind === "dmg" && get(event, "main") === true) out.main = true;   // 攻击动作本身的伤害（玩家画面在这几段补攻击演出的打击形状）
+      if (get(event, "tag") === "boom") out.tag = "boom";   // 爆炸（高能自爆的余波、自爆小车的死亡引爆）：不算这次出手打到的目标
       if (popupWords.has(get(event, "text"))) out.text = get(event, "text");
       if (snap.length) out.snap = snap.map(projectUnit).filter(Boolean);
       return [out];

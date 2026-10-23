@@ -5285,12 +5285,19 @@ function explodeBoomcar(target, notes) {
   const half = Math.floor((target.atk || 0) / 2);
   notes.push(`${target.name} 死亡引爆：同区 ${half} 能量 + 1 击破。`);
   markAoeZone(target.zone, { element: "energy", dmg: half, attacker: target });
-  // 同区不分敌我的范围伤害（不能协助格挡）
-  state.units.filter(u => !u.hidden && !u.dead && !u._removed && u.id !== target.id &&Number(u.zone) === Number(target.zone)).forEach(u => {
-    const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
-    fake.zone = target.zone;
-    dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
-  });
+  // 画面：在小车身上炸开（震屏、爆炸声、爆炸形状、「引爆」字样；game.js · playTape、online-ui.js · playPacket、hd2d/hd2d-play.js 的 carboom）
+  spawnPopup(target, { kind: "carboom", text: "引爆", element: "energy" });
+  // 同区不分敌我的范围伤害（不能协助格挡）。画面上和高能自爆的余波一样标成爆炸（tag "boom"：数字放大、停久一点），
+  // 不算进打死它的那次攻击的演出（game.js · strikePlan 跳过这些弹字）
+  const prevTag = state.popTag;
+  state.popTag = "boom";
+  try {
+    state.units.filter(u => !u.hidden && !u.dead && !u._removed && u.id !== target.id && Number(u.zone) === Number(target.zone)).forEach(u => {
+      const fake = unitOf("小车残骸", target.level, [{ type: "armor", hp: 1 }], 0, 0);
+      fake.zone = target.zone;
+      dealTo(fake, u, { atk: 0, mult: 0, flat: half, element: "energy", baseBreak: 1, flags: { action: true, aoe: true } });
+    });
+  } finally { state.popTag = prevTag || null; }
 }
 
 function removeEnemyFromField(u, notes) {
@@ -5408,7 +5415,8 @@ function sweepDeadEnemies() {
       notes.push(...absorbSandsInto(u));
       if (!isInnerDepleted(u) && !u.dead) return;
     }
-    if (u.kit === "boomcar") explodeBoomcar(u, notes);
+    // 自爆小车正在挨打死它的那一击（dealToInner · holdBoom）：等那一下的弹字出来再炸
+    if (u.kit === "boomcar") { if (u._holdBoom) u._boomPending = true; else explodeBoomcar(u, notes); }
     if (u.kit === "ufo_body") {
       ufoAllLegs(u).forEach(leg => {
         if (leg && !leg._removed) {
@@ -8583,6 +8591,10 @@ function dealToInner(attacker, target, opt) {
   if (target && !target.isPlayer) target._killBonus = scoreBonus;
   // 废物利用的来源：记下这一击之前敌人每层的血量，之后只认这一击真正打碎的层
   const layersBeforeHit = target && !target.isPlayer ? (target.layers || []).map(l => ({ type: l.type, cur: Number(l.current) || 0, max: Number(l.max) || 0, sealed: !!l.sealed })) : null;
+  // 自爆小车：这一击打死它时，死亡引爆等这一击的伤害弹字出来之后再炸（见函数末尾）——
+  // 以前先炸（applyCombat 里清场在弹字之前），画面上先看到爆炸、小车倒下，打死它的那一下最后才落上去（作者 10/20 反馈）
+  const holdBoom = !!(target && target.kit === "boomcar" && !target._exploded);
+  if (holdBoom) target._holdBoom = true;
   const extra = applyCombat(target, res, attacker);
   // 出血（engine.js · BLEED）：日志单独写一行，排在这一击的其他后果（倒下、失衡……）前面
   const bleedLine = bleedLogLine(res);
@@ -8719,8 +8731,12 @@ function dealToInner(attacker, target, opt) {
       const maxHp = (target.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       if ((res.intended || 0) >= maxHp * 0.5) target.killBig = true;
     }
-    // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色
-    const mainHit = flags.action !== false && !flags.environment;
+    // main：这一下是攻击动作本身的伤害（不是高压场地、感电这类连带伤害）。预览和总伤害计数按它定属性颜色，
+    // 攻击演出按它补打击形状（game.js · strikePlan）。不在场上的替身打的（自爆小车的残骸、爆炸桶、危墙倒塌……）也是连带伤害——
+    // 以前算成主攻击，协助攻击打死自爆小车时，小车炸到的每个人身上都补一遍协助攻击的刀光（作者 10/20 反馈）。
+    // 我方操控的碎渣机炮（替身记着操控的人 creditTo）照旧算：那一炮就是这次行动本身
+    const standIn = !!attacker && (!!attacker.envSrc || !(state.units || []).includes(attacker));
+    const mainHit = flags.action !== false && !flags.environment && (!standIn || !!attacker.creditTo);
     // adv：玩家这一击触发了属性克制（预览写「克制」、血条变浅金；演出时画面震一下）
     const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
     const disHit = !!(res.disadvantage && attacker && attacker.isPlayer && mainHit);   // 劣势：预览写「劣势」、伤害变灰
@@ -8744,6 +8760,10 @@ function dealToInner(attacker, target, opt) {
   }
   // 代挡的清扫机剩下的血量 < 25%、还没死：立刻自爆（enemies.js · sweeperGuardAfter）
   if (guardSweeper && typeof sweeperGuardAfter === "function") sweeperGuardAfter(guardSweeper, attacker, extra);
+  if (holdBoom) {
+    target._holdBoom = false;
+    if (target._boomPending) { target._boomPending = false; explodeBoomcar(target, extra); }   // 这一击把它打死了：弹字都出来了，现在才炸
+  }
   return { res, extra };
 }
 
@@ -10574,6 +10594,9 @@ function spawnPopup(unit, spec) {
   if (!unit || unit.hidden) return;
   spec = spec || {};
   const kind = spec.kind || "dmg";
+  // 自爆小车的「引爆」（carboom）只是战斗画面的演出（game.js 接管 spawnPopup，记进演出带）：计算器页不弹，
+  // 也就不为浮字编号多抽一次随机数——装了种子随机数的模拟（BattleSim）照旧和以前一样复现
+  if (kind === "carboom") return;
   const element = spec.element || "physical";
   let text = spec.text;
   let dur = 2.3;

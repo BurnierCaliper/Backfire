@@ -3,7 +3,7 @@
  * 一、播收到的包时，和单机 / 房主那边（game.js · playTape）响一样的音效。声音只从收到的包推出来（online-view.js 投影过的 tape / fx / state），
  *    不读房主的 state：打中按属性响（Sfx.play；重击 big 只在投影给了数、按 bigHitInfo 是大伤害时才算）、失衡 Sfx.stagger、击倒 / 濒死 Sfx.ui("ko")、
  *    治疗 heal、护盾变多 shield、状态字（护盾 / 增益类 shield，减益 debuff）、换区脚步 move、开枪 gun、近战同区出手的破风声 swing、
- *    格挡成功 / 伙伴登场 Sfx.parry、高能自爆 Sfx.boom。
+ *    格挡成功 / 伙伴登场 Sfx.parry、高能自爆 / 自爆小车死亡引爆 Sfx.boom。
  *    坚毅生命：投影里打在坚毅生命上、濒死的那几下不给数——照样响普通的打中声（和画面上只演打中、不弹数字一致），
  *    不另给一种声音，也不按藏起来的数字变重击。
  *    两条画面用同一份：旧画面（online-ui.js · playPacket）一下一下播时叫 pop，新画面（hd2d/hd2d-play.js）每一段打中时叫 wave。
@@ -13,6 +13,7 @@
  *      s.strike() 出手的那一刻        s.parry() 格挡火花那一刻
  *      s.pop(e)   旧画面：演出带里的一下（带着快照的顺便比一比击倒 / 濒死 / 护盾 / 换区；失衡等整串放完再响，和单机一样）
  *      s.wave(i)  新画面：第 i 段打中（hd2d-fx.js · cues 同一个分段，这一段的几下一起响）
+ *      s.blast(i) 新画面：第 i 辆自爆小车炸开（cues 的 blasts：爆炸声 + 炸到的那几下）
  *      s.end()    演完：最后的画面（包里的 state）和之前比——失衡、击倒、濒死、护盾、换区（已经响过的不再响）
  *    音效关着时一个 Sfx 接口都不调；跳过 / 被顶掉以后不再响。
  *
@@ -80,6 +81,7 @@
     }
     if (e.kind === "heal") return v !== null && v <= 0 ? [] : [["ui", "heal"]];
     if (e.kind === "highboom") return [["boom"], ["play", C.boom.element, { big: C.boom.big }]];
+    if (e.kind === "carboom") return [["boom"]];   // 自爆小车死亡引爆：爆炸声（炸到的人各自的打中声在后面那几下里）
     if (e.kind === "partner") return [["parry"]];
     if (e.kind === "status" && typeof e.text === "string" && e.text) {
       const k = C.status.shield.test(e.text) ? "shield" : C.status.none.test(e.text) ? "" : "debuff";
@@ -105,10 +107,17 @@
     const after = unitsOf(packet && packet.state), last = unitsOf(o.before);
     const ctx = { bigHit: typeof o.bigHit === "function" ? o.bigHit : null, level: (id) => { const u = after.get(String(id)) || last.get(String(id)); return u ? u.level : undefined; } };
     const live = () => { try { return typeof o.live === "function" ? !!o.live() : true; } catch (e) { return false; } };
-    // 新画面的分段：和 hd2d-fx.js · cues 一样——主攻击的每一下（或者第一下伤害）开一段，后面的几下算进这一段
-    const waves = [];
-    let w = -1;
-    tape.forEach(e => { if (e.kind === "dmg" && (e.main || w < 0)) w++; const i = Math.max(0, w); (waves[i] = waves[i] || []).push(e); });
+    // 新画面的分段：和 hd2d-fx.js · cues 一样——主攻击的每一下（或者第一下伤害）开一段，后面的几下算进这一段；
+    // 自爆小车的死亡引爆（carboom）和紧跟着它炸到的那几下（tag "boom"）另成一组，等小车炸开的那一刻再响（blast）
+    const waves = [], blasts = [];
+    let w = -1, b = -1;
+    tape.forEach(e => {
+      if (e.kind === "carboom") b = blasts.push([]) - 1;
+      else if (e.tag !== "boom") b = -1;
+      if (b >= 0) { blasts[b].push(e); return; }
+      if (e.kind === "dmg" && (e.main || w < 0)) w++;
+      const i = Math.max(0, w); (waves[i] = waves[i] || []).push(e);
+    });
     const stuns = new Set();
     let done = false;
     const play = (calls) => (done || !live() ? 0 : fire(calls));
@@ -129,6 +138,7 @@
         return play(calls);
       },
       wave: (i) => play([].concat(...(waves[i] || []).map(e => popCalls(e, ctx)))),
+      blast: (i) => play([].concat(...(blasts[i] || []).map(e => popCalls(e, ctx)))),
       end() {
         if (done) return 0;
         const calls = diff(after);
