@@ -11,6 +11,8 @@
  *   · 点铭牌 = 点单位卡、点地台 = 点区、点危墙 / 桥梁 = 点那根竖条、点空地 = 点战场的空白、悬停铭牌 = 悬停单位卡（悬停说明挂在铭牌上）：
  *     都调 game.js 交出来的入口（GAME.fieldInput），规则判断只在 game.js 里那一份
  *   · 选目标 / 选区的标记（game.js 的 fieldMarks）画成铭牌描边、其余变暗、地台 / 间隔亮框
+ *   · 下潜中的中立生物（夜晚迁徙的尘虫）不画卡，每个区合成一块「沙下动静 ×N」贴在地台前沿的一角（#358，syncStirs，旧画面 game.js · paintSandStir 那一套）：
+ *     点开的列表里点一只 = 点它的单位卡，选目标时能选的那一行亮起来
  *   · 2D 攻击演出（attack-fx / hit-fx）的位置问这里（rectOf / zoneRectOf：铭牌、地台、间隔按这一刻的镜头投影到屏幕上）；
  *     伤害 / 击破 / 治疗 / 格挡 / 状态字换成原型的纸片风数字（numbers）、打中那一下的纸片感（paper）、出手时推一下镜头（push / release），
  *     都交给 hd2d-play.js（和原型页同一份），演出倍率、跳过跟着 game.js 的 G.fxClock 走（#283）
@@ -32,6 +34,7 @@
  *   HD2DField.wire(input)                                   场景的点击 / 悬停 → GAME.fieldInput（纯函数）
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
  *   HD2DField.waveTagsOf(v)                                 画面那一份里的驻波墙 → 间隔上贴的字牌（纯函数，#345：3D 场景包还没有驻波墙的模型）
+ *   HD2DField.stirHtml(s) / stirSpot(s, lens, box, size, cards)   区角的「沙下动静 ×N」（#358：下潜中的中立生物不画卡）里面写什么、这一刻摆在哪（纯函数）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  *   HD2DField.packetView(pv, { OB, OV })                    联机玩家收到的那一份 → 画面用的（纯函数，#289）
  *   HD2DField.quality(storage) / setQuality(choice, storage) / levelOf(choice, dropped) / nextQuality(choice)   画质（#321，见 FIELD.quality；读写都包 try/catch）
@@ -96,6 +99,20 @@
       choices: ["auto", "high", "low"], dflt: "auto",
       levels: { high: { pixelRatio: 2, bokeh: true, bloom: true }, low: { pixelRatio: 1, bokeh: false, bloom: false } },
       auto: { from: "high", to: "low" }
+    },
+    // 沙下动静（#358，旧画面 game.js · paintSandStir）：下潜中的中立生物合成每个区一块的标记（摆法见下面的 syncStirs）。
+    //   icon / text   沙纹图标（和旧画面 game.js 的 STIR_ICON 同一个）、标记和列表弹层上的字（{zone} 区号、{n} 几只 / 几回合、{names} 有哪几种）
+    //   drop          标记的上沿挂在锚点（地台前沿的角）下面多少像素；edge 摆位时离四边（让开界面以后的那一块）至少留多少
+    //   size          还没量到标记多大时按这个估（像素，hd2d.css 的 .hd2d-stir-b 差不多这么大）
+    stir: {
+      icon: `<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M5 16c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#f0cf9a" stroke-width="2.6" stroke-linecap="round"/><path d="M5 25c4-4 8-4 12 0s8 4 12 0 5-3 7 0" fill="none" stroke="#d9a35f" stroke-width="2.2" stroke-linecap="round" opacity=".8"/><circle cx="12" cy="32" r="2" fill="#d9a35f"/><circle cx="22" cy="33" r="2" fill="#d9a35f"/><circle cx="30" cy="31" r="2" fill="#d9a35f"/></svg>`,
+      text: {
+        title: "沙下动静", more: "迁徙中 · 点开看看", tip: "点开看看", head: "沙下动静 · {zone} 区（{n} 只{names}）",
+        seen: "已被发现", leave: "{n} 回合后离开", under: "在沙下", pick: "可选",
+        foot: "下潜中：只有谐波攻击和塌陷打得到。沙鱼发现后会去吃。"
+      },
+      drop: 3, edge: 6,
+      size: { w: 176, h: 42 }
     }
   };
   /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
@@ -662,7 +679,7 @@
         onCardSize: (m) => { m.forEach((v, k) => S.sizes.set(String(k), { w: v.w, h: v.h })); if (S.sc) paint(false); }
       }, input || {}));
       S.wfx = WX.create(stage, { lens: () => HD2DFx.lens(S.sc.lensNow()), view: () => S.sc.view(), flash: () => S.sc.flash });
-      S.ad = HD2DFx.adapter({ lens: () => S.sc.lensNow(), plate: (id) => S.sc.plateOf(id), zone: (id) => S.sc.zoneOf(id), size: (big) => L.plateSize(S.sc.view(), big), offset: () => stage.getBoundingClientRect() });
+      S.ad = stirAware(HD2DFx.adapter({ lens: () => S.sc.lensNow(), plate: (id) => S.sc.plateOf(id), zone: (id) => S.sc.zoneOf(id), size: (big) => L.plateSize(S.sc.view(), big), offset: () => stage.getBoundingClientRect() }));
       // 纸片风数字、纸片感、推镜头（hd2d-play.js，#283）：演出倍率 / 跳过用 game.js 的同一个钟（G.fxClock：「演出 1× / 2×」、协助攻击的慢放、点击跳过；
       // 联机玩家用他那边给的钟）；影子那一层挂进 3D 战场这一层（压在 3D 画面上、铭牌下面）
       const PL = root.HD2DPlay;
@@ -687,6 +704,7 @@
   /** 拆掉 3D 战场，旧画面露出来；refresh = 让旧画面再画一遍（单机：game.js 把天气叠加层放回去） */
   function teardown(refresh) {
     stopWaveTags();
+    stopStirs();
     if (S.sc) { try { S.sc.dispose(); } catch (e) {} }
     if (S.wfx) { try { S.wfx.dispose(); } catch (e) {} }
     if (S.stage && S.stage.remove) S.stage.remove();
@@ -737,6 +755,7 @@
     koMarks();
     arrivals(!!animate);
     syncWaveTags();   // 驻波墙的字牌（#345）
+    syncStirs();      // 沙下动静（#358）
   }
   /** 这一刻的演出倍率（1 正常、0.5 两倍速、0 跳过）：单机是 game.js 的 G.fxClock，联机玩家是他那边给的钟；都没有按 1 */
   function clockNow() {
@@ -812,6 +831,7 @@
     S.ko.forEach((k, id) => {
       const i = at.get(id), u = i != null ? units[i] : null;
       if (u && !u.dead && !u.hidden) { S.ko.delete(id); return; }       // 又站起来了（撤销）：照常画
+      if (u && u.neutral && u.submerged) { S.ko.delete(id); return; }  // 在沙下被吃掉的中立生物（#358）：本来就没有卡，「沙下动静」里少一只（同旧画面）
       if (u && !u.hidden) {
         k.unit = u;
         if (list && list.has(id)) k.card = list.get(id);
@@ -1100,6 +1120,7 @@
   function setMarks(m) {
     S.marks = m ? { pick: !!m.pick, targets: (m.targets || []).slice(), hover: m.hover != null ? m.hover : null, zones: (m.zones || []).slice(), hoverZone: m.hoverZone != null ? m.hoverZone : null } : null;
     if (S.sc && S.layout) S.sc.setMarks(marksOf(S.marks, S.layout, S.actorId));
+    markStirs();   // 沙下动静（#358）：能选的那一行亮起来
   }
 
   /* ---------- 联机玩家的战斗画面（online-ui.js 调，#289）---------- */
@@ -1205,7 +1226,7 @@
       const g = S.layout && S.layout.gaps.find(x => x.key === k.slice(4));
       return g ? gapRect(root.HD2DFx.lens(S.sc.lensNow()), g, S.stage.getBoundingClientRect()) : null;
     }
-    return S.ad.rectOf(k);
+    return S.ad.rectOf(k);   // 下潜中的中立生物（#358）：适配器给它那一块「沙下动静」（stirAware）
   }
   /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
   function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
@@ -1271,6 +1292,200 @@
     });
   }
 
+  /* ---------- 沙下动静（#358，旧画面 game.js · paintSandStir）----------
+   * 下潜中的中立生物（夜晚迁徙的尘虫）不画卡（布局里不占站位：hd2d-layout.js · stirOf），每个区一块「沙下动静 ×N」（沙纹图标、×N、「名字迁徙中 · 点开看看」）。
+   * 不改 3D 场景包：和驻波墙的字牌一样是 3D 战场这一层里的 DOM，锚点在布局给的地台前沿的一角（3D 坐标），每一帧按这一刻的镜头投影摆位（远 / 中 / 近、拖动都跟着走）：
+   *   标记的上沿挂在锚点下面，贴着地台的侧面——这个区的卡都站在地台上面，压不到；先用左角（旧画面在区的左下角），左角不在画面里（中景框进来的左边那个区）
+   *   或者压到别的卡就换右角；两个角都不在画面里就藏起来；再收进四边让开界面以后的那一块里（不出画）。
+   *   这一层在铭牌下面（万一压到卡，卡在上面：不挡卡），点开的列表弹层在铭牌上面；近景里别的区的标记和别的区的卡一样淡一截。
+   * 点开：每只一行（名字、血条、已被发现、几回合后离开 / 在沙下），底下一句说明——和旧画面同一份字（FIELD.stir.text）。
+   *   点一行 = 点那只的单位卡（场景回调 onUnitClick → 单机 GAME.fieldInput.unit / 联机旧战场的回调：谐波攻击选目标就从这里选），悬停一行 = 悬停单位卡；
+   *   选目标时能选的那一行亮起来、写「可选」，标记本身也一明一暗。攻击演出、伤害数字落在标记上（rectOf：这只没有卡）。
+   * 浮上来的（被谐波 / 塌陷打出来、自己出手）布局里又是一张卡，新出现的照常亮个相（#330 · arrivals）；一个区的全部离开 / 死掉就拿掉这一块。
+   * 只读画面那一份（投影过的：名字、血量、已发现、几回合后离开），坚毅生命一个字都不碰 */
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const fillText = (t, o) => String(t).replace(/\{(\w+)\}/g, (m, k) => (o[k] != null ? String(o[k]) : ""));
+  /** 一块标记里面的 HTML（纯函数）：s = 布局的一份（hd2d-layout.js · stirOf）。选目标的样子不在这里（markStirs 只改 class，鼠标停着的那一行不会被换掉） */
+  function stirHtml(s) {
+    const K = FIELD.stir, T = K.text;
+    const rows = s.units.map(u => `<button type="button" class="r" data-stir-id="${esc(u.id)}"><span class="n">${esc(u.name)}</span>` +
+      `<span class="bar"><i style="width:${Math.max(0, Math.min(100, Number(u.pct) || 0))}%"></i></span>` +
+      `${u.seen ? `<em>${esc(T.seen)}</em>` : ""}<small>${esc(u.leaveIn != null ? fillText(T.leave, { n: u.leaveIn }) : T.under)}</small><b class="ok">${esc(T.pick)}</b></button>`).join("");
+    return `<button type="button" class="hd2d-stir-b" aria-expanded="false" title="${esc(T.tip)}">${K.icon}<span>${esc(T.title)} ×${s.count}<small>${esc(s.names)}${esc(T.more)}</small></span></button>` +
+      `<div class="hd2d-stir-pop"><h4>${esc(fillText(T.head, { zone: s.zone, n: s.count, names: s.names }))}</h4>${rows}<footer>${esc(T.foot)}</footer></div>`;
+  }
+  /**
+   * 一块标记这一刻摆在哪（纯函数）：s = 布局的一份（anchors：地台前沿的左角、右角），lens = 这一刻的镜头（hd2d-fx.js · lens，带画面的宽高），
+   * box = 能摆的那一块（战场像素：四边让开界面以后的 { x0, x1, y0, y1 }），size = 标记的像素大小 { w, h }，cards = 卡在屏幕上的矩形（战场像素 { x0, x1, y0, y1 }）。
+   * 左角往右伸、右角往左伸，上沿挂在锚点下面 FIELD.stir.drop；锚点在画面里、又不压卡的那个角先用（左角优先），都压卡就用锚点在画面里的第一个；
+   * 再收进 box（离边 FIELD.stir.edge）。两个角都不在画面里 = null（藏起来）。返回 { x, y 标记左上角, side }
+   */
+  function stirSpot(s, lens, box, size, cards) {
+    const L = Lay(), K = FIELD.stir, w = size.w, h = size.h;
+    const tries = ((s && s.anchors) || []).map(a => {
+      const p = L.project(lens, a);
+      if (!(p.depth > 0) || !(p.x >= 0 && p.x <= lens.width && p.y >= 0 && p.y <= lens.height)) return null;
+      const x = a.side === "right" ? p.x - w : p.x, y = p.y + K.drop;
+      const hit = (cards || []).some(c => c && x < c.x1 && c.x0 < x + w && y < c.y1 && c.y0 < y + h);
+      return { x, y, side: a.side, hit };
+    }).filter(Boolean);
+    const at = tries.find(t => !t.hit) || tries[0];
+    if (!at) return null;
+    const E = K.edge, fit = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    return { x: Math.round(fit(at.x, box.x0 + E, box.x1 - E - w)), y: Math.round(fit(at.y, box.y0 + E, box.y1 - E - h)), side: at.side };
+  }
+  /** 布局里这只单位（id）在哪一块「沙下动静」里；没有 = null */
+  function stirOfUnit(id) {
+    const k = String(id);
+    return ((S.layout && S.layout.stirs) || []).find(s => s.units.some(u => String(u.id) === k)) || null;
+  }
+  let stirRaf = 0, stirIn = false, stirHover = null;
+  function stopStirs() { if (stirRaf && root.cancelAnimationFrame) root.cancelAnimationFrame(stirRaf); stirRaf = 0; stirHover = null; }
+  const stirLayer = () => (S.stage && typeof S.stage.querySelector === "function" ? S.stage.querySelector(":scope > .hd2d-stirs") : null);
+  /** 排完一次（paint）：一个区一块，按布局增删、换内容（内容没变不动：开着的弹层、鼠标停着的那一行都还在）；有就每一帧跟着镜头摆位，没有就停 */
+  function syncStirs() {
+    const stage = S.stage, d = env.doc;
+    if (!stage || !d || typeof stage.querySelector !== "function") return;
+    const list = (S.layout && S.layout.stirs) || [];
+    let box = stirLayer();
+    if (!list.length) { if (box) box.remove(); stopStirs(); return; }
+    if (!box) {
+      box = d.createElement("div");
+      box.className = "hd2d-stirs";
+      box.addEventListener("click", onStirClick);
+      box.addEventListener("pointerover", (e) => stirHoverTo(rowOf(e.target)));
+      box.addEventListener("pointerout", (e) => { if (!rowOf(e.relatedTarget)) stirHoverTo(null); });
+      stage.appendChild(box);
+    }
+    const want = new Set(list.map(s => String(s.zone)));
+    box.querySelectorAll(".hd2d-stir").forEach(n => { if (!want.has(n.dataset.zone)) n.remove(); });
+    list.forEach(s => {
+      let n = [...box.querySelectorAll(".hd2d-stir")].find(x => x.dataset.zone === String(s.zone));
+      if (!n) { n = d.createElement("div"); n.className = "hd2d-stir"; n.dataset.zone = String(s.zone); box.appendChild(n); }
+      const html = stirHtml(s);
+      if (n.stirHtml !== html) {
+        n.stirHtml = html; n.innerHTML = html; n.stirSize = null; n.stirPop = null;
+        const b = n.querySelector(".hd2d-stir-b");
+        if (b) b.setAttribute("aria-expanded", n.classList.contains("open") ? "true" : "false");
+      }
+    });
+    if (stirHover && !stirOfUnit(stirHover.id)) stirHoverTo(null);   // 鼠标停着的那只浮上来 / 走了
+    markStirs();
+    placeStirs();
+    if (!stirRaf && !stirIn && typeof root.requestAnimationFrame === "function") {
+      const tick = () => {
+        if (stirIn) return;   // 同步跑回调的 requestAnimationFrame（测试的假页面）：这一帧摆过了，不递归
+        stirRaf = 0;
+        if (!stirLayer() || !S.sc) return;
+        placeStirs();
+        stirIn = true;
+        try { stirRaf = root.requestAnimationFrame(tick) || 0; } finally { stirIn = false; }
+      };
+      stirIn = true;
+      try { stirRaf = root.requestAnimationFrame(tick) || 0; } finally { stirIn = false; }
+    }
+  }
+  /** 选目标的样子（game.js / 联机给的标记 S.marks）：能选的那一行 .is-targetable（写「可选」）、鼠标停着的能选的那一行 .is-hover，里面有能选的标记 .pick */
+  function markStirs() {
+    const box = stirLayer();
+    if (!box) return;
+    const m = S.marks || {}, targets = new Set(m.pick ? (m.targets || []).map(String) : []);
+    const aim = m.hover != null && targets.has(String(m.hover)) ? String(m.hover) : null;
+    box.querySelectorAll(".hd2d-stir").forEach(n => {
+      let any = false;
+      n.querySelectorAll("[data-stir-id]").forEach(r => {
+        const ok = targets.has(String(r.dataset.stirId));
+        any = any || ok;
+        r.classList.toggle("is-targetable", ok);
+        r.classList.toggle("is-hover", ok && aim === String(r.dataset.stirId));
+      });
+      n.classList.toggle("pick", any);
+    });
+  }
+  /** 一块标记有多大（量一次记下，内容变了重量；藏着、还没画出来量不到就按 FIELD.stir.size 估，下一帧再量）。不是每一帧都量：量一次要排一次版 */
+  function stirSizeOf(n) {
+    if (n.stirSize) return n.stirSize;
+    const b = n.hidden ? null : n.querySelector(".hd2d-stir-b"), w = b ? b.offsetWidth : 0, h = b ? b.offsetHeight : 0;
+    if (w > 0 && h > 0) { n.stirSize = { w, h }; return n.stirSize; }
+    return FIELD.stir.size;
+  }
+  /** 点开的列表弹层多大（同上：开的时候、内容变了量一次）；没开 / 量不到 = null */
+  function stirPopOf(n) {
+    if (!n.classList.contains("open")) return null;
+    if (!n.stirPop) { const pop = n.querySelector(".hd2d-stir-pop"); n.stirPop = pop && pop.offsetHeight > 0 ? { w: pop.offsetWidth, h: pop.offsetHeight } : null; }
+    return n.stirPop;
+  }
+  /** 场上的卡这一刻在屏幕上的矩形（战场像素，和攻击演出同一个公式：hd2d-fx.js · rectOf）：标记挑角时让开它们 */
+  function cardRects(lens) {
+    const FX = root.HD2DFx, out = [];
+    if (!FX || !S.layout || !S.sc || typeof S.sc.plateOf !== "function") return out;
+    S.layout.units.forEach(u => {
+      const p = S.sc.plateOf(u.id);
+      if (!p || p.hide || !(p.w > 0 && p.h > 0 && p.s > 0)) return;
+      const r = FX.rectOf(lens, p, { w: p.w, h: p.h, s: p.s });
+      if (r) out.push({ x0: r.left, x1: r.right, y0: r.top, y1: r.bottom });
+    });
+    return out;
+  }
+  /** 每一帧：标记摆到这一刻的镜头下（stirSpot）；不在画面里就藏起来。点开的弹层：挂在右角的右对齐（.right），往那边伸出画面就换另一边；上面放不下就往下开（.down） */
+  function placeStirs() {
+    const box = stirLayer();
+    if (!box || !S.sc || !S.layout || !root.HD2DFx) return;
+    const lens = root.HD2DFx.lens(S.sc.lensNow()), v = S.layout.view || {};
+    const area = { x0: v.left || 0, x1: lens.width - (v.right || 0), y0: v.top || 0, y1: lens.height - (v.bottom || 0) };
+    const cards = cardRects(lens), near = S.sc.tier === "near" && S.sc.zone != null;
+    box.classList.toggle("still", !S.sc.motion);
+    box.querySelectorAll(".hd2d-stir").forEach(n => {
+      const s = (S.layout.stirs || []).find(x => String(x.zone) === n.dataset.zone), at = s ? stirSpot(s, lens, area, stirSizeOf(n), cards) : null;
+      if (n.hidden !== !at) n.hidden = !at;   // 变了才写（每一帧都走这里）
+      if (!at) return;
+      const left = at.x + "px", top = at.y + "px";
+      if (n.style.left !== left) n.style.left = left;
+      if (n.style.top !== top) n.style.top = top;
+      const pop = stirPopOf(n), E = FIELD.stir.edge, w = stirSizeOf(n).w;
+      const right = at.side === "right" ? !(pop && at.x + w - pop.w < area.x0 + E) : !!(pop && at.x + pop.w > area.x1 - E);
+      n.classList.toggle("right", right);
+      n.classList.toggle("down", !!pop && at.y - pop.h - E < area.y0);
+      n.classList.toggle("dim", near && Number(n.dataset.zone) !== Number(S.sc.zone));
+    });
+  }
+  /** 点标记 = 开 / 关列表；点列表里的一行 = 点那只的单位卡（场景回调：单机 GAME.fieldInput.unit，联机旧战场的回调） */
+  function onStirClick(e) {
+    e.stopPropagation();
+    const row = rowOf(e.target);
+    if (row) { const inp = host.input ? host.input() : null; if (inp && inp.onUnitClick) inp.onUnitClick(row.dataset.stirId); return; }
+    const b = e.target && e.target.closest ? e.target.closest(".hd2d-stir-b") : null, n = b ? b.parentNode : null;
+    if (!n) return;
+    const open = n.classList.toggle("open");
+    b.setAttribute("aria-expanded", open ? "true" : "false");
+    n.stirPop = null;
+    placeStirs();
+  }
+  const rowOf = (t) => (t && typeof t.closest === "function" ? t.closest(".hd2d-stirs [data-stir-id]") : null);
+  /** 鼠标停到列表里的一行上 / 离开 = 悬停 / 离开那只的单位卡（悬停说明挂在这一行上；选目标时预演、瞄准线） */
+  function stirHoverTo(row) {
+    const id = row ? String(row.dataset.stirId) : null;
+    if ((stirHover ? stirHover.id : null) === id) return;
+    const inp = host.input ? host.input() : null, was = stirHover;
+    stirHover = row ? { id, el: row } : null;
+    if (inp && inp.onUnitHover) {
+      if (was) inp.onUnitHover(was.id, false, was.el);
+      if (row) inp.onUnitHover(id, true, row);
+    }
+  }
+  /** 攻击演出要的这只的位置：下潜中的中立生物没有卡，落在它那一块标记上（视口坐标，和铭牌的矩形一样两种写法都给）；标记藏着 = null */
+  function stirRect(s) {
+    const box = stirLayer(), n = box ? [...box.querySelectorAll(".hd2d-stir")].find(x => x.dataset.zone === String(s.zone)) : null;
+    const r = n && !n.hidden && typeof n.getBoundingClientRect === "function" ? n.getBoundingClientRect() : null;
+    if (!r || !(r.width > 0) || !(r.height > 0)) return null;
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height, left: r.left, top: r.top, width: r.width, height: r.height, right: r.left + r.width, bottom: r.top + r.height };
+  }
+  /** 攻击演出的适配器（hd2d-fx.js · adapter）换上认得「沙下动静」的 rectOf：下潜中的中立生物落在它那一块标记上，别的照旧问适配器。
+   *  单机（game.js 问的 rectOf / 纸片数字）和联机玩家（hd2d-play.js 播包）都用这一个 */
+  function stirAware(ad) {
+    return Object.assign({}, ad, { rectOf: (id) => { const s = id != null ? stirOfUnit(id) : null; return s ? stirRect(s) : ad.rectOf(id); } });
+  }
+
   /* ---------- 攻击演出：纸片风数字、纸片感、推镜头（#283，game.js · playTape 一下一下调；都交给 hd2d-play.js）---------- */
   /** 数字摆位要的画面：战场那一格在视口里的位置（数字和铭牌的矩形一样是视口坐标）、大小，上下被首领横幅 / 镜头按钮盖住的像素（场景的 insets） */
   function fxView() {
@@ -1308,7 +1523,8 @@
 
   const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, quality, setQuality, levelOf, nextQuality, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
     cards, ko, releaseKOs, warn, quake, still, waveTagsOf,
-    cover, coverInsets, fitCover };   // #339：3D 白卡让开浮在战场上的面板
+    cover, coverInsets, fitCover,     // #339：3D 白卡让开浮在战场上的面板
+    stirHtml, stirSpot };             // #358：区角的「沙下动静 ×N」
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

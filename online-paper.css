@@ -27,6 +27,26 @@ body.online-player.ol-paper .ol-battle > .g-field { position: absolute; inset: 0
 body.online-player.ol-paper .ol-battle > .g-field > .g-topstack, body.ol-paper.g-paper .g-app > .g-field > .g-topstack { margin-top: var(--olp-under); }
 /* 新画面原来的镜头按钮（右下角）：搬到顶栏上了（顶栏的远 / 中 / 近点的就是它们）；中景 / 近景两边的换区箭头照旧 */
 body.ol-paper .ol-battle .hd2d-field > .hd2d-cam, body.ol-paper.g-paper .g-app > .g-field > .hd2d-field > .hd2d-cam { display: none; }
+/* 新画面区角的「沙下动静」（#358，hd2d.css 的 .hd2d-stir）：牛皮纸的小标签 + 米白卡片的列表弹层，颜色跟着这一套配色（白天 / 夜里 / 天气）；
+ * 沙纹图标换成纸上的墨色（原来的浅沙色在牛皮纸上看不清）；选目标时能选的描一圈高亮色（--olp-ring） */
+body.ol-paper .hd2d-field .hd2d-stir-b {
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); border: 0; clip-path: none; box-shadow: var(--olp-shadow);
+  font: 400 16px/1.15 var(--olp-label); transform: rotate(-1deg);
+}
+body.ol-paper .hd2d-field .hd2d-stir-b small { font: 700 11px/1.3 var(--olp-sans); color: var(--olp-kraft-ink); opacity: .8; }
+body.ol-paper .hd2d-field .hd2d-stir-b svg path { stroke: var(--olp-kraft-ink); }
+body.ol-paper .hd2d-field .hd2d-stir-b svg circle { fill: var(--olp-kraft-ink); }
+body.ol-paper .hd2d-field .hd2d-stir.pick .hd2d-stir-b { outline: 3px solid var(--olp-ring); outline-offset: 1px; animation: none; }
+body.ol-paper .hd2d-field .hd2d-stir-pop { color: var(--olp-paper-ink); background: var(--olp-card); border: 0; box-shadow: var(--olp-shadow); font: 13px/1.35 var(--olp-sans); }
+body.ol-paper .hd2d-field .hd2d-stir-pop h4 { font: 400 17px/1.2 var(--olp-label); color: var(--olp-kraft-ink); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r:hover, body.ol-paper .hd2d-field .hd2d-stir-pop .r.is-hover { background: var(--olp-hl); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r .bar { background: color-mix(in srgb, var(--olp-paper-ink) 18%, transparent); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r .bar i { background: var(--olp-kraft); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r em { color: var(--olp-turn); font-weight: 700; }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r small, body.ol-paper .hd2d-field .hd2d-stir-pop footer { color: var(--olp-muted); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r.is-targetable { box-shadow: inset 0 0 0 2px var(--olp-ring); }
+body.ol-paper .hd2d-field .hd2d-stir-pop .r .ok { color: var(--olp-on-ink); background: var(--olp-on); }
+body.ol-paper .hd2d-field .hd2d-stir-pop footer { border-top-color: color-mix(in srgb, var(--olp-paper-ink) 30%, transparent); }
 /* 舞台上的提示、战斗结算、连锁、检定：浮在吊牌下面的中间 */
 body.online-player.ol-paper .ol-stage > .olp-float {
   position: absolute; z-index: 9; top: var(--olp-under); left: 50%; transform: translateX(-50%); width: min(620px, 56vw);
