@@ -3298,7 +3298,7 @@ const RACE_PERKS = {
   "鼠类人·鼠": { fieldCut: true, text: "环境适应：场地伤害、冻土击破 50% 概率免疫" },
   "牛类人·马": { firstBonus: true, text: "千里马：第一回合 +1 附赠" },
   "兽人·狼":   { hunt: true, text: "追猎本能：附赠，对一个敌人施加紧追" },
-  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破；每回合最多一次，晕眩 / 失衡时不发作" },
+  "兽人·牛":   { rage: true, text: "易怒蛮牛（缺陷）：血量低于 50% 时受到任何伤害，会失去附赠、冲到另一个区、对随机一个目标造成 1 击破；每回合最多一次，晕眩 / 失衡时不发作（打出失衡后接着来的协助攻击也算这次失衡）" },
   "兽人·蜥蜴": { spit: true, energyUp: true, text: "吐酸：附赠，近距 1×atk 酸，每场一次；鳞片（缺陷）：受能量伤害 +25%" },
   "兽人·猫":   { breakCap: true, distract: true, text: "灵巧：一回合最多失去 2 架势；注意力涣散（缺陷）：不止一个目标可选时，连续超过 1 回合打同一个目标，伤害 −25%" },
   "兽人·熊":   { text: "重装操作、嗜睡（战斗里不生效，只记在资料里）" }
@@ -3442,7 +3442,10 @@ function raceNoteAttack(a, t) {
 var RAGE_HOLD = { depth: 0, pending: [] };
 
 function rageBlocked(target, result) {
-  return !!(target.stunned || (!target.noPosture && Number(target.def) <= 0) || (result && result.broke));
+  // 首领架势规则的精英牛被打进失衡、立刻恢复后，排上队的协助攻击（_bossAssistWindow 开着）也算这次失衡的一部分，和 lv 5 的牛一样不发作。
+  // 两个条件要一起看：窗口没人协助时会一直开着；全反击反打攻击者时也带 assist
+  const assistOfBreak = !!(result && result.flags && result.flags.assist && target._bossAssistWindow);
+  return !!(target.stunned || (!target.noPosture && Number(target.def) <= 0) || (result && result.broke) || assistOfBreak);
 }
 
 /** 易怒蛮牛：血量低于一半时受到任何伤害 → 失去附赠、冲到另一个区、对随机一个目标造成击破。applyCombat 末尾调用。

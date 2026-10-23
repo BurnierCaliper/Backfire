@@ -170,3 +170,18 @@ test("dealTo 中途出错：暂存清掉，不会挂到下一次不相干的攻�
   assert.ok(!foe.raceRageUsed, "不相干的攻击不会让牛发作");
   void S;
 });
+
+for (const lv of [10, 5]) {
+  test(`打进失衡后接着来的协助攻击（lv ${lv}）：算这次失衡的一部分，不发作、不占次数`, () => {
+    const { c, S, foe, kolt, helu } = setup({ lv });
+    helu.zone = 1;
+    const r = hit(c, kolt, foe, { baseBreak: 99 });
+    assert.equal(rages(r), 0);
+    const before = S.logPages.flatMap(p => p.lines).length;
+    c.finishAssist(helu.id);
+    const txt = S.logPages.flatMap(p => p.lines).slice(before).map(l => l.text).join("\n");
+    assert.match(txt, /协助攻击/, "协助攻击确实打了");
+    assert.doesNotMatch(txt, /受伤后失控/);
+    assert.ok(!foe.raceRageUsed);
+  });
+}
