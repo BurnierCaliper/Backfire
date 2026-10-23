@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：主持人在已经开始的战斗里点「探索环节」，任何时候确认后都能回到探索**（issue #322；game.js：新增 `abandonBattle`（`GAME.abandonBattle`）和 `battleGen` / `abandoned`，`perform` / `playTape` / `playBeats` / `act` / `playBlockCheck` / `resolveQueues` / `enemyPhase` / `spaceStartOrEnd` / `clickStartOrEnd` / `askRetreat` / `askOpeningChoices` / `endTurn` / `resolveOnlineEdits` / `resumeOnline` 每次等完先看这场是不是已经放弃；trpg-ui.js：`backFromBattle` 先 `GAME.abandonBattle`，`requestBackFromBattle` 去掉「演出中直接返回」；online-legacy.js：`leave`（回到探索不当成重置遭遇、不排队）；hotseat-game.js：`HotseatGame.abandon`、`validate`（有没回答的询问 / 分步选择时也放行回到探索）、`ownedChoice` 的 `drop`；online-game.js：`OnlineGame.abandonBattle`、`battleEpoch`（`submit` / `queueHostEdit` 作废放弃前排队的主持人操作）；online.css：主持人战斗中的 `.hs-overlay` 从战斗顶栏下面开始；测试：tests/online-explore-back.test.js（新））
+  - **以前**：主持人点「探索环节」有时候没反应：① 行动阶段、没在播演出——确认后被 online-legacy.js 当成「重置遭遇」拒绝，画面不动；② 播演出、敌人回合、主持人手动操控敌人、等玩家回答协助格挡时（`GAME.depth > 0`）——连确认框都没有，直接什么都不做；③ 开战前等玩家的分步选择（例：柯尔特的初始刀头分给了玩家）——被「正在等待其他操作者回应」挡掉；④ 每回合选行动顺序时——主持人的「行动顺序」卡片（`#hs-panel`）盖住整个战斗顶栏，点不到按钮（等人回答时的协助询问卡 `#hs-reaction` 也一样）。
+  - **现在**：任何时候点了、确认放弃后都马上回到探索（这场照旧不结算，回到开战前）：正在播的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人的阶段、选到一半的技能目标都停下作废——半路的流程醒过来看到这场已经放弃就直接退出，不再结算、不碰之后摆的新战场；掉线玩家的倒计时清掉，放弃之前排队还没执行的主持人操作作废（「这场战斗已经放弃，排队的主持人操作没有执行」）；玩家那边跟着切回探索画面。主持人的行动顺序 / 协助询问卡片从战斗顶栏下面开始，顶栏随时点得到。单机跑团在敌人回合中点「探索环节」也一样能回去。指令被拒绝时（房间暂停、不是主持人）什么都不停，战斗照常进行。
+  - **没改的**：放弃战斗照旧不算失败、不结算；开战前的大字（点一下就收起）照旧会挡几秒钟按钮；顶栏「标题」照旧只在没有演出时能用。
+
 - **联机玩家：等主机回话时技能栏不再一下子整排灰掉**（#317 追加，worker 提的问题 1；online-battle.js 给只因 ui.busy 灰掉的技能 / 唤出 / 结束行动按钮挂 `ob-wait`；online.css · `.ob-wait:disabled` 动画；weather-fx.css 的天气灰按钮样式不盖它们；测试 tests/hd2d-shell.test.js「#317 追加」）
   - **以前**：每选一次技能 / 取消都要问主机，问的那一下所有按钮立刻变灰（透明度 0.4）再恢复，网络慢一点就像在闪。
   - **现在**：按钮照旧马上不能点（防连点不变），但看起来先照常亮着，过 0.3 秒主机还没回才变灰；本来就用不了的（blocked）照旧马上灰。
