@@ -21,6 +21,7 @@
  *     modeOf(o)                    顶栏最前面写什么模式
  *     soloSlots(list, o)           一个人打的时候的吊牌：我方每个人
  *     hotseatSlots(view, units, moves)   热座 / 联机房主的吊牌：热座栏的行动顺序
+ *     receiptHead(mode)            战斗记录抽屉顶上的收据头（BACKFIRE / 战斗记录 · 模式 + 一排等号；记录本身照旧是 game.js 画的，game-paper.css 换成收据的样子）
  *   页面：boot() 页面加载完自己跑；sync() 有变化时（画面、新画面、顶栏、队伍栏、热座栏、镜头……）排一次 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./paper-ui.js"));
@@ -138,9 +139,15 @@
     });
   }
 
+  /** 收据顶上那一块（战斗记录抽屉里，.gp-rc-head）：BACKFIRE / 战斗记录 · 模式 + 一排等号。字和联机的收据同一份（paper-ui.js · BASE.receipt），模式 = modeOf 的那个名字 */
+  function receiptHead(mode) {
+    const R = GPAPER.receipt;
+    return `<b>${esc(R.brand)}</b><span>${esc(String(R.head).replace("{0}", mode || ""))}</span><i aria-hidden="true">${esc(R.rule)}</i>`;
+  }
+
   /* ---------- 页面 ---------- */
   const env = { doc: null, storage: null, box: null, on: false, toolsOpen: false, swapOpen: null, drawerOpen: false, queued: false, last: {}, theme: null, themeKey: "",
-    watch: null, watched: [], sizer: null, dressQueued: false, added: null, tab: null, blocker: null };
+    watch: null, watched: [], sizer: null, dressQueued: false, added: null, tab: null, rcHead: null, blocker: null };
   /** 单机画面自己的元素（g- 开头：game.html 的垫片找不到时老实返回 null） */
   const $ = (id) => (env.doc ? env.doc.getElementById(id) : null);
   /** 别的模块的元素（热座栏 #hs-…）：用 querySelector——game.html 的垫片会给找不到的 id 现造一个替身，getElementById 会把替身塞进页面 */
@@ -268,8 +275,12 @@
       tab.innerHTML = '<span class="gp-drawer-label"></span><span class="gp-drawer-dot" aria-hidden="true" hidden></span><span class="gp-sr"></span>';
       tab.addEventListener("click", () => setDrawer(!env.drawerOpen));
       log.insertBefore(tab, log.firstChild);
+      // 收据顶上那一块：插在「复制本回合 / 复制全部」那一行前面（记录本身 #g-logs 每场重画，不放在里面）
+      const head = env.doc.createElement("div");
+      head.className = "gp-rc-head";
+      log.insertBefore(head, log.querySelector(":scope > .log-tools") || tab.nextSibling);
       log.classList.add("gp-drawer");
-      env.tab = tab;
+      env.tab = tab; env.rcHead = head;
     }
     paintDrawer();
     watch(true);
@@ -297,6 +308,7 @@
     A.styles.forEach((v, el) => { if (v == null) el.removeAttribute("style"); else el.setAttribute("style", v); });
     env.added = null;
     if (env.tab) { env.tab.remove(); env.tab = null; }
+    if (env.rcHead) { env.rcHead.remove(); env.rcHead = null; }
     if (log) log.classList.remove("gp-drawer", "gp-collapsed");
     // 技能栏、技能按钮、队伍栏这些贴过纸纹的（game.js 会接着用同一个按钮）：纸纹的标记拿掉
     const a = app();
@@ -333,6 +345,7 @@
     paintTheme(UI.themeOf({ light: st && st.light, night: !!(a && a.classList.contains("is-night")), weather: (a && a.dataset.weather) || (st && st.weather) }));
     const mode = readMode();
     html(env.box.querySelector(".olp-top-host"), P.topHtml(topInfo(mode)), "top");
+    html(env.rcHead, receiptHead(modeOf(mode)), "rc");
     if (top) {
       top.classList.toggle("gp-open", env.toolsOpen);
       // 一组的按钮这一局都藏着（单局里的「布置 · 主持人」……按模式藏的照旧藏）：小标题也不留
@@ -503,7 +516,7 @@
     [env.box.querySelector(".olp-top"), topBar(), app() && app().querySelector(":scope > .g-hud"), app() && app().querySelector(".hd2d-party"), $("g-log")].forEach(n => { if (n) env.sizer.observe(n); });
   }
 
-  const api = { PAPER: GPAPER, GPAPER, active, modeOf, soloSlots, hotseatSlots, boot, sync, isOn: () => env.on };
+  const api = { PAPER: GPAPER, GPAPER, active, modeOf, soloSlots, hotseatSlots, receiptHead, boot, sync, isOn: () => env.on };
   // 页面里：等页面加载完（game.js、hd2d-field.js 先登记在 DOMContentLoaded 上）再接
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

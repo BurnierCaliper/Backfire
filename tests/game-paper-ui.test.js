@@ -366,3 +366,144 @@ test("新加的 DOM（胶带、吊牌、「工具 ▾」、抽屉的竖标签、
   assert.doesNotMatch(html, /shp/i);
   assert.deepEqual(o.errors, []);
 });
+
+/* ---------- 第 3 步：收据、选目标的按钮条、天气换色不串 ---------- */
+/** 战斗记录里塞几条和 game.js（pushLogCard / addLogPhase）画的一样的记录；技能栏里摆一条和 game.js · showPickBar 一样的选目标按钮条 */
+const fakeLog = page => page.evaluate(() => {
+  const logs = document.getElementById("g-logs");
+  logs.insertAdjacentHTML("beforeend", '<div class="lg phase"><div class="t">第 1 回合 · 我方回合</div></div>' +
+    '<div class="lg"><div class="t">【<span class="who player">瑞比</span>】斩击</div><div class="s cost">消耗 1 行动点</div><div class="s hit">→ 狂徒：<span class="dmg-electric">12</span> 电击伤害，击破 4</div>' +
+    '<div class="s warn">狂徒 失衡</div><div class="s sum">本行动合计 12</div><details class="calc"><summary>计算过程</summary><pre>1d6+6 = 12</pre></details></div>' +
+    '<div class="lg"><div class="t">【<span class="who enemy">狂徒</span>】乱砍</div><div class="s hit">→ 结人：8 伤害</div></div>');
+  const row = document.querySelector("#g-app > .g-hud .hud-row");
+  let bar = document.getElementById("g-pick-bar");
+  if (!bar) { bar = document.createElement("div"); bar.className = "g-pick-bar"; bar.id = "g-pick-bar"; row.parentNode.insertBefore(bar, row); }
+  bar.innerHTML = '<button class="g-btn">不选<small>跳过</small></button><button class="g-btn danger">放弃（Esc）</button>';
+  bar.classList.add("show");
+});
+/** 一个 CSS 变量这一刻在某个元素里算出来的颜色（rgb(...)） */
+const varColor = (page, sel, name) => page.evaluate(([sel, name]) => {
+  const host = document.querySelector(sel), x = document.createElement("i");
+  x.style.color = `var(${name})`; host.appendChild(x);
+  const c = getComputedStyle(x).color; x.remove(); return c;
+}, [sel, name]);
+
+test("战斗记录是一长条热敏收据（和联机同一套字、分隔线：打印体、顶上 BACKFIRE / 战斗记录 · 模式 + 一排等号、每条之间虚线、回合 / 阶段那一句写成 *** … ***）；白天白纸、夜里黑纸；选目标时的按钮条是米白小卡片，「放弃」是红章色", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  await fakeLog(page);
+  await page.click("#g-log .gp-drawer-tab");
+  await page.waitForFunction(() => !document.getElementById("g-log").classList.contains("gp-collapsed"));
+  await settle(page);
+  // 顶上：BACKFIRE / 战斗记录 · 模式（自定义战斗写「战斗」）+ 一排等号（字都在 paper-ui.js · BASE.receipt，和联机的收据同一份）
+  const head = await page.evaluate(() => { const h = document.querySelector("#g-log > .gp-rc-head"); return h && { brand: h.querySelector("b").textContent, sub: h.querySelector("span").textContent, rule: /^=+$/.test(h.querySelector("i").textContent), visible: h.getClientRects().length > 0 }; });
+  assert.deepEqual(head, { brand: "BACKFIRE", sub: "战斗记录 · 战斗", rule: true, visible: true });
+  const look = await page.evaluate(() => {
+    const cs = (sel, pseudo) => getComputedStyle(document.querySelector(sel), pseudo || null);
+    return {
+      mono: /Mono|monospace/i.test(cs("#g-logs").fontFamily), dashed: cs("#g-logs > .lg:not(.phase)").borderBottomStyle,
+      phase: [cs("#g-logs > .lg.phase .t", "::before").content, cs("#g-logs > .lg.phase .t", "::after").content, cs("#g-logs > .lg.phase .t").textAlign],
+      ink: cs("#g-logs .lg .s.hit").color, dmg: cs("#g-logs .lg .dmg-electric").color, title: cs("#g-logs > .lg:not(.phase) .t").color,
+      sumRule: cs("#g-logs .lg .s.sum").borderTopStyle, tools: cs("#g-log .log-tools > span").display
+    };
+  });
+  const ink = await varColor(page, "#g-logs", "--olp-receipt-ink");
+  assert.equal(look.mono, true, "打印体");
+  assert.equal(look.dashed, "dashed", "每条之间虚线");
+  assert.deepEqual(look.phase, ['"*** "', '" ***"', "center"], "回合 / 阶段那一句写成 *** … ***");
+  assert.equal(look.ink, ink, "字是收据的墨色");
+  assert.equal(look.dmg, ink, "热敏纸是单色的：属性颜色的数字也是墨色（加粗）");
+  assert.equal(look.title, ink);
+  assert.equal(look.sumRule, "dashed", "本行动合计上面一排虚线");
+  assert.equal(look.tools, "none", "「战斗记录」那几个字挪到收据顶上了");
+  // 白天白纸、夜里黑纸（同一套变量：--olp-receipt）
+  const paperOf = () => varColor(page, "#g-log", "--olp-receipt");
+  const day = await paperOf();
+  await page.evaluate(() => { state.light = "night"; document.getElementById("g-app").classList.add("is-night"); });
+  await page.waitForFunction(() => document.body.dataset.olpTime === "night");
+  const night = await paperOf();
+  assert.notEqual(day, night);
+  assert.ok(day.match(/\d+/g).slice(0, 3).every(v => Number(v) > 200), "白天收据是白的：" + day);
+  assert.ok(night.match(/\d+/g).slice(0, 3).every(v => Number(v) < 60), "夜里收据是黑的：" + night);
+  // 选目标的按钮条：米白小卡片（--olp-card），「放弃」红章色（--olp-stamp）；「或者：」是纸上的淡字
+  const pick = await page.evaluate(() => {
+    const [a, b] = document.querySelectorAll("#g-pick-bar .g-btn"), ca = getComputedStyle(a), cb = getComputedStyle(b);
+    return { bg: ca.backgroundColor, ink: ca.color, danger: cb.color, dangerBorder: cb.borderTopColor, visible: a.getClientRects().length > 0 };
+  });
+  assert.deepEqual(pick, { bg: await varColor(page, "#g-app > .g-hud", "--olp-card"), ink: await varColor(page, "#g-app > .g-hud", "--olp-paper-ink"),
+    danger: await varColor(page, "#g-app > .g-hud", "--olp-stamp"), dangerBorder: await varColor(page, "#g-app > .g-hud", "--olp-stamp"), visible: true });
+  await shot(page, "solo-paper-receipt");
+  // 离开纸片画面：收据顶上那一块拿掉，旧记录栏照旧
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("g-paper"));
+  assert.equal(await page.locator("#g-log > .gp-rc-head").count(), 0);
+  assert.notEqual(await page.evaluate(() => getComputedStyle(document.querySelector("#g-log .log-tools > span")).display), "none", "旧记录栏的「战斗记录」照旧");
+  assert.deepEqual(o.errors, []);
+});
+
+/** 纸片画面里看得见的几块（打开「工具 ▾」、拉开抽屉、预演框亮着）和它们的 ::before 这一刻算出来的样子；动画都停在第 0 帧（呼吸发光的影子不随时间变） */
+const PAPER_PARTS = {
+  tools: "#g-app > .g-top", toolBtn: "#g-app > .g-top #g-stats", toolOff: "#g-app > .g-top #g-undo", select: "#g-weather-sel",
+  hud: "#g-app > .g-hud", sk: "#g-app > .g-hud .skills .sk", skNm: "#g-app > .g-hud .skills .sk .nm", skKey: "#g-app > .g-hud .skills .sk .key", skCost: "#g-app > .g-hud .skills .sk .cost",
+  skAp: "#g-app > .g-hud .skills .sk .cost .ap", end: "#g-app > .g-hud .endturn", summon: "#g-app > .g-hud .summonbtn", hint: "#g-app > .g-hud > .hint", hintB: "#g-app > .g-hud > .hint b",
+  sheet: "#g-app > .g-hud .pc-sheet", sheetN: "#g-app > .g-hud .pc-sheet .n", pick: "#g-pick-bar .g-btn", pickSmall: "#g-pick-bar .g-btn small",
+  log: "#g-log", logBtn: "#g-log .log-tools .g-btn", lgT: "#g-logs .lg .t", lgS: "#g-logs .lg .s", lgCost: "#g-logs .lg .s.cost", lgSum: "#g-logs .lg .s.sum", lgPre: "#g-logs .lg pre",
+  pv: "#g-app > .pvbox", pvH: "#g-app > .pvbox h4", pvLn: "#g-app > .pvbox .ln", party: "#g-app > .g-hud .hd2d-party", pm: "#g-app > .g-hud .hd2d-party .pm"
+};
+const PAPER_PROPS = ["color", "background-color", "background-image", "border-top-color", "border-top-style", "border-top-width", "box-shadow", "animation-name", "text-shadow", "opacity", "filter"];
+const looks = (page, parts) => page.evaluate(([parts, props]) => {
+  document.getAnimations().forEach(a => { a.pause(); a.currentTime = 0; });
+  const out = {};
+  Object.entries(parts).forEach(([k, sel]) => {
+    const el = document.querySelector(sel);
+    if (!el) { out[k] = "（没有）"; return; }
+    const cs = getComputedStyle(el), bs = getComputedStyle(el, "::before");
+    props.forEach(p => { out[k + " " + p] = cs.getPropertyValue(p); });
+    // 图片地址只比「有几张」：纸纹是程序画的 PNG；旧皮肤相位天气的波纹（weather-fx.js）过一会儿会从 SVG 换成画好的 PNG，和纸片无关
+    ["content", "filter", "animation-name", "background-image", "clip-path"].forEach(p => { out[k + "::before " + p] = bs.getPropertyValue(p).replace(/url\("data:[^"]*"\)/g, 'url("data:…")'); });
+  });
+  return out;
+}, [parts, PAPER_PROPS]);
+const diffOf = (a, b) => Object.keys(a).filter(k => a[k] !== b[k]).map(k => `${k}: ${a[k]} ≠ ${b[k]}`);
+/** 换天气（旧顶栏的下拉框，同一个处理：game.js 换 state.weather、#g-app[data-weather]） */
+const setWeather = (page, w) => page.evaluate(w => { const s = document.getElementById("g-weather-sel"); s.value = w; s.dispatchEvent(new Event("change", { bubbles: true })); }, w);
+
+test("天气换色不串：纸片画面里旧皮肤（game.css / weather-fx.css）按 #g-app[data-weather] 给面板、按钮、记录换的底色、字色、描边、呼吸发光、沙雾一条都套不上（只跟着纸片自己的天气色调）；回到旧画面，纸片的配色一点不留、旧皮肤的天气样子照旧", { timeout: 150000 }, async t => {
+  const o = await soloPage(t, { on: false }); if (!o) return; const { page } = o;
+  await fakeLog(page);
+  const OLD = { top: "#g-app > .g-top", btn: "#g-stats", hud: "#g-app > .g-hud", sk: "#g-app > .g-hud .sk", log: "#g-log", lgT: "#g-logs .lg .t", lgS: "#g-logs .lg .s", pick: "#g-pick-bar .g-btn" };
+  // 纸片自己的天气色调（paper-ui.js · BASE.theme.weather；酷暑没有）
+  const PAPER_WEATHER = { glow: "fog", sand: "sand", heat: "none", snow: "snow", acid: "rain", thunder: "rain", phase: "fog" };
+  for (const w of Object.keys(PAPER_WEATHER)) {
+    await setWeather(page, w);
+    await page.waitForFunction(w => document.getElementById("g-app").dataset.weather === w, w);
+    await settle(page);
+    const oldBefore = await looks(page, OLD);
+    await paperOn(page);
+    // 纸片画面：下拉打开、抽屉拉开、预演框亮着，纸纹贴好
+    await page.evaluate(() => {
+      // 先拉抽屉再开下拉（点到下拉外面会把下拉收起）
+      if (document.getElementById("g-log").classList.contains("gp-collapsed")) document.querySelector("#g-log .gp-drawer-tab").click();
+      if (!document.querySelector("#g-app > .g-top.gp-open")) document.querySelector('#g-paper [data-olp="tools"]').click();
+      const pv = document.getElementById("g-pvbox"); pv.innerHTML = '<h4>斩击 · 预演</h4><div class="ln">消耗 1 行动点</div><div class="ln key">→ 狂徒：12 伤害</div>'; pv.classList.add("live");
+    });
+    await page.waitForFunction(() => !!document.querySelector("#g-app > .g-top.gp-open[data-olp-tex]") && !!document.querySelector("#g-log[data-olp-tex]") && !!document.querySelector("#g-app > .g-hud[data-olp-tex]"));
+    await settle(page);
+    const withWeather = await looks(page, PAPER_PARTS);
+    assert.equal(await page.evaluate(() => document.body.dataset.olpWeather), PAPER_WEATHER[w], "纸片自己的天气色调照旧：" + w);
+    // 同一个纸片画面（纸片的天气色调不变），只是旧皮肤的天气规则套不上（拿掉 #g-app 的 data-weather）：应该一模一样
+    await page.evaluate(() => { const a = document.getElementById("g-app"); a.dataset.keepWeather = a.dataset.weather; delete a.dataset.weather; });
+    await settle(page);
+    const without = await looks(page, PAPER_PARTS);
+    assert.equal(await page.evaluate(() => document.body.dataset.olpWeather), PAPER_WEATHER[w], "拿掉 data-weather 也不换纸片自己的色调");
+    await page.evaluate(() => { const a = document.getElementById("g-app"); a.dataset.weather = a.dataset.keepWeather; delete a.dataset.keepWeather; });
+    assert.deepEqual(diffOf(withWeather, without), [], `天气「${w}」时旧皮肤的天气样式串进了纸片画面`);
+    // 回到旧画面：纸片的配色变量、天气标记都拿掉，旧皮肤的天气样子和进纸片画面之前一模一样
+    await page.evaluate(() => { document.getElementById("g-pvbox").classList.remove("live"); HD2DField.switchTo("old"); });
+    await page.waitForFunction(() => !document.body.classList.contains("g-paper"));
+    await settle(page);
+    const left = await page.evaluate(() => ({ vars: [...document.body.style].filter(p => p.startsWith("--olp")), time: document.body.dataset.olpTime || null, weather: document.body.dataset.olpWeather || null }));
+    assert.deepEqual(left, { vars: [], time: null, weather: null }, "纸片的配色留在了旧画面上：" + w);
+    assert.deepEqual(diffOf(await looks(page, OLD), oldBefore), [], `天气「${w}」：开 / 关纸片画面以后旧皮肤的样子变了`);
+  }
+  assert.deepEqual(o.errors, []);
+});

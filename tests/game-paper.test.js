@@ -113,7 +113,11 @@ test("联机和单机共用 paper-ui.js 那一份：配色、纸纹、收据是�
   const solo = GP.PAPER.text && UI.make(GP.GPAPER).topHtml({ title: "单局", sub: "遭遇 外城区巷战", turnText: "准备中", phase: { text: "敌人行动", enemy: true }, weather: "沙暴", night: true });
   assert.match(solo, /<span class="olp-title">单局<\/span><span class="olp-meta olp-sub">遭遇 外城区巷战<\/span><span class="olp-meta olp-turn">准备中<\/span><span class="olp-meta olp-phase enemy">敌人行动<\/span><span class="olp-meta olp-weather">夜 · 沙暴<\/span>/);
   assert.match(solo, /aria-controls="g-paper-tools"/, "「工具」按钮指着旧顶栏变的下拉");
+  // 战斗记录抽屉顶上的收据头：字和联机的收据同一份（BASE.receipt）
+  assert.equal(GP.GPAPER.receipt.brand, UI.BASE.receipt.brand);
+  assert.equal(GP.receiptHead("单局"), `<b>BACKFIRE</b><span>战斗记录 · 单局</span><i aria-hidden="true">${UI.BASE.receipt.rule}</i>`);
+  assert.equal(GP.receiptHead("<b>"), `<b>BACKFIRE</b><span>战斗记录 · &lt;b&gt;</span><i aria-hidden="true">${UI.BASE.receipt.rule}</i>`, "转义");
   // 新加的 HTML 里没有坚毅生命
-  const all = solo + OP.tagsHtml(GP.soloSlots([{ id: "a", name: "瑞比" }], { acting: true })) + UI.make(GP.GPAPER).shellHtml({ tools: false });
+  const all = solo + GP.receiptHead("单局") + OP.tagsHtml(GP.soloSlots([{ id: "a", name: "瑞比" }], { acting: true })) + UI.make(GP.GPAPER).shellHtml({ tools: false });
   assert.doesNotMatch(all, /shp|坚毅/);
 });
