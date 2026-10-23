@@ -367,6 +367,53 @@ test("新加的 DOM（胶带、吊牌、「工具 ▾」、抽屉的竖标签、
   assert.deepEqual(o.errors, []);
 });
 
+/* ---------- 第 4 步：3D 白卡让开浮在战场上的面板 ---------- */
+/** 新画面这一刻排好的远景（假场景记下的布局，hd2d-layout.js / hd2d-camera.js 是真的）：每张卡（抬高以后的屏幕矩形）压在哪些面板底下、出没出画面。
+ *  only = 只看这几块面板（拉开抽屉时三个区可能少让一点上下：只看左右的队伍、抽屉） */
+const cardsUnder = (page, only) => page.evaluate((only) => {
+  const st = document.querySelector("#g-field > .hd2d-field").getBoundingClientRect(), lay = window.__scene.layout;
+  const sel = { 胶带: "#g-paper .olp-top", 吊牌: "#g-paper .olp-tags", 队伍: "#g-app > .g-hud .hd2d-party", 技能栏: "#g-app > .g-hud", 抽屉: "#g-log" };
+  const ps = Object.entries(sel).filter(([k]) => !only || only.includes(k)).map(([k, s]) => [k, document.querySelector(s).getBoundingClientRect()]);
+  const out = [];
+  lay.units.forEach(u => {
+    const x0 = st.left + u.rect.x0, x1 = st.left + u.rect.x1, y0 = st.top + u.rect.y0, y1 = st.top + u.rect.y1;
+    ps.forEach(([k, r]) => { if (r.width > 0 && x0 < r.right - 0.5 && r.left < x1 - 0.5 && y0 < r.bottom - 0.5 && r.top < y1 - 0.5) out.push(`${u.id} 压在${k}底下`); });
+    if (x0 < -1 || y0 < -1 || x1 > innerWidth + 1 || y1 > innerHeight + 1) out.push(`${u.id} 出了画面`);
+  });
+  return { out, n: lay.units.length, view: lay.view };
+}, only || null);
+
+test("3D 白卡让开浮在战场上的面板（第 4 步）：几种窗口大小下，远景排好的卡不压在胶带、吊牌、左上角的队伍、底下的技能栏、右边的抽屉底下（窗口矮、技能栏高时上下少让一点，左右照让、卡不出画面）；拉开抽屉、收起队伍跟着重排", { timeout: 150000 }, async t => {
+  for (const [w, h] of [[1440, 900], [1920, 1080], [1366, 768]]) {
+    const o = await soloPage(t, { context: { viewport: { width: w, height: h } } }); if (!o) return; const { page } = o;
+    // 纸片画面量好面板交给新画面（hd2d-field.js · cover），新画面按让出来的那一块重排
+    await page.waitForFunction(() => window.__scene && window.__scene.layout && window.__scene.layout.view.left > 0 && window.__scene.layout.view.right > 0);
+    await settle(page);
+    let r = await cardsUnder(page, h >= 900 ? null : ["队伍", "抽屉"]);
+    assert.ok(r.n >= 7, "卡都排了：" + r.n);
+    assert.deepEqual(r.out, [], `${w}×${h} · 抽屉收着：` + JSON.stringify(r.view));
+    // 拉开抽屉：右边让得更多，卡不压在抽屉底下
+    const right = r.view.right;
+    await page.click("#g-log .gp-drawer-tab");
+    await page.waitForFunction(x => window.__scene.layout.view.right > x + 100, right);
+    await settle(page);
+    r = await cardsUnder(page, ["队伍", "抽屉"]);
+    assert.deepEqual(r.out, [], `${w}×${h} · 抽屉拉开：` + JSON.stringify(r.view));
+    await page.click("#g-log .gp-drawer-tab");
+    await page.waitForFunction(x => window.__scene.layout.view.right <= x, right);
+    // 收起队伍（只剩一列头像）：左边少让，卡还是不压在它底下
+    const left = (await cardsUnder(page)).view.left;
+    await page.click("#g-app > .g-hud .hd2d-party .hd2d-toggle");
+    await page.waitForFunction(x => window.__scene.layout.view.left < x - 60, left);
+    await settle(page);
+    r = await cardsUnder(page, h >= 900 ? null : ["队伍", "抽屉"]);
+    assert.deepEqual(r.out, [], `${w}×${h} · 队伍收起：` + JSON.stringify(r.view));
+    await page.click("#g-app > .g-hud .hd2d-party .hd2d-toggle");
+    await shot(page, `solo-paper-cover-${w}x${h}`);
+    assert.deepEqual(o.errors, []);
+  }
+});
+
 /* ---------- 第 3 步：收据、选目标的按钮条、天气换色不串 ---------- */
 /** 战斗记录里塞几条和 game.js（pushLogCard / addLogPhase）画的一样的记录；技能栏里摆一条和 game.js · showPickBar 一样的选目标按钮条 */
 const fakeLog = page => page.evaluate(() => {

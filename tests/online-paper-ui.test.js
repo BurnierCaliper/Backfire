@@ -107,6 +107,7 @@ async function paperPage(t, opt) {
       const handle = { on: () => !!built, view() { place(); }, actor() {}, marks() {}, play: () => null, skip() {} };
       const F = {
         tier: 0, packetView: () => null,
+        covers: [], cover(rects) { F.covers.push(rects ? JSON.parse(JSON.stringify(rects)) : null); },   // #339：纸片画面交来的浮着的面板（记下来）
         attach(s) { if (spec === s) return handle; spec = s; place(); build(); return handle; },
         detach(s) { teardown(); spec = null; return true; },
         switchTo(to) { want = to === "new"; localStorage.setItem("backfire-hd2d-field", want ? "on" : "off"); paintToggle(); if (want) build(); else { teardown(); if (spec) spec.refresh(); } return true; }
@@ -859,6 +860,30 @@ test("电脑上不变（#311）：技能栏照旧默认展开、不跟着轮次�
   assert.equal(await page.isVisible(".hd2d-party .pm .meta"), true, "队伍栏有名字");
   assert.deepEqual(await page.locator(".hd2d-party .olp-party-tools [data-online]").evaluateAll(els => els.map(e => e.dataset.info)), ["sheet", "armory", "bag"]);
   assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null);
+  assert.deepEqual(o.errors, []);
+});
+
+test("3D 白卡让开浮在战场上的面板（#339 第 4 步）：纸片画面把顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉量好交给新画面（HD2DField.cover）；收起队伍、拉开抽屉跟着再交；离开纸片画面交 null", { timeout: 60000 }, async t => {
+  const o = await paperPage(t); if (!o) return; const { page } = o;
+  await asPlayer(page);
+  await page.waitForFunction(() => document.body.classList.contains("ol-paper") && HD2DField.covers.some(c => c && c.length === 5));
+  await settle(page);
+  const last = () => page.evaluate(() => HD2DField.covers[HD2DField.covers.length - 1]);
+  const measured = () => page.evaluate(() => ["#online-paper .olp-top", "#online-paper .olp-tags", ".ol-battle > .g-hud.hd2d-shell > .hd2d-party", ".ol-battle > .g-hud.hd2d-shell", "#online-side"]
+    .map(s => { const r = document.querySelector(s).getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) }; }));
+  assert.deepEqual(await last(), await measured(), "交的就是这五块现在的矩形（配置在 OnlinePaper.PAPER.cover）");
+  // 收起队伍（只剩一列头像）：再交一次，队伍那块窄了
+  const party = (await last())[2];
+  await page.click(".ol-battle > .g-hud.hd2d-shell > .hd2d-party .hd2d-toggle");
+  await page.waitForFunction(w => { const c = HD2DField.covers[HD2DField.covers.length - 1]; return !!c && c[2].right - c[2].left < w - 60; }, party.right - party.left);
+  // 拉开抽屉：右边那块宽了
+  await page.click("#online-side .ol-side-collapse");
+  await page.waitForFunction(() => { const c = HD2DField.covers[HD2DField.covers.length - 1]; return !!c && c[4].right - c[4].left > 200; });
+  await settle(page);
+  assert.deepEqual(await last(), await measured());
+  // 关掉新画面（离开纸片画面）：交 null，新画面不再让
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("ol-paper") && HD2DField.covers[HD2DField.covers.length - 1] === null);
   assert.deepEqual(o.errors, []);
 });
 

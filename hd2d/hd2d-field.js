@@ -39,7 +39,9 @@
  *   卡片动画（#330，旧画面单位卡有的动画 3D 白卡也有）：cards() → hd2d-play.js · HD2DPlay.cards（冲撞 / 冲一下 / 后坐 / 挪一下 / 受击 + 击退 / 格挡 / 登场 / 慢动作）；
  *     ko(id, { hold, slow }) / releaseKOs() 被打倒的敌人先留在场上、演完再淡出；warn(id, on) 高能自爆预警（白卡 + 脚下的地台）；quake(力度) 震屏；still() 新画面开着且减少动态效果。
  *     换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相：view 的 animate 一开就演（hd2d-scene.js 按 setBattle 的 move 秒数插值）
- * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js）。数值、文字都在 FIELD。 */
+ *   纸片画面（#339，game-paper.js / online-ui.js 调）：cover(rects) 浮在战场上的面板（视口矩形，paper-ui.js · coverRects；null = 没有），
+ *     取景让开它们（纯函数 coverInsets 算上下左右让多少、fitCover 让不下时少让一点；左右交给布局的 view.left / right，不改场景包）
+ * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js、tests/hd2d-cover.test.js）。数值、文字都在 FIELD。 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-layout.js"));
   else root.HD2DField = factory(root, null);
@@ -73,6 +75,11 @@
     sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
+    // 浮在战场上的面板（#339：纸片画面的顶栏胶带、吊牌、左上角的队伍、底下的技能栏、右边的抽屉；纸片画面量好了交给 cover()）取景时让开：
+    //   gap 面板外面再留多少像素；min 比这还窄 / 还矮的不算；max 一块面板最多让出战场宽 / 高的多少（再多就不让这一块：手机上拉开盖满屏幕的抽屉）；
+    //   room 左右（上下）加起来让完至少还剩战场宽（高）的多少，让太多就按比例缩回来；
+    //   steps 地方不够时上下让几成（照全让排出来有卡被推出画面——窗口小、卡多：卡是固定像素大小的——就往下一级少让一点，左右照让；都不行左右也不让）
+    cover: { gap: 8, min: 12, max: 0.45, room: 0.3, steps: [1, 0.5, 0] },
     drag: 5,
     // 白卡（#316）的快照只带 unit-card.js 画卡要读的这些字段（UnitCard.create / update / headOf），别的一概不带——坚毅生命不在里面
     cardKeys: ["id", "name", "vehicle", "level", "atk", "race", "racePerks", "iv", "isPlayer", "isProp", "isDevice", "neutral", "neutralTags",
@@ -638,7 +645,8 @@
     const hadStage = !!S.stage;
     // 纸片风数字、影子拿掉，attack-fx 的画布复原（旧画面照旧画在没压扁的画布上）
     if (hadStage && root.HD2DPlay) { root.HD2DPlay.clear(); root.HD2DPlay.shadeIn(null); }
-    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = S.viewSnaps = S.cards = S.seen = null;
+    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = S.viewSnaps = S.cards = S.seen = S.base = S.coverIns = null;
+    S.coverLevel = 0;
     S.sizes = new Map();
     S.ko.clear();
     S.pushed = false;
@@ -667,7 +675,11 @@
     // 白卡（#316）：铭牌画旧画面的单位卡——卡片快照（单机：game.js 的快照；联机玩家：收到的包，packetView 里转好的）、量到的卡片大小一起交给布局
     // 被打倒、还没淡完的敌人（#330）先留在布局里
     const kept = lingering(v0, host.cards ? host.cards(v0) : null, !!animate), v = kept.v, cards = kept.cards;
-    S.layout = L.build(v, layoutOpts(v, S.sc.view(), S.sc.portrait, cards ? { cards, sizes: S.sizes } : null));
+    // 取景让开四边的界面（#339：浮着的面板让不下时少让一点，卡不会被推出画面）；场景记着最后用的上下（数字摆位也让开）
+    const more = cards ? { cards, sizes: S.sizes } : null, sv = S.sc.view();
+    const fit = fitCover((view) => L.build(v, layoutOpts(v, view, S.sc.portrait, more)), { width: sv.width, height: sv.height }, S.base, S.coverIns, S.coverLevel);
+    S.layout = fit.layout; S.coverLevel = fit.level;
+    S.sc.setInsets({ top: fit.view.top, bottom: fit.view.bottom });
     // 换了区的铭牌在两个地台之间滑过去（#330，场景按这个秒数插值；跳过 / 减少动态效果 / 不是演出中的刷新 = 0，直接摆过去）
     const move = root.HD2DFx ? root.HD2DFx.moveSecs(clockNow(), { animate: !!animate, reduced: !S.sc.motion }) : 0;
     S.sc.setBattle(S.layout, { weather: v.weather || "none", theme: v.light || "day", actorId: S.actorId, move });
@@ -825,17 +837,85 @@
       tier: cam.tier || S.sc.tier, close: cam.close != null, zone: cam.zone != null ? cam.zone : S.sc.zone, reduced: !S.sc.motion, layout: S.layout
     });
   }
-  /** 取景让开战场上沿的一摞（首领机制横幅 / 援军倒计时，game.js 放在 #g-field 的 .g-topstack 里，照旧露在新画面上面）和下沿的镜头按钮；变了返回 true */
+  /** 取景让开战场上沿的一摞（首领机制横幅 / 援军倒计时，game.js 放在 #g-field 的 .g-topstack 里，照旧露在新画面上面）、下沿的镜头按钮（S.base），
+   *  和浮在战场上的面板（#339，纸片画面交给 cover() 的：S.coverIns；排布局时 fitCover 一起算）；变了返回 true（让不下时从全让重新试） */
   function insets() {
     const field = S.stage && S.stage.parentNode;
     const top = field && field.querySelector ? field.querySelector(":scope > .g-topstack") : null;
     const t = top && top.offsetHeight > 0 ? top.offsetTop + top.offsetHeight + FIELD.pad : 0;
     const b = S.cam && S.cam.bar ? S.cam.bar.offsetHeight + 2 * FIELD.pad : 0;
-    S.sc.setInsets({ top: t, bottom: b });
-    const key = t + "|" + b;
+    const c = coverInsets({ width: S.stage.clientWidth, height: S.stage.clientHeight }, coverOnStage());
+    S.base = { top: t, bottom: b }; S.coverIns = c;
+    const key = [t, b, c.top, c.bottom, c.left, c.right, S.stage.clientWidth, S.stage.clientHeight].join("|");
     if (key === S.insetKey) return false;
-    S.insetKey = key;
+    S.insetKey = key; S.coverLevel = 0;
     return true;
+  }
+  /**
+   * 取景让开四边的界面（#339）：base = { top, bottom } 本来就要让的（首领横幅、镜头按钮），cover = coverInsets 算的浮着的面板，
+   * build(view) = 按这个画面（{ width, height, top, bottom, left, right }）排一次布局。先照全让排；排出来有卡被推出画面
+   * （地方太小：卡是固定像素大小的，取景越拉越远、后排越抬越高）就上下少让一点（FIELD.cover.steps，左右照让），都不行左右也不让。
+   * from = 从第几级开始试（上次成了的那一级，同一套让法不用每次从头试）。返回 { layout, view, level }
+   */
+  function fitCover(build, view, base, cover, from) {
+    base = base || {}; cover = cover || {};
+    const levels = FIELD.cover.steps.map(k => ({ k, side: true })).concat([{ k: 0, side: false }]);
+    let out = null, last = "";
+    for (let i = Math.min(Math.max(0, from || 0), levels.length - 1); i < levels.length; i++) {
+      const lv = levels[i], vw = {
+        width: view.width, height: view.height,
+        top: Math.max(base.top || 0, Math.round((cover.top || 0) * lv.k)), bottom: Math.max(base.bottom || 0, Math.round((cover.bottom || 0) * lv.k)),
+        left: lv.side ? cover.left || 0 : 0, right: lv.side ? cover.right || 0 : 0
+      };
+      const key = [vw.top, vw.bottom, vw.left, vw.right].join("|");
+      if (out && key === last) { out.level = i; continue; }   // 和上一级一样（没有浮着的面板）：不用再排
+      last = key;
+      out = { layout: build(vw), view: vw, level: i };
+      if (onScreen(out.layout, vw)) break;
+    }
+    return out;
+  }
+  /** 布局里的卡（远景抬高以后的屏幕矩形）是不是都在画面里 */
+  function onScreen(layout, view) {
+    return ((layout && layout.units) || []).every(u => !u.rect || (u.rect.x0 >= -1 && u.rect.y0 >= -1 && u.rect.x1 <= view.width + 1 && u.rect.y1 <= view.height + 1));
+  }
+  /** 纸片画面交给 cover() 的面板矩形（视口坐标）换成战场里的坐标（战场左上角是 0, 0） */
+  function coverOnStage() {
+    if (!S.cover || !S.stage || typeof S.stage.getBoundingClientRect !== "function") return [];
+    const o = S.stage.getBoundingClientRect();
+    return S.cover.map(r => ({ left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top }));
+  }
+  /**
+   * 浮在战场上的面板要让开多少（#339，纯函数）：view = { width, height } 战场的大小，rects = 面板在战场里的矩形（像素，战场左上角是 0, 0）。
+   * 每块面板从它贴着的那条边让：上下左右里让出去占战场比例最小的那一条（左上角的队伍让左边窄窄一条，比让上面一大截划算；底下的技能栏让下面）；
+   * 在战场外面的、太窄 / 太矮的（< cover.min）不算；一块要让的比 cover.max 还多（手机上拉开盖满屏幕的抽屉）就不让它。
+   * 左右（上下）加起来让完至少留 cover.room，让太多按比例缩回来。返回 { top, bottom, left, right }（像素，都是整数）
+   */
+  function coverInsets(view, rects) {
+    const C = FIELD.cover, W = Math.max(1, Number(view && view.width) || 0), H = Math.max(1, Number(view && view.height) || 0);
+    const out = { top: 0, bottom: 0, left: 0, right: 0 };
+    (rects || []).forEach(r => {
+      if (!r) return;
+      const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top), x1 = Math.min(W, r.right), y1 = Math.min(H, r.bottom);
+      if (!(x1 - x0 >= C.min && y1 - y0 >= C.min)) return;
+      const best = [["left", x1 + C.gap, W], ["right", W - x0 + C.gap, W], ["top", y1 + C.gap, H], ["bottom", H - y0 + C.gap, H]]
+        .map(([side, px, size]) => ({ side, px: Math.ceil(px), share: px / size })).filter(s => s.share <= C.max)
+        .sort((a, b) => a.share - b.share)[0];
+      if (best) out[best.side] = Math.max(out[best.side], best.px);
+    });
+    [["left", "right", W], ["top", "bottom", H]].forEach(([a, b, size]) => {
+      const total = out[a] + out[b], cap = size * (1 - C.room);
+      if (total > cap) { const k = cap / total; out[a] = Math.floor(out[a] * k); out[b] = Math.floor(out[b] * k); }
+    });
+    return out;
+  }
+  /** 浮在战场上的面板（#339：纸片画面量好的视口矩形 [{ left, top, right, bottom }]，paper-ui.js · coverRects；null / 空 = 没有）：
+   *  取景让开它们；让的变了就重排一次（镜头回到这一段的默认位置），没变什么都不做 */
+  function cover(rects) {
+    const list = (rects || []).filter(r => r && [r.left, r.top, r.right, r.bottom].every(Number.isFinite))
+      .map(r => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
+    S.cover = list.length ? list : null;
+    if (S.sc && S.stage && S.stage.clientWidth && insets()) paint(true);
   }
 
   /* ---------- 镜头按钮：远 / 中 / 近、看的那个区；中景 / 近景时两边的换区箭头（键盘左右键也行） ---------- */
@@ -1076,7 +1156,8 @@
   }
 
   const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
-    cards, ko, releaseKOs, warn, quake, still };
+    cards, ko, releaseKOs, warn, quake, still,
+    cover, coverInsets, fitCover };   // #339：3D 白卡让开浮在战场上的面板
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

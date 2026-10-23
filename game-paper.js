@@ -41,6 +41,8 @@
    *   extras       纸片画面的下拉里另加的（#339 要的：单局 / 跑团探索画面顶栏上的「图鉴」「规则」、「战场数据」面板里的「整局数据」，战斗里也能直接点）：
    *                group 排在哪一组的最后、mode 图鉴打开哪一本（bestiary-ui.js · Bestiary.open；不给 = 默认那本），career 打开整局数据（sheet-ui.js · CareerLog），
    *                title 悬停说明（和原来那个按钮的同一句）。离开纸片画面就拿掉
+   *   cover        浮在战场上、3D 白卡要让开的面板（第 4 步：顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉、一台电脑热座的那一条；量好交给 hd2d-field.js · cover）。
+   *                「工具 ▾」下拉、悬停预演只是一下子，不让（不然一开下拉镜头就动）
    *   art.targets  哪些面板贴哪种纸（paper-ui.js · dress） */
   const P = UI.make({
     bodyClass: "g-paper",
@@ -72,6 +74,7 @@
     ],
     // 打开图鉴时按几人队算敌人血量（同单局顶栏：场上的角色数，夹在 2–4 里）
     bestiaryParty: { min: 2, max: 4 },
+    cover: ["#g-paper .olp-top", "#g-paper .olp-tags", ".g-app > .g-hud.hd2d-shell > .hd2d-party", ".g-app > .g-hud.hd2d-shell", ".g-app > .g-log.gp-drawer", "#hotseat-root"],
     art: {
       targets: [
         ["#g-paper .olp-top", "tapebar"], ["#g-paper .olp-tag-card", "tag|tagon"], ["#g-paper .olp-tools-b", "board"], ["#g-paper .olp-menu-b", "boardy"], ["#g-paper .olp-move", "card"],
@@ -147,7 +150,7 @@
 
   /* ---------- 页面 ---------- */
   const env = { doc: null, storage: null, box: null, on: false, toolsOpen: false, swapOpen: null, drawerOpen: false, queued: false, last: {}, theme: null, themeKey: "",
-    watch: null, watched: [], sizer: null, dressQueued: false, added: null, tab: null, rcHead: null, blocker: null };
+    watch: null, watched: [], sizer: null, dressQueued: false, added: null, tab: null, rcHead: null, blocker: null, coverKey: "null" };
   /** 单机画面自己的元素（g- 开头：game.html 的垫片找不到时老实返回 null） */
   const $ = (id) => (env.doc ? env.doc.getElementById(id) : null);
   /** 别的模块的元素（热座栏 #hs-…）：用 querySelector——game.html 的垫片会给找不到的 id 现造一个替身，getElementById 会把替身塞进页面 */
@@ -315,6 +318,7 @@
     if (a) a.querySelectorAll("[data-olp-tex]").forEach(untex);
     watch(false);
     if (env.sizer) env.sizer.disconnect();
+    pushCover();   // 新画面不用再让开纸片的面板
     paintTheme(null);
     setTimeout(() => { if (typeof root.dispatchEvent === "function" && typeof Event === "function") root.dispatchEvent(new Event("resize")); }, 0);
   }
@@ -508,12 +512,25 @@
   function dress() {
     if (!env.on) return;
     P.dress(env.doc, null, env.theme);
+    pushCover();
     // 技能栏现在多高（--olp-dock-h）：右边的抽屉、悬停预演让开它（技能多了换行变高也跟着让）；手机上抽屉的竖标签挂在它上面
     const hud = app() && app().querySelector(":scope > .g-hud"), b = env.doc.body, dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
     if (b.style.getPropertyValue("--olp-dock-h") !== dockH) { if (dockH) b.style.setProperty("--olp-dock-h", dockH); else b.style.removeProperty("--olp-dock-h"); }
     if (typeof ResizeObserver !== "function") return;
     if (!env.sizer) env.sizer = new ResizeObserver(() => dressSoon());
     [env.box.querySelector(".olp-top"), topBar(), app() && app().querySelector(":scope > .g-hud"), app() && app().querySelector(".hd2d-party"), $("g-log")].forEach(n => { if (n) env.sizer.observe(n); });
+  }
+
+  /* ---------- 3D 白卡让开浮在战场上的面板（第 4 步）---------- */
+  /** 量一下浮在战场上的面板（GPAPER.cover）交给新画面（hd2d-field.js · cover：换成战场里的坐标、算上下左右让多少，变了才重排）；
+   *  出纸片画面时交 null（旧画面、新画面关着都不让）。和上次一样就不交 */
+  function pushCover() {
+    const F = root.HD2DField;
+    if (!F || typeof F.cover !== "function") return;
+    const rects = env.on ? P.cover(env.doc) : null, key = JSON.stringify(rects);
+    if (key === env.coverKey) return;
+    env.coverKey = key;
+    F.cover(rects);
   }
 
   const api = { PAPER: GPAPER, GPAPER, active, modeOf, soloSlots, hotseatSlots, receiptHead, boot, sync, isOn: () => env.on };

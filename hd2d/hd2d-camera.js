@@ -160,18 +160,19 @@
     box.maxY = Math.max(...zones.map(i => zoneOf(layout, i).topY));
     return { box, zones };
   }
-  /** 中景 / 近景的镜头：让框住的范围和选中那个区的铭牌（按这一段的大小、抬高）刚好装进上下被界面盖住之后剩下的那一块。
+  /** 中景 / 近景的镜头：让框住的范围和选中那个区的铭牌（按这一段的大小、抬高）刚好装进四边被界面盖住之后剩下的那一块（左右没盖住时和以前一样）。
    *  和布局的 fitView 同一个迭代（先居中，再按超出 / 留空的比例推拉），只是把铭牌也算进去：铭牌是固定像素大小的，镜头推近它不跟着变大。
    *  range = [最近, 最远]（镜头到看的那一点的距离） */
   function frame(layout, win, T, focus, sizeOf, range) {
     const view = layout.view, W = view.width, H = view.height, aspect = W / H;
     const lo = -1 + 2 * view.bottom / H, hi = 1 - 2 * view.top / H;
+    const lx = -1 + 2 * (view.left || 0) / W, hx = 1 - 2 * (view.right || 0) / W;
     const b = win.box, pts = [];
     [b.minX, b.maxX].forEach(x => [0, b.maxY].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
     const mine = layout.units.filter(u => u.zone === focus);
     const t = { x: (b.minX + b.maxX) / 2, y: L.CONFIG.camera.targetY, z: (b.minZ + b.maxZ) / 2 };
     let dist = clamp(layout.camera.dist * 0.5, range[0], range[1]);
-    const camOf = () => Object.assign(L.camAt(t, dist, aspect, T), { width: W, height: H, view: { top: view.top, bottom: view.bottom } });
+    const camOf = () => Object.assign(L.camAt(t, dist, aspect, T), { width: W, height: H, view: { top: view.top, bottom: view.bottom, left: view.left || 0, right: view.right || 0 } });
     for (let it = 0; it < 30; it++) {
       const cam = camOf();
       let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
@@ -181,10 +182,10 @@
         const lifts = L.liftPlates(layout.units, cam, sizeOf, T.maxLift);
         mine.forEach(u => { const r = lifts.get(u.id).rect; add(r.x0 / W * 2 - 1, 1 - r.y1 / H * 2); add(r.x1 / W * 2 - 1, 1 - r.y0 / H * 2); });
       }
-      const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = -(x0 + x1) / 2;
+      const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = (lx + hx) / 2 - (x0 + x1) / 2;
       const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
       t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
-      const k = Math.max((x1 - x0) / (2 * T.margin), (y1 - y0) / ((hi - lo) * T.margin));
+      const k = Math.max((x1 - x0) / ((hx - lx) * T.margin), (y1 - y0) / ((hi - lo) * T.margin));
       dist = clamp(dist * clamp(k, 0.6, 1.6), range[0], range[1]);
     }
     return camOf();
@@ -264,18 +265,22 @@
   }
 
   /* ---------- 特写（#237：近景里双击一个单位）---------- */
-  /** 特写的镜头：距离固定（CAMERA.close.dist），看的那一点从脚下往上 lookY 出发，再上下挪到「脚下 + 放大的铭牌」整块在顶栏和技能栏之间居中 */
+  /** 特写的镜头：距离固定（CAMERA.close.dist），看的那一点从脚下往上 lookY 出发，再挪到「脚下 + 放大的铭牌」整块在四边的界面之间居中
+   *  （上下：顶栏和技能栏之间；左右：#339 纸片画面左上角的队伍、右边的抽屉之间，没盖住时左右不挪，和以前一样） */
   function closeLens(layout, u, size) {
     const T = CAMERA.close, view = layout.view, W = view.width, H = view.height, aspect = W / H;
     const lo = -1 + 2 * view.bottom / H, hi = 1 - 2 * view.top / H;
+    const lx = -1 + 2 * (view.left || 0) / W, hx = 1 - 2 * (view.right || 0) / W;
     const t = { x: u.x, y: u.y + T.lookY, z: u.z };
-    const camOf = () => Object.assign(L.camAt(t, T.dist, aspect, T), { width: W, height: H, view: { top: view.top, bottom: view.bottom } });
+    const camOf = () => Object.assign(L.camAt(t, T.dist, aspect, T), { width: W, height: H, view: { top: view.top, bottom: view.bottom, left: view.left || 0, right: view.right || 0 } });
     for (let it = 0; it < 12; it++) {
       const cam = camOf(), r = L.plateRect(cam, size, u, 0);
       const top = 1 - 2 * r.y0 / H, bottom = 1 - 2 * r.y1 / H;          // 铭牌的上沿、脚下（NDC，y 向上）
+      const left = r.x0 / W * 2 - 1, right = r.x1 / W * 2 - 1;          // 铭牌的左右（NDC）
       const dy = (lo + hi) / 2 - (top + bottom) / 2, mu = -dy * cam.tanHalf * T.dist;
-      if (Math.abs(dy) < 1e-5) break;
-      t.x += cam.up.x * mu; t.y += cam.up.y * mu; t.z += cam.up.z * mu;
+      const dx = (view.left || view.right) ? (lx + hx) / 2 - (left + right) / 2 : 0, mr = -dx * cam.tanHalf * T.dist * aspect;
+      if (Math.abs(dy) < 1e-5 && Math.abs(dx) < 1e-5) break;
+      t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
     }
     return camOf();
   }

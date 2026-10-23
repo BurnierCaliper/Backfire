@@ -32,6 +32,8 @@
    *               技能栏、队伍栏用 hd2d-shell.js 的 SHELL.keys（单机新画面、原型页同一个习惯）
    *   defaults    没记过时开不开：抽屉平时收着（主人：「平时藏在右边」）
    *   text        顶栏、下拉、抽屉上联机自己的字（共用的在 BASE.text）
+   *   cover       浮在战场上、3D 白卡要让开的面板（#339：顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉；online-ui.js 量好交给 hd2d-field.js · cover）。
+   *               「工具 ▾」下拉、舞台上浮着的提示只是一下子，不让（不然一开下拉镜头就动）
    *   art.targets 哪些面板贴哪种纸（online-ui.js 交给 dress）："on" = 当前行动的吊牌换青色那一种 */
   const P = UI.make({
     bodyClass: "ol-paper",
@@ -45,6 +47,7 @@
       menuTitle: "菜单（Esc）：消息与成员、大厅、克制表……",
       drawer: "记录 · 聊天", drawerOpen: "展开战斗记录与小队聊天", drawerClose: "收起战斗记录与小队聊天", logTab: "战斗记录"
     },
+    cover: ["#online-paper .olp-top", "#online-paper .olp-tags", ".ol-battle > .g-hud.hd2d-shell > .hd2d-party", ".ol-battle > .g-hud.hd2d-shell", "#online-side"],
     art: {
       targets: [
         ["#online-paper .olp-top", "tapebar"], ["#online-paper .olp-tools", "kraft"], ["#online-paper .olp-tag-card", "tag|tagon"],

@@ -15,7 +15,8 @@
  *     receiptLine / receiptGroups / noteColor                       收据、便利贴
  *   页面：
  *     readMoves(root) / pressMove(root, index, n)   热座栏里每一格现在的按钮 / 点原来那一个
- *     readCam(root) / pressCam(root, i)             新画面的镜头按钮（远 / 中 / 近）现在哪个亮着 / 点第 i 个 */
+ *     readCam(root) / pressCam(root, i)             新画面的镜头按钮（远 / 中 / 近）现在哪个亮着 / 点第 i 个
+ *     coverRects(doc, selectors) / make(…).cover(doc)   浮在战场上、3D 白卡要让开的面板这一刻的矩形（#339；交给 hd2d-field.js · cover） */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root);
   else root.PaperUI = factory(root);
@@ -430,6 +431,19 @@
     return true;
   }
 
+  /* ---------- 3D 白卡让开浮在战场上的面板（#339 第 4 步）---------- */
+  /** 浮在战场上、取景要让开的面板这一刻在视口里的矩形：selectors = 这一家配置里的 cover（顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉……）；
+   *  藏着的、没大小的不算。返回 [{ left, top, right, bottom }]（视口坐标，和 getBoundingClientRect 一样；交给 hd2d-field.js · cover 换成战场里的坐标、算让多少） */
+  function coverRects(doc, selectors) {
+    const out = [];
+    if (!doc || typeof doc.querySelectorAll !== "function") return out;
+    (selectors || []).forEach(sel => doc.querySelectorAll(sel).forEach(el => {
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) out.push({ left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) });
+    }));
+    return out;
+  }
+
   /* ---------- 一份界面（联机 / 单机各拿自己的配置）---------- */
   /**
    * cfg = { bodyClass 这一家在 body 上另加的类, keys / defaults 本机记住收起 / 展开的键和没记过时的默认, text 这一家的字（标题、按钮说明……，盖在 BASE.text 上）,
@@ -545,11 +559,13 @@
 
     /** 给这一家的面板贴纸纹：targets 不给 = 这一家配置里的 art.targets */
     function dress(doc, targets, theme) { return dressWith(doc, targets || P.art.targets, theme); }
+    /** 这一家浮在战场上、3D 白卡要让开的面板（配置里的 cover）这一刻的矩形 */
+    function cover(doc) { return coverRects(doc, P.cover); }
 
-    return Object.assign({}, SHARED, { PAPER: P, isOpen, setOpen, shellHtml, topHtml, tagsHtml, receiptHtml, dress });
+    return Object.assign({}, SHARED, { PAPER: P, isOpen, setOpen, shellHtml, topHtml, tagsHtml, receiptHtml, dress, cover });
   }
 
   const SHARED = { dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, texture, grit, toolsHtml,
-    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam };
+    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, coverRects };
   return Object.assign({ BASE, make, dress: dressWith, readOpen, writeOpen }, SHARED);
 });
