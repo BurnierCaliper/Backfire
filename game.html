@@ -25,6 +25,8 @@
   <!-- 新画面（HD-2D 战场，#261）：战场顶栏的开关开着才用到。样式的类名都是 hd2d- / pl- 开头，关着时一条都套不上；
        场景和 three.js 打成了一个普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），开了以后 hd2d/hd2d-field.js 才加载，直接双击打开也能用 -->
   <link rel="stylesheet" href="hd2d/hd2d.css" />
+  <!-- 联机玩家战斗画面的纸片风界面（#308，online-paper.js）：联机玩家开着新画面时 body 上才有 .ol-paper，样式都挂在它下面，别的画面一条都套不上 -->
+  <link rel="stylesheet" href="online-paper.css" />
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -969,6 +971,8 @@ window.GAME_MODE = true;
 <script src="online-battle.js"></script>
 <script src="check-request-ui.js"></script>
 <script src="lore-ui.js"></script>
+<script src="online-paper.js"></script>
+<script src="online-sfx.js"></script>
 <script src="online-ui.js"></script>
 <script src="levelup-ui.js"></script>
 <script src="commands-debug.js"></script>

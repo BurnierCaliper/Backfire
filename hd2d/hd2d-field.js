@@ -816,14 +816,15 @@
   }
   /** 联机玩家收到一个行动包（#289）：整包交给 hd2d-play.js 播（原型页按联机包播的同一份）——出手 / 弹道 / 打中照 attack-fx、受击粒子照 hit-fx，
    *  位置问 3D 铭牌（适配器）；纸片风数字、纸片感、推镜头，演出倍率、跳过跟着 host.clock。只读投影过的包。
-   *  o.before = 出招前画面用的那一份（比一比谁被击倒）、o.bigHit 大伤害加 !!、o.onImpact = 第一下打中时画面换成包里的 state。没开返回 null */
+   *  o.before = 出招前画面用的那一份（比一比谁被击倒）、o.bigHit 大伤害加 !!、o.onImpact = 第一下打中时画面换成包里的 state、
+   *  o.sound(kind, i) = 该响音效的那一刻（online-sfx.js，#304：出手 strike / 第 i 段打中 wave / 格挡 parry / 演完 end）。没开返回 null */
   function play(packet, o) {
     const PL = root.HD2DPlay;
     if (!S.sc || !S.ad || !PL || typeof PL.play !== "function" || !packet) return null;
     o = o || {};
     if (PL.busy) PL.skip();          // 上一个包还在播：立刻结束（和旧画面收到新包时一样不叠着播）
     return PL.play(packet, S.ad, {
-      before: o.before || null, bigHit: o.bigHit || null, onImpact: o.onImpact,
+      before: o.before || null, bigHit: o.bigHit || null, onImpact: o.onImpact, sound: o.sound || null,
       view: () => (S.sc && S.stage ? fxView() : { width: 0, height: 0, top: 0 }), camera: S.push, lens: () => (S.sc ? S.sc.lensNow() : null)
     });
   }

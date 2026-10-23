@@ -10,7 +10,7 @@
  *
  *   纯函数（Node 里能 require，tests/hd2d-shell.test.js）：
  *     SHELL                                     配置：本机记住收起 / 展开的键、按钮上的字、手机多宽、面板上的字
- *     isOpen(name, storage, dflt) / setOpen(name, open, storage) / labelOf(name, open)
+ *     saved(name, storage) / isOpen(name, storage, dflt) / setOpen(name, open, storage) / labelOf(name, open)
  *     looks(cards, eleByCn) / lookOf(u)         头像要的公开资料（hd2d-ui.js · heroLooks，按 kit 查；武器人没有自己的就用主人的）
  *     effectElements(list)                      图鉴里带属性的效果（技能按钮的属性角标要）
  *     skillButton(row, i, unit, o)              正式画面的一个技能按钮换成新样子：{ cls, html, label }
@@ -22,7 +22,8 @@
  *   页面：
  *     wirePanel(panel, btn, o)                  一块面板的收起 / 展开（原型页的技能栏 / 队伍栏 / 日志、正式画面的技能栏 / 队伍栏）
  *     attach(hud, o) / detach(hud) / on(hud)    正式画面底下的 .g-hud 换上 / 拆掉新外壳（hd2d-field.js 建好 / 拆掉新画面时调）
- *     who(hud, html)                            写技能栏上面那一行 */
+ *     who(hud, html)                            写技能栏上面那一行
+ *     manual(hud, name) / setPanel(hud, name, open)   手动点过没有 / 页面自己收起、展开一块（不记；联机纸片画面的手机上轮到你时展开技能栏，#311） */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-ui.js"));
   else root.HD2DShell = factory(root, null);
@@ -49,6 +50,14 @@
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   /* ---------- 收起 / 展开（读写 localStorage 都包 try/catch）---------- */
+  /** 本机记着的（手动点过「技能 ▼ / ▲」「队伍 ◀ / ▶」才记）："open" / "closed"；没记过、记了认不得的、读不了（隐私模式、被禁用）：null */
+  function saved(name, storage) {
+    try {
+      const k = SHELL.keys[name];
+      const v = storage && k ? storage.getItem(k) : null;
+      return v === "open" || v === "closed" ? v : null;
+    } catch (e) { return null; }
+  }
   /** 本机记着的：name = "dock" / "party"；没记过、记了认不得的、读不了（隐私模式、被禁用）都按 dflt */
   function isOpen(name, storage, dflt) {
     try {
@@ -256,10 +265,28 @@
       panel.appendChild(party);
     }
     hud.appendChild(panel);
-    Object.assign(st, { row, who, panel });
+    Object.assign(st, { row, who, panel, storage });
     hud[STATE] = st;
-    wirePanel(hud, dockBtn, { name: "dock", storage, open: !phone, cls: "dock-closed" });
-    wirePanel(panel, partyBtn, { name: "party", storage, open: !phone });
+    // 两块面板：页面自己收起 / 展开用（setPanel，不记）；clicked = 这次挂上以后手动点过（存不了的时候也算手动选过）
+    st.panels = {
+      dock: { set: wirePanel(hud, dockBtn, { name: "dock", storage, open: !phone, cls: "dock-closed" }), target: hud, cls: "dock-closed", clicked: false },
+      party: { set: wirePanel(panel, partyBtn, { name: "party", storage, open: !phone }), target: panel, cls: "collapsed", clicked: false }
+    };
+    dockBtn.addEventListener("click", () => { st.panels.dock.clicked = true; });
+    partyBtn.addEventListener("click", () => { st.panels.party.clicked = true; });
+    return true;
+  }
+  /** 这一块（"dock" / "party"）手动点过没有：本机记着的，或者这次挂上以后点过（存不了的时候也算）。没换上新外壳：false */
+  function manual(hud, name) {
+    const st = hud && hud[STATE], p = st && st.panels && st.panels[name];
+    return !!(p && (p.clicked || saved(name, st.storage)));
+  }
+  /** 页面自己收起 / 展开一块（联机纸片画面的手机上：轮到你时展开技能栏，online-ui.js）：不记在本机，和现在一样就不动。没换上新外壳：返回 false */
+  function setPanel(hud, name, open) {
+    const st = hud && hud[STATE], p = st && st.panels && st.panels[name];
+    if (!p) return false;
+    if (p.target.classList.contains(p.cls) === !open) return true;
+    p.set(!!open);
     return true;
   }
   /** 拆掉新外壳：队伍栏放回原来的位置，加的那一行、那块面板拿掉，加的类去掉——旧画面的 .g-hud 和换上之前一模一样。没换上过：返回 false */
@@ -288,7 +315,7 @@
   }
 
   return {
-    SHELL, isOpen, setOpen, labelOf, phoneNow, wirePanel, looks, lookOf, effectElements,
-    skillButton, summonButton, pickSummon, hintsOf, member, whoHtml, attach, detach, on, who
+    SHELL, saved, isOpen, setOpen, labelOf, phoneNow, wirePanel, looks, lookOf, effectElements,
+    skillButton, summonButton, pickSummon, hintsOf, member, whoHtml, attach, detach, on, who, manual, setPanel
   };
 });

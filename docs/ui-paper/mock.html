@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>纸片界面样稿</title>
+<!-- 联机战斗画面「纸片风」界面的设计样稿（主人 10/22 定稿）。只是样稿：直接用浏览器打开，网址加 ?s=day / night / collapsed 看三种状态。
+     纸的褶皱、撕边、胶带、收据、便利贴都是这里的 JS 程序画的（crumple / rough / zig / grit），正式实现可以照这个思路做。 -->
+<link rel="stylesheet" href="../../fonts/fonts.css">
+<style>
+:root { --canvas: #ece0c6; --ink: #0b0806; }
+body { margin: 0; width: 1440px; height: 944px; overflow: hidden; background: #111; font-family: "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif; position: relative; }
+body[data-t="day"]   { --kraft: #c8a46e; --kraft-ink: #2a1b0c; --paper: #f3ecdc; --paper-ink: #1d160e; --card: #fbf7ee; --muted: #6e5c44; --tape: rgba(232,214,166,.93); --pen: #1f2a5c; --hl: rgba(255,226,64,.55); }
+body[data-t="night"] { --kraft: #3a2d20; --kraft-ink: #efe4cf; --paper: #1d1c21; --paper-ink: #eae4d6; --card: #26252b; --muted: #a59c8a; --tape: rgba(160,150,120,.85); --pen: #cfe3ff; --hl: rgba(255,226,64,.35); }
+.bg { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; background-size: cover; }
+.wrap { position: absolute; filter: drop-shadow(2px 5px 4px rgba(0,0,0,.5)) drop-shadow(0 1px 0 rgba(0,0,0,.25)); }
+.sheet { position: relative; background-size: cover; }
+.zc { font-family: "ZCOOL QingKe HuangYou", sans-serif; letter-spacing: .5px; }
+.bo { font-family: "Black Ops One", sans-serif; }
+.pm { font-family: "Permanent Marker", "ZCOOL QingKe HuangYou", sans-serif; }
+.hand { font-family: "Zhi Mang Xing", "ZCOOL QingKe HuangYou", sans-serif; }
+.tape { position: absolute; width: 74px; height: 24px; background: var(--tape); opacity: .92; z-index: 5; }
+.staple { position: absolute; width: 22px; height: 4px; border-radius: 2px; background: linear-gradient(#e6e6e6, #8d8d8d); box-shadow: 0 1px 1px rgba(0,0,0,.5); z-index: 5; }
+.face { display: grid; place-items: center; border: 2px solid var(--ink); border-radius: 7px; box-shadow: 0 0 0 2px var(--canvas), 1px 2px 2px rgba(0,0,0,.35); }
+.face svg { width: 74%; height: 74%; }
+.stk { display: block; overflow: visible; }
+.stk .rim * { fill: none; stroke: var(--canvas); stroke-width: 9; stroke-linejoin: round; stroke-linecap: round; }
+.stk .rim .thin { stroke-width: 7; } .stk .rim .bold { stroke-width: 10.5; } .stk .rim .solid { fill: var(--canvas); }
+.stk .ink * { fill: none; stroke: var(--ink); stroke-width: 4.2; stroke-linejoin: round; stroke-linecap: round; }
+.stk .ink .thin { stroke-width: 2.8; } .stk .ink .bold { stroke-width: 5.6; } .stk .ink .solid { fill: var(--ink); stroke-width: 1.5; }
+.stk .rim .frag { stroke-width: 3.4; } .stk .ink .frag { stroke-width: .8; }
+.stk .rim .ghost { stroke-width: 5; } .stk .ink .ghost { stroke-width: 1.8; stroke-dasharray: 2.2 2.6; }
+.stk .rim .hole, .stk .rim .cut { stroke: none; fill: none; } .stk .ink .hole { fill: var(--canvas); stroke: none; } .stk .ink .cut { stroke: var(--canvas); stroke-width: 2.4; }
+/* 印章：红墨、斑驳 */
+.stamp { display: inline-block; color: #c8281e; border: 2.5px solid #c8281e; background: rgba(200,40,30,.06); border-radius: 4px; padding: 0 6px; font-weight: 900; transform: rotate(-8deg); -webkit-mask-image: var(--grit); mask-image: var(--grit); mask-size: 120px; }
+/* 顶栏：一长条美纹纸胶带 */
+#topbar > .sheet { width: 1416px; height: 46px; display: flex; align-items: center; gap: 16px; padding: 0 22px; box-sizing: border-box; color: #2a1d0c; }
+#topbar > .sheet > * { flex-shrink: 0; white-space: nowrap; }
+#topbar .t1 { font-size: 22px; }
+#topbar .meta { font-size: 18px; } #topbar .meta b { font-family: "Permanent Marker", sans-serif; font-weight: 400; font-size: 20px; }
+#topbar .right { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+.chipc { font-size: 15px; padding: 3px 10px; color: #f6efe1; }
+.cam span { display: inline-block; width: 28px; text-align: center; font-size: 17px; color: #2a1d0c; }
+.cam span.on { background: var(--hl); border-radius: 3px; }
+/* 行动顺序：挂在胶带下面的小吊牌 */
+.tags { position: absolute; left: 540px; top: 44px; display: flex; gap: 14px; z-index: 3; }
+.tagw { position: relative; }
+.tagw::before { content: ""; position: absolute; left: 50%; top: -12px; width: 1.5px; height: 16px; background: #3b2a16; }
+.tag .sheet { width: 112px; height: 40px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 18px; box-sizing: border-box; color: var(--kraft-ink); }
+.tag .hole { position: absolute; left: 6px; top: 50%; width: 7px; height: 7px; margin-top: -4px; border-radius: 50%; background: rgba(0,0,0,.55); box-shadow: inset 0 1px 1px rgba(0,0,0,.6); }
+.tag .face { width: 22px; height: 22px; border-width: 1.5px; border-radius: 5px; }
+.tag .nm { font-size: 15px; line-height: 1; } .tag .nm small { display: block; font-size: 10px; color: var(--muted); font-family: sans-serif; }
+.tag.on .sheet { outline: none; } .tag.on .nm { color: #08332c; }
+.tag .sw { margin-left: auto; font-size: 13px; opacity: .75; }
+/* 队伍：一叠用回形针夹着的人员卡 */
+#party > .sheet:not(.mini) { width: 236px; padding: 14px 12px 12px; box-sizing: border-box; color: var(--kraft-ink); }
+#party h3 { margin: 0 0 8px; font-size: 22px; font-weight: 400; display: flex; align-items: center; gap: 8px; }
+#party h3 small { font-size: 13px; color: var(--muted); font-family: sans-serif; }
+.clip { position: absolute; left: 196px; top: -16px; width: 18px; height: 46px; border: 3px solid #9aa0a6; border-radius: 9px; z-index: 6; box-shadow: 1px 1px 1px rgba(0,0,0,.4); }
+.clip::after { content: ""; position: absolute; left: 3px; top: 8px; width: 6px; height: 26px; border: 2.5px solid #b9bec3; border-radius: 6px; }
+.icard { position: relative; margin: 0 0 5px; }
+.icard .sheet { display: grid; grid-template-columns: 34px 1fr auto; gap: 1px 8px; align-items: center; padding: 5px 9px 6px; color: var(--paper-ink); }
+.icard .face { width: 30px; height: 30px; grid-row: span 2; transform: rotate(-4deg); }
+.icard .nm { font-size: 17px; line-height: 1.1; }
+.icard .nm i { font-family: "Permanent Marker", sans-serif; font-style: normal; font-size: 12px; color: var(--muted); margin-left: 3px; }
+.icard .you { grid-row: span 2; font-size: 13px; padding: 0 4px; }
+.hp { position: relative; height: 8px; }
+.hp i { position: absolute; left: 0; top: 0; height: 8px; background: #d43d33; border-radius: 4px 2px 5px 3px; transform: skewX(-12deg); opacity: .88; }
+.hp::before { content: ""; position: absolute; inset: 3px 0; border-bottom: 1.5px dashed rgba(0,0,0,.25); }
+.icard.on .sheet::after { content: ""; position: absolute; inset: -4px; border: 3px solid #e2b320; border-radius: 40% 8% 30% 10% / 10% 30% 8% 40%; transform: rotate(-1deg); pointer-events: none; }
+.pbtns { display: flex; gap: 5px; margin-top: 8px; } .pbtns .sheet { font-size: 13px; padding: 4px 7px; }
+.lbl .sheet { padding: 4px 9px; font-size: 15px; color: var(--paper-ink); }
+/* 战斗记录：一长条热敏收据 */
+#log > .sheet { width: 330px; height: 560px; padding: 26px 20px 30px; box-sizing: border-box; font-family: "WenQuanYi Zen Hei Mono", monospace; font-size: 13.5px; line-height: 1.55; color: #26231d; }
+body[data-t="night"] #log .sheet { color: #26231d; }
+.rc-h { text-align: center; } .rc-h b { font-size: 17px; letter-spacing: 3px; } .rc-h div { color: #777; font-size: 12px; }
+.rc-sep { text-align: center; color: #888; letter-spacing: 1px; margin: 6px 0; overflow: hidden; white-space: nowrap; }
+.rc-r { padding: 5px 0; border-bottom: 1px dashed #b7b1a3; }
+.rc-r b { font-weight: 900; } .rc-r .n { float: right; font-weight: 900; } .rc-r small { color: #7b746a; display: block; }
+.idx { position: absolute; top: -30px; height: 34px; z-index: -1; }
+.idx .sheet { padding: 6px 14px 10px; font-size: 18px; color: var(--kraft-ink); }
+.idx.on .sheet { color: #2a1b0c; }
+/* 聊天：便利贴 */
+#chat > .sheet { width: 340px; height: 560px; padding: 22px 18px; box-sizing: border-box; color: var(--paper-ink); }
+.note { position: relative; margin: 0 0 14px; width: 250px; }
+.note.me { margin-left: auto; }
+.note .sheet { padding: 8px 12px 10px; color: #222; }
+.note .who { font-family: "ZCOOL QingKe HuangYou", sans-serif; font-size: 14px; opacity: .75; }
+.note .t { font-family: "Noto Sans CJK SC", "WenQuanYi Zen Hei", sans-serif; font-size: 16px; font-weight: 600; line-height: 1.45; color: #1a1712; }
+.chat-in { position: absolute; left: 18px; right: 18px; bottom: 16px; border-bottom: 2px solid var(--paper-ink); padding: 6px 2px; font-size: 18px; color: var(--muted); display: flex; justify-content: space-between; }
+/* 技能栏：撕下来的一长条牛皮纸 */
+#dock > .sheet { width: 960px; padding: 18px 18px 14px; box-sizing: border-box; color: var(--kraft-ink); }
+#dock .row { display: flex; align-items: center; gap: 12px; }
+#dock .who { font-size: 24px; } #dock .who small { font-family: sans-serif; font-size: 13px; color: var(--muted); margin-left: 6px; }
+#dock .turn { margin-left: auto; font-size: 18px; }
+.hud { display: flex; gap: 14px; margin-top: 10px; align-items: stretch; }
+.gauge { width: 150px; }
+.gauge .sheet { height: 100%; padding: 9px 10px; box-sizing: border-box; text-align: center; color: #e9f3ef; font-size: 12px; }
+.gauge .pips { display: flex; gap: 4px; justify-content: center; margin: 2px 0 7px; }
+.gauge .pips i { width: 10px; height: 22px; background: #44dbf2; border-radius: 1px; box-shadow: 0 0 6px rgba(68,219,242,.6); } .gauge .pips i.o { background: #2f3b40; box-shadow: none; }
+.gauge b { font-family: "Black Ops One", sans-serif; font-size: 22px; font-weight: 400; }
+.sks { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 14px; }
+.tk { position: relative; }
+.tk .sheet { height: 52px; padding: 6px 12px 6px 26px; box-sizing: border-box; color: #2a1b0c; }
+.tk .sheet::before { content: ""; position: absolute; left: 14px; top: 4px; bottom: 4px; border-left: 2px dotted rgba(42,27,12,.45); }
+.tk .hole { position: absolute; left: 5px; top: 50%; width: 6px; height: 6px; margin-top: -3px; border-radius: 50%; background: rgba(0,0,0,.6); }
+.tk b { font-size: 21px; font-weight: 400; display: block; line-height: 1.1; }
+.tk small { font-size: 12px; color: #6a5236; }
+.tk .key { position: absolute; right: 8px; bottom: 3px; font-family: "Black Ops One"; font-size: 14px; color: rgba(42,27,12,.5); }
+.tk .el { position: absolute; right: 8px; top: 5px; width: 24px; height: 24px; border-radius: 50%; border: 2.5px solid var(--c); color: var(--c); display: grid; place-items: center; font-size: 13px; font-weight: 900; transform: rotate(-12deg); -webkit-mask-image: var(--grit); mask-image: var(--grit); mask-size: 90px; }
+.tk.off { opacity: .55; filter: grayscale(.7); }
+.tk.off b { text-decoration: line-through; text-decoration-thickness: 2px; }
+/* 纸板喷漆大按钮 */
+.board .sheet { width: 128px; height: 100%; display: grid; place-items: center; text-align: center; }
+.spray { font-size: 30px; line-height: 1.05; color: var(--sp); text-shadow: 0 0 1px var(--sp), 0 0 5px color-mix(in srgb, var(--sp) 70%, transparent), 1px 1px 0 rgba(0,0,0,.35); -webkit-mask-image: var(--grit); mask-image: var(--grit); mask-size: 220px; }
+.spray small { display: block; font-family: "Black Ops One"; font-size: 13px; letter-spacing: 1px; }
+/* 收起时 */
+#party > .sheet.mini { padding: 12px 9px 8px; }
+.cap { position: absolute; left: 0; right: 0; top: 900px; height: 44px; display: grid; place-items: center; background: #111; color: #fff; font-size: 16px; font-weight: 700; }
+</style></head>
+<body>
+<div class="bg" id="bg"></div>
+<div id="ui"></div>
+<script src="../../hd2d/hd2d-ui.js"></script>
+<script>
+const Q = new URLSearchParams(location.search), S = Q.get("s") || "day";
+const T = S === "night" ? "night" : "day";
+document.body.dataset.t = T;
+document.getElementById("bg").style.backgroundImage = `url(bg-${T}.jpg)`;
+let seed = 7;
+const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+const css = (n) => getComputedStyle(document.body).getPropertyValue(n).trim();
+function hex(c) { const m = /#([0-9a-f]{6})/i.exec(c); const v = parseInt(m[1], 16); return [v >> 16, (v >> 8) & 255, v & 255]; }
+/** 揉皱的纸：随机几块折面（Voronoi），每块明暗不同，折痕处一道亮一道暗，再撒纤维噪点 */
+function crumple(w, h, base, o) {
+  o = Object.assign({ facets: 16, amp: .09, crease: .22, grain: .05, scale: .5 }, o || {});
+  const W = Math.max(8, Math.round(w * o.scale)), H = Math.max(8, Math.round(h * o.scale));
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d"), img = x.createImageData(W, H), d = img.data, [r0, g0, b0] = hex(base);
+  const pts = Array.from({ length: o.facets }, () => ({ x: rnd() * W, y: rnd() * H, l: (rnd() * 2 - 1) }));
+  for (let y = 0; y < H; y++) for (let X = 0; X < W; X++) {
+    let d1 = 1e9, d2 = 1e9, i1 = 0;
+    for (let i = 0; i < pts.length; i++) { const dx = X - pts[i].x, dy = y - pts[i].y, dd = dx * dx + dy * dy; if (dd < d1) { d2 = d1; d1 = dd; i1 = i; } else if (dd < d2) d2 = dd; }
+    const gap = Math.sqrt(d2) - Math.sqrt(d1);
+    let s = 1 + pts[i1].l * o.amp;
+    if (gap < 1.6) s += (i1 % 2 ? 1 : -1) * o.crease * (1 - gap / 1.6);
+    s += (rnd() - .5) * o.grain;
+    const k = (y * W + X) * 4;
+    d[k] = r0 * s; d[k + 1] = g0 * s; d[k + 2] = b0 * s; d[k + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  const out = document.createElement("canvas"); out.width = w; out.height = h;
+  const ox = out.getContext("2d"); ox.filter = "blur(.6px)"; ox.drawImage(c, 0, 0, w, h); ox.filter = "none";
+  // 纤维：细短的线
+  for (let i = 0; i < w * h / 260; i++) { ox.strokeStyle = rnd() < .5 ? "rgba(0,0,0,.06)" : "rgba(255,255,255,.08)"; ox.lineWidth = .7; const a = rnd() * 6.28, L = 2 + rnd() * 5, px = rnd() * w, py = rnd() * h; ox.beginPath(); ox.moveTo(px, py); ox.lineTo(px + Math.cos(a) * L, py + Math.sin(a) * L); ox.stroke(); }
+  if (o.corrugated) { for (let X = 0; X < w; X += 7) { ox.fillStyle = "rgba(0,0,0,.07)"; ox.fillRect(X, 0, 3, h); } }
+  if (o.sand) { for (let i = 0; i < w * h / 90; i++) { ox.fillStyle = `rgba(${150 + rnd() * 60},${110 + rnd() * 40},60,${.2 + rnd() * .3})`; ox.fillRect(rnd() * w, rnd() * h, 1.3, 1.3); } }
+  return out.toDataURL();
+}
+/** 斑驳的墨（印章、喷漆用的遮罩） */
+function grit() {
+  const c = document.createElement("canvas"); c.width = c.height = 160; const x = c.getContext("2d");
+  x.fillStyle = "#000"; x.fillRect(0, 0, 160, 160);
+  for (let i = 0; i < 520; i++) x.clearRect(rnd() * 160, rnd() * 160, .8 + rnd() * 1.6, .8 + rnd() * 1.6);
+  return c.toDataURL();
+}
+document.body.style.setProperty("--grit", `url(${grit()})`);
+/** 不规整的边：每条边按步长往里随机缩一点；torn 的那几条边更毛、更碎 */
+function rough(el, o) {
+  o = Object.assign({ jag: 2.2, step: 9, torn: {} }, o || {});
+  const w = el.offsetWidth, h = el.offsetHeight, p = [];
+  const j = (side) => (o.torn[side] ? o.torn[side] : o.jag);
+  const st = (side) => (o.torn[side] ? 4 : o.step);
+  for (let x = 0; x <= w; x += st("top")) p.push([x, rnd() * j("top")]);
+  for (let y = 0; y <= h; y += st("right")) p.push([w - rnd() * j("right"), y]);
+  for (let x = w; x >= 0; x -= st("bottom")) p.push([x, h - rnd() * j("bottom")]);
+  for (let y = h; y >= 0; y -= st("left")) p.push([rnd() * j("left"), y]);
+  el.style.clipPath = `polygon(${p.map(([a, b]) => `${a.toFixed(1)}px ${b.toFixed(1)}px`).join(",")})`;
+}
+/** 锯齿边（收据撕下来的那一头） */
+function zig(el, side) {
+  const w = el.offsetWidth, h = el.offsetHeight, p = [[0, 0], [w, 0]];
+  for (let x = w; x >= 0; x -= 8) p.push([x, h - ((x / 8) % 2 ? 0 : 7) - rnd() * 1.5]);
+  el.style.clipPath = `polygon(${p.map(([a, b]) => `${a}px ${b}px`).join(",")})`;
+}
+const U = window.HD2DUI;
+const face = (h) => U.avatarHtml(U.avatarOf({ role: h.role, main: h.main, sub: h.sub }));
+const heroes = [
+  { n: "瑞比", role: "直伤", main: "energy", sub: "electric", me: 1, hp: 100, on: 1 },
+  { n: "结人", role: "控场", main: "ice", sub: "physical", me: 1, hp: 72 },
+  { n: "绯秋", role: "直伤", main: "fire", sub: "physical", hp: 85 },
+  { n: "灯", role: "坦克", main: "harmonic", sub: "physical", hp: 100 }
+];
+const W = (id, x, y, rot, inner, cls) => `<div class="wrap ${cls || ""}" id="${id || ""}" style="left:${x}px;top:${y}px;transform:rotate(${rot}deg)">${inner}</div>`;
+const sheet = (kind, inner, cls, extra) => `<div class="sheet ${cls || ""}" data-k="${kind}" ${extra || ""}>${inner}</div>`;
+const tape = (x, y, r) => `<span class="tape" data-tape style="left:${x}px;top:${y}px;transform:rotate(${r}deg)"></span>`;
+const staple = (x, y, r) => `<span class="staple" style="left:${x}px;top:${y}px;transform:rotate(${r}deg)"></span>`;
+const collapsed = S === "collapsed";
+let h = "";
+// 顶栏胶带
+h += W("topbar", 12, 6, -.4, sheet("tapebar", `<span class="zc t1">联机跑团</span><span class="stamp bo" style="font-size:15px">SA3X7C</span>
+  <span class="meta zc">第 <b>1</b> 回合</span><span class="meta zc">第 1 天 · <b>08:00</b> 上午</span><span class="meta zc">${T === "night" ? "夜 · 雷鸣" : "常态"}</span>
+  <span class="right"><span class="cam zc"><span class="on">远</span><span>中</span><span>近</span></span>
+  <span class="wrap lbl" style="position:relative"><span class="sheet zc" data-k="board" style="display:block;padding:4px 12px;font-size:17px;color:#f6efe1">工具 ▾</span></span>
+  <span class="wrap lbl" style="position:relative"><span class="sheet zc" data-k="boardy" style="display:block;padding:4px 12px;font-size:17px;color:#2a1b0c">菜单 <span class="bo" style="font-size:12px">ESC</span></span></span></span>`));
+// 行动顺序吊牌
+h += `<div class="tags">${heroes.map((x, i) => `<div class="tagw" style="transform:rotate(${[-3, 2, -1.5, 3][i]}deg)"><div class="wrap tag ${x.on ? "on" : ""}" style="position:relative">${sheet(x.on ? "tagon" : "tag", `<span class="hole"></span>${face(x)}<span class="nm zc">${x.n}<small>${x.me ? "Alice" : "GM"}</small></span>${x.me ? '<span class="sw">⇅</span>' : ""}`)}</div></div>`).join("")}</div>`;
+// 队伍
+if (collapsed) {
+  h += W("party", 14, 92, -1.2, sheet("kraft", `${heroes.map(x => `<div style="margin:5px 0">${face(x).replace('style="background:', 'style="width:38px;height:38px;background:')}</div>`).join("")}<div class="zc" style="text-align:center;font-size:15px;color:var(--kraft-ink)">▶</div>`, "mini") + `<span class="clip" style="left:16px"></span>`);
+} else {
+  h += W("party", 14, 96, -1.2, sheet("kraft", `<h3 class="zc">我方队伍 <small>◀ 收起</small></h3>
+    ${heroes.map((x, i) => `<div class="icard ${x.on ? "on" : ""}" style="transform:rotate(${[.8, -.6, .5, -.9][i]}deg)">${sheet("card", `${face(x)}<span class="nm zc">${x.n}<i>Lv1</i></span>${x.me ? '<span class="you stamp zc">你</span>' : "<span></span>"}<span class="hp"><i style="width:${x.hp}%"></i></span>`)}</div>`).join("")}
+    <div class="pbtns">${["角色资料", "武器", "背包"].map((t, i) => `<div class="wrap lbl" style="position:relative;transform:rotate(${[-2, 1.5, -1][i]}deg)">${sheet("card", `<span class="zc">${t}</span>`)}</div>`).join("")}</div>`) + `<span class="clip"></span>`);
+}
+// 右边：战斗记录收据 / 夜里是便利贴聊天
+if (S === "day") {
+  h += W("log", 1080, 104, .8, sheet("receipt", `<div class="rc-h"><b>BACKFIRE</b><div>战斗记录 · RX-SA3X7C</div></div><div class="rc-sep">================================</div>
+  <div class="rc-sep">*** 第 1 回合 ***</div>
+  <div class="rc-r"><b>主持人</b> 调整队伍物资</div>
+  <div class="rc-r"><b>瑞比</b> 普通攻击 → 狂徒(匕首)<span class="n">12</span><small>击破 1 · 架势 3→2</small></div>
+  <div class="rc-r"><b>狂徒(锤)</b> 重击 → 结人<span class="n">9</span><small>协助格挡失败</small></div>
+  <div class="rc-r"><b>结人</b> 冰封领域 → 2 区<small>地面结冰 · 2 回合</small></div>
+  <div class="rc-r"><b>强盗头子</b> 喝令<small>狂徒们下回合 ATK +2</small></div>
+  <div class="rc-sep">- - - - - - - - - - - - - - - -</div><div class="rc-h"><div>* 本回合合计 伤害 21 · 击破 1 *</div></div>`, "", 'data-zig="1"')
+  + `<div class="wrap idx on" style="left:18px">${sheet("tabon", "<span class='zc'>战斗记录</span>")}</div><div class="wrap idx" style="left:150px">${sheet("kraft", "<span class='zc'>小队 <span style='color:#d43d33'>●</span></span>")}</div>` + tape(262, -8, -5));
+} else if (S === "night") {
+  const notes = [["GM", "强盗头子在吹口哨，远处有人回应。", "#f4e27a", -2], ["Bob", "我先去拉仇恨，灯顶上！", "#ffb3c7", 1.5], ["Alice（你）", "瑞比打匕首那个，结人冻 2 区", "#b8e3ff", -1, 1], ["GM · 私信", "记得你身上还有一个手雷。", "#f4e27a", 2]];
+  h += W("chat", 1076, 104, .6, sheet("black", notes.map(([who, t, col, r, me]) => `<div class="note ${me ? "me" : ""}" style="transform:rotate(${r}deg)"><div class="wrap" style="position:relative">${sheet("note", `<div class="who">${who}</div><div class="t">${t}</div>`, "", `data-col="${col}"`)}</div></div>`).join("") + `<div class="chat-in"><span style="font-size:15px">写给小队……（Enter 发送）</span><span class="zc">发送 ▸</span></div>`)
+  + `<div class="wrap idx" style="left:18px">${sheet("kraft", "<span class='zc'>战斗记录</span>")}</div><div class="wrap idx on" style="left:150px">${sheet("tabon", "<span class='zc'>小队</span>")}</div>` + tape(250, -10, 5));
+} else {
+  h += W("logtab", 1394, 330, 0, sheet("kraft", `<div class="zc" style="writing-mode:vertical-rl;font-size:18px;padding:14px 8px;height:150px;color:var(--kraft-ink)">记录 · 聊天 <span class="stamp" style="writing-mode:horizontal-tb;font-size:12px;transform:rotate(8deg)">3</span></div>`));
+}
+// 技能栏
+const tk = (n, s, c, el, k, off) => `<div class="wrap tk ${off ? "off" : ""}" style="position:relative;transform:rotate(${(rnd() * 2.4 - 1.2).toFixed(2)}deg)">${sheet("tag", `<span class="hole"></span><b class="zc">${n}</b><small>${s}</small><span class="el zc" style="--c:${c}">${el}</span><span class="key">${k}</span>`)}</div>`;
+if (collapsed) {
+  h += W("dock", 470, 830, -.5, sheet("kraftdock", `<div class="row"><span class="zc" style="font-size:20px">技能 ▲</span><span class="who zc">瑞比<small>Lv1 · 行动中</small></span><span class="turn stamp zc" style="color:#0b6b5a;border-color:#0b6b5a">轮到你了</span></div>`) + staple(14, 6, -8) + staple(460, 8, 6));
+} else {
+  h += W("dock", 240, 714, -.4, sheet("kraftdock", `<div class="row"><span class="zc" style="font-size:20px">技能 ▼</span><span class="who zc">瑞比<small>Lv1 · 行动中</small></span><span class="turn stamp zc" style="color:#0b6b5a;border-color:#0b6b5a">轮到你了</span></div>
+  <div class="hud"><div class="wrap gauge" style="position:relative;transform:rotate(-1deg)">${sheet("metal", `纳米<div class="pips"><i></i><i></i><i></i><i></i><i class="o"></i><i class="o"></i><i class="o"></i><i class="o"></i></div><b>40</b> / 100`)}</div>
+  <div class="sks">${tk("普通攻击", "行动 1", "#c8281e", "攻", 1)}${tk("扳机", "行动 1", "#0b8a78", "技", 2)}${tk("准备", "附赠 1", "#0b8a78", "技", 3)}${tk("移动", "附赠 1", "#0b8a78", "技", 5)}${tk("使用道具", "没有能用的道具", "#7a6a55", "技", 4, 1)}</div>
+  <div class="wrap board" style="position:relative;transform:rotate(1.5deg)">${sheet("board", `<div class="spray zc" style="--sp:#3fe0cc">唤出<br>明特<small>Q</small></div>`)}</div>
+  <div class="wrap board" style="position:relative;transform:rotate(-2deg)">${sheet("board", `<div class="spray zc" style="--sp:#ffd23a">结束<br>行动<small>SPACE</small></div>`)}</div></div>`) + staple(18, 8, -8) + staple(900, 10, 7) + tape(420, -12, 2));
+}
+h += `<div class="cap">${{ day: "纸片样稿 · 白天：牛皮纸单据 + 收据卷 + 纸板喷漆", night: "纸片样稿 · 夜晚：黑卡纸 + 便利贴聊天", collapsed: "纸片样稿 · 平时都收起来" }[S]}</div>`;
+document.getElementById("ui").innerHTML = h;
+// 贴材质
+const N = T === "night";
+const mats = {
+  tapebar: [css("--tape").includes("232") ? "#e8d6a6" : "#a09678", { facets: 30, amp: .05, crease: .12 }],
+  kraft: [N ? "#2c2219" : "#c8a46e", { facets: 18 }], kraftdock: [N ? "#2c2219" : "#c39d66", { facets: 26, amp: .08 }],
+  card: [N ? "#2a292f" : "#f7f1e3", { facets: 8, amp: .05, crease: .15 }], receipt: ["#f6f4ee", { facets: 22, amp: .05, crease: .16 }],
+  black: ["#1c1b20", { facets: 20, amp: .12, crease: .3 }], tag: [N ? "#8f6f45" : "#d8b47a", { facets: 6, amp: .06 }],
+  tagon: ["#55d6c2", { facets: 6, amp: .06 }], tabon: ["#e9c443", { facets: 5, amp: .05 }],
+  board: ["#9a7448", { facets: 10, amp: .1, corrugated: 1 }], boardy: ["#e9c443", { facets: 6 }], metal: ["#21282b", { facets: 8, amp: .1, grain: .08 }]
+};
+document.querySelectorAll(".sheet").forEach(el => {
+  let [base, o] = mats[el.dataset.k] || ["#eeeeee", {}];
+  if (el.dataset.col) base = el.dataset.col, o = { facets: 5, amp: .05, crease: .12 };
+  el.style.backgroundImage = `url(${crumple(el.offsetWidth, el.offsetHeight, base, o)})`;
+  if (el.dataset.zig) zig(el);
+  else rough(el, { jag: el.dataset.k === "kraftdock" ? 3 : 2, torn: el.dataset.k === "kraftdock" ? { top: 6 } : el.dataset.k === "tapebar" ? { left: 6, right: 6 } : el.dataset.k === "kraft" ? { bottom: 5 } : {} });
+});
+document.querySelectorAll("[data-tape]").forEach(el => { el.style.backgroundImage = `url(${crumple(74, 24, "#e8d6a6", { facets: 4, amp: .04 })})`; rough(el, { jag: 1, torn: { left: 5, right: 5 } }); });
+</script>
+</body></html>

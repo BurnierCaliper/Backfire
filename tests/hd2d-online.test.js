@@ -173,6 +173,7 @@ async function olPage(opts) {
     const paintStage = () => {};
     const unitTip = (node) => V.tip(node);
     const strikeOnline = async () => null, onlineCtx = () => null, zoomOnline = () => false, zoomOutOnline = () => {};
+    const turnCue = null, turnInfo = () => null, sfxFor = () => null;   // 音效（online-sfx.js，#304）这里不测
     ${block}
     ${fns}
     return { battleCb, hd2dSpec, marksOf3d, paintField3d, playPacket, battleUi, menu,
