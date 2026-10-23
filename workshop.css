@@ -45,6 +45,10 @@
 .ws-filter { font-size: 12px; color: var(--sk-mint, #39e6b4); margin: 0 0 6px; }
 .ws-detail, .bp-detail { background: var(--sk-oil-2, #1a1511); border: 1px solid var(--sk-edge, #4d4337); padding: 10px 12px; align-self: start; }
 .ws-meta { margin: 0 0 8px; font-size: 12px; color: var(--sk-muted, #a8977b); }
+/* 道具效果（ITEM_CATALOG 的 hint）：列表里比熟练项那行亮一点，详情里在材料上面，学配方里单独一行 */
+.ws-recipe .ws-effect { color: var(--sk-canvas, #ece0c6); opacity: .85; }
+.ws-detail .ws-effect { margin: 0 0 8px; font-size: 13px; }
+.ws-q .ws-effect { display: block; font-size: 11px; color: var(--sk-muted, #a8977b); }
 .ws-mats li { padding: 2px 0; font-size: 13px; }
 .ws-mats li b { font-family: var(--num); }
 .ws-mats li small { margin-left: 6px; color: var(--sk-muted, #a8977b); }

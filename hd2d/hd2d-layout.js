@@ -7,7 +7,8 @@
  *   const out = HD2DLayout.build(state, { portrait: false, view: { width, height, top, bottom } });
  *   out.zones   [{ id, cx, cz, w, d, h, topY, kind, effects, hole, outline（不规则的外轮廓，局部坐标）… }]
  *   out.gaps    [{ key, a, b, type, open, x, z, axis, length, width, y0 / y1（两头的地台多高）… }]
- *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]
+ *   out.units   [{ id, zone, x, y, z, flying, submerged, lift, rect, plate … }]   // 下潜中的中立生物不在这里，在 out.stirs（#358）
+ *   out.stirs   [{ zone, count, names, units: [{ id, name, pct, seen, leaveIn }], anchors: [{ side, x, y, z }] }]   // 区角的「沙下动静 ×N」
  *   out.bounds  { minX, maxX, minZ, maxZ, maxY }
  *   out.camera  { target, dist, pos, fov, elevation, aspect, width, height }   // 场景照这个摆默认镜头（= 远景；中景 / 近景在 hd2d-camera.js）
  *   out.region / out.scene / out.ground / out.lamps   // 这场战斗在哪个区域（opts.region）、区域里的哪个场景（opts.scene）、地面主题（GROUNDS 的键）、灯摆在哪（战场外缘，0–2 盏）
@@ -60,6 +61,10 @@
       sink: 0.55,         // 下潜单位沉下去的深度（铭牌只露半截）
       plateH: 1.7         // 取景时给竖起来的铭牌（含后排抬高）留的高度（世界单位）
     },
+    /* 「沙下动静」（#358，旧画面 game.js · paintSandStir）：下潜中的中立生物（夜晚迁徙的尘虫）不画卡、不占站位，每个区合成一块「沙下动静 ×N」，
+     * 贴在地台前沿的一角（3D 锚点：hd2d-field.js 每一帧按镜头投影摆位，标记挂在锚点下面、贴着地台的侧面）。
+     *   inset   锚点离地台左 / 右边多远（世界单位；地台的四个角各削掉一块，见 outline.chip，往里让过去才贴得着地台） */
+    stir: { inset: 1 },
     /* 铭牌（DOM）的像素尺寸：hd2d-scene.js 照这个设铭牌的宽高，这里照这个算它在屏幕上的矩形 */
     plate: {
       w: 120, h: 40,                  // 桌面：名字一行 + 血条 / 架势一行（13px 的字，8 个汉字的名字放得下）
@@ -511,6 +516,31 @@
     return plate;
   }
 
+  /* ---------- 沙下动静（#358）---------- */
+  /** 下潜中的中立生物（旧画面只折叠这一种：埋伏的沙鱼这些不是中立生物，照旧画卡） */
+  const inStir = (u) => !!u.neutral && !!u.submerged;
+  /** 一个区里下潜中的中立生物 → 区角那块「沙下动静 ×N」要的（和旧画面 game.js · paintSandStir 写的一样）：每只的名字、血量百分比（血条）、
+   *  被声呐发现了没有（投影里的 neutralTags）、几回合后离开（leaveIn，没有 = null：在沙下）；names = 有哪几种（「、」隔开）。
+   *  anchors = 地台前沿的左角、右角（世界坐标，hd2d-field.js 每一帧投影：先用左角，和旧画面一样在区的左下角）。没有 = null。
+   *  只读白名单里的字段：坚毅生命不在其中 */
+  function stirOf(zone, list) {
+    if (!list.length) return null;
+    const I = CONFIG.stir.inset, front = zone.cz + zone.d / 2;
+    const units = list.map(u => {
+      const layers = (u.layers || []).map(l => ({ cur: Math.max(0, num(l.current, 0)), max: Math.max(0, num(l.max, 0)) }));
+      const cur = layers.reduce((a, l) => a + l.cur, 0), max = layers.reduce((a, l) => a + l.max, 0);
+      return {
+        id: u.id, name: String(u.name || "?"), pct: Math.round(cur / Math.max(1, max) * 100),
+        seen: Array.isArray(u.neutralTags) && u.neutralTags.some(t => t && t.key === "seen"),
+        leaveIn: Number.isFinite(u.leaveIn) ? u.leaveIn : null
+      };
+    });
+    return {
+      zone: zone.id, count: units.length, names: [...new Set(units.map(u => u.name))].join("、"), units,
+      anchors: [{ side: "left", x: zone.cx - zone.w / 2 + I, y: zone.topY, z: front }, { side: "right", x: zone.cx + zone.w / 2 - I, y: zone.topY, z: front }]
+    };
+  }
+
   /* ---------- 镜头（和 hd2d-scene.js 用同一套：透视、俯角 elevation、正对 −z 方向）---------- */
   /** 镜头摆在 target 后上方 dist 远处，朝 target 看。lens = { elevation, fov }（度）不给就用默认镜头的（CONFIG.camera）；
    *  中景 / 近景（hd2d-camera.js）用自己的俯角和视野 */
@@ -871,14 +901,13 @@
     const narrow = !!cards && new Set(zones.map(z => Math.round(z.cx * 100))).size >= CONFIG.card.narrowFrom;
     const phone = view.width <= CONFIG.plate.phoneMax;
 
-    // 单位：藏起来的、死了的、被移出的不画
-    const visible = (state.units || []).filter(u => u && !u.hidden && !u.dead && !u._removed && !u.fused);
+    // 单位：藏起来的、死了的、被移出的不画；下潜中的中立生物（#358）不画卡、不占站位，每个区折成一块「沙下动静」（stirs）
+    const live = (state.units || []).filter(u => u && !u.hidden && !u.dead && !u._removed && !u.fused);
+    const visible = live.filter(u => !inStir(u));
+    const zoneOfUnit = (u) => zoneById[Number(u.zone)] || (u.isPlayer ? zones[0] : zones[zones.length - 1]);   // 旧档 / 计算器里留着的、棋盘上没有的区号
     const byZone = {};
-    visible.forEach(u => {
-      let z = zoneById[Number(u.zone)];
-      if (!z) z = u.isPlayer ? zones[0] : zones[zones.length - 1];   // 旧档 / 计算器里留着的、棋盘上没有的区号
-      (byZone[z.id] = byZone[z.id] || []).push(u);
-    });
+    visible.forEach(u => { const z = zoneOfUnit(u); (byZone[z.id] = byZone[z.id] || []).push(u); });
+    const stirs = zones.map(z => stirOf(z, live.filter(u => inStir(u) && zoneOfUnit(u) === z))).filter(Boolean);
     const cardOf = (u) => (cards && cards.has(String(u.id)) ? cards.get(String(u.id)) : null);
     const sizeOfCard = (u) => {
       const m = measured && measured.get(String(u.id));
@@ -945,9 +974,9 @@
     liftRows(units, camera, size, !!cards, fits);
     const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
     // cards / narrow / cardW：白卡（#316）排的（场景把普通单位的卡片宽设成 cardW）；原型页 cards = false。
-    // crowd = 远景里挤的区怎么缩（#341，上面的 fits）；compact = 紧凑卡的像素尺寸（场景照它画，布局按它排）
+    // crowd = 远景里挤的区怎么缩（#341，上面的 fits）；compact = 紧凑卡的像素尺寸（场景照它画，布局按它排）；stirs = 区角的「沙下动静」（#358，hd2d-field.js 画）
     return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, cards: !!cards, narrow, cardW: cards ? cardSize({}, narrow, phone).w : 0,
-      crowd: fits, compact: cards ? compact : null, region, scene, ground, lamps };
+      crowd: fits, compact: cards ? compact : null, region, scene, ground, lamps, stirs };
   }
 
   return {
@@ -956,6 +985,7 @@
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
     cardScale, cardSize, cardAt,   // 白卡（#316）
     crowdBad, crowdStep,           // 挤（#341）
-    outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf
+    outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf,
+    stirOf                         // 沙下动静（#358）
   };
 });

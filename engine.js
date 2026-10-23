@@ -415,6 +415,23 @@ const SKILL_TARGET_SIDE = {
   helu_rule: "anySelf"      // 规则干涉：同区自选任意单位拿附赠动作（敌人也行，作者 10/23），Helumica 自己也行
 };
 
+/* 谐波攻击的技能（打得到下潜中的单位，effects.js · 下潜，#360）：选目标的名单——最后单独选的目标（game.js · candidateUnits）、
+ * 分步里选单位的那几步（app.js · skillFlowSteps）——里留着下潜中的单位；别的技能名单里没有下潜中的单位。
+ * 只打范围的（音爆、声波震击）、只打刺入目标的（扯下）不用选目标，不在这里；分步里只有某一步是谐波攻击的，在那一步上写 harmonic。
+ * 谐波的义体攻击注册时自己登记进来（cyberware.js · cwRegisterSkill） */
+const SKILL_HITS_SUBMERGED = {
+  helu_aa: true,       // 普通攻击：远距离 1atk 谐波
+  helu_assist: true,   // 协助攻击：1atk 谐波（单人模式的「支援」叫 Helumica 来打时，分步里选的敌人）
+  mochi_roar: true,    // 吼叫：同区 atk+1d4 谐波
+  tou_sonic: true,     // 声波切割：同区 1atk、距离 1 的 0.5atk 谐波（分步里各选一个）
+  tou_accuse: true,    // 赤诚控诉：距离 1 以内 1atk 谐波
+  vitas_slash: true    // 针尖剑斩：同区 1atk 谐波
+};
+/** 这个技能是不是谐波攻击（选目标时下潜中的单位也能选） */
+function skillHitsSubmerged(id) {
+  return Object.prototype.hasOwnProperty.call(SKILL_HITS_SUBMERGED, id) && SKILL_HITS_SUBMERGED[id] === true;
+}
+
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
 const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
