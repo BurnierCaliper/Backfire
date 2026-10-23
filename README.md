@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **长线养成每日挑战的换题日期可以换成别的时钟；growth-mode 测试固定换题日期，结果不再随跑测试的那天变**（issue #320；rogue.js · `setGrowthDailyClock`（新）/ `growthDailyKey`；测试 tests/growth-mode.test.js：`fresh` 固定换题日期、自动打抽成 `autoPlay`、新增 `pretendToday` 和「换日期也稳定」「每日挑战跟着注入的时钟换题」两条）
+  - **以前**：长线养成的每日挑战按本机日期换题（`growthDailyKey` 里直接 `new Date()`，种子是 `run.seed:日期`），测试也读真实日期。同一个种子，抽到哪三个每日挑战、什么时候做完、多不多发一个赫心融合体都看是哪天跑，后面的抽卡、战斗跟着变：G7b 在 2026 年 10 月里 10-05 / 10-18 / 10-23 / 10-24 这四天自动打到全员永久死亡（`over`），「自动打 40 步」在 main 和以前全绿的提交上一起失败。
+  - **现在**：`growthDailyKey` 改读 `growthDailyClock`，默认还是本机时钟（`new Date()`），**规则不变**；`Rogue.setGrowthDailyClock(() => 日期)` 可以换成别的时钟，传空恢复本机时钟。growth-mode 测试一律按 2026-10-22 换题（`DAILY_DAY`）。
+  - **测试**：「换日期也稳定」把规则环境里的本机时钟分别拨到 10-22、10-23，各自动打一遍 G7b，两局的阶段、任务数、天数、奎支、队伍、阵亡、整局日志完全一样；「每日挑战跟着注入的时钟换题」查默认读本机日期、注入以后按注入的那天换题、传空恢复。没修的代码上都失败；只把 `setGrowthDailyClock` 换成空函数（等于没固定）时，「换日期也稳定」不管哪天跑都失败。
+  - 整局追查过其余读本机时钟的地方：飘字（app.js · `spawnPopup` / `nextFloaterSlot`）、长休报告编号（ledger.js · `restReport`）、升级提示（levelup.js）、`run.createdAt`（save.js），都不影响结算。
 - **联机玩家：等主机回话时技能栏不再一下子整排灰掉**（#317 追加，worker 提的问题 1；online-battle.js 给只因 ui.busy 灰掉的技能 / 唤出 / 结束行动按钮挂 `ob-wait`；online.css · `.ob-wait:disabled` 动画；weather-fx.css 的天气灰按钮样式不盖它们；测试 tests/hd2d-shell.test.js「#317 追加」）
   - **以前**：每选一次技能 / 取消都要问主机，问的那一下所有按钮立刻变灰（透明度 0.4）再恢复，网络慢一点就像在闪。
   - **现在**：按钮照旧马上不能点（防连点不变），但看起来先照常亮着，过 0.3 秒主机还没回才变灰；本来就用不了的（blocked）照旧马上灰。
