@@ -305,7 +305,22 @@
     }
     for (const key of gapKeys) if (obj(get(get(state, "gaps"), key))) {
       const gap = get(get(state, "gaps"), key), dto = copyFields(gap, {}, [], ["hp", "maxHp", "level"], ["open"]);
-      enumField(gap, dto, "type", ["open", "bridge", "wall", "door", "void"]); out.gaps[key] = dto;
+      enumField(gap, dto, "type", ["open", "bridge", "wall", "door", "void", "wave"]);
+      // 驻波墙（频域造物）：过滤的属性、降幅 / 增幅、暂时取代的是什么（耐久、门的开关）——都是棋盘上公开的东西，没有任何坚毅数值
+      const wave = get(gap, "wave");
+      if (dto.type === "wave" && obj(wave)) {
+        const w = {};
+        enumField(wave, w, "el", ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]);
+        enumField(wave, w, "mode", ["dampen", "amplify"]);
+        const saved = get(wave, "saved");
+        if (obj(saved)) {
+          const base = copyFields(saved, {}, [], ["hp", "maxHp"], ["open"]);
+          enumField(saved, base, "type", ["open", "bridge", "wall", "door", "void"]);
+          w.saved = base;
+        }
+        dto.wave = w;
+      }
+      out.gaps[key] = dto;
     }
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
@@ -470,6 +485,8 @@
   // Helumica 扫描后的互动 / 危墙倒向 / 干涉场……以前都缺）。新加分步 key 时要一起加进来（tests/online-view.test.js 会对照检查）
   const pickKeys = new Set(["partner", "target", "target1", "target2", "ally", "dest", "prop", "layer", "status", "mode", "carry", "burn", "rangeMode", "carryMode", "blade", "again", "item", "index",
     "act", "boost", "fall", "pull", "push", "shield", "sign", "swapTarget", "weapon",
+    // Helumica「频域造物」：选间隙、选属性（降幅 / 增幅用 mode）
+    "gap", "element",
     // 询问选项的 extra：以身作盾（{ ironwall: true }）、龙哥手杖协助顺手治疗谁（{ mode: "cane", heal: 单位 }）
     "ironwall", "heal"]);
   function choiceValue(value) {

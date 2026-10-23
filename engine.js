@@ -364,6 +364,8 @@ const SKILL_RANGE = {
   torque_strip: { min: 0, max: 0 },
   helu_aa: { min: 1, max: 1 },
   helu_scan: { min: 0, max: 99 },
+  helu_rule: { min: 0, max: 1 },      // 规则干涉：1 距离以内的一区；拿附赠动作的单位就在那一区
+  helu_forge: { min: 0, max: 99 },    // 频域造物：任意间隙，不限距离（不选单位）
   ecmo_bite: { min: 0, max: 0 },
   ecmo_focus: { min: 0, max: 99 },
   ecmo_boom: { min: 0, max: 0 },
@@ -409,7 +411,8 @@ const SKILL_TARGET_SIDE = {
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
   role_double_dot: "enemy", // 加倍计量：一个敌人
-  chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
+  chuan_over: "anySelf",    // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
+  helu_rule: "anySelf"      // 规则干涉：同区自选任意单位拿附赠动作（敌人也行，作者 10/23），Helumica 自己也行
 };
 
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
@@ -594,6 +597,17 @@ const INTERFERE_CAP = 1;
  *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
  *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
 const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
+/** 驻波墙（Helumica「频域造物」，作者 10/23 定；放墙、穿墙、消失在 app.js · placeWaveWall / wavePassUnit / expireWaveWalls）：
+ *  dampenMult   降幅墙：穿过它的选定属性伤害 ×0.5，并且不造成任何击破；两道墙 ×0.5 再 ×0.5（= 25%），不会变成 −100%
+ *  amplifyPct   增幅墙：穿过它的选定属性伤害 +25%，和其他百分比加算（两道墙 +50%），击破照常
+ *  rounds       持续几个整轮：1 = 放下的这一整轮结束时消失（我方回合 + 敌人回合都过完）
+ *  dampenStatus / amplifyStatus  单位穿过驻波墙时挂上的状态（降幅：不稳、虚弱；增幅：坚挺、振奋）
+ *  elements     能选的属性 */
+const WAVE_WALL = {
+  dampenMult: 0.5, amplifyPct: 0.25, rounds: 1,
+  dampenStatus: ["unstable", "weak"], amplifyStatus: ["sturdy", "inspire"],
+  elements: ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]
+};
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -714,6 +728,11 @@ function resolveAttack(ctx) {
       element = latest;
     }
   }
+  // 驻波墙（dealTo 算好这一击的连线穿过了哪几道，flags.waveWalls）：只管墙选的那一种属性（按这一击最终结算的属性），
+  // 增幅每道 +25%（和其他百分比加算）、击破照常；降幅每道 ×0.5（另外相乘）并且这一击不造成任何击破
+  const waveHere = (Array.isArray(flags.waveWalls) ? flags.waveWalls : []).filter(w => w && w.el === element);
+  const waveAmp = waveHere.filter(w => w.mode === "amplify").length;
+  const waveDamp = waveHere.filter(w => w.mode !== "amplify").length;
 
   let atk = Number(ctx.atk) || 0;
   if (a && a.statuses) {
@@ -809,6 +828,7 @@ function resolveAttack(ctx) {
       if (weather === "glow" && br > 0) br = Math.max(1, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
+      if (waveDamp && br > 0) { br = 0; hAdd("驻波墙（降幅）：这一击不造成击破。"); }
       totalBreak += br;
       hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
       perHit.push({ dealt: 0, breakDealt: br, base: segBase, layers: clone(layersWork) });
@@ -965,6 +985,11 @@ function resolveAttack(ctx) {
         }
       });
     }
+    if (waveAmp) {
+      const wp = WAVE_WALL.amplifyPct * waveAmp;
+      pct += wp;
+      hAdd(`驻波墙（增幅${ELE[element] || element}${waveAmp > 1 ? ` ×${waveAmp} 道` : ""}）：${pctTxt(wp)}`);
+    }
 
     // 以百分比写的增伤 / 减伤（攻击方、受击方都算）一律和上面的加在一起，不连乘：
     // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
@@ -1010,6 +1035,11 @@ function resolveAttack(ctx) {
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
+    if (waveDamp) {
+      const wm = Math.pow(WAVE_WALL.dampenMult, waveDamp);
+      mul *= wm;
+      hAdd(`驻波墙（降幅${ELE[element] || element}${waveDamp > 1 ? ` ×${waveDamp} 道` : ""}）：伤害 ×${round2(wm)}。`);
+    }
     packet *= mul;
 
     packet = Math.max(0, packet);
@@ -1088,7 +1118,7 @@ function resolveAttack(ctx) {
       if (meltIceHit) br += 1;
       if (h === 0 && isAttack && Number(ctx.firstBreak) > 0) { br += Number(ctx.firstBreak); hAdd(`迅袭：整场第一个行动的第一击，击破 +${Number(ctx.firstBreak)}。`); }
       if (flags.smash) {
-        selfBreak += br;
+        if (!waveDamp) selfBreak += br;   // 降幅驻波墙：这一击没有任何击破，反震也没有
         br *= 2;
         hAdd("猛击：击破 ×2，攻击者承受原击破。");
       }
@@ -1111,6 +1141,7 @@ function resolveAttack(ctx) {
           br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
         }
       }
+      if (waveDamp && br > 0) { br = 0; hAdd("驻波墙（降幅）：这一击不造成击破。"); }
     }
     // 冰打熔融：这次攻击结算完熔融结束（后面的段数照样吃熔融）
     if (meltIceHit) meltEnded = true;
