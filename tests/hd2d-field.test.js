@@ -201,7 +201,7 @@ test("关着时 game.html 的战场照旧：顶栏多一个「新画面」开关
   assert.match(g, /const field3d = \(\) => !!\(window\.HD2DField && HD2DField\.on\(\)\);/);
   assert.match(g, /function centerOf\(id\) \{\s*if \(field3d\(\)\) return field3dRect\(id\);/, "演出位置：开着问 3D，关着照旧量单位卡");
   assert.match(g, /function zoneRectOf\(zone\) \{\s*if \(field3d\(\)\) return HD2DField\.zoneRectOf\(zone\);/);
-  assert.match(g, /if \(window\.HD2DField\) HD2DField\.view\(snaps\);/, "setView 每次都告诉新画面（新画面自己看开没开）");
+  assert.match(g, /if \(window\.HD2DField\) HD2DField\.view\(snaps, \{ animate: !!animate \}\);/, "setView 每次都告诉新画面（新画面自己看开没开；#330 起带上这一下演不演）");
   assert.match(g, /const wfxField = field3d\(\) \? null : fieldEl;/, "天气叠加层：开着时画在新画面上，旧战场不放（关着照旧）");
   // 页面的 CSS：只有 .g-app.hd2d-on（开着）时才藏旧战场
   const css = read("hd2d/hd2d.css");
