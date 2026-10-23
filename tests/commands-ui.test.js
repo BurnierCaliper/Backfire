@@ -22,6 +22,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function open(t, file = "game.html", debug = false) {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));

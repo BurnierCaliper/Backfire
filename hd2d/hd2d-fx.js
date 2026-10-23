@@ -128,8 +128,12 @@
       const s = box(r.left + (o.left || 0), r.top + (o.top || 0), r.w, r.h, (r.y - r.top) / r.h);
       return r.foot != null ? Object.assign(s, { scale: r.scale, foot: r.foot + (o.top || 0) }) : s;
     };
-    // 铭牌的像素尺寸：近景放大的那张（big），特写的那个单位再乘 zoom（#237：hd2d-camera.js 的 CAMERA.close.zoom）
-    const sizeOf = (p) => { const s = src.size(!!p.big); return s && p.zoom > 0 && p.zoom !== 1 ? { w: s.w * p.zoom, h: s.h * p.zoom } : s; };
+    // 铭牌的像素尺寸：近景放大的那张（big），特写的那个单位再乘 zoom（#237：hd2d-camera.js 的 CAMERA.close.zoom）；
+    // 白卡（#316，场景给了 w / h / s）：这张卡本来的大小 + 这一段的基础缩放（特写的放大已经在 s 里），和布局、场景同一个公式（L.cardScale）
+    const sizeOf = (p) => {
+      if (p.w > 0 && p.h > 0 && p.s > 0) return { w: p.w, h: p.h, s: p.s };
+      const s = src.size(!!p.big); return s && p.zoom > 0 && p.zoom !== 1 ? { w: s.w * p.zoom, h: s.h * p.zoom } : s;
+    };
     const unit = (id) => {
       const p = src.plate(id);
       const r = p ? rectOf(lens(src.lens()), p, sizeOf(p)) : null;

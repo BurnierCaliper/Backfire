@@ -53,6 +53,7 @@ test.after(async () => { if (browser) await browser.close(); });
 test("画面：图鉴里有「专长」这一本，按层级筛，点开看详情", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));
