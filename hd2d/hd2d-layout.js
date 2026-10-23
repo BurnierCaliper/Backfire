@@ -81,7 +81,13 @@
      *   tier                   每一段镜头的基础缩放：远景缩小一点（far），中景和旧画面一样大（mid = 1），近景选中的区放大（near）；
      *                          再乘按远近的缩放（plate.scaleExp 那一套），最后夹在 minScale（最小：远景里卡上的小字也要看得清）和 maxScale 之间
      *   gapX / gapY            两张卡之间至少留的空（像素）
-     *   maxLift                每一段后排最多抬高多少像素（卡比以前的铭牌高得多：上限给得宽，同一区的卡才不会因为抬不上去而压住） */
+     *   maxLift                每一段后排最多抬高多少像素（卡比以前的铭牌高得多：上限给得宽，同一区的卡才不会因为抬不上去而压住）
+     *   crowd                  挤（#341）：一个区里人多、这一段镜头下放不下（卡互相压住、跑出画面）时，这个区的卡先整张缩小，再放不下就换成紧凑卡：
+     *     fit        一档一档缩到这一段本来大小的几成（乘在这一段的基础缩放上）；屏幕上照旧不小于上面的 minScale（字要看得清），这个区最大的卡已经到 minScale 就不再缩
+     *     compact    紧凑卡的像素尺寸（scale 1 时，宽高固定，样子在 hd2d.css 的 .hd2d-plate.compact）：名字 + 血量数字一行、分层血条、架势 + 状态图标一行；
+     *                宽和普通卡一样分三种（w 两区 / narrowW 一排三区起 / phoneW 手机），h 高。配置物、中立生物的迷你名牌本来就小，不换。鼠标 / 键盘停上去照旧是完整的卡
+     *     farBack    远景为了装下抬高以后的卡最多往后退多少（× 只框地台时的距离；以前没有上限，一个区挤满了会越退越远）
+     *     passes     最多试几轮（每一轮把放不下的区往下降一档：缩一档，缩到底了换紧凑卡再从头缩） */
     card: {
       w: 196, narrowW: 148, narrowFrom: 3, phoneW: 150,
       prop: { w: 86, h: 86, narrowW: 72, narrowH: 72 }, mini: { w: 86, h: 54 },
@@ -89,7 +95,13 @@
       tier: { far: 0.85, mid: 1, near: 1.25 },
       minScale: 0.8, maxScale: 2.4,
       gapX: 10, gapY: 8,
-      maxLift: { far: 640, mid: 720, near: 820, close: 820 }
+      maxLift: { far: 640, mid: 720, near: 820, close: 820 },
+      crowd: {
+        fit: [1, 0.9, 0.8, 0.7, 0.6],
+        compact: { w: 150, narrowW: 124, phoneW: 120, h: 58 },
+        farBack: 1.3,
+        passes: 14
+      }
     },
     /* 默认镜头：场景（hd2d-scene.js）也用这一份 */
     camera: { fov: 22, elevation: 30, margin: 0.97, targetY: 0.6 },
@@ -547,15 +559,18 @@
     };
   }
   /** 取景：让整个战场刚好装进「上下被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉）。
-   *  rects(cam) 给了（白卡，#316）：这个镜头下每张卡在屏幕上的矩形（像素）也要装进去——卡是固定像素大小的，后排抬高以后会高出地台一大截 */
-  function fitView(bounds, view, rects) {
+   *  rects(cam) 给了（白卡，#316）：这个镜头下每张卡在屏幕上的矩形（像素）也要装进去——卡是固定像素大小的，后排抬高以后会高出地台一大截。
+   *  o.maxDist：最多退到多远（#341：卡不跟着镜头变小，退远了地台变小、同一排站得下的人更少、摞得更高，不封顶会越退越远）；
+   *  o.from：从这个镜头接着推拉（挤的时候一轮一轮重新取景，接着上一轮的，几步就稳） */
+  function fitView(bounds, view, rects, o) {
     const C = CONFIG.camera;
     const W = Math.max(1, view.width), H = Math.max(1, view.height), aspect = W / H;
     const lo = -1 + 2 * (view.bottom || 0) / H, hi = 1 - 2 * (view.top || 0) / H;
     const b = bounds, top = b.maxY + 0.5, pts = [];
     [b.minX, b.maxX].forEach(x => [0, top].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
-    const t = { x: (b.minX + b.maxX) / 2, y: C.targetY, z: (b.minZ + b.maxZ) / 2 };
-    let dist = 40, cam = null;
+    const from = o && o.from, lim = o && o.maxDist > 0 ? o.maxDist : Infinity;
+    const t = from ? { x: from.target.x, y: from.target.y, z: from.target.z } : { x: (b.minX + b.maxX) / 2, y: C.targetY, z: (b.minZ + b.maxZ) / 2 };
+    let dist = from ? Math.min(lim, from.dist) : Math.min(lim, 40), cam = null;
     for (let it = 0; it < (rects ? 24 : 14); it++) {
       cam = camAt(t, dist, aspect);
       let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
@@ -568,7 +583,10 @@
       const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
       t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
       const k = Math.max((x1 - x0) / (2 * C.margin), (y1 - y0) / ((hi - lo) * C.margin));
-      dist *= Math.min(1.6, Math.max(0.6, k));
+      const next = Math.min(lim, dist * Math.min(1.6, Math.max(0.6, k)));
+      // 接着上一轮推拉的（o.from）：已经居中、远近也不用再动了就停（不封顶时照旧走满）
+      if (from && Math.abs(dx) < 1e-5 && Math.abs(dy) < 1e-5 && Math.abs(next - dist) < dist * 1e-5) { dist = next; break; }
+      dist = next;
     }
     cam = camAt(t, dist, aspect);
     cam.width = W; cam.height = H; cam.view = { top: view.top || 0, bottom: view.bottom || 0 };
@@ -709,14 +727,64 @@
     });
     return out;
   }
-  /** 默认镜头下的后排抬高：每个单位写上 lift 和 rect。白卡（#316）每个单位按自己的卡片尺寸、远景的基础缩放，上限是 CONFIG.card.maxLift.far */
-  function liftRows(units, cam, size, card) {
-    const out = card ? liftPlates(units, cam, farSize, CONFIG.card.maxLift.far) : liftPlates(units, cam, () => size);
+  /** 默认镜头下的后排抬高：每个单位写上 lift 和 rect。白卡（#316）每个单位按自己的卡片尺寸、远景的基础缩放（挤的区按 fits 缩小 / 换紧凑卡，#341），上限是 CONFIG.card.maxLift.far */
+  function liftRows(units, cam, size, card, fits) {
+    const out = card ? liftPlates(units, cam, (u) => cardAt(u, CONFIG.card.tier.far, fits && fits[u.zone]), CONFIG.card.maxLift.far) : liftPlates(units, cam, () => size);
     units.forEach(u => { const r = out.get(u.id); u.lift = r.lift; u.rect = r.rect; });
   }
-  /** 白卡在某一段镜头下的尺寸：卡片本来的像素（布局排好的 u.size）+ 这一段的基础缩放（hd2d-camera.js 的中景 / 近景也用） */
-  const cardAt = (u, base) => ({ w: u.size.w, h: u.size.h, s: base });
-  const farSize = (u) => cardAt(u, CONFIG.card.tier.far);
+  /** 白卡在某一段镜头下的尺寸：卡片本来的像素（布局排好的 u.size）+ 这一段的基础缩放（hd2d-camera.js 的中景 / 近景也用）。
+   *  fit = 这个区在这一段的挤法（#341，crowdStep 给的 { k, compact }）：基础缩放再乘 k；compact 时换成紧凑卡的尺寸（u.compact，配置物 / 迷你名牌没有，照旧） */
+  const cardAt = (u, base, fit) => {
+    const c = fit && fit.compact && u.compact ? u.compact : u.size;
+    return { w: c.w, h: c.h, s: base * (fit && fit.k > 0 ? fit.k : 1) };
+  };
+
+  /* ---------- 挤（#341）：一个区放不下时先整张缩小、再换紧凑卡 ---------- */
+  /** liftPlates 排好以后哪些区放不下：区里的卡互相压住，或者 must（一定要整个看得到的区：远景是全部，中景 / 近景是看的那个区）里有卡伸出可视范围 box
+   *  （屏幕像素 { x0, x1, y0, y1 }）的上沿、左右。两个区的卡压住时算人多的那个区（一样多两个都算），人少的那个记在 also 里（人多的降到底了再降它）；
+   *  只是卡的底边伸出下沿的（多半是别的区摞得太高、取景上下居中把它挤下去的），别的区都没毛病时才算它，不然也记在 also 里。
+   *  差半个像素以内不算（和量重叠的测试一样）。返回区号的 Set（另带 also：区号的 Set） */
+  function crowdBad(units, lifts, box, must) {
+    const E = 0.5, bad = new Set(), also = new Set(), low = new Set(), n = {}, rs = units.map(u => ({ zone: u.zone, r: lifts.get(u.id).rect }));
+    units.forEach(u => { n[u.zone] = (n[u.zone] || 0) + 1; });
+    rs.forEach((a, i) => {
+      const r = a.r;
+      if (must.has(a.zone)) {
+        if (r.y0 < box.y0 - E || r.x0 < box.x0 - E || r.x1 > box.x1 + E) bad.add(a.zone);
+        else if (r.y1 > box.y1 + E) low.add(a.zone);
+      }
+      for (let j = i + 1; j < rs.length; j++) {
+        const b = rs[j], q = b.r;
+        if (!(r.x0 < q.x1 - E && q.x0 < r.x1 - E && r.y0 < q.y1 - E && q.y0 < r.y1 - E)) continue;
+        if (a.zone === b.zone || n[a.zone] === n[b.zone]) { bad.add(a.zone); bad.add(b.zone); }
+        else { const [big, small] = n[a.zone] > n[b.zone] ? [a.zone, b.zone] : [b.zone, a.zone]; bad.add(big); also.add(small); }
+      }
+    });
+    const only = bad.size === 0;
+    low.forEach(id => (only ? bad : also).add(id));
+    bad.forEach(id => also.delete(id));
+    bad.also = also;
+    return bad;
+  }
+  /** 放不下的区（bad）往下降一档：先整张缩小（CONFIG.card.crowd.fit 一档一档往下；这个区最大的卡在屏幕上已经缩到 CONFIG.card.minScale 就不再缩，缩了也一样大），
+   *  再换紧凑卡（从原来的大小再一档一档缩）；降到底了就不动（bad 里的都降不动了，再降 bad.also 里的）。fits = { 区号: { i, k, compact } }（改它，没写的区 = 原样）；
+   *  baseOf(u) = 这一段这个单位的基础缩放（cam 是这一轮的镜头，按它算缩放）。有区降了返回 true */
+  function crowdStep(fits, bad, units, cam, baseOf) {
+    const F = CONFIG.card.crowd.fit, min = CONFIG.card.minScale;
+    const step = (id) => {
+      const mine = units.filter(u => u.zone === id);
+      if (!mine.length) return false;
+      const f = fits[id] || { i: 0, k: F[0], compact: false };
+      const top = Math.max(...mine.map(u => cardScale(cam, u, baseOf(u))));
+      let next = null;
+      if (f.i + 1 < F.length && top * f.k > min + 1e-3) next = { i: f.i + 1, k: F[f.i + 1], compact: f.compact };
+      else if (!f.compact && mine.some(u => u.compact)) next = { i: 0, k: F[0], compact: true };
+      if (next) fits[id] = next;
+      return !!next;
+    };
+    const moved = [...bad].filter(step).length > 0;
+    return moved || [...(bad.also || [])].filter(step).length > 0;
+  }
   /** 卡片快照 / 量到的尺寸：Map 或者普通对象（单位 id → 值）都认，统一成 Map；没给 = null */
   function idMap(x) {
     if (!x) return null;
@@ -813,16 +881,19 @@
       const m = measured && measured.get(String(u.id));
       return m && m.w > 0 && m.h > 0 ? { w: Math.round(m.w), h: Math.round(m.h) } : cardSize(cardOf(u) || u, narrow, phone);
     };
-    /** 按这个镜头排一遍站位（每排几个人跟着镜头：卡在屏幕上是固定像素大小的） */
-    const arrange = (cam) => {
+    // 紧凑卡（#341）的尺寸：宽和普通卡一样按两区 / 三区起 / 手机分，高固定；配置物、中立生物的迷你名牌不换（本来就小）
+    const KC = CONFIG.card.crowd.compact, compact = { w: phone ? KC.phoneW : narrow ? KC.narrowW : KC.w, h: KC.h };
+    const compactOf = (u) => { const s = cardOf(u) || u; return s.isProp || s.neutral ? null : compact; };
+    /** 按这个镜头排一遍站位（每排几个人跟着镜头：卡在屏幕上是固定像素大小的）。fits = 远景里挤的区缩小 / 换紧凑卡了（#341）：按缩过的卡排，一排站得下更多人 */
+    const arrange = (cam, fits) => {
       const out = [];
       zones.forEach(z => {
         const list = byZone[z.id];
         if (!list) return;
         let zsize = size;
         if (cards) {
-          const ss = list.map(sizeOfCard);
-          zsize = { w: Math.max(...ss.map(s => s.w)), h: Math.max(...ss.map(s => s.h)), s: CONFIG.card.tier.far };
+          const f = fits && fits[z.id], ss = list.map(u => (f && f.compact && compactOf(u)) || sizeOfCard(u));
+          zsize = { w: Math.max(...ss.map(s => s.w)), h: Math.max(...ss.map(s => s.h)), s: CONFIG.card.tier.far * (f && f.k > 0 ? f.k : 1) };
         }
         arrangeUnits(z, list, cam, zsize).forEach(slot => {
           const u = slot.unit;
@@ -838,27 +909,39 @@
             lift: 0, rect: null,             // liftRows 填：后排抬高的像素、铭牌在屏幕上的矩形
             plate: plateData(u)
           };
-          if (cards) { one.card = cardOf(u); one.size = sizeOfCard(u); }   // 白卡：卡片快照（场景交给 UnitCard 画）、卡片本来的像素尺寸
+          // 白卡：卡片快照（场景交给 UnitCard 画）、卡片本来的像素尺寸、换成紧凑卡时的尺寸（#341；配置物 / 迷你名牌是 null）
+          if (cards) { one.card = cardOf(u); one.size = sizeOfCard(u); one.compact = compactOf(u); }
           out.push(one);
         });
       });
       return out;
     };
     let units = arrange(camera);
+    // 远景里每个区的挤法（#341：区号 → { i, k, compact }，没写的区 = 原样）；场景、镜头（hd2d-camera.js · pose 的远景）照它画
+    const fits = {};
     if (cards) {
-      // 取景装下抬高以后的卡：镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
-      for (let pass = 0; pass < 3; pass++) {
-        const next = fitView(b, view, (cam) => [...liftPlates(units, cam, farSize, CONFIG.card.maxLift.far).values()].map(r => r.rect));
-        const same = Math.abs(next.dist - camera.dist) < 1e-3 && Math.hypot(next.target.x - camera.target.x, next.target.y - camera.target.y, next.target.z - camera.target.z) < 1e-3;
-        camera = next;
-        units = arrange(camera);
-        if (same) break;
+      // 远景最多退到只框地台时的 farBack 倍（以前不封顶：卡不跟着变小，一个区挤满了会越退越远）。放不下的区一轮一轮往下降一档（crowdStep），
+      // 每一轮重新取景、重排站位：镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
+      const K = CONFIG.card, lim = camera.dist * K.crowd.farBack, sizeOf = (u) => cardAt(u, K.tier.far, fits[u.zone]);
+      const box = { x0: 0, x1: view.width, y0: view.top, y1: view.height - view.bottom }, all = new Set(zones.map(z => z.id));
+      for (let round = 0; round < K.crowd.passes; round++) {
+        for (let pass = 0; pass < 3; pass++) {
+          const next = fitView(b, view, (cam) => [...liftPlates(units, cam, sizeOf, K.maxLift.far).values()].map(r => r.rect), { maxDist: lim, from: round ? camera : null });
+          const same = Math.abs(next.dist - camera.dist) < 1e-3 && Math.hypot(next.target.x - camera.target.x, next.target.y - camera.target.y, next.target.z - camera.target.z) < 1e-3;
+          camera = next;
+          units = arrange(camera, fits);
+          if (same) break;
+        }
+        const bad = crowdBad(units, liftPlates(units, camera, sizeOf, K.maxLift.far), box, all);
+        if (!bad.size || !crowdStep(fits, bad, units, camera, () => K.tier.far)) break;
       }
     }
-    liftRows(units, camera, size, !!cards);
+    liftRows(units, camera, size, !!cards, fits);
     const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
-    // cards / narrow / cardW：白卡（#316）排的（场景把普通单位的卡片宽设成 cardW）；原型页 cards = false
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, cards: !!cards, narrow, cardW: cards ? cardSize({}, narrow, phone).w : 0, region, scene, ground, lamps };
+    // cards / narrow / cardW：白卡（#316）排的（场景把普通单位的卡片宽设成 cardW）；原型页 cards = false。
+    // crowd = 远景里挤的区怎么缩（#341，上面的 fits）；compact = 紧凑卡的像素尺寸（场景照它画，布局按它排）
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, cards: !!cards, narrow, cardW: cards ? cardSize({}, narrow, phone).w : 0,
+      crowd: fits, compact: cards ? compact : null, region, scene, ground, lamps };
   }
 
   return {
@@ -866,6 +949,7 @@
     CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, threatsOf, arrangeUnits, gapKeyOf,
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
     cardScale, cardSize, cardAt,   // 白卡（#316）
+    crowdBad, crowdStep,           // 挤（#341）
     outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf
   };
 });

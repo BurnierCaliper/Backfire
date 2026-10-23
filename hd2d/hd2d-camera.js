@@ -79,7 +79,10 @@
      * 张开拉近、捏小拉远（#261：正式画面里远景再捏小 = 转回旧画面） */
     pinch: { ratio: 0.2 },
     /* 键盘：1 / 2 / 3 切远 / 中 / 近；中景 / 近景里左右键换相邻的区 */
-    keys: { far: "1", mid: "2", near: "3", prev: "ArrowLeft", next: "ArrowRight" }
+    keys: { far: "1", mid: "2", near: "3", prev: "ArrowLeft", next: "ArrowRight" },
+    /* 中景 / 近景两边的换区箭头（hd2d.css 的 .hd2d-zone-nav：离边 10px，「◀ 1 区 · 酸液」这么宽）占掉的那一条（像素；窗口宽 ≤ L.CONFIG.plate.phoneMax 时用 phone）：
+     * 看的那个区的白卡不伸进去（#341）；地台照旧可以铺到边上 */
+    nav: { w: 110, phone: 76 }
   };
   /** 缓动：进出都慢（起步和停下都没有突变，不晃） */
   const EASE = {
@@ -162,15 +165,18 @@
   }
   /** 中景 / 近景的镜头：让框住的范围和选中那个区的铭牌（按这一段的大小、抬高）刚好装进上下被界面盖住之后剩下的那一块。
    *  和布局的 fitView 同一个迭代（先居中，再按超出 / 留空的比例推拉），只是把铭牌也算进去：铭牌是固定像素大小的，镜头推近它不跟着变大。
-   *  range = [最近, 最远]（镜头到看的那一点的距离） */
-  function frame(layout, win, T, focus, sizeOf, range) {
+   *  range = [最近, 最远]（镜头到看的那一点的距离）；side = 两边换区箭头占的像素（#341：选中的区的卡横着只用中间那一块，地台照旧）；
+   *  from = 从这个镜头接着推拉（挤的时候一轮一轮重新取景，接着上一轮的，稳了就停） */
+  function frame(layout, win, T, focus, sizeOf, range, side, from) {
     const view = layout.view, W = view.width, H = view.height, aspect = W / H;
     const lo = -1 + 2 * view.bottom / H, hi = 1 - 2 * view.top / H;
     const b = win.box, pts = [];
     [b.minX, b.maxX].forEach(x => [0, b.maxY].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
     const mine = layout.units.filter(u => u.zone === focus);
-    const t = { x: (b.minX + b.maxX) / 2, y: L.CONFIG.camera.targetY, z: (b.minZ + b.maxZ) / 2 };
-    let dist = clamp(layout.camera.dist * 0.5, range[0], range[1]);
+    // 卡横着要装进 [side, W − side]：按画面的中线放大 sx 倍再和地台一起装进整个画面，装进去了就正好让开两边
+    const sx = 1 / Math.max(0.2, 1 - 2 * (side || 0) / W);
+    const t = from ? { x: from.target.x, y: from.target.y, z: from.target.z } : { x: (b.minX + b.maxX) / 2, y: L.CONFIG.camera.targetY, z: (b.minZ + b.maxZ) / 2 };
+    let dist = clamp(from ? from.dist : layout.camera.dist * 0.5, range[0], range[1]);
     const camOf = () => Object.assign(L.camAt(t, dist, aspect, T), { width: W, height: H, view: { top: view.top, bottom: view.bottom } });
     for (let it = 0; it < 30; it++) {
       const cam = camOf();
@@ -179,43 +185,63 @@
       pts.forEach(p => { const n = L.toNdc(cam, p); add(n.x, n.y); });
       if (mine.length) {
         const lifts = L.liftPlates(layout.units, cam, sizeOf, T.maxLift);
-        mine.forEach(u => { const r = lifts.get(u.id).rect; add(r.x0 / W * 2 - 1, 1 - r.y1 / H * 2); add(r.x1 / W * 2 - 1, 1 - r.y0 / H * 2); });
+        mine.forEach(u => { const r = lifts.get(u.id).rect; add((r.x0 / W * 2 - 1) * sx, 1 - r.y1 / H * 2); add((r.x1 / W * 2 - 1) * sx, 1 - r.y0 / H * 2); });
       }
       const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = -(x0 + x1) / 2;
       const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
       t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
       const k = Math.max((x1 - x0) / (2 * T.margin), (y1 - y0) / ((hi - lo) * T.margin));
-      dist = clamp(dist * clamp(k, 0.6, 1.6), range[0], range[1]);
+      const next = clamp(dist * clamp(k, 0.6, 1.6), range[0], range[1]);
+      // 接着上一轮推拉的：已经居中、远近也不用再动了就停
+      if (from && Math.abs(dx) < 1e-5 && Math.abs(dy) < 1e-5 && Math.abs(next - dist) < dist * 1e-5) { dist = next; break; }
+      dist = next;
     }
     return camOf();
+  }
+  /** 中景 / 近景两边换区箭头占的像素（CAMERA.nav；远景没有箭头） */
+  function navSide(layout, tier) {
+    if (tierName(tier) === "far") return 0;
+    return layout.view.width <= L.CONFIG.plate.phoneMax ? CAMERA.nav.phone : CAMERA.nav.w;
   }
   /** 白卡（#316，布局给了卡片快照）这一段里每张卡的基础缩放（L.CONFIG.card.tier）：远景 far；中景 mid；近景选中的区放大（near），别的区照中景 */
   function cardBase(tier, u, zone) {
     const K = L.CONFIG.card.tier;
     return tier === "far" ? K.far : CAMERA[tier].big && u.zone === zone ? K.near : K.mid;
   }
-  /** 这一段的镜头摆法（远景就是布局的默认镜头）和铭牌的抬高 */
+  /** 这一段的镜头摆法（远景就是布局的默认镜头）和铭牌的抬高。
+   *  白卡（#341）：选中的区放不下（卡互相压住、伸出顶栏 / 技能栏 / 两边的换区箭头之间那一块），或者哪个区的卡互相压住，
+   *  那个区就一档一档往下降（L.crowdStep：先整张缩小，再换紧凑卡），每降一轮重新取景。返回的 fits = 这一段每个区的挤法 */
   function lensOf(layout, tier, zone) {
-    const T = CAMERA[tier], far = layout.camera.dist;
+    const T = CAMERA[tier], far = layout.camera.dist, fits = {};
     const small = layout.plateSize || L.plateSize(layout.view), big = L.plateSize(layout.view, true);
-    // 白卡：每个单位按自己的卡片尺寸 × 这一段的基础缩放，抬高的上限也按白卡的（卡高得多）
-    const sizeOf = layout.cards ? (u) => L.cardAt(u, cardBase(tier, u, zone)) : (u) => (T.big && u.zone === zone ? big : small);
+    // 白卡：每个单位按自己的卡片尺寸 × 这一段的基础缩放（挤的区再按 fits 缩），抬高的上限也按白卡的（卡高得多）
+    const sizeOf = layout.cards ? (u) => L.cardAt(u, cardBase(tier, u, zone), fits[u.zone]) : (u) => (T.big && u.zone === zone ? big : small);
     const cap = layout.cards ? L.CONFIG.card.maxLift[tier] : T.maxLift;
     let range = [2, far];
     if (tier === "mid") {
       const near = lensOf(layout, "near", zone).cam.dist, top = far * T.dist.far;
       range = [Math.min(near * T.dist.near, top), top];
     }
-    const cam = frame(layout, windowOf(layout, tier, zone), Object.assign({}, T, { maxLift: cap }), zone, sizeOf, range);
-    return { cam, lifts: L.liftPlates(layout.units, cam, sizeOf, cap) };
+    const win = windowOf(layout, tier, zone), lens = Object.assign({}, T, { maxLift: cap }), side = layout.cards ? navSide(layout, tier) : 0;
+    let cam = frame(layout, win, lens, zone, sizeOf, range, side), lifts = L.liftPlates(layout.units, cam, sizeOf, cap);
+    if (layout.cards) {
+      const v = layout.view, box = { x0: side, x1: v.width - side, y0: v.top, y1: v.height - v.bottom }, must = new Set([zone]);
+      for (let round = 1; round < L.CONFIG.card.crowd.passes; round++) {
+        const bad = L.crowdBad(layout.units, lifts, box, must);
+        if (!bad.size || !L.crowdStep(fits, bad, layout.units, cam, (u) => cardBase(tier, u, zone))) break;
+        cam = frame(layout, win, lens, zone, sizeOf, range, side, cam);
+        lifts = L.liftPlates(layout.units, cam, sizeOf, cap);
+      }
+    }
+    return { cam, lifts, fits };
   }
 
   /**
    * 一段镜头。tier = far / mid / near；want = 想看的区（认不得就看当前行动单位所在的区，opts.actorId）。
-   * 返回 { tier, zone 选中的区, zones 这一段框住的区, target, dist, elevation, azimuth, fov, pos, cam（投影用，和布局的镜头同一种）,
+   * 返回 { tier, zone 选中的区, zones 这一段框住的区, crowd 挤的区怎么缩（#341：区号 → { k, compact }）, target, dist, elevation, azimuth, fov, pos, cam（投影用，和布局的镜头同一种）,
    *        clip 近裁剪面, tilt 拖动的俯角范围, dof { shift 焦点比镜头到 target 远多少, aperture, maxblur, far, lateral, half, cx / cy / cz 焦点区中心 },
    *        fogShift 起雾的地方挪近多少,
-   *        plates { 单位 id: { lift 抬高的像素, rect 屏幕矩形, big 放大, dim 变淡糊掉 } }, k: 1 }
+   *        plates { 单位 id: { lift 抬高的像素, rect 屏幕矩形, big 放大, dim 变淡糊掉；白卡另有 scale 这一段的基础缩放、compact 换成紧凑卡 } }, k: 1 }
    * 远景就是布局的默认镜头和布局排好的抬高，景深 / 雾和以前一样（shift、fogShift 都是 0）
    */
   function pose(layout, tier, want, opts) {
@@ -223,12 +249,18 @@
     const T = CAMERA[tier], zone = focusZone(layout, want, opts.actorId), z = zoneOf(layout, zone);
     const win = windowOf(layout, tier, zone);
     const scripted = tier !== "far" && !!z;
-    const lens = scripted ? lensOf(layout, tier, zone) : { cam: layout.camera, lifts: new Map(layout.units.map(u => [u.id, { lift: u.lift, rect: u.rect }])) };
+    // 远景：布局排好的（挤的区怎么缩也是布局定的：layout.crowd）
+    const lens = scripted ? lensOf(layout, tier, zone) : { cam: layout.camera, lifts: new Map(layout.units.map(u => [u.id, { lift: u.lift, rect: u.rect }])), fits: layout.crowd || {} };
     const cam = lens.cam, plates = {};
     layout.units.forEach(u => {
       const r = lens.lifts.get(u.id);
       plates[u.id] = { lift: r.lift, rect: r.rect, big: !!T.big && u.zone === zone, dim: !!T.dim && u.zone !== zone };
-      if (layout.cards) plates[u.id].scale = cardBase(tier, u, zone);   // 白卡：这一段的基础缩放（场景每帧按 L.cardScale 再乘远近）
+      if (layout.cards) {
+        // 白卡：这一段的基础缩放（场景每帧按 L.cardScale 再乘远近）；挤的区（#341）再乘 fits 的 k，换紧凑卡的写 compact（场景给铭牌加 .compact）
+        const f = lens.fits[u.zone];
+        plates[u.id].scale = L.cardAt(u, cardBase(tier, u, zone), f).s;
+        plates[u.id].compact = !!(f && f.compact && u.compact);
+      }
     });
     // 沿视线离镜头多远（景深、雾都按这个量）
     const depth = (c, p) => (c.pos.x - p.x) * c.back.x + (c.pos.y - p.y) * c.back.y + (c.pos.z - p.z) * c.back.z;
@@ -239,7 +271,7 @@
     const back = (c) => depth(c, { x: c.target.x, y: 0, z: layout.bounds.minZ });
     const fogShift = scripted ? back(cam) - back(layout.camera) : 0;
     return {
-      tier, zone, zones: win.zones,
+      tier, zone, zones: win.zones, crowd: lens.fits,
       target: { x: cam.target.x, y: cam.target.y, z: cam.target.z }, dist: cam.dist, elevation: cam.elevation, azimuth: 0, fov: cam.fov,
       pos: { x: cam.pos.x, y: cam.pos.y, z: cam.pos.z }, cam,
       clip: T.clip, tilt: T.tilt.slice(),
@@ -425,7 +457,7 @@
   }
 
   return {
-    CAMERA, EASE, ZONE_TAGS, tierName, stepTier, zoneOrder, neighborZone, focusZone, linkedZones, zoneTag, windowOf, pose, blurAt,
+    CAMERA, EASE, ZONE_TAGS, tierName, stepTier, zoneOrder, neighborZone, focusZone, linkedZones, zoneTag, windowOf, navSide, pose, blurAt,
     closePose, unitAt, camStep, pastFar, posOf, poseFrom, lerpPose, tween, at, overheadPose, wheelStep, wheelPixels, pinchStep
   };
 });
