@@ -241,8 +241,22 @@
   const WX_NAME = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
 
   /* ---------- 任务板 ---------- */
+  /** 长线养成队伍空了（候补也没人，接任务不会自动补上）：返回不能接任务的原因，否则 null */
+  function emptyPartyWhy(run) {
+    if (!run || !run.growth || (run.party || []).length || (run.reserve || []).length) return null;
+    return "队伍里没有人，不能接任务";
+  }
+  /** 队伍空时任务板上的「休整」入口（调 camp：过 1 天，领每天的融合体） */
+  function emptyRestHtml(run, fusionName) {
+    if (!emptyPartyWhy(run)) return "";
+    return `<div class="task r-empty-rest">
+      <div class="t-head"><b>休整</b><span class="days">1 天</span></div>
+      <p class="r-hint">队伍里没有人，休整一天可领 ${(typeof ROGUE_GROWTH !== "undefined" && ROGUE_GROWTH.fusionPerDay) || 1} 个${esc(fusionName || "融合体")}，用抽取机招募角色。</p>
+      <button class="g-btn r-main" id="r-board-camp">休整一天</button>
+    </div>`;
+  }
   function taskCard(t, which) {
-    const why = Rogue.taskBlocked(run, t);
+    const why = emptyPartyWhy(run) || Rogue.taskBlocked(run, t);
     const warn = !why && Rogue.taskWarning(run, t);
     const pay = Rogue.taskPay(run, t);
     const supplyText = [pay.water ? `${pay.water} ml 水` : "", ...Object.keys(pay.items).filter(id => pay.items[id]).map(id => `${ITEM_CATALOG[id].name}×${pay.items[id]}`)].filter(Boolean).join("、");
@@ -276,7 +290,7 @@
     const daily = typeof Rogue.growthDaily === "function" ? Rogue.growthDaily(run) : null;
     const dailyHtml = daily ? `<h3>每日挑战</h3><div class="shop">${daily.tasks.map(t => `<div class="shop-row"><span class="s-name">${esc(t.name)}<small>${esc(t.desc)}</small></span><span class="s-have">${t.progress}/${t.target}</span><span class="s-price">${t.done ? "已完成" : ""}</span></div>`).join("")}</div><p class="r-hint">${dailyRewardText(fusion)}</p>` : "";
     return `<h2>抽取机</h2>
-      ${window.GachaUI ? GachaUI.panelHtml(d, fusion) : ""}
+      ${window.GachaUI ? GachaUI.panelHtml(d, fusion, ROGUE_GACHA) : ""}
       <p class="r-hint">已有：${esc(owned)}</p>
       ${dailyHtml}
       ${reserve ? `<h3>候补</h3><div class="shop">${reserve}</div>` : ""}
@@ -298,6 +312,7 @@
     if (run.growth) {
       return `<h2>任务板</h2>
       <p class="r-hint">长线养成：独立存档，没有主线和期限。每天获得赫心融合体。角色永久死亡后清零等级移出队伍，下次抽到从 1 级重新培养。</p>
+      ${emptyRestHtml(run, ITEM_CATALOG[ROGUE_GROWTH.fusionItem].name)}
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
       ${renderGrowth()}
       ${renderSmiths()}`;
@@ -993,6 +1008,7 @@
     on("r-leave", () => act({ action: "leaveNode" }));
     body.querySelectorAll("[data-check]").forEach(b => { b.onclick = () => doCheck(b.dataset.check, Number(b.dataset.opt) || 0); });
     on("r-check-skip", () => act({ action: "skipCheck" }));
+    on("r-board-camp", () => act({ action: "camp" }));
     on("r-camp", () => withCamp(() => act(Object.assign({ action: "camp" }, restSel))));
     body.querySelectorAll("[data-rest-food]").forEach(el => { el.onchange = () => { restSel.food[el.dataset.restFood] = el.value; render(); }; });
     body.querySelectorAll("[data-rest-sleep]").forEach(el => { el.onchange = () => { restSel.sleep[el.dataset.restSleep] = el.value; render(); }; });

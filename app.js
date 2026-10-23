@@ -14413,16 +14413,16 @@ function runSkillInner(id, optRun) {
   }
   const extraBy = a ? [a.instant && a.instant.overload ? "过载" : null, a.self === "conductor" ? "导体" : null].filter(Boolean) : [];
   if (extraBy.length && overloadSeq.length >= 2) {
-    const last = overloadSeq[overloadSeq.length - 1];
-    const same = overloadSeq.filter(x => x.target && last.target && x.target.id === last.target.id);
-    if (same.length >= 2 && last.target) {
-      // 过载、导体各多打一次，都重复最后一段
-      extraBy.forEach(by => {
-        if (totalHp(last.target) <= 0) return;
-        lines.push(`${a.name} ${by}：复数次攻击额外再打一次，重复最后一段。`);
-        hitOne(last.actor, last.target, last.opt);
-      });
-    }
+    // 每个被打了 2 次以上的目标都补一次，各重复打它的最后一段，按最后一段的先后补（#333：音爆再耗圣盾放两次，
+    // 同区每个敌人都补；以前只看最后一个目标，只补它一个，它被打死了就谁都不补）
+    const ids = overloadSeq.map(x => x.target.id);
+    const repeat = overloadSeq.filter((x, i) => ids.lastIndexOf(x.target.id) === i && ids.indexOf(x.target.id) !== i);
+    // 过载、导体各多打一次，都重复最后一段
+    extraBy.forEach(by => {
+      if (!repeat.some(x => totalHp(x.target) > 0)) return;
+      lines.push(`${a.name} ${by}：复数次攻击额外再打一次，重复最后一段。`);
+      repeat.forEach(x => { if (totalHp(x.target) > 0) hitOne(x.actor, x.target, x.opt); });
+    });
   }
   flushAoePulse();
   paintSkillLog(lines.join("\n"));

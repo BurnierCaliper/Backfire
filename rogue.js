@@ -59,7 +59,7 @@ const Rogue = (function () {
   /** 现在幕间能不能改走下水道：背包里有地图（联机：队里任何一个人名下有，或者公用的），这一局还没进过。长线养成没有幕间 */
   const canEnterSewer = (run) => !run.growth && !!ITEM_CATALOG[SEWER().item] && bagCount(SEWER().item) > 0 && !sewerEntered(run);
   /* ---------- 长线养成（rogue-data.js · ROGUE_GROWTH） ---------- */
-  const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
+  const G = () => (typeof ROGUE_GROWTH !== "undefined" ? ROGUE_GROWTH : { startParty: 2, partyMax: 4, fusionPerTask: 1, fusionPerDay: 1, drawCost: 1, recruitLevel: 1, maxLevel: 20, fusionItem: "heart_fusion" });
   let growthOn = false;   // 当前载入的是长线养成：经验照跑团模式（growth.js · grantXpToPlayers、app.js 战斗结算看这个）
   /** 队伍平均等级（四舍五入） */
   function partyLevel(run) {
@@ -506,6 +506,9 @@ const Rogue = (function () {
     // 只能在任务板前接任务：任务中途接新任务会覆盖当前任务、跳过休整和期限检查（以前只靠界面拦）
     if (run.stage !== "board") throw new Error("现在不在任务板前，不能接任务");
     const task = which === "main" ? run.main : (run.board || [])[which];
+    // 长线养成：全队永久死亡、队伍空了不能接任务（#340）。先抽角色，或者休整等每天的融合体
+    if (run.growth && !run.party.length && (run.reserve || []).length) fillFromReserve(run, G().partyMax, []);
+    if (run.growth && !run.party.length) throw new Error("队伍里没有角色，不能接任务。先去角色抽取机抽角色，或者休整一天等融合体。");
     const why = taskBlocked(run, task);
     if (why) throw new Error(why);
     run.taskNo += 1;
@@ -677,6 +680,7 @@ const Rogue = (function () {
   }
   /** 场上的状态写回单局：升级、升级奖励、血量；死亡的角色连同武器人永久离队 */
   function captureParty(run, notes) {
+    const size0 = run.party.length;
     run.party.slice().forEach(h => {
       const u = findKit(h.kit, state.units);
       if (!u) return;
@@ -710,7 +714,17 @@ const Rogue = (function () {
       }
       captureHero(u, h);
     });
+    if (run.growth && run.party.length < size0) fillFromReserve(run, size0, notes);
     return notes;
+  }
+  /** 长线养成：有人永久死亡空出位置时，候补自动补上（补到死亡前的人数，不超过上限）（#340） */
+  function fillFromReserve(run, upTo, notes) {
+    const max = Math.min(upTo, G().partyMax);
+    while (run.party.length < max && (run.reserve || []).length) {
+      const h = run.reserve.shift();
+      run.party.push(h);
+      (notes || []).push(`${heroName(h.kit)} 从候补补进队伍。`);
+    }
   }
 
   /** 单局角色在某个里程碑能拿的职责技能（按手册的专精规则，见 growth.js · roleChoicesAt） */
@@ -1074,9 +1088,13 @@ const Rogue = (function () {
         if (run.stage !== "over") advanceNode(run, notes);
         return logAll(run, notes);
       }
-      if ((outcome === "lose" || !run.party.length) && C.wipeEndsRun) {
+      if ((outcome === "lose" || (!run.party.length && !run.growth)) && C.wipeEndsRun) {
         notes.push("团灭。本局结束。");
         endRun(run, false, "在休息点被偷袭，全队倒下。");
+        return logAll(run, notes);
+      }
+      if (outcome === "win" && run.growth && !run.party.length && run.task) {
+        failTask(run, notes, "队伍里没有人了", "任务失败");
         return logAll(run, notes);
       }
       if (outcome === "win") {
@@ -1099,7 +1117,12 @@ const Rogue = (function () {
       failTask(run, notes, "全队倒下", "任务失败");
       return logAll(run, notes);
     }
-    if ((outcome === "lose" || !run.party.length) && C.wipeEndsRun) {
+    if (run.growth && !run.party.length && run.task) {
+      // 长线养成：打赢了但全队都已永久死亡（#340）：不结束本局、存档保留，任务算失败，回城休整
+      failTask(run, notes, "队伍里没有人了", "任务失败");
+      return logAll(run, notes);
+    }
+    if ((outcome === "lose" || (!run.party.length && !run.growth)) && C.wipeEndsRun) {
       notes.push("团灭。本局结束。");
       endRun(run, false, boss ? `倒在第 ${run.act} 幕的首领面前。` : "全队倒在了任务途中。");
       return logAll(run, notes);
@@ -2751,9 +2774,11 @@ const Rogue = (function () {
     const today = Number(run.day) || 1;
     const last = Number(run.lastFusionDay) || 0;
     if (today <= last) return;
-    const n = today - last;
-    bagAdd(G().fusionItem, n);
+    const per = G().fusionPerDay == null ? 1 : Math.max(0, Number(G().fusionPerDay) || 0);
+    const n = (today - last) * per;
     run.lastFusionDay = today;
+    if (n <= 0) return;
+    bagAdd(G().fusionItem, n);
     const name = (ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体";
     (notes || []).push(`第 ${today} 天：获得 ${name}×${n}（现有 ${bagCount(G().fusionItem)}）。`);
   }
@@ -2907,8 +2932,17 @@ function advanceDays(run, n) {
 
   /** 休整一次：补给够就长休，不够只能硬撑。之后回任务板、进首领战，或者主线过期 → 结束 */
   function camp(run, plan) {
-    if (run.stage !== "camp") throw new Error("现在不是休整的时候");
+    const emptyGrowth = !!run.growth && !run.party.length;
+    // 长线养成队伍空了：任务板前也能休整，每次过 1 天，照常拿每天的融合体（#340）
+    if (run.stage !== "camp" && !(emptyGrowth && run.stage === "board")) throw new Error("现在不是休整的时候");
     const notes = [];
+    if (emptyGrowth) {
+      notes.push("队伍里没有角色：休整一天，等抽取机。");
+      advanceDays(run, 1);
+      notes.push(`现有${(ITEM_CATALOG[G().fusionItem] || {}).name || "赫心融合体"} ${bagCount(G().fusionItem)} 个。`);
+      makeBoard(run);
+      return logAll(run, notes);
+    }
     plan = restChoice(plan);
     if (canLongRest(run, plan)) doLongRest(run, notes, null, plan);
     else {
@@ -3096,7 +3130,16 @@ function advanceDays(run, n) {
     const sh = gachaCfg().share;
     const all = run ? run.party.concat(run.reserve || []) : [];
     const maxed = !!run && heroPool().every(c => { const h = all.find(x => x.kit === c.kit); return h && (h.level || 1) >= G().maxLevel; });
-    if (!maxed) return { hero: sh.hero, weapon: sh.weapon, craft: sh.craft };
+    if (!maxed) {
+      // 保底（#340 同 PR，主人定）：可用角色（队伍 + 候补，永久死亡的已移出）越少，出角色的概率越高；剩下的按 weapon:craft 分
+      const n = run ? all.length : Infinity;
+      const tier = (gachaCfg().pity || []).filter(t => n < t.below).sort((a, b) => a.below - b.below)[0];
+      if (tier) {
+        const rest = sh.weapon + sh.craft, left = 1 - tier.hero;
+        return { hero: tier.hero, weapon: left * sh.weapon / rest, craft: left * sh.craft / rest };
+      }
+      return { hero: sh.hero, weapon: sh.weapon, craft: sh.craft };
+    }
     const rest = sh.weapon + sh.craft;
     return { hero: 0, weapon: sh.weapon / rest, craft: sh.craft / rest };
   }
@@ -3114,7 +3157,7 @@ function advanceDays(run, n) {
       : fusion < G().drawCost ? `${ITEM_CATALOG[G().fusionItem].name}不够（要 ${G().drawCost}，有 ${fusion}）` : null;
     return { fusion, cost: G().drawCost, canDraw: !why, why, allMaxed, rates: drawRates(run), pool };
   }
-  /** 抽到角色：新角色入队（满员进候补），已有的 +1 级 */
+  /** 抽到角色：新角色入队（满员进候补）；已有的 +1 级，在候补里且队伍有空位就直接上场（#340） */
   function applyHeroDraw(run, kit, notes) {
     const h = run.party.concat(run.reserve || []).find(x => x.kit === kit);
     if (h) {
@@ -3122,6 +3165,12 @@ function advanceDays(run, n) {
       h.level = from + 1;
       notes.push(`已经有 ${heroName(kit)} 了：${heroName(kit)} 升到 ${h.level} 级。`);
       queueLevelRewards(h, from, h.level, notes, run);
+      const ri = (run.reserve || []).indexOf(h);
+      if (ri >= 0 && run.party.length < G().partyMax) {
+        run.reserve.splice(ri, 1);
+        run.party.push(h);
+        notes.push(`队伍有空位：${heroName(kit)} 从候补直接上场。`);
+      }
       return { levelUp: true, level: h.level };
     }
     // 以前永久死亡过的角色：从 1 级重新开始
