@@ -131,3 +131,42 @@ test("高压场地：主伤害 + 场地连带伤害只发作一次，只移动�
   assert.equal(moveLines(S).length, 1, "只移动一次");
   assert.equal(foe.zone, 2);
 });
+
+test("技能打危墙：倒塌砸到牛引起的发作照样写进这一击的日志（替身 out.lines）", () => {
+  const { c, S, foe, kolt, helu } = setup({ lv: 5 });
+  foe.zone = 2; kolt.zone = 1; helu.zone = 1;
+  S.gaps["1-2"] = Object.assign(c.emptyGap(), { type: "wall", hp: 1, maxHp: 1, level: 1 });
+  const proxy = c.makeStructProxy("gap:1-2", [1, 2], kolt);
+  const out = c.dealTo(kolt, proxy, { mult: 0, flat: 0, atk: 0, baseBreak: 5, flags: { action: true, blockResolved: true } });
+  assert.equal(out.structure, true);
+  const txt = c.formatHitLines(kolt, proxy, out).join("\n");
+  assert.equal(foe.raceRageUsed, true, "牛确实发作了");
+  assert.match(txt, /受伤后失控/);
+  assert.match(txt, /不受控地冲撞/);
+});
+
+for (const lv of [10, 5]) {
+  test(`同一击里只有击破的一段（惯性 + 震荡）打进失衡（lv ${lv}）：整击不发作、不占次数`, () => {
+    const { c, foe, kolt } = setup({ lv });
+    foe.def = 2; foe.statuses.shockwave = 1;
+    const r = c.dealTo(kolt, foe, { mult: 0, flat: 5, atk: 0, baseBreak: 0, flags: { action: true, blockResolved: true, atkFx: ["inertia"] } });
+    const txt = r.extra.join("\n");
+    assert.match(txt, /惯性 \+ 震荡/, "纯击破那一段确实结算了");
+    assert.doesNotMatch(txt, /受伤后失控/);
+    assert.ok(!foe.raceRageUsed);
+  });
+}
+
+test("dealTo 中途出错：暂存清掉，不会挂到下一次不相干的攻击上发作", () => {
+  const { c, S, foe, kolt, helu } = setup();
+  const orig = c.noteActionHit;
+  let once = true;
+  c.noteActionHit = function () { if (once) { once = false; throw new Error("测试：中途出错"); } return orig.apply(this, arguments); };
+  assert.throws(() => hit(c, kolt, foe), /中途出错/);
+  c.noteActionHit = orig;
+  assert.ok(!foe.raceRageUsed, "出错的那一击没发作");
+  // 下一次打别人（打自己人当靶子，只要是一次完整的 dealTo）
+  hit(c, kolt, helu);
+  assert.ok(!foe.raceRageUsed, "不相干的攻击不会让牛发作");
+  void S;
+});

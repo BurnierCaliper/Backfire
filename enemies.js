@@ -3461,6 +3461,14 @@ function raceAfterHurt(target, result, attacker, notes) {
   raceRageGo(target, notes);
 }
 
+/** 暂存期间别的结算（bossQuickRecover：纯击破那一段打进失衡、首领立刻恢复）告诉暂存「这只牛这一击打出了失衡」。只管当前这一击 */
+function raceRageMarkBroke(u) {
+  if (RAGE_HOLD.depth <= 0 || !u) return;
+  let rec = RAGE_HOLD.pending.find(r => r.target === u);
+  if (!rec) RAGE_HOLD.pending.push(rec = { target: u, broke: false });
+  rec.broke = true;
+}
+
 /** 最外层 dealTo 结束：判暂存的易怒蛮牛。返回要追加到这一击日志的行 */
 function raceRageFlush() {
   const list = RAGE_HOLD.pending;

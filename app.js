@@ -7895,13 +7895,19 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
 function dealTo(attacker, target, opt) {
   if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
   RAGE_HOLD.depth++;
-  let out;
-  try { out = dealToInner(attacker, target, opt); }
-  finally { RAGE_HOLD.depth--; }
+  let out, ok = false;
+  try { out = dealToInner(attacker, target, opt); ok = true; }
+  finally {
+    RAGE_HOLD.depth--;
+    // 中途出错：这一击作废，暂存的记录一起丢掉（不然会挂到下一次毫不相干的攻击上发作；意图预测还会留下指向模拟单位的记录）
+    if (!ok && RAGE_HOLD.depth === 0) RAGE_HOLD.pending = [];
+  }
   if (RAGE_HOLD.depth === 0) {
     const notes = raceRageFlush();
     if (notes.length) {
-      if (out && Array.isArray(out.extra)) out.extra.push(...notes);
+      // 打配置物 / 危墙的替身（dealToStructure）：formatHitLines 只输出 out.lines
+      if (out && out.structure && Array.isArray(out.lines)) out.lines.push(...notes);
+      else if (out && Array.isArray(out.extra)) out.extra.push(...notes);
       else appendLog(notes.join("\n"));
     }
   }
@@ -11066,6 +11072,7 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  if (typeof raceRageMarkBroke === "function") raceRageMarkBroke(u);   // 易怒蛮牛：这一击（含纯击破的一段）打出了失衡，整击不发作
   u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
   u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));
