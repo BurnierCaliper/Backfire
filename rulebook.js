@@ -583,10 +583,10 @@ const RULEBOOK_CHAPTERS = [
           "义体不能升级：同一系列同时只能装一件，换等级要在诊所以新换旧（付旧的拆除费 + 新的价格）。",
           "没有部位 / 槽位限制，装几件只看改造率；写着冲突标签的，同标签的不能同时装。",
           "在诊所花钱安装；拆除也要花钱，但完全可逆，压低的上限会还回来。每一件的效果、价格和坚毅生命的具体消耗见图鉴「义体」。",
-          // #315：等级门槛读 cyberware.js · CYBERWARE_UNLOCK_LEVEL
-          `角色 ${CYBERWARE_UNLOCK_LEVEL} 级起才能在诊所安装 / 拆除义体；还不到 ${CYBERWARE_UNLOCK_LEVEL} 级时已经装着的义体照常生效，只是不能拆。血量层改造没有这个限制，1 级就能做。`
-        ], table: { head: ["等级", "名字后缀", "生命上限", "固定占用"],
-          rows: CYBERWARE_TIERS.map(t => [`${t} 级`, `.vol${CYBERWARE_VOL[t]}`, `−${CYBERWARE_TIER[t].hpCut}`, rbPct(CYBERWARE_TIER[t].occupancy)]) } },
+          // #315：等级门槛读 cyberware.js · CYBERWARE_UNLOCK_LEVEL；每档要几级读 cyberwareInstallLevel（下表最后一列）
+          `角色 ${CYBERWARE_UNLOCK_LEVEL} 级起才能在诊所安装 / 拆除义体；装哪一件还要角色等级到它的档位（下表「角色几级能装」，以新换旧看新的那件），拆除不看档位。还不到 ${CYBERWARE_UNLOCK_LEVEL} 级时已经装着的义体照常生效，只是不能拆。血量层改造没有这个限制，1 级就能做。`
+        ], table: { head: ["等级", "名字后缀", "生命上限", "固定占用", "角色几级能装"],
+          rows: CYBERWARE_TIERS.map(t => [`${t} 级`, `.vol${CYBERWARE_VOL[t]}`, `−${CYBERWARE_TIER[t].hpCut}`, rbPct(CYBERWARE_TIER[t].occupancy), `${cyberwareInstallLevel(t)} 级`]) } },
         { title: `发动义体（${kind.name}）`, lines: fire.length ? [
           `装着的义体会出现在战斗的技能列表里；义体长在身上，空手也能用。发动花 ${rbSameCost(fire.map(d => CYBERWARE_SKILL_PREFIX + d.id))}，` +
             (uses != null ? `每次短休 ${uses} 次（短休、长休后恢复）。` : "每次短休能用几次见图鉴「义体」。"),
