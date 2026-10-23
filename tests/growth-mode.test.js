@@ -124,7 +124,7 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
 test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭。
   // 日期也固定：每日挑战完成了给材料、奎支、融合体（多抽一次人），战况跟着日期变，以前没固定，2026-10-23 这样的日子就会全灭
-  const { c, run, R } = fresh("G7b", null, "2026-10-22T12:00:00");
+  const { c, run, R } = fresh("G7c", null, "2026-10-22T12:00:00");
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {
@@ -223,7 +223,7 @@ test("换日期也稳定：本机时钟假装是 10-22、10-23（不固定换题
     const c = H.load();
     pretendToday(c, day);
     assert.equal(vm.runInContext("new Date().getDate()", c), Number(day.slice(8)), "本机时钟拨到了这一天");
-    const g = fresh320("G7b", c);
+    const g = fresh320("G7c", c);
     autoPlay320(g);
     const { run } = g;
     return plain({ stage: run.stage, tasksDone: run.tasksDone, day: run.day, daily: run.growthDaily.key, kuizhi: c.S.state.kuizhi,
