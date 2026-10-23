@@ -70,9 +70,13 @@ function uiPage(R, opts) {
   const w = P.window;
   Object.assign(w, { livePartyCards: () => R.cards, ELE_BY_CN: R.ele, CODEX_EFFECTS: R.codex, OnlineView: R.OV, skillList: (u) => R.ctx.skillList(u) });
   const ctx = vm.createContext(w);
-  ["icons.js", "hud-icons.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js"].concat(opts.scripts || []).forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
+  // hud-patch.js（#317：技能栏 / 队伍栏按需更新）：game.html 里在 game.js、online-battle.js 前面加载；opts.noPatch = 不加载（看退回整块换的那一条）
+  ["icons.js", "hud-icons.js"].concat(opts.noPatch ? [] : ["hud-patch.js"], ["hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js"], opts.scripts || []).forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
   return { P, w, ctx, doc: P.document };
 }
+/** game.js 里技能栏 / 队伍栏按需更新的小工具（#317）：有的才抠（没改的旧代码里没有，照样跑得起来，测试在断言上失败） */
+const HUD_FNS = ["hudAttr", "hudCls", "hudInner", "hudKeep", "hudPlace", "hudTrim", "hudSoon"];
+const hudFns = (g) => HUD_FNS.filter(n => g.includes("function " + n + "(")).map(n => fnSrc(g, n)).join("\n");
 
 /**
  * 单机：game.js 的技能栏 / 队伍栏（refreshHud 和它用到的 isSummonSkill / mainElementOf / summonIcon）、战斗画面的快捷键（boot 里那一个 keydown），
@@ -83,7 +87,7 @@ function soloHud(R, page, opts) {
   opts = opts || {};
   const g = read("game.js");
   const helpers = ["esc", "el", "sumCur", "sumMax"].map(n => { const m = new RegExp("^  const " + n + " = .*$", "m").exec(g); assert.ok(m, "game.js 有 " + n); return m[0]; }).join("\n");
-  const fns = ["refreshHud", "isSummonSkill", "mainElementOf", "summonIcon"].map(n => fnSrc(g, n)).join("\n");
+  const fns = ["refreshHud", "isSummonSkill", "mainElementOf", "summonIcon"].map(n => fnSrc(g, n)).join("\n") + "\n" + hudFns(g);
   const keyHead = 'document.addEventListener("keydown", (e) => {\n      // 只在战斗界面响应';
   const k0 = g.indexOf(keyHead);
   assert.ok(k0 > 0, "game.js 的战斗快捷键");
@@ -113,7 +117,7 @@ function soloHud(R, page, opts) {
     const isWeaponUnit = (u) => !!(u && u.weaponOf);
     const snapUnit = V.snapUnit, gameSkills = V.gameSkills, blockReason = V.blockReason, armSkill = V.armSkill, selectActor = V.selectActor, spaceStartOrEnd = V.spaceStartOrEnd;
     const cards = new Map();
-    let hudEpoch = 0, choiceResolve = null, choiceKeys = [];
+    let hudEpoch = 0, hudPaints = 0, choiceResolve = null, choiceKeys = [];
     const SPACE_SAFE = ${space ? space[1] : '"button"'}, kbdFocus = () => false;
     ${fns}
     const onKey = ${keySrc};
@@ -394,8 +398,8 @@ test("单机：开着新画面时点技能按钮 / 唤出按钮 / 队伍栏、�
   assert.deepEqual(L.arms.slice(-1), [G.skillsShown[1].id], "收起时数字键照旧");
   // 源码：新样子只换按钮里面的东西，点击 / 悬停还是 wireSkill 接的那一个按钮
   const src = code(fnSrc(read("game.js"), "refreshHud"));
-  assert.match(src, /if \(shell\) \{\s*const nb = shell\.skillButton\(\{ id: sk\.id, name: sk\.name, hint: sk\.hint, cost: sk\.cost \}, i, actorView, \{ key: i < 9 \? i \+ 1 : "" \}\);\s*nb\.cls\.split\(" "\)\.forEach\(c => b\.classList\.add\(c\)\);\s*b\.innerHTML = nb\.html;/);
-  assert.match(src, /wireSkill\(b, sk, why\);\s*box\.appendChild\(b\);/, "接点击 / 悬停的还是原来那一个");
+  assert.match(src, /if \(shell\) \{\s*const nb = shell\.skillButton\(\{ id: sk\.id, name: sk\.name, hint: sk\.hint, cost: sk\.cost \}, i, actorView, \{ key: i < 9 \? i \+ 1 : "" \}\);\s*cls \+= " " \+ nb\.cls;\s*inner = nb\.html;/);
+  assert.match(src, /wireSkill\(b, sk, why\);\s*hudPlace\(box, b, i\);/, "接点击 / 悬停的还是原来那一个（#317 起同一个技能还是同一个按钮）");
   assert.match(src, /const shell = window\.HD2DShell && HD2DShell\.on\(hudEl\) && window\.OnlineView \? HD2DShell : null;/, "只有换上了新外壳才换样子");
 });
 
