@@ -2,11 +2,17 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const vm = require("node:vm");
 const H = require("./headless");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-function fresh(seed, party) {
+/** today：把「今天」钉在这个时刻（长线养成的每日挑战按当天日期刷题，rogue.js · growthDailyKey；要战况固定的测试用） */
+function fresh(seed, party, today) {
   const c = H.load();
+  if (today) {
+    const RealDate = Date, t = new RealDate(today).getTime();
+    c.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [t])); } };
+  }
   const run = c.Rogue.newRun({ party: party || ["kolt", "helu"], seed, growth: true });
   return { c, run, R: c.Rogue, G: c.ROGUE_GROWTH || c.S.ROGUE_GROWTH };
 }
@@ -53,14 +59,15 @@ test("完成任务得到赫心融合体；回到任务板（不会进首领战�
   assert.equal(run.stage, "board");
 });
 
-test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
+test("抽取机（30% 抽到角色）：新角色入队，满员进候补；抽到已有的 +1 级；可以换人", () => {
   const { c, run, R, G } = fresh("G4");
   assert.equal(R.drawInfo(run).canDraw, false);
-  c.bagAdd("heart_fusion", 30);
+  c.bagAdd("heart_fusion", 100);
   let ups = 0, joins = 0;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 100; i++) {
     const before = run.party.length + run.reserve.length;
     const r = R.drawHero(run);
+    if (r.kind !== "character") { assert.ok(["weapon_material", "craft_material"].includes(r.kind)); continue; }
     const h = run.party.concat(run.reserve).find(x => x.kit === r.kit);
     if (r.levelUp) { ups++; assert.ok(h.level >= 2); }
     else { joins++; assert.equal(run.party.length + run.reserve.length, before + 1); assert.equal(h.level, G.recruitLevel); }
@@ -77,7 +84,8 @@ test("抽取机：新角色入队，满员进候补；抽到已有的 +1 级；�
   }
   // 抽到重复角色升级也会排上升级选择
   const leveled = run.party.concat(run.reserve).find(h => h.level >= 4);
-  if (leveled) assert.ok((leveled.pending || []).some(p => p.level === 4));
+  assert.ok(leveled, "100 抽里应该有人升到 4 级");
+  assert.ok((leveled.pending || []).some(p => p.level === 4));
 });
 
 test("武器升级照跑团模式：要实物材料 + 加工费；商店常备材料", () => {
@@ -116,7 +124,9 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
 });
 
 test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
-  const { c, run, R } = fresh("G7b");   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭
+  // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭。
+  // 日期也固定：每日挑战完成了给材料、奎支、融合体（多抽一次人），战况跟着日期变，以前没固定，2026-10-23 这样的日子就会全灭
+  const { c, run, R } = fresh("G7c", null, "2026-10-22T12:00:00");
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {
@@ -162,3 +172,81 @@ test("坚毅生命耗尽才真正死亡：移出队伍，再抽到从 1 级重�
   assert.ok((run.deadKits || []).includes(kit));
   assert.notEqual(run.stage, "over");
 });
+
+/* ---------- #320：规则里的换题日期可以注入（Rogue.setGrowthDailyClock），换哪天跑都一样 ---------- */
+const DAILY_DAY = new Date("2026-10-22T12:00");
+/** 用注入的时钟固定换题日期（和上面 fresh 的假 Date 是两种做法：这里测 rogue.js 的注入口） */
+function fresh320(seed, c) {
+  c = c || H.load();
+  c.Rogue.setGrowthDailyClock(() => DAILY_DAY);
+  const run = c.Rogue.newRun({ party: ["kolt", "helu"], seed, growth: true });
+  return { c, run, R: c.Rogue };
+}
+/** 把这套规则环境里的本机时钟拨到某一天（时间照常往前走；带参数的 new Date(...) 不受影响） */
+function pretendToday(c, ymd) {
+  const Real = vm.runInContext("Date", c);
+  const shift = new Real(`${ymd}T12:00`).getTime() - Real.now();
+  c.Date = class extends Real {
+    constructor(...a) { if (a.length) super(...a); else super(Real.now() + shift); }
+    static now() { return Real.now() + shift; }
+  };
+}
+function autoPlay320({ c, run, R }) {
+  const { BattleSim } = c;
+  const seen = new Set();
+  for (let i = 0; i < 400 && run.tasksDone < 6; i++) {
+    const pend = R.pendingChoices(run);
+    if (pend.length) { const p = pend[0]; R.choose(run, p.kit, p.index, R.choiceOptions(run, p.kit, p.index)[0].value); continue; }
+    seen.add(run.stage);
+    if (run.stage === "board") {
+      if (R.drawInfo(run).canDraw) { R.drawHero(run); continue; }
+      R.acceptTask(run, 0);
+    } else if (run.stage === "task" && !R.currentNode(run)) R.chooseNode(run, R.nodeChoices(run)[0].i);
+    else if (run.stage === "task") {
+      const node = R.currentNode(run);
+      if (node.type === "rest" && !run.ambush) R.restAtNode(run, R.canLongRest(run) ? "long" : "short");
+      else if (node.type === "check") R.skipCheck(run);
+      else if (["shop", "smith", "clinic"].includes(node.type)) R.leaveNode(run);
+      else {
+        const spec = R.battleSpec(run);
+        if (spec.level != null) assert.ok(spec.level >= R.partyLevel(run), `敌人 ${spec.level} 级，队伍平均 ${R.partyLevel(run)} 级`);
+        BattleSim.setup(spec);
+        const r = BattleSim.run({ maxRounds: 40 });
+        R.finishBattle(run, r.winner === "player" ? "win" : "lose");
+      }
+    } else if (run.stage === "camp") R.camp(run);
+    else assert.fail("不该出现的阶段：" + run.stage);
+  }
+  return seen;
+}
+
+test("换日期也稳定：本机时钟假装是 10-22、10-23（不固定换题日期时这天会全灭）各打一遍，两局完全一样", () => {
+  const ends = ["2026-10-22", "2026-10-23"].map(day => {
+    const c = H.load();
+    pretendToday(c, day);
+    assert.equal(vm.runInContext("new Date().getDate()", c), Number(day.slice(8)), "本机时钟拨到了这一天");
+    const g = fresh320("G7c", c);
+    autoPlay320(g);
+    const { run } = g;
+    return plain({ stage: run.stage, tasksDone: run.tasksDone, day: run.day, daily: run.growthDaily.key, kuizhi: c.S.state.kuizhi,
+      party: run.party.concat(run.reserve).map(h => `${h.kit} ${h.level}`), dead: run.deadKits || [], log: run.log.map(l => l.text) });
+  });
+  assert.equal(ends[0].daily, "2026-10-22", "按固定的日期换题");
+  assert.deepEqual(ends[1], ends[0]);
+  assert.notEqual(ends[0].stage, "over");
+});
+
+test("每日挑战跟着注入的时钟换题；不注入（或传空）照旧用本机日期", () => {
+  const c = H.load();
+  pretendToday(c, "2026-10-23");
+  const R = c.Rogue;
+  const run = R.newRun({ party: ["kolt", "helu"], seed: "G9", growth: true });
+  assert.equal(R.growthDaily(run).key, "2026-10-23", "默认读本机日期（规则不变）");
+  R.setGrowthDailyClock(() => new Date("2026-10-05T12:00"));
+  const a = plain(R.growthDaily(run));
+  assert.equal(a.key, "2026-10-05", "时钟换了一天就换题");
+  assert.deepEqual(plain(R.growthDaily(run)), a, "同一天再问还是这三个");
+  R.setGrowthDailyClock(null);
+  assert.equal(R.growthDaily(run).key, "2026-10-23", "传空恢复本机时钟");
+});
+

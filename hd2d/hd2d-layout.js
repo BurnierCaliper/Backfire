@@ -456,6 +456,13 @@
     const zv = state && state.zoneView && state.zoneView[String(id)];
     return zv && Array.isArray(zv.towers) ? zv.towers.filter(t => t && typeof t === "object" && t.type) : [];
   }
+  /** 区域预警（#330，旧画面区上的 .threat / .zthreat）：敌人已经标定、之后回合才落地的范围攻击——投影里的 zoneView[区].threats
+   *  （label 写什么攻击、from 谁标的、ready 下一回合就落地，online-view.js · zoneViewOf 的白名单）。没有 = [] */
+  function threatsOf(state, id) {
+    const zv = state && state.zoneView && state.zoneView[String(id)];
+    return zv && Array.isArray(zv.threats) ? zv.threats.filter(t => t && typeof t === "object" && typeof t.label === "string" && t.label)
+      .map(t => ({ label: t.label, from: typeof t.from === "string" ? t.from : "", ready: t.ready === true })) : [];
+  }
   /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
    *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
    *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
@@ -747,7 +754,8 @@
         hole: fk.effects.includes("abyss") ? S * CONFIG.holeRatio : 0,
         // 地面主题：只给没有场地效果的地台（只是垫高的高地也算）；兜底时不给，照旧画以前的样子
         ground: ground !== GROUND_DEFAULT && fk.effects.every(e => e === "highland") ? ground : null,
-        towers: towersOf(state, bz.id)   // 首领机制·踩塔（#283）：地台上一圈 + 前沿的图标
+        towers: towersOf(state, bz.id),  // 首领机制·踩塔（#283）：地台上一圈 + 前沿的图标
+        threats: threatsOf(state, bz.id) // 区域预警（#330）：地台上一圈红框 + 预警字
       };
     });
     const zoneById = {};
@@ -855,7 +863,7 @@
 
   return {
     SCENES, sceneOf,   // 区域下面的场景（#239）
-    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, arrangeUnits, gapKeyOf,
+    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, threatsOf, arrangeUnits, gapKeyOf,
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
     cardScale, cardSize, cardAt,   // 白卡（#316）
     outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf

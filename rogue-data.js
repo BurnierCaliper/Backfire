@@ -65,7 +65,7 @@ const ROGUE_CONFIG = {
     "下水道": []
   },
 
-  // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）
+  // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）。只有模板原有的休息点给；按小时补的（noPay）无报酬（rogue.js · restSkipPay）
   restSkipKuizhi: 250,
 
   // 遭遇战：在任务的休息点长休时可能被偷袭（城里休整不会）
@@ -77,7 +77,10 @@ const ROGUE_CONFIG = {
   hours: {
     travel: 3,          // 占位：每走到下一个节点
     shortRest: 1,       // 手册：短休 1 小时
-    longRest: 8         // 手册：长休 8–12 小时，这里取 8
+    longRest: 8,        // 手册：长休 8–12 小时，这里取 8
+    // 任务路线上任何一段连续不长休最多几小时（rogue.js · spaceRests / huntNext 按它补休息点）。力竭 20 小时起算，留 2 小时余量。
+    // 只算路线上的路程和节点时间：不算短休、撤退多花的时间、首领战后（不长休）带进下一幕的时间
+    restGapMax: 18
   },
 
   // 开局物资（占位）。水以毫升计，食物是手册里的四档
@@ -262,9 +265,10 @@ const ROGUE_SOLO = {
  * 和单局共用任务板、节点、工匠、客制化，不同的地方：
  *   没有主线、期限和首领；敌人等级跟着队伍平均等级走（区域按这个等级落在哪一幕）
  *   经验照跑团模式：升级所需经验不打折，击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」
+ *   任务经验照跑团模式：主持人手册的任务经验表（trpg-tasks.js · TRPG_TASK_PAY），按任务天数和队伍平均等级查，每人全额（rogue.js · taskXp）
  *   武器升级照跑团模式：要实物材料（商店常备）+ 工匠加工费
  *   角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败
- *   完成任务得到赫心融合体，在角色抽取机里抽角色：新角色入队（满员进候补），抽到已有的角色 +1 级
+ *   完成任务得到赫心融合体，在抽取机里抽（概率见下面 ROGUE_GACHA）：抽到角色时新角色入队（满员进候补），抽到已有的角色 +1 级
  *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
  *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
  *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
@@ -277,8 +281,33 @@ const ROGUE_GROWTH = {
   maxLevel: 20,
   fusionItem: "heart_fusion"
 };
+/* 长线养成：抽取机概率（每抽一次消耗 1 个赫心融合体）
+ *   share       每抽的大类：hero 角色（原来的抽角色逻辑）/ weapon 武器升级材料 / craft 道具制作材料
+ *               所有角色都满级时，hero 那一份按比例分给 weapon / craft（40:30）
+ *   weaponMats  武器材料各档相对权重 —— 和每日挑战奖励的材料是同一张表（rogue.js · completeGrowthDailyTask）
+ *   craftMats   null = 道具制作材料（items.js · CRAFT_MATERIALS）全部等概率
+ *   light       每次结果的光色（给抽卡界面用）：gold / purple / blue / gray
+ *   kuizhiMode  ⚠ 待定（等作者拍板）："byLight" 按光色给奎支（kuizhiByLight）；"flat" 每抽固定 kuizhiFlat.base + 按光色的 kuizhiFlat.extra
+ *   dailyTaskFusion  每完成 1 个每日挑战给几个赫心融合体；dailyAllFusion 三个全完成额外给几个 */
+const ROGUE_GACHA = {
+  share: { hero: 0.30, weapon: 0.40, craft: 0.30 },
+  weaponMats: [
+    { id: "mat_metal",   w: 50 },
+    { id: "mat_alloy",   w: 30 },
+    { id: "mat_polymer", w: 14 },
+    { id: "mat_crystal", w: 4 },
+    { id: "mat_heart",   w: 2 }
+  ],
+  craftMats: null,
+  light: { hero: "gold", craft: "blue", mat_heart: "gold", mat_crystal: "purple", mat_polymer: "blue", mat_alloy: "blue", mat_metal: "gray" },
+  kuizhiMode: "byLight",   // ⚠ PENDING：作者还没定，"byLight" 或 "flat"
+  kuizhiByLight: { gray: 100, blue: 150, purple: 500, gold: 1000 },
+  kuizhiFlat: { base: 100, extra: { gray: 0, blue: 0, purple: 0, gold: 0 } },
+  dailyTaskFusion: 1,
+  dailyAllFusion: 5
+};
 if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
-  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: "长线养成：在角色抽取机里抽一名角色（抽到已有的角色 +1 级）", goods: true };
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支`, goods: true };
 }
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
@@ -293,10 +322,11 @@ const ROGUE_CLINIC = {
 /* 支线任务模板（文字与数值都是占位）。报酬和补给是 ROGUE_CONFIG.perHeadBase 人队的量
  *   nodes    节点数范围 [最少, 最多]
  *   mix      中间节点的抽取权重（最后一个节点固定是战斗，elite: true 则是精英战）
- *            休息点不在这里抽：每个任务固定额外插一个（不在第一站、也不在最后一站）
+ *            休息点不在这里抽：每个任务固定额外插一个（不在第一站、也不在最后一站），
+ *            之后再按小时补（ROGUE_CONFIG.hours.restGapMax），所以可能不止一个
  *   days     需要几天
  *   diff     敌人等级额外 +几
- *   reward   完成奖励：奎支、每人经验
+ *   reward   完成奖励：奎支、每人经验（长线养成的经验不看这里，照手册的任务经验表，见 ROGUE_GROWTH）
  *   supply   接任务时委托方提供的补给：水（毫升）、物品 */
 const ROGUE_TASKS = [
   { kind: "clear",  name: "清剿", goal: "清掉盘踞在{region}的一伙敌人", nodes: [2, 3], days: 1, diff: 0,
@@ -371,7 +401,7 @@ const ROGUE_SMITH = {
 
 /* 武器工匠（设定照作者给的人物表）。
  *   ROGUE_SMITH_RULES.onBoard        每次回到任务板时随机出现几位不同的工匠（已定：3）
- *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的客制化里挑一张图纸（已定：5，代替设定里的任务线）
+ *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他还没给过的客制化里挑一张图纸；领完计数归零，再满几次领下一张，不重复，都领完不再计数（已定：5，代替设定里的任务线）
  *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格（已定：5000）
  * 每位工匠：
  *   home      所在的地方（单局在这个区域时出现的机会翻倍）       weight  出现的权重（默认 1）
@@ -470,9 +500,9 @@ const ROGUE_PARTS = {
 /* 悬赏任务（rogue.js · huntNext）：路线不预先给出，一站一站往前走。
  *   线索检定 → 其他任意节点 → 线索检定 → …；检定成功 need 次就找到目标；失败 failMax 次也会直接找到目标。
  *   检定失败（或绕过去）之后，下一个线索检定换一个不同的熟练项。
- *   找到后下一站是精英战：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
+ *   找到后下一站是精英战（走过去会超 ROGUE_CONFIG.hours.restGapMax 小时就先插一个休息点）：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
  *   打赢目标完成任务；从目标那一战撤退 = 目标逃走，任务失败。
- *   other：检定之间那一站的抽取权重（休息点整个任务最多一次） */
+ *   other：检定之间那一站的抽取权重（随机抽到的休息点整个任务最多一次；按小时强制补的休息点另算，补过之后也不再随机抽） */
 const ROGUE_BOUNTY = {
   need: 3, failMax: 5,
   hpMul: 1.5, atkMul: 1.5, extraTokens: 1,
