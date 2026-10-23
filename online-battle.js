@@ -287,15 +287,17 @@
         if (SH) {
           // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、原因、点击、悬停说明照旧
           const nb = SH.skillButton({ id: o.value, name: o.label, hint: hints[o.value] || "" }, i, cur, { key: i < 9 ? i + 1 : "", cost: o.disabled ? why : cost });
-          return `<button type="button" class="sk ${nb.cls}${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(nb.label + (why && !o.disabled ? "：" + why : ""))}">${nb.html}</button>`;
+          return `<button type="button" class="sk ${nb.cls}${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ui.busy ? " ob-wait" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(nb.label + (why && !o.disabled ? "：" + why : ""))}">${nb.html}</button>`;
         }
-        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
+        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ui.busy ? " ob-wait" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
           <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(o.disabled ? why : cost)}</span></button>`;
       }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : ""), "data-ob-skill");
       paintSummon(shown && shown.summon, cur, ui);
       if (SH) SH.who(hud, ui.acting ? SH.whoHtml(cur, true) : "");   // 技能栏上面那一行：谁在行动（敌人回合空着）
       const end = hud.querySelector(".endturn");
       end.disabled = !(ui.acting && mine.has(ui.current)) || !!ui.busy;
+      // 只是在等主机回话（ui.busy）才灰掉的按钮挂 ob-wait：online.css 的 .ob-wait 让它晚一点才变灰，主机回得快就不闪（#317 追加）
+      end.classList.toggle("ob-wait", !!(ui.busy && ui.acting && mine.has(ui.current)));
       // 提示栏：现在要做什么；分步里的「选项」类选择、可以不选的步骤、取消，放成按钮
       const m = ui.menu;
       let hint = esc(ui.hint || "");
@@ -328,7 +330,7 @@
       const sb = SH.summonButton({ id: o.value, name: o.label }, cur, { cost: o.disabled ? why : cost, key: isTouch() ? "" : SH.SHELL.summonKey });
       b.type = "button";
       // 变了的才写（#317）
-      const cls = "summonbtn" + (sb.back ? " back" : "") + (ui.armed === o.value ? " armed" : "") + (o.disabled ? " blocked" : "");
+      const cls = "summonbtn" + (sb.back ? " back" : "") + (ui.armed === o.value ? " armed" : "") + (o.disabled ? " blocked" : ui.busy ? " ob-wait" : "");
       if (b.className !== cls) b.className = cls;
       b.dataset.obSkill = o.value;
       b.disabled = !!(o.disabled || ui.busy);

@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机玩家：等主机回话时技能栏不再一下子整排灰掉**（#317 追加，worker 提的问题 1；online-battle.js 给只因 ui.busy 灰掉的技能 / 唤出 / 结束行动按钮挂 `ob-wait`；online.css · `.ob-wait:disabled` 动画；weather-fx.css 的天气灰按钮样式不盖它们；测试 tests/hd2d-shell.test.js「#317 追加」）
+  - **以前**：每选一次技能 / 取消都要问主机，问的那一下所有按钮立刻变灰（透明度 0.4）再恢复，网络慢一点就像在闪。
+  - **现在**：按钮照旧马上不能点（防连点不变），但看起来先照常亮着，过 0.3 秒主机还没回才变灰；本来就用不了的（blocked）照旧马上灰。
+
 - **选技能时画面不再一闪一闪：技能栏 / 队伍栏按需更新，一次操作只画一遍**（主人反馈，issue #317；新文件 hud-patch.js（`HudPatch.html`），game.html 在 game.js / online-battle.js 前面加载它；game.js：`refreshHud`（队伍栏按 `data-id`、技能栏按 `data-skill` 对上；`hudAttr` / `hudCls` / `hudInner` / `hudKeep` / `hudPlace` / `hudTrim`）、`disarm(quiet)`、`syncBusy(quiet)`、`hudSoon`、`armSkill`、`selectActor`、结束回合；online-battle.js：`paintHud`（`patchHtml`）、`paintSummon`；ROADMAP 代码地图加一行；测试：tests/hud-patch.test.js（新）、tests/hd2d-shell.test.js 第 8 节，tests/mini-dom.js 加 `watch`（记下 DOM 的每一次改动））
   - **以前**：单机每次 `refreshHud` 都 `innerHTML = ""` 把技能栏、队伍栏整块拆掉重建：图标、贴纸 SVG 重新解析，悬停状态丢掉，说明框重建。点一个要选目标的技能，`armSkill` 里 `disarm`、自己、`pickUnit` 各画一遍（一下点击画三遍）；选着技能时换人、点「结束回合」是 `disarm` 和后面各画一遍，演完是 `syncBusy` 和紧跟着的 `refreshAll` 各画一遍。联机玩家每次 `render()`（问主机的 `call()` 前后各一次）都把 `.party` / `.skills` 整块换 `innerHTML`，纸片画面贴的纸纹（online-paper.js · `dress`）也跟着重贴。主人在浏览器里量过：选技能 / Esc 取消一共 6 下，技能按钮被重建 70 次、队伍栏 15 次。
   - **现在**：按钮按人（`data-id` / `data-ob-unit`）、按技能（`data-skill` / `data-ob-skill`）对上：同一个人、同一个技能还是同一个按钮（悬停、焦点、说明框、纸纹都留着），只改变了的 class（选中、灰掉、谁亮着）、属性、文字 / 费用；按钮里面变了也只换变了的那几个节点，别的代码后来挂上的属性（纸纹）不碰。点技能 / 数字键选技能、Esc 取消、选着技能时点队伍栏换人，一下只画一遍（`armSkill` 先不画，后面选目标 / 区域、出手画了就不再画，都没画——弹选项——才在这一下跑完时补画一遍）；点「结束回合」、演完各少画一遍（后面马上要画的地方前面不先画）。选技能、取消时只改选中的那一个按钮的 class，别的按钮、队伍栏、唤出按钮一下都不碰。换了人技能也跟着换：两个人都有的（移动之类）还是原来那个按钮。唤出按钮、「结束回合」的字没变也不再重写。旧画面（新画面关着）也一样按需更新，样子和行为不变（读回来的 HTML 和整块重画的一样）。规则没动。

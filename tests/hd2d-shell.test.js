@@ -853,3 +853,25 @@ test("联机玩家（#317）：选技能（问主机前后 online-ui.js · call(
     } finally { W.stop(); }
   }
 });
+
+test("联机玩家（#317 追加）：只是在等主机回话才灰掉的技能 / 唤出 / 结束行动按钮挂 ob-wait，online.css 让它过 0.3 秒还没回才变灰（主机回得快就不闪）；本来就用不了的（blocked）不挂、照旧马上灰；回话了就摘掉", () => {
+  for (const shellOn of [true, false]) {
+    const R = rules(), O = onlineHud(R), hud = O.hud, tag = shellOn ? "新画面" : "旧画面";
+    if (shellOn) O.page.w.HD2DShell.attach(hud, { phone: false });
+    O.paint();
+    const skills = () => [...hud.querySelectorAll(".skills .sk")];
+    assert.ok(!skills().some(b => b.classList.contains("ob-wait")), tag + "：平时没有");
+    O.ui.busy = true; O.paint();
+    const wait = skills().filter(b => b.classList.contains("ob-wait"));
+    assert.ok(wait.length >= 2 && wait.every(b => b.disabled), tag + "：等主机时灰掉的按钮挂 ob-wait");
+    skills().filter(b => b.classList.contains("blocked")).forEach(b => assert.ok(!b.classList.contains("ob-wait"), tag + "：本来就用不了的不挂"));
+    const end = hud.querySelector(".endturn");
+    assert.ok(end.disabled && end.classList.contains("ob-wait"), tag + "：结束行动也是");
+    O.ui.busy = false; O.paint();
+    assert.ok(!skills().some(b => b.classList.contains("ob-wait")) && !end.classList.contains("ob-wait"), tag + "：回话了就摘掉");
+  }
+  const css = read("online.css");
+  assert.match(css, /\.ob-wait:disabled \{ animation: ob-wait-dim \.32s step-end forwards; \}/, "过 0.3 秒才变灰");
+  assert.match(css, /@keyframes ob-wait-dim \{ from \{ opacity: 1; \} to \{ opacity: \.4; \} \}/);
+  assert.ok(!/\.sk\[disabled\],/.test(read("weather-fx.css")), "天气的灰按钮样式不盖等主机的那几个");
+});
