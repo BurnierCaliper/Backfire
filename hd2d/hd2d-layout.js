@@ -71,6 +71,26 @@
       maxLift: 140,                   // 后排最多抬高多少像素（再高就和脚下的点脱节了）；中景 / 近景另有上限（hd2d-camera.js）
       scaleExp: 0.85, minScale: 0.74, maxScale: 1.15   // 按离镜头远近缩放：(焦距 / 距离)^scaleExp，夹在这个范围里
     },
+    /* 白色单位卡（#316）：正式画面（hd2d-field.js 给了卡片快照 opts.cards）3D 战场上的铭牌就是旧画面的单位卡（unit-card.js 画的 .unit-wrap，样子在 game.css），
+     * 这里是它的像素尺寸和每一段镜头的缩放，布局按它排站位、抬高后排、取景（没给卡片快照的原型页照旧按上面的 plate）。
+     *   w / narrowW / phoneW   普通单位的卡片宽（scale 1 时的像素）：和旧画面一样——两区 196（game.css 的 .unit）、画面上一排有 narrowFrom 个区以上 148（.g-field.z3 .unit）、
+     *                          窗口宽 ≤ plate.phoneMax 时 phoneW
+     *   prop / mini            配置物（圆形，.unit.prop；一排三区以上用 narrow 的）、中立生物的迷你名牌（.unit.mini）的宽高
+     *   rows                   还没画出来、量不到时估卡片多高（画出来以后场景量到真的大小，hd2d-field.js 按量到的重排）：base 上下内边距 + 名字 + 血条 + 血量数字，
+     *                          def 架势一行（菱形每个 pipW 宽），dur 耐久条，foot 行动点 / 状态那一行（ap 一个行动点 / 附赠多宽、chip 一个状态约多宽、line 多一行多高），res 资源文字一行
+     *   tier                   每一段镜头的基础缩放：远景缩小一点（far），中景和旧画面一样大（mid = 1），近景选中的区放大（near）；
+     *                          再乘按远近的缩放（plate.scaleExp 那一套），最后夹在 minScale（最小：远景里卡上的小字也要看得清）和 maxScale 之间
+     *   gapX / gapY            两张卡之间至少留的空（像素）
+     *   maxLift                每一段后排最多抬高多少像素（卡比以前的铭牌高得多：上限给得宽，同一区的卡才不会因为抬不上去而压住） */
+    card: {
+      w: 196, narrowW: 148, narrowFrom: 3, phoneW: 150,
+      prop: { w: 86, h: 86, narrowW: 72, narrowH: 72 }, mini: { w: 86, h: 54 },
+      rows: { base: 77, def: 16, pipW: 12, dur: 29, foot: 22, ap: 13, chip: 46, line: 19, res: 19 },
+      tier: { far: 0.85, mid: 1, near: 1.25 },
+      minScale: 0.8, maxScale: 2.4,
+      gapX: 10, gapY: 8,
+      maxLift: { far: 640, mid: 720, near: 820, close: 820 }
+    },
     /* 默认镜头：场景（hd2d-scene.js）也用这一份 */
     camera: { fov: 22, elevation: 30, margin: 0.97, targetY: 0.6 },
     view: { width: 1440, height: 900, top: 46, bottom: 160 },        // 桌面：顶栏 + 展开的技能栏
@@ -436,6 +456,13 @@
     const zv = state && state.zoneView && state.zoneView[String(id)];
     return zv && Array.isArray(zv.towers) ? zv.towers.filter(t => t && typeof t === "object" && t.type) : [];
   }
+  /** 区域预警（#330，旧画面区上的 .threat / .zthreat）：敌人已经标定、之后回合才落地的范围攻击——投影里的 zoneView[区].threats
+   *  （label 写什么攻击、from 谁标的、ready 下一回合就落地，online-view.js · zoneViewOf 的白名单）。没有 = [] */
+  function threatsOf(state, id) {
+    const zv = state && state.zoneView && state.zoneView[String(id)];
+    return zv && Array.isArray(zv.threats) ? zv.threats.filter(t => t && typeof t === "object" && typeof t.label === "string" && t.label)
+      .map(t => ({ label: t.label, from: typeof t.from === "string" ? t.from : "", ready: t.ready === true })) : [];
+  }
   /** 铭牌上要写的内容。只读白名单里的字段——坚毅生命（shp）不在其中。
    *  原型页交进来的是联机投影过的状态（online-view.js · projectState），和联机玩家拿到的一样；
    *  ATK 用主机算好的实际 ATK（投影里的 display.atk，联机单位卡也是这个数：online-battle.js · snapUnit），没有就用 atk */
@@ -504,6 +531,14 @@
     const d = Math.hypot(p.x - cam.pos.x, p.y - cam.pos.y, p.z - cam.pos.z);
     return clamp(Math.pow(cam.dist / Math.max(1e-6, d), P.scaleExp), P.minScale, P.maxScale);
   }
+  /** 白卡（#316）的缩放：这一段镜头的基础缩放 base（CONFIG.card.tier；特写的那张再乘放大）× 按远近的缩放（plateScale），夹在 CONFIG.card 的 minScale / maxScale 里。
+   *  布局、镜头（hd2d-camera.js）、场景每帧、攻击演出的位置（hd2d-fx.js）都用这一个公式 */
+  function cardScale(cam, p, base) {
+    const C = CONFIG.card;
+    return clamp((base > 0 ? base : 1) * plateScale(cam, p), C.minScale, C.maxScale);
+  }
+  /** 一张卡 / 铭牌这一刻在屏幕上的缩放：size.s 给了（白卡：这一段的基础缩放）按 cardScale，没给（原型的铭牌）按 plateScale */
+  const scaleOf = (cam, p, size) => (size && size.s != null ? cardScale(cam, p, size.s) : plateScale(cam, p));
   function viewOf(opts) {
     const base = opts.portrait ? CONFIG.phoneView : CONFIG.view, v = opts.view || {};
     return {
@@ -511,8 +546,9 @@
       top: Math.max(0, num(v.top, base.top)), bottom: Math.max(0, num(v.bottom, base.bottom))
     };
   }
-  /** 取景：让整个战场刚好装进「上下被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉） */
-  function fitView(bounds, view) {
+  /** 取景：让整个战场刚好装进「上下被界面盖住之后剩下的那一块」（迭代：先居中，再按超出 / 留空的比例推拉）。
+   *  rects(cam) 给了（白卡，#316）：这个镜头下每张卡在屏幕上的矩形（像素）也要装进去——卡是固定像素大小的，后排抬高以后会高出地台一大截 */
+  function fitView(bounds, view, rects) {
     const C = CONFIG.camera;
     const W = Math.max(1, view.width), H = Math.max(1, view.height), aspect = W / H;
     const lo = -1 + 2 * (view.bottom || 0) / H, hi = 1 - 2 * (view.top || 0) / H;
@@ -520,10 +556,14 @@
     [b.minX, b.maxX].forEach(x => [0, top].forEach(y => [b.minZ, b.maxZ].forEach(z => pts.push({ x, y, z }))));
     const t = { x: (b.minX + b.maxX) / 2, y: C.targetY, z: (b.minZ + b.maxZ) / 2 };
     let dist = 40, cam = null;
-    for (let it = 0; it < 14; it++) {
+    for (let it = 0; it < (rects ? 24 : 14); it++) {
       cam = camAt(t, dist, aspect);
       let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
       pts.forEach(p => { const n = toNdc(cam, p); x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); });
+      if (rects) {
+        cam.width = W; cam.height = H;
+        rects(cam).forEach(r => { x0 = Math.min(x0, r.x0 / W * 2 - 1); x1 = Math.max(x1, r.x1 / W * 2 - 1); y0 = Math.min(y0, 1 - r.y1 / H * 2); y1 = Math.max(y1, 1 - r.y0 / H * 2); });
+      }
       const dy = (lo + hi) / 2 - (y0 + y1) / 2, dx = -(x0 + x1) / 2;
       const half = cam.tanHalf * dist, mu = -dy * half, mr = -dx * half * aspect;
       t.x += cam.up.x * mu + cam.right.x * mr; t.y += cam.up.y * mu + cam.right.y * mr; t.z += cam.up.z * mu + cam.right.z * mr;
@@ -543,9 +583,26 @@
     const P = CONFIG.plate, S = big ? P.big : P;
     return view.width <= P.phoneMax ? { w: S.phoneW, h: S.phoneH } : { w: S.w, h: S.h };
   }
-  /** 一块铭牌在屏幕上的矩形（像素，y 向下）：底边中点在脚下的点往上 lift 像素，大小按远近缩放，上下各让出浮动的幅度 */
+  /** 白卡（#316）的像素尺寸（scale 1 时）：s = 卡片快照（unit-card.js 要的那一份，hd2d-field.js 给的）；narrow = 画面上一排有三个区以上；phone = 手机。
+   *  配置物 / 中立生物按它们自己的样子；普通单位宽照旧画面（CONFIG.card），高按卡上有几行估（画出来以后按场景量到的，见 build 的 opts.sizes） */
+  function cardSize(s, narrow, phone) {
+    const C = CONFIG.card, R = C.rows;
+    s = s || {};
+    if (s.isProp) return narrow ? { w: C.prop.narrowW, h: C.prop.narrowH } : { w: C.prop.w, h: C.prop.h };
+    if (s.neutral) return { w: C.mini.w, h: C.mini.h };
+    const w = phone ? C.phoneW : narrow ? C.narrowW : C.w, inner = Math.max(1, w - 24);
+    const pips = Math.max(num(s.defMax, 0), num(s.def, 0)), perRow = Math.max(1, Math.floor(inner / R.pipW));
+    let h = R.base + R.def + (pips > 40 ? 0 : Math.max(0, Math.ceil(pips / perRow) - 1) * R.pipW);
+    if (s.dur && s.isPlayer) h += R.dur;
+    const econ = (Math.max(num(s.apMax, 0), num(s.ap, 0)) + Math.max(num(s.bonusMax, 0), num(s.bonus, 0))) * R.ap + (s.flying ? R.chip : 0);
+    const chips = (Array.isArray(s.badges) ? s.badges.length : 0) + String(s.status || "").split(" · ").filter(Boolean).length;
+    h += R.foot + (Math.max(1, Math.ceil((econ + chips * R.chip) / inner)) - 1) * R.line;
+    if (s.res) h += R.res * Math.max(1, Math.ceil(String(s.res).length * 11 / inner));
+    return { w, h: Math.round(h) };
+  }
+  /** 一块铭牌在屏幕上的矩形（像素，y 向下）：底边中点在脚下的点往上 lift 像素，大小按远近缩放（白卡：size.s = 这一段的基础缩放，见 cardScale），上下各让出浮动的幅度 */
   function plateRect(cam, size, anchor, lift) {
-    const s = project(cam, anchor), k = plateScale(cam, anchor), bob = CONFIG.plate.bob;
+    const s = project(cam, anchor), k = scaleOf(cam, anchor, size), bob = CONFIG.plate.bob;
     const w = size.w * k, h = size.h * k;
     return { cx: s.x, foot: s.y, scale: k, x0: s.x - w / 2, x1: s.x + w / 2, y0: s.y - lift - h - bob, y1: s.y - lift + bob };
   }
@@ -554,7 +611,7 @@
   /** 一个区里一排最多站几个人，以及相邻两人的间距（世界单位）。
    *  铭牌按 (焦距 / 距离)^0.85 缩放，比地面缩得慢，所以越远越挤：前沿、后沿都量一遍，取挤的那边 */
   function columnsOf(zone, cam, size) {
-    const P = CONFIG.plate, U = CONFIG.unit;
+    const card = size && size.s != null, P = card ? CONFIG.card : CONFIG.plate, U = CONFIG.unit;
     const usableW = zone.w - 2 * CONFIG.pad;
     if (!cam) return { per: Math.max(1, Math.floor(usableW / U.minCol + 1e-9) + 1), step: U.minCol };
     let step = U.minCol, plateW = 0, overhang = Infinity;
@@ -562,11 +619,12 @@
       const z = zone.cz + edge * (zone.d / 2 - CONFIG.pad), y = zone.topY;
       const a = project(cam, { x: zone.cx - 0.5, y, z }), b = project(cam, { x: zone.cx + 0.5, y, z });
       const ppu = Math.max(1e-6, Math.abs(b.x - a.x));                     // 这里 1 个世界单位横向多少像素
-      const w = size.w * plateScale(cam, { x: zone.cx, y, z }) / ppu;         // 铭牌宽（世界单位）
+      const w = size.w * scaleOf(cam, { x: zone.cx, y, z }, size) / ppu;     // 铭牌宽（世界单位）
       plateW = Math.max(plateW, w);
       step = Math.max(step, w + P.gapX / ppu);
       overhang = Math.min(overhang, Math.max(0, CONFIG.zoneGap / 2 - P.gapX / ppu));   // 铭牌最多伸出地台边缘多少（不压到隔壁区的铭牌）
     });
+    // 再多站一个人：最外面两人脚下的点还在能站的那一块里（per × step 是多一个人以后两头的脚相隔多远），最外面那张铭牌 / 卡也不伸进隔壁区
     let per = 1;
     while (per * step <= usableW + 1e-9 && per * step / 2 + plateW / 2 <= zone.w / 2 + overhang + 1e-9) per++;
     return { per, step };
@@ -614,10 +672,12 @@
   /**
    * 后排抬高：从屏幕上最靠下（离镜头最近）的一排开始放，后面每一排如果和已经放好的铭牌在屏幕上叠到，
    * 就整排往上抬，直到让开 gapY（最多抬 maxLift）。不改传进来的单位，返回 Map（单位 id → { lift 像素, rect 屏幕矩形 }）。
-   * sizeOf(u) = 这个单位的铭牌像素尺寸（近景里选中那个区的铭牌是放大的）；默认镜头和中景 / 近景（hd2d-camera.js）都用这一个
+   * sizeOf(u) = 这个单位的铭牌像素尺寸（近景里选中那个区的铭牌是放大的；白卡是 { w, h, s 这一段的基础缩放 }）；默认镜头和中景 / 近景（hd2d-camera.js）都用这一个。
+   * 白卡（sizeOf 给了 s）上下至少隔 CONFIG.card.gapY
    */
   function liftPlates(units, cam, sizeOf, maxLift) {
-    const P = CONFIG.plate, cap = Number.isFinite(maxLift) ? maxLift : P.maxLift;
+    const card = units.length > 0 && sizeOf(units[0]) && sizeOf(units[0]).s != null;
+    const P = card ? { gapY: CONFIG.card.gapY } : CONFIG.plate, cap = Number.isFinite(maxLift) ? maxLift : CONFIG.plate.maxLift;
     const rows = new Map();
     units.forEach(u => {
       const key = u.zone + ":" + u.row;
@@ -649,10 +709,19 @@
     });
     return out;
   }
-  /** 默认镜头下的后排抬高：每个单位写上 lift 和 rect */
-  function liftRows(units, cam, size) {
-    const out = liftPlates(units, cam, () => size);
+  /** 默认镜头下的后排抬高：每个单位写上 lift 和 rect。白卡（#316）每个单位按自己的卡片尺寸、远景的基础缩放，上限是 CONFIG.card.maxLift.far */
+  function liftRows(units, cam, size, card) {
+    const out = card ? liftPlates(units, cam, farSize, CONFIG.card.maxLift.far) : liftPlates(units, cam, () => size);
     units.forEach(u => { const r = out.get(u.id); u.lift = r.lift; u.rect = r.rect; });
+  }
+  /** 白卡在某一段镜头下的尺寸：卡片本来的像素（布局排好的 u.size）+ 这一段的基础缩放（hd2d-camera.js 的中景 / 近景也用） */
+  const cardAt = (u, base) => ({ w: u.size.w, h: u.size.h, s: base });
+  const farSize = (u) => cardAt(u, CONFIG.card.tier.far);
+  /** 卡片快照 / 量到的尺寸：Map 或者普通对象（单位 id → 值）都认，统一成 Map；没给 = null */
+  function idMap(x) {
+    if (!x) return null;
+    if (x instanceof Map) return x;
+    return typeof x === "object" ? new Map(Object.keys(x).map(k => [k, x[k]])) : null;
   }
 
   /* ---------- 总入口 ---------- */
@@ -685,7 +754,8 @@
         hole: fk.effects.includes("abyss") ? S * CONFIG.holeRatio : 0,
         // 地面主题：只给没有场地效果的地台（只是垫高的高地也算）；兜底时不给，照旧画以前的样子
         ground: ground !== GROUND_DEFAULT && fk.effects.every(e => e === "highland") ? ground : null,
-        towers: towersOf(state, bz.id)   // 首领机制·踩塔（#283）：地台上一圈 + 前沿的图标
+        towers: towersOf(state, bz.id),  // 首领机制·踩塔（#283）：地台上一圈 + 前沿的图标
+        threats: threatsOf(state, bz.id) // 区域预警（#330）：地台上一圈红框 + 预警字
       };
     });
     const zoneById = {};
@@ -722,8 +792,13 @@
       b.maxY = Math.max(b.maxY, z.topY + U.flyLift + U.plateH);
     });
     const view = viewOf(opts);
-    const camera = fitView(b, view);
+    let camera = fitView(b, view);
     const size = plateSize(view);
+    // 白卡（#316）：给了卡片快照（opts.cards：单位 id → unit-card.js 要的快照）就按旧画面的单位卡排——每个单位按自己的卡片尺寸（量到的 opts.sizes 优先，没有就估），
+    // 远景的基础缩放；取景把抬高以后的卡也装进去。没给（原型页）照旧按铭牌（CONFIG.plate）
+    const cards = idMap(opts.cards), measured = idMap(opts.sizes);
+    const narrow = !!cards && new Set(zones.map(z => Math.round(z.cx * 100))).size >= CONFIG.card.narrowFrom;
+    const phone = view.width <= CONFIG.plate.phoneMax;
 
     // 单位：藏起来的、死了的、被移出的不画
     const visible = (state.units || []).filter(u => u && !u.hidden && !u.dead && !u._removed && !u.fused);
@@ -733,35 +808,64 @@
       if (!z) z = u.isPlayer ? zones[0] : zones[zones.length - 1];   // 旧档 / 计算器里留着的、棋盘上没有的区号
       (byZone[z.id] = byZone[z.id] || []).push(u);
     });
-    const units = [];
-    zones.forEach(z => {
-      const list = byZone[z.id];
-      if (!list) return;
-      arrangeUnits(z, list, camera, size).forEach(slot => {
-        const u = slot.unit;
-        const flying = !!u.flying && !u.submerged;
-        const submerged = !!u.submerged;
-        units.push({
-          id: u.id, zone: z.id, side: u.isPlayer ? "player" : "foe",
-          x: z.cx + slot.x, z: z.cz + slot.z,
-          groundY: z.topY, flying, submerged,
-          y: z.topY + (flying ? U.flyLift : 0) - (submerged ? U.sink : 0),
-          row: slot.row, col: slot.col,
-          footprint: { w: slot.colStep, d: U.d },
-          lift: 0, rect: null,             // liftRows 填：后排抬高的像素、铭牌在屏幕上的矩形
-          plate: plateData(u)
+    const cardOf = (u) => (cards && cards.has(String(u.id)) ? cards.get(String(u.id)) : null);
+    const sizeOfCard = (u) => {
+      const m = measured && measured.get(String(u.id));
+      return m && m.w > 0 && m.h > 0 ? { w: Math.round(m.w), h: Math.round(m.h) } : cardSize(cardOf(u) || u, narrow, phone);
+    };
+    /** 按这个镜头排一遍站位（每排几个人跟着镜头：卡在屏幕上是固定像素大小的） */
+    const arrange = (cam) => {
+      const out = [];
+      zones.forEach(z => {
+        const list = byZone[z.id];
+        if (!list) return;
+        let zsize = size;
+        if (cards) {
+          const ss = list.map(sizeOfCard);
+          zsize = { w: Math.max(...ss.map(s => s.w)), h: Math.max(...ss.map(s => s.h)), s: CONFIG.card.tier.far };
+        }
+        arrangeUnits(z, list, cam, zsize).forEach(slot => {
+          const u = slot.unit;
+          const flying = !!u.flying && !u.submerged;
+          const submerged = !!u.submerged;
+          const one = {
+            id: u.id, zone: z.id, side: u.isPlayer ? "player" : "foe",
+            x: z.cx + slot.x, z: z.cz + slot.z,
+            groundY: z.topY, flying, submerged,
+            y: z.topY + (flying ? U.flyLift : 0) - (submerged ? U.sink : 0),
+            row: slot.row, col: slot.col,
+            footprint: { w: slot.colStep, d: U.d },
+            lift: 0, rect: null,             // liftRows 填：后排抬高的像素、铭牌在屏幕上的矩形
+            plate: plateData(u)
+          };
+          if (cards) { one.card = cardOf(u); one.size = sizeOfCard(u); }   // 白卡：卡片快照（场景交给 UnitCard 画）、卡片本来的像素尺寸
+          out.push(one);
         });
       });
-    });
-    liftRows(units, camera, size);
+      return out;
+    };
+    let units = arrange(camera);
+    if (cards) {
+      // 取景装下抬高以后的卡：镜头一换，每排站几个人、抬多高都跟着变，来回两三遍就稳了
+      for (let pass = 0; pass < 3; pass++) {
+        const next = fitView(b, view, (cam) => [...liftPlates(units, cam, farSize, CONFIG.card.maxLift.far).values()].map(r => r.rect));
+        const same = Math.abs(next.dist - camera.dist) < 1e-3 && Math.hypot(next.target.x - camera.target.x, next.target.y - camera.target.y, next.target.z - camera.target.z) < 1e-3;
+        camera = next;
+        units = arrange(camera);
+        if (same) break;
+      }
+    }
+    liftRows(units, camera, size, !!cards);
     const lamps = lampSpots(zones, lampPlan(ground, opts.theme || "day"));
-    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, region, scene, ground, lamps };
+    // cards / narrow / cardW：白卡（#316）排的（场景把普通单位的卡片宽设成 cardW）；原型页 cards = false
+    return { portrait, boardId: board.id, zones, gaps, units, bounds: b, camera, view, plateSize: size, cards: !!cards, narrow, cardW: cards ? cardSize({}, narrow, phone).w : 0, region, scene, ground, lamps };
   }
 
   return {
     SCENES, sceneOf,   // 区域下面的场景（#239）
-    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, arrangeUnits, gapKeyOf,
+    CONFIG, KIND_ORDER, STATUS_LABELS, GROUNDS, GROUND_DEFAULT, REGIONS, REGION_ALIAS, build, boardOf, fieldKinds, plateData, mechsOf, towersOf, threatsOf, arrangeUnits, gapKeyOf,
     fitView, camAt, toNdc, project, plateScale, plateRect, plateSize, liftPlates, frameTop, regionName, groundOf, lampPlan,
+    cardScale, cardSize, cardAt,   // 白卡（#316）
     outlineOf, neighborSides, insideOutline, outlineDist, offsetOutline, hashOf
   };
 });

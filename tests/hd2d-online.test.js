@@ -67,7 +67,7 @@ function fakeScene(log) {
 /**
  * 一位联机玩家的页面：原型页的假网页 + online-battle.js + hd2d-field.js；单机的 #g-app（顶栏里有开关）/ #g-field 照 game.html 摆着，
  * 联机舞台（顶上工具栏的 .ol-hd2d-slot、战斗画面 .ol-battle 的战场）另建。房主的 state 每个人塞上特殊的坚毅生命数、私有笔记，玩家拿到的是投影过的。
- * opts.on = 本机记着新画面开；opts.reduced = 减少动态效果（转场直接切）
+ * opts.on = 本机记着新画面开，不然本机记着关（#316 起没选过 = 默认开，旧画面要明确选过关）；opts.reduced = 减少动态效果（转场直接切）
  */
 async function olPage(opts) {
   opts = opts || {};
@@ -127,7 +127,7 @@ async function olPage(opts) {
   st.units.forEach(u => { const c = doc.createElement("div"); c.dataset.unitId = u.id; cards[u.id] = c; });
   const battle = { el: ol, cardOf: (id) => cards[id] || null };
 
-  const mem = new Map(opts.on ? [[F.FIELD.storageKey, "on"]] : []), writes = [];
+  const mem = new Map([[F.FIELD.storageKey, opts.on ? "on" : "off"]]), writes = [];
   const storage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); writes.push([k, String(v)]); } };
   const q = [], clock = { t: 100 };
   F.boot({ doc, storage, load: () => { log.loads++; return Promise.resolve(fakeScene(log)); }, hint: (m) => log.hints.push(m), reduced: () => !!opts.reduced, wait: (s, fn) => q.push(fn), now: () => clock.t });
@@ -250,14 +250,15 @@ test("联机玩家开 / 关新画面：同一个开关（#g-hd2d-toggle 挪到�
   assert.ok(P.ol.classList.contains("hd2d-on"), "联机的战斗画面加 hd2d-on（旧的单位卡看不见）");
   assert.equal(P.app.classList.contains("hd2d-on"), false, "单机的 #g-app 不动");
   assert.equal(P.btn.textContent, "新画面 开");
-  assert.deepEqual(P.writes, [[P.F.FIELD.storageKey, "on"]], "开关只记在本机");
+  assert.deepEqual(P.writes, [[P.F.FIELD.lockKey, "0"], [P.F.FIELD.storageKey, "on"]], "开关只记在本机（点开关打开时顺带解锁，也是本机的，主人 10/23）");
   // 再点：转回旧画面（镜头升到正上方 → 云雾 → 拆掉）
   P.btn._on.click.forEach(f => f({}));
   assert.equal(P.F.transition().to, "old");
   await P.drain();
   assert.ok(sc.disposed && !P.ol.classList.contains("hd2d-on"), "拆干净，旧战场回来");
   assert.equal(P.btn.textContent, "新画面 关");
-  assert.deepEqual(P.writes.map(w => w[1]), ["on", "off"]);
+  assert.deepEqual(P.writes.filter(w => w[0] === P.F.FIELD.storageKey).map(w => w[1]), ["on", "off"]);
+  assert.equal(P.writes.filter(w => w[0] === P.F.FIELD.lockKey).pop()[1], "1", "点开关关掉：记了锁（主人 10/23）");
   assert.deepEqual(P.calls, [], "开 / 关新画面、转场都不经过联机的 api（不发给别人）");
   // 离开战斗（探索、离开房间）：拆下来，开关放回单机顶栏原来的位置
   P.U.paintField3d(null);

@@ -561,8 +561,11 @@ function longRestNeeds(plan) {
   const heroes = partyHeroes().filter(h => !h.dead);
   let water = 0;
   const food = {}, sleep = {};
+  // plan.free：这次长休不消耗水和食物（单局按小时补的休息点，rogue.js · freeRestHere）；睡眠道具照常
   heroes.forEach(h => {
     const c = heroRestCost(h);
+    const sid0 = sleepFor(plan, h.kit);
+    if (plan.free) { if (sid0) sleep[sid0] = (sleep[sid0] || 0) + 1; return; }
     water += c.water;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
     food[fid] = (food[fid] || 0) + c.food;
@@ -579,7 +582,7 @@ function longRestNeeds(plan) {
     const have = bagCount(sid);
     if (have < sleep[sid]) lack.push(`${(ITEM_CATALOG[sid] || {}).name || sid} 只有 ${have} 个，分给了 ${sleep[sid]} 个人`);
   });
-  return { water, food, sleep, lack, ok: lack.length === 0 };
+  return { water, food, sleep, lack, ok: lack.length === 0, free: !!plan.free };
 }
 /* ===== 吐酸（兽人-蜥蜴种族特长）的属性：长休时可以改 ===== */
 const SPIT_ELEMENTS = ["acid", "fire", "ice", "electric", "energy", "physical", "harmonic"];
@@ -699,7 +702,9 @@ function ledgerLongRest(plan, notes) {
     ledgerAdvance(hours, notes);
     return { ok: false, notes, report: restReport(before, restSnapshot(), { ok: false, hours }) };
   }
-  if (!plan.force) {
+  if (plan.free && !plan.force) {
+    notes.push(`长休 ${hours} 小时，这里不消耗补给（水和食物）。`);
+  } else if (!plan.force) {
     setLedgerWater(ledgerWater() - need.water);
     Object.keys(need.food).forEach(fid => bagAdd(fid, -need.food[fid]));
     notes.push(`长休 ${hours} 小时，消耗 ${need.water} ml 水、` +
@@ -742,7 +747,8 @@ function ledgerLongRest(plan, notes) {
     h.upOnShp = false;
     h.stunned = false;
     const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
-    const foodBonus = ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
+    // 不耗补给的长休（plan.free）没吃食物，也就没有食物的坚毅加成
+    const foodBonus = plan.free && !plan.force ? 0 : ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
     const sid = sleepFor(plan, h.kit);
     const hasBag = !!sid;
     const perHour = 2 + (hasBag ? Number(ITEM_CATALOG[sid].sleep) || 0 : 0);

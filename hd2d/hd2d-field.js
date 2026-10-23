@@ -1,10 +1,13 @@
 /* Antlerscale: Backfire · HD-2D 战场 · 接进正式战斗画面（game.html，#261）
  *
- * 战斗顶栏的「新画面」开关（默认关，记在本机 localStorage）开着时，战场那一格（#g-field）里铺一层 3D 战场，盖住旧的区和单位卡：
+ * 战斗顶栏的「新画面」开关（默认开（#316），记在本机 localStorage：明确选过关的照旧关）开着时，战场那一格（#g-field）里铺一层 3D 战场，盖住旧的区和单位卡：
  *   · 画面数据走联机玩家的那条路：本机的战斗状态先过 online-view.js 的白名单（OnlineView.projectState），演出途中每一下的快照
  *     （game.js · setView 拿到的 snapUnit / snapProp）照联机演出带（projectTape）的做法过 OnlineView.projectUnit，再交给布局（hd2d-layout.js）。
  *     区域 / 场景 / 光影读投影里的 region / scene / light。坚毅生命投影里本来就没有，这里一个字都不碰
  *   · 每次战斗画面刷新（game.js · setView：refreshAll、演出的每一下）跟着重排：血量、架势、状态、站位、天气、场地、间隔；谁在行动跟着 refreshHud
+ *   · 铭牌就是旧画面的白色单位卡（#316）：unit-card.js 的 UnitCard.create / update 画，卡片快照是旧画面单位卡的同一份（单机：game.js · setView 给的快照；
+ *     联机玩家：收到的包过 online-battle.js · snapUnit / snapProp），交给场景之前去掉坚毅生命（cardsOf）。卡片的大小、每一段镜头的缩放在 hd2d-layout.js 的 CONFIG.card，
+ *     场景画出来量到的大小和布局估的不一样就按量到的重排（onCardSize → S.sizes）
  *   · 点铭牌 = 点单位卡、点地台 = 点区、点危墙 / 桥梁 = 点那根竖条、点空地 = 点战场的空白、悬停铭牌 = 悬停单位卡（悬停说明挂在铭牌上）：
  *     都调 game.js 交出来的入口（GAME.fieldInput），规则判断只在 game.js 里那一份
  *   · 选目标 / 选区的标记（game.js 的 fieldMarks）画成铭牌描边、其余变暗、地台 / 间隔亮框
@@ -22,7 +25,7 @@
  *   同一个场景；画面只用他收到的包（packetView：已经过 online-view.js 的白名单，不再碰房主的 state），点铭牌 / 地台走联机现有的回调，
  *   收到行动包时整包交给 hd2d-play.js 播（play）。离开战斗 detach，开关放回单机的顶栏。开关、镜头只在这台电脑上，不发给别人。
  *
- *   HD2DField.enabled(storage) / setEnabled(on, storage)   开关（读写 localStorage 都包 try/catch，默认关）
+ *   HD2DField.enabled(storage) / setEnabled(on, storage)   开关（读写 localStorage 都包 try/catch，默认开；存着 "off" 的照旧关）
  *   HD2DField.viewState(state, snaps, { OV, itemCatalog })  画面用的那一份（纯函数）
  *   HD2DField.layoutOpts(v, view, portrait)                 交给 HD2DLayout.build 的选项（区域 / 场景 / 光影读投影）
  *   HD2DField.marksOf(marks, layout, actorId)               game.js 的标记 → 场景要的（纯函数）
@@ -30,9 +33,12 @@
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  *   HD2DField.packetView(pv, { OB, OV })                    联机玩家收到的那一份 → 画面用的（纯函数，#289）
- * 页面（game.js 调）：on() / view(snaps) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
+ * 页面（game.js 调）：on() / view(snaps, { animate }) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
  *   联机玩家（online-ui.js 调，#289）：attach(spec) → 把手 { on, view, actor, marks, play, skip }；detach(spec)。spec 见下面的「画面挂在哪」
  *   攻击演出（#283）：numbers(list) 弹纸片风数字 / paper(id) 打中那一下的纸片感 / unpaper() 画布复原 / push(出手的, 目标) 推镜头（返回要等的毫秒，不推 = 0）/ release() 拉回
+ *   卡片动画（#330，旧画面单位卡有的动画 3D 白卡也有）：cards() → hd2d-play.js · HD2DPlay.cards（冲撞 / 冲一下 / 后坐 / 挪一下 / 受击 + 击退 / 格挡 / 登场 / 慢动作）；
+ *     ko(id, { hold, slow }) / releaseKOs() 被打倒的敌人先留在场上、演完再淡出；warn(id, on) 高能自爆预警（白卡 + 脚下的地台）；quake(力度) 震屏；still() 新画面开着且减少动态效果。
+ *     换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相：view 的 animate 一开就演（hd2d-scene.js 按 setBattle 的 move 秒数插值）
  * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js）。数值、文字都在 FIELD。 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-layout.js"));
@@ -41,18 +47,22 @@
   "use strict";
 
   /* ---------- 配置 ----------
-   *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（关：主人试过再改默认）
+   *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（#316 起默认开：本机没选过的打开页面就是新画面；明确选过关的照旧关）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
    *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
    *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
    *                            全用普通脚本，直接双击打开 game.html（file://）也能开新画面——浏览器不让 file:// 加载 ES 模块
    *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
    *                            名字、状态、实际 ATK 这些用这一刻的战斗状态投影出来的
+   *   cardKeys                 白卡（#316：3D 铭牌画旧画面的单位卡）的快照交给场景时只带的字段（白名单）
    *   pad                      取景时让开战场上沿的首领机制横幅 / 援军倒计时、下沿的镜头按钮，再多留几像素
    *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」 */
   const FIELD = {
     storageKey: "backfire-hd2d-field",
-    defaultOn: false,
+    defaultOn: true,
+    // 用右上角开关关掉新画面（主人 10/23）：本机另记一个「锁」，旧战场上的滚轮就不再转到新画面（要开就点开关）；
+    // 远景再往外拉（滚轮）回到旧画面的不锁，往前滚照样能回去。点开关打开时解锁
+    lockKey: "backfire-hd2d-lock",
     toggleId: "g-hd2d-toggle",
     label: { on: "新画面 开", off: "新画面 关", loading: "新画面 …" },
     text: {
@@ -63,7 +73,11 @@
     sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
-    drag: 5
+    drag: 5,
+    // 白卡（#316）的快照只带 unit-card.js 画卡要读的这些字段（UnitCard.create / update / headOf），别的一概不带——坚毅生命不在里面
+    cardKeys: ["id", "name", "vehicle", "level", "atk", "race", "racePerks", "iv", "isPlayer", "isProp", "isDevice", "neutral", "neutralTags",
+      "layers", "highEnergy", "overkill", "killBig", "upOnShp", "def", "defMax", "dur", "ap", "apMax", "bonus", "bonusMax", "flying", "hung",
+      "status", "badges", "res", "intents", "marks", "casts", "stunned", "dying", "dead", "hidden"]
   };
   /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
    * 主人：「在远景情况下如果还继续缩小，就会变回之前的战斗画面，具体是镜头上升到正上方然后一阵白色云雾后切换成之前的战斗画面」。
@@ -94,12 +108,20 @@
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
   /* ---------- 开关 ---------- */
-  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（关） */
+  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（FIELD.defaultOn：开） */
   function enabled(storage) {
     try {
       const v = storage ? storage.getItem(FIELD.storageKey) : null;
       return v === "on" ? true : v === "off" ? false : FIELD.defaultOn;
     } catch (e) { return FIELD.defaultOn; }
+  }
+  /** 用开关关掉的（锁着：滚轮不转到新画面）；读不了按没锁 */
+  function locked(storage) {
+    try { return !!storage && storage.getItem(FIELD.lockKey) === "1"; } catch (e) { return false; }
+  }
+  /** 记住锁没锁；存不了不报错 */
+  function setLocked(on, storage) {
+    try { if (!storage) return false; storage.setItem(FIELD.lockKey, on ? "1" : "0"); return true; } catch (e) { return false; }
   }
   /** 记住开关；存不了（隐私模式、存满了）不报错，返回 false */
   function setEnabled(on, storage) {
@@ -144,13 +166,36 @@
   function packetView(pv, deps) {
     if (!pv || typeof pv !== "object" || !Array.isArray(pv.units)) return null;
     const OB = deps && deps.OB, OV = deps && deps.OV;
+    const live = (Array.isArray(pv.props) ? pv.props : []).filter(p => p && !p.destroyed && !p.hidden);
     const props = OB && typeof OB.snapProp === "function" && OV && typeof OV.projectUnit === "function"
-      ? (Array.isArray(pv.props) ? pv.props : []).filter(p => p && !p.destroyed && !p.hidden).map(p => OV.projectUnit(OB.snapProp(p))).filter(Boolean) : [];
-    return Object.assign({}, pv, { units: pv.units.filter(Boolean).concat(props) });
+      ? live.map(p => OV.projectUnit(OB.snapProp(p))).filter(Boolean) : [];
+    // 白卡（#316）：3D 铭牌画旧画面的单位卡，快照和联机玩家旧画面的单位卡同一份（online-battle.js · snapUnit / snapProp，只读这个包）
+    const cards = OB && typeof OB.snapUnit === "function" && typeof OB.snapProp === "function"
+      ? cardsOf(pv.units.filter(u => u && !u.hidden).map(u => OB.snapUnit(u)).concat(live.map(p => OB.snapProp(p)))) : null;
+    return Object.assign({}, pv, { units: pv.units.filter(Boolean).concat(props), cards });
   }
-  /** 交给 HD2DLayout.build 的选项：画面大小、竖屏；区域 / 场景 / 光影读投影里的（没有 = 布局的兜底，光影按白天） */
-  function layoutOpts(v, view, portrait) {
-    return { portrait: !!portrait, view, region: (v && v.region) || null, scene: (v && v.scene) || null, theme: (v && v.light) || "day" };
+  /**
+   * 白卡（#316）用的快照：单位 id → 卡片快照（unit-card.js 的 UnitCard.create / update 要的那一份）。snaps = 单机 game.js · setView 这一帧的快照
+   * （旧画面的单位卡画的就是它）/ 联机玩家的包过 online-battle.js · snapUnit / snapProp 的。危墙 / 桥梁（isGap）不算；
+   * 只带画卡要读的字段（FIELD.cardKeys）：坚毅生命这些旧画面的卡本来就不画的，交给 3D 的这一份连字段都没有（纯函数，不改传进来的）
+   */
+  function cardsOf(snaps) {
+    if (!Array.isArray(snaps)) return null;
+    const out = new Map();
+    snaps.forEach(s => {
+      if (!s || typeof s !== "object" || s.isGap || s.id == null) return;
+      const c = {};
+      FIELD.cardKeys.forEach(k => { if (own(s, k)) c[k] = s[k]; });
+      out.set(String(s.id), c);
+    });
+    return out;
+  }
+  /** 交给 HD2DLayout.build 的选项：画面大小、竖屏；区域 / 场景 / 光影读投影里的（没有 = 布局的兜底，光影按白天）。
+   *  more.cards 给了（白卡，#316）：带上卡片快照、量到的卡片大小（more.sizes），布局按旧画面的单位卡排 */
+  function layoutOpts(v, view, portrait, more) {
+    const o = { portrait: !!portrait, view, region: (v && v.region) || null, scene: (v && v.scene) || null, theme: (v && v.light) || "day" };
+    if (more && more.cards) { o.cards = more.cards; o.sizes = more.sizes || null; }
+    return o;
   }
   /**
    * game.js 的标记（fieldMarks：pick 正在选目标、targets 能点的目标 id、hover 鼠标停着的、zones 能移动去的区、hoverZone）→ 场景要的：
@@ -254,11 +299,15 @@
   /* ---------- 页面 ----------
    * S：开关想开（want）、正在加载（loading）、建好的场景（sc）/ 天气的 2D 层（wfx）/ 攻击演出的适配器（ad）/ 3D 战场那一层（stage）/ 镜头按钮（cam），
    *    出手时推镜头（push：hd2d-play.js · HD2DPlay.camera；pushed = 推着还没拉回），
-   *    最近一次排好的布局（layout）和画面用的那一份（view），game.js 给的快照（snaps）、标记（marks）、行动的人（actorId），
+   *    最近一次排好的布局（layout）和画面用的那一份（view），game.js 给的快照（snaps；viewSnaps = 这一次画面实际用的，白卡跟着它画）、标记（marks）、行动的人（actorId），
+ *    白卡（#316）量到的卡片大小（sizes：单位 id → { w, h }，布局按它排），
+   *    卡片动画（#330）：cards = hd2d-play.js · HD2DPlay.cards 给的（3D 白卡照旧画面的单位卡动）、ko = 被打倒还留在场上的（id → { phase held / fade / gone, unit, card, gen }）、
+   *    seen = 上一次排出来的单位（新出现的亮个相），
    *    broken = 这一次打开页面新画面打不开过（旧战场上往前滚就不再去开它，要开点开关——开关会说为什么打不开）
    * T：新旧画面之间的转场——busy 正在转（滚轮、开关都不理）、to 转去哪边（"old" / "new"）、step 走到哪一段、plan 剩下的几段（mistPlan）、mist 云雾那一层、
    *    pre 旧 → 新时云雾一涌进来就开始加载的、gen 第几次（页面重新 boot 过，旧的计时器到了也不算）、gesture 战场上这一次滚动（wheelGate） */
-  const S = { want: false, loading: null, create: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, marks: null, actorId: null, insetKey: "", broken: false, hud: null };
+  const S = { want: false, loading: null, create: null, sc: null, wfx: null, ad: null, push: null, pushed: false, stage: null, cam: null, camInfo: null, layout: null, view: null, snaps: null, viewSnaps: null, sizes: new Map(), marks: null, actorId: null, insetKey: "", broken: false, hud: null,
+    cards: null, ko: new Map(), seen: null };
   const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
   const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null, toggle: null, home: null };
   let keysBound = false;
@@ -292,6 +341,8 @@
     app: () => (env.doc ? env.doc.getElementById("g-app") : null),
     hud: () => hudIn(SOLO.app()),
     view: () => soloView(),
+    // 白卡（#316）：game.js 这一帧的快照（旧画面的单位卡画的同一份），去掉坚毅生命
+    cards: () => cardsOf(S.viewSnaps),
     input: () => { const G = root.GAME; return G && G.fieldInput ? wire(G.fieldInput) : null; },
     clock: () => (root.GAME && typeof root.GAME.fxClock === "function" ? root.GAME.fxClock : null),
     refresh() { const G = root.GAME; if (G && typeof G.refresh === "function" && !G.depth) G.refresh(); },
@@ -333,7 +384,7 @@
     if (field && !field.hd2dWheel) { field.hd2dWheel = true; field.addEventListener("wheel", onFieldWheel, { capture: true, passive: false }); }
   }
   /** 顶栏开关：和滚轮走同一个入口（switchTo）——开着就转回旧画面、关着就转到新画面；转场中点了不理 */
-  function toggle() { switchTo(S.want ? "old" : "new"); }
+  function toggle() { const to = S.want ? "old" : "new"; if (T.busy) return; setLocked(to === "old", env.storage); switchTo(to); }
   /** 打开：加载（只第一次）→ 建场景。加载途中又关掉就不建。pre = 已经在加载的（转场：云雾一涌进来就开始加载） */
   function start(pre) {
     S.want = true;
@@ -476,7 +527,7 @@
   }
   /** 战场上的滚轮（#g-field，捕获阶段，一次滚动 = wheelGate）：
    *   正在转场、这一次滚动已经换过一次画面（触控板的惯性还在来）：不理（镜头不换段，页面也不滚）
-   *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的
+   *   旧画面：往前滚（拉近）攒够一下 → 转到新画面；往后滚、按着 Ctrl（触控板双指缩放 / 浏览器缩放）照旧是浏览器自己的；用右上角开关关掉的（FIELD.lockKey 锁着）往前滚也不转
    *   新画面：交给场景（三段镜头换段；远景再往外拉由场景叫 onZoomOut）
    * 这一次打开页面新画面已经打不开过：旧画面的滚轮照旧，要开就点开关 */
   function onFieldWheel(e) {
@@ -485,7 +536,7 @@
     if (T.busy || T.gesture.ate) { e.preventDefault(); e.stopPropagation(); return; }
     // 联机玩家的旧战场自己会滚动：还没滚到顶就照旧滚，这一次滚动不打开新画面（#289）
     if (!S.want && !S.sc && scrollsUp(e)) { T.gesture.done = true; return; }
-    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || S.broken) return;
+    if (S.want || S.sc || r.step !== 1 || e.ctrlKey || S.broken || locked(env.storage)) return;   // 用开关关掉的：滚轮照旧是浏览器自己的
     e.preventDefault(); e.stopPropagation();
     if (switchTo("new")) T.gesture.ate = true;
   }
@@ -552,7 +603,9 @@
         onPortraitChange: () => { if (S.sc) paint(true); },
         onViewChange: () => { if (S.sc) paint(true); },
         // 远景到头了还往外拉（滚轮 / 双指捏小）：转回旧画面，和顶栏开关同一个入口；这一次滚动剩下的都不理（不会转回去又被惯性拉回来）
-        onZoomOut: () => { if (switchTo("old") && T.gesture) T.gesture.ate = true; }
+        onZoomOut: () => { if (switchTo("old") && T.gesture) T.gesture.ate = true; },
+        // 白卡（#316）画出来量到的大小和布局估的不一样：记下来按量到的重排（同一区的卡不互相压住）
+        onCardSize: (m) => { m.forEach((v, k) => S.sizes.set(String(k), { w: v.w, h: v.h })); if (S.sc) paint(false); }
       }, input || {}));
       S.wfx = WX.create(stage, { lens: () => HD2DFx.lens(S.sc.lensNow()), view: () => S.sc.view(), flash: () => S.sc.flash });
       S.ad = HD2DFx.adapter({ lens: () => S.sc.lensNow(), plate: (id) => S.sc.plateOf(id), zone: (id) => S.sc.zoneOf(id), size: (big) => L.plateSize(S.sc.view(), big), offset: () => stage.getBoundingClientRect() });
@@ -564,6 +617,8 @@
         if (typeof clock === "function") PL.setClock(clock);
         PL.shadeIn(stage);
         S.push = PL.camera(S.sc);
+        // 3D 白卡的卡片动画（#330）：白卡在哪、在屏幕上的位置都问这里；减少动态效果看场景的（和推镜头一样）
+        if (typeof PL.cards === "function") S.cards = PL.cards({ el: cardEl, rect: rectOf, reduced: () => !S.sc || !S.sc.motion });
       }
     } catch (e) { teardown(false); throw e; }
     app.classList.add("hd2d-on");
@@ -583,7 +638,9 @@
     const hadStage = !!S.stage;
     // 纸片风数字、影子拿掉，attack-fx 的画布复原（旧画面照旧画在没压扁的画布上）
     if (hadStage && root.HD2DPlay) { root.HD2DPlay.clear(); root.HD2DPlay.shadeIn(null); }
-    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = null;
+    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = S.viewSnaps = S.cards = S.seen = null;
+    S.sizes = new Map();
+    S.ko.clear();
     S.pushed = false;
     S.insetKey = "";
     // 技能栏、队伍栏的新外壳拆掉（#297）：.g-hud 回到换上之前的样子（按钮里面的东西等 refresh / 下一次画技能栏换回旧的）
@@ -596,22 +653,158 @@
   }
 
   /** 排一次战场（game.js / 联机那边刷新画面、窗口变了、横幅出来了）：画面用的那一份（host.view：单机投影、联机是收到的包）→ 布局 → 场景；
-   *  reset = 镜头回到这一段的默认位置 */
-  function paint(reset) {
+   *  reset = 镜头回到这一段的默认位置；animate = 演出中的这一下（#330：换了区的铭牌滑过去、新出现的亮个相、已经不在了的被打倒的人快点淡掉；
+   *  窗口变了、量到卡片大小这些重排都不演） */
+  function paint(reset, animate) {
     const L = Lay();
     if (!S.sc || !L) return;
     // 战斗画面藏着（切到地图、标题……，战场宽 0）：先不排，回来时画面大小一变场景会叫 onViewChange 重排（快照记着最新的）
     if (!S.stage || !S.stage.clientWidth) return;
-    const v = host.view();
-    if (!v) return;
-    S.view = v;
+    const v0 = host.view();
+    if (!v0) return;
+    S.view = v0;
     if (insets()) reset = true;
-    S.layout = L.build(v, layoutOpts(v, S.sc.view(), S.sc.portrait));
-    S.sc.setBattle(S.layout, { weather: v.weather || "none", theme: v.light || "day", actorId: S.actorId });
+    // 白卡（#316）：铭牌画旧画面的单位卡——卡片快照（单机：game.js 的快照；联机玩家：收到的包，packetView 里转好的）、量到的卡片大小一起交给布局
+    // 被打倒、还没淡完的敌人（#330）先留在布局里
+    const kept = lingering(v0, host.cards ? host.cards(v0) : null, !!animate), v = kept.v, cards = kept.cards;
+    S.layout = L.build(v, layoutOpts(v, S.sc.view(), S.sc.portrait, cards ? { cards, sizes: S.sizes } : null));
+    // 换了区的铭牌在两个地台之间滑过去（#330，场景按这个秒数插值；跳过 / 减少动态效果 / 不是演出中的刷新 = 0，直接摆过去）
+    const move = root.HD2DFx ? root.HD2DFx.moveSecs(clockNow(), { animate: !!animate, reduced: !S.sc.motion }) : 0;
+    S.sc.setBattle(S.layout, { weather: v.weather || "none", theme: v.light || "day", actorId: S.actorId, move });
     if (reset) S.sc.refit();
     S.sc.setMarks(marksOf(S.marks, S.layout, S.actorId));
     syncWeather();
+    koMarks();
+    arrivals(!!animate);
   }
+  /** 这一刻的演出倍率（1 正常、0.5 两倍速、0 跳过）：单机是 game.js 的 G.fxClock，联机玩家是他那边给的钟；都没有按 1 */
+  function clockNow() {
+    const c = host.clock ? host.clock() : null, v = typeof c === "function" ? Number(c()) : 1;
+    return Number.isFinite(v) && v >= 0 ? v : 1;
+  }
+  /** 卡片动画演不演（#330）：新画面建好了、没跳过（倍率 0）、没开减少动态效果（场景的 motion） */
+  const fxLive = () => !!S.sc && !!S.sc.motion && clockNow() > 0;
+  const FXC = () => root.HD2DFx.FX.card;
+
+  /* ---------- 卡片动画（#330）：旧画面单位卡有的动画，3D 铭牌上的白卡也要有 ----------
+   * 白卡本身怎么动在 hd2d-play.js · HD2DPlay.cards（game.js 用 cards() 拿；联机玩家的 play 里也是它）；这里管要排进布局 / 场景的那几样：
+   *   被打倒的敌人（ko / releaseKOs）：这一段演完之前留着（.ko-held），演完照 game.css 的 .unit-wrap.dead 淡出，已经不在画面数据里了快点淡掉（.gone），淡完才从 3D 战场上拿掉
+   *   新出现的单位（召唤、援军、登场支援）亮个相（.enter）；高能自爆预警（warn：白卡 + 脚下的地台一起闪）；震屏（quake，联机玩家的新画面用） */
+  /** 这个单位的 3D 白卡（UnitCard.create 的 .unit-wrap，data-id = 单位 id；配置物是 prop:…）；没开 / 找不到 = null */
+  function cardEl(id) {
+    if (!S.stage || id == null || typeof S.stage.querySelectorAll !== "function") return null;
+    const k = String(id);
+    for (const w of S.stage.querySelectorAll(".hd2d-plate .unit-wrap")) if (w && w.dataset && String(w.dataset.id) === k) return w;
+    return null;
+  }
+  /** 给 game.js 的卡片动画（hd2d-play.js · HD2DPlay.cards：dash / lunge / recoil / nudge / cls / hit / parry / enter / warn / slow）；单机没开新画面 = null */
+  function cards() { return on() && S.cards ? S.cards : null; }
+  /**
+   * 被打倒的敌人（game.js · setView 的 kill；联机玩家：play 的 ko.hold）：3D 战场上先留着它（布局本来不画倒下的）。
+   * o.hold = 这一段演出还没完（白卡 .ko-held，演完 releaseKOs 再淡出），不然马上开始淡出；o.slow = 一记重击打死的（淡得慢，game.css 的 .dead-slow）。
+   * 跳过、倍率 0、减少动态效果时不留（照以前马上拿掉）；没开新画面不管。返回留没留
+   */
+  function ko(id, o) {
+    if (id == null || !fxLive()) return false;
+    const k = String(id), old = S.ko.get(k);
+    const rec = { phase: "held", slow: !!(o && o.slow), unit: old ? old.unit : null, card: old ? old.card : null, gen: 0 };
+    S.ko.set(k, rec);
+    if (!(o && o.hold)) fadeKO(k, rec);
+    return true;
+  }
+  let koSeq = 0;
+  /** 开始淡出：照 game.css 的 .unit-wrap.dead（一记重击打死的 .dead-slow）要多久，淡完拿掉 */
+  function fadeKO(id, k) {
+    k.phase = "fade";
+    const gen = k.gen = ++koSeq, ms = k.slow || (k.card && k.card.killBig) ? FXC().ko.slow : FXC().ko.fade;
+    env.wait(ms / 1000, () => { const c = S.ko.get(id); if (c && c.gen === gen) dropKO(id); });
+  }
+  /** 已经不在画面数据里了（game.js · setView 的 .gone）：快点淡掉再拿掉 */
+  function goneKO(id, k) {
+    k.phase = "gone";
+    const gen = k.gen = ++koSeq;
+    env.wait(FXC().ko.gone / 1000, () => { const c = S.ko.get(id); if (c && c.gen === gen) dropKO(id); });
+  }
+  /** 淡完了：从 3D 战场上拿掉（同一区的人照常重排，滑过去） */
+  function dropKO(id) { if (S.ko.delete(id) && S.sc) paint(false, true); }
+  /** 这一段演完（game.js · releaseKOs；联机玩家：play 的 ko.release）：留着的被打倒的人开始淡出；跳过了、减少动态效果就直接拿掉 */
+  function releaseKOs() {
+    if (!S.ko.size) return;
+    const go = fxLive();
+    let gone = false;
+    S.ko.forEach((k, id) => {
+      if (k.phase !== "held") return;
+      if (go) fadeKO(id, k); else { S.ko.delete(id); gone = true; }
+    });
+    if (gone && S.sc) paint(false);
+    koMarks();
+  }
+  /**
+   * 布局之前：被打倒、还没淡完的（S.ko）当站着排进去——白卡照旧画倒下的样子（快照里是 dead：game.css 的 .unit-wrap.dead 淡出，.ko-held 留着）。
+   * 已经不在画面数据里了的（藏起来、拿掉了）：演出中拿最后一次看到的样子再留一会儿（.gone 快点淡掉），不是演出中的刷新（换了一场战斗、撤销……）直接拿掉；
+   * 又站起来的（撤销）不再留。返回 { v 画面用的那一份, cards 卡片快照 }（不改传进来的）
+   */
+  function lingering(v, cards, animate) {
+    if (!S.ko.size || !v || !Array.isArray(v.units)) return { v, cards };
+    const units = v.units.slice(), list = cards ? new Map(cards) : null;
+    const at = new Map(units.map((u, i) => [u && u.id != null ? String(u.id) : "", i]));
+    S.ko.forEach((k, id) => {
+      const i = at.get(id), u = i != null ? units[i] : null;
+      if (u && !u.dead && !u.hidden) { S.ko.delete(id); return; }       // 又站起来了（撤销）：照常画
+      if (u && !u.hidden) {
+        k.unit = u;
+        if (list && list.has(id)) k.card = list.get(id);
+        units[i] = Object.assign({}, u, { dead: false });
+        return;
+      }
+      if (!animate || !k.unit) { S.ko.delete(id); return; }
+      if (k.phase !== "gone") goneKO(id, k);
+      if (i != null) units[i] = Object.assign({}, k.unit, { dead: false }); else units.push(Object.assign({}, k.unit, { dead: false }));
+      if (list && k.card) list.set(id, k.card);
+    });
+    return { v: Object.assign({}, v, { units }), cards: list };
+  }
+  /** 留着的被打倒的人：白卡挂上旧画面的 .ko-held（演完之前不淡）/ .gone（快点淡掉）；淡出中两样都不挂（.dead 自己淡） */
+  function koMarks() {
+    S.ko.forEach((k, id) => {
+      const w = cardEl(id);
+      if (!w) return;
+      w.classList.toggle("ko-held", k.phase === "held");
+      w.classList.toggle("gone", k.phase === "gone");
+    });
+  }
+  /** 新出现的单位（召唤、援军、登场支援，#330）：演出中这一下才排出来的铭牌亮个相（.enter）。刚建好、不是演出中的刷新不算 */
+  function arrivals(animate) {
+    const was = S.seen, now = new Set(S.layout.units.map(u => String(u.id)));
+    S.seen = now;
+    if (!was || !animate || !S.cards) return;
+    now.forEach(id => { if (!was.has(id)) S.cards.enter(id); });
+  }
+  /** 高能自爆预警（game.js 的 .high-warn）：3D 白卡闪两下，它脚下的地台跟着闪（场景的 zoneFx，hd2d-scene.js 的 ZONE_FX.warn）；on = false 撤掉。
+   *  跳过、倍率 0、减少动态效果时不闪；没开新画面不管 */
+  function warn(id, on) {
+    if (!S.sc || !S.cards || id == null) return false;
+    const done = S.cards.warn(id, on);
+    if (on && done && typeof S.sc.zoneFx === "function") {
+      const u = S.layout && S.layout.units.find(x => String(x.id) === String(id));
+      if (u) S.sc.zoneFx(u.zone, "warn", { secs: (2 * FXC().warn.ms / 1000) * clockNow() });
+    }
+    return done;
+  }
+  /** 震屏（联机玩家的新画面：高能自爆；和 game.js · shakeField 同一个样子）：画面那一层（.ol-battle / #g-app）加 game.css 的 .quake（power ≥ 1）/ .quake-s，
+   *  3D 战场在战场那一格（.g-field）里，画布和铭牌一起震。跳过、倍率 0、减少动态效果时不震 */
+  function quake(power) {
+    const app = S.sc ? host.app() : null;
+    if (!app || !fxLive()) return false;
+    const Q = FXC().quake, big = power >= 1, cls = big ? "quake" : "quake-s";
+    app.classList.remove("quake", "quake-s");
+    void app.offsetWidth;
+    app.classList.add(cls);
+    env.wait((big ? Q.ms : Q.small) / 1000, () => app.classList.remove(cls));
+    return true;
+  }
+  /** 新画面开着、系统开了「减少动态效果」（game.js 的震屏看它：新画面开着时不震） */
+  function still() { return on() && !S.sc.motion; }
   /** 单机画面用的那一份：本机的战斗状态投影（viewState），快照用 game.js · setView 给的（还没给过就现拍一张） */
   function soloView() {
     const G = root.GAME, st = stateNow();
@@ -619,6 +812,7 @@
     // 和联机发包前一样先同步区域 / 场景 / 光影（光影跟着时钟、场景跟着场上的场地；只是画面的标签，不改结算：world-data.js）
     try { if (typeof root.battleLookSync === "function") root.battleLookSync(); } catch (e) {}
     const snaps = S.snaps || (typeof G.snapAll === "function" ? G.snapAll() : null);
+    S.viewSnaps = snaps;   // 白卡（#316）画的就是这一份（SOLO.cards）
     return viewState(st, snaps, { OV: root.OnlineView, itemCatalog: catalog() });
   }
   /** 天气的 2D 层（正式画面的 weather-fx 压在 3D 上，hd2d-wfx.js）和 3D 沙粒的风：只读投影里的天气 / 风向 / 相位 / 光影；镜头是这个玩家自己的 */
@@ -704,18 +898,19 @@
   /* ---------- game.js 调的（单机；联机玩家的画面挂着时不管，快照照样记着）---------- */
   /** 新画面建好了没有（开关开着、模块加载成功）：game.js 的演出位置、天气叠加层看它 */
   function on() { return !!S.sc && host === SOLO; }
-  /** game.js · setView 每次都叫（refreshAll 的现在的状态、演出的每一下）：开着就跟着重排；快照记着，刚打开时用 */
-  function view(snaps) {
+  /** game.js · setView 每次都叫（refreshAll 的现在的状态、演出的每一下）：开着就跟着重排；快照记着，刚打开时用。
+   *  o.animate = game.js · setView 的 animate（#330：演出的每一下、refreshAll 是 true——换了区的铭牌滑过去、新出现的亮个相；开新一场、撤销、窗口变了是 false） */
+  function view(snaps, o) {
     S.snaps = Array.isArray(snaps) ? snaps : null;
-    if (host === SOLO) sync();
+    if (host === SOLO) sync(!!(o && o.animate));
   }
   /** 跟着画面重排；旧战场换棋盘时整个清空重建（game.js · syncFieldDom、online-battle.js · layout 的 innerHTML = ""）：新画面那一层、转场的云雾挂回去 */
-  function sync() {
+  function sync(animate) {
     const field = env.doc ? host.field() : null;
     if (field && T.mist && T.mist.parentNode !== field) field.appendChild(T.mist);
     if (!S.sc) return;
     if (field && S.stage && S.stage.parentNode !== field) field.appendChild(S.stage);
-    paint(false);
+    paint(false, animate);
   }
   /** 转场走到哪了（测试、game.js 看）：{ busy 正在转, to 转去哪边, step 哪一段 } */
   function transition() { return { busy: T.busy, to: T.to, step: T.step }; }
@@ -758,7 +953,7 @@
    * 关着就只挪开关、接上滚轮（旧战场上往前滚 = 打开，和单机一样）。同一个 spec 再叫一次就是拿回把手。
    * 返回把手（只对这一次挂上去的画面有效，detach 以后都不理）：
    *   on()           新画面建好了没有（收到行动包时看它：开着走 play、关着照旧走旧画面）
-   *   view()         联机那边刷新画面（收到包、演出的每一下、选目标）：跟着重排
+   *   view(o)        联机那边刷新画面（收到包、演出的每一下、选目标）：跟着重排；o.animate = 正在播行动包（#330：换了区的铭牌滑过去、新出现的亮个相）
    *   actor(id)      谁在行动（轮到他、在行动的那个人；不是行动阶段 = null）   marks(m)  选目标 / 选区的标记（和 game.js 的 fieldMarks 一样的格式）
    *   play(packet, { before, bigHit, onImpact })   收到行动包：整包交给 hd2d-play.js 播（原型页同一份），返回 Promise；没开返回 null
    *   skip()         正在播的立刻结束
@@ -772,6 +967,7 @@
     S.actorId = null; S.marks = null;
     const h = {
       spec, field: spec.field, app: spec.app, view: spec.view,
+      cards: (v) => (v && v.cards) || null,   // 白卡（#316）：packetView 按收到的包转好的卡片快照
       input: () => (spec.input ? wire(spec.input) : null),
       clock: () => (typeof spec.clock === "function" ? spec.clock : null),
       refresh: () => { if (typeof spec.refresh === "function") spec.refresh(); },
@@ -782,7 +978,7 @@
     const mine = () => host === h;
     h.handle = {
       on: () => mine() && !!S.sc,
-      view: () => { if (!mine()) return; placeToggle(); sync(); },
+      view: (o) => { if (!mine()) return; placeToggle(); sync(!!(o && o.animate)); },
       actor: (id) => { if (mine()) setActor(id); },
       marks: (m) => { if (mine()) setMarks(m); },
       play: (packet, o) => (mine() ? play(packet, o) : null),
@@ -817,7 +1013,8 @@
   /** 联机玩家收到一个行动包（#289）：整包交给 hd2d-play.js 播（原型页按联机包播的同一份）——出手 / 弹道 / 打中照 attack-fx、受击粒子照 hit-fx，
    *  位置问 3D 铭牌（适配器）；纸片风数字、纸片感、推镜头，演出倍率、跳过跟着 host.clock。只读投影过的包。
    *  o.before = 出招前画面用的那一份（比一比谁被击倒）、o.bigHit 大伤害加 !!、o.onImpact = 第一下打中时画面换成包里的 state、
-   *  o.sound(kind, i) = 该响音效的那一刻（online-sfx.js，#304：出手 strike / 第 i 段打中 wave / 格挡 parry / 演完 end）。没开返回 null */
+   *  o.sound(kind, i) = 该响音效的那一刻（online-sfx.js，#304：出手 strike / 第 i 段打中 wave / 格挡 parry / 演完 end）。
+   *  3D 白卡照旧画面的单位卡动（#330）：卡片动画（cards）、被打倒的先留着演完再淡出（ko）、高能自爆预警（warn）、震屏（quake）都交给 hd2d-play.js。没开返回 null */
   function play(packet, o) {
     const PL = root.HD2DPlay;
     if (!S.sc || !S.ad || !PL || typeof PL.play !== "function" || !packet) return null;
@@ -825,7 +1022,8 @@
     if (PL.busy) PL.skip();          // 上一个包还在播：立刻结束（和旧画面收到新包时一样不叠着播）
     return PL.play(packet, S.ad, {
       before: o.before || null, bigHit: o.bigHit || null, onImpact: o.onImpact, sound: o.sound || null,
-      view: () => (S.sc && S.stage ? fxView() : { width: 0, height: 0, top: 0 }), camera: S.push, lens: () => (S.sc ? S.sc.lensNow() : null)
+      view: () => (S.sc && S.stage ? fxView() : { width: 0, height: 0, top: 0 }), camera: S.push, lens: () => (S.sc ? S.sc.lensNow() : null),
+      cards: S.cards, ko: { hold: (ids) => (ids || []).forEach(id => ko(id, { hold: true })), release: releaseKOs }, warn, quake
     });
   }
   /** 2D 攻击演出要的「单位 / 危墙在屏幕上的矩形」（game.js · centerOf）：铭牌按这一刻的镜头投影（hd2d-fx.js 的适配器；被击倒拿掉的单位给最后一次的位置），
@@ -877,7 +1075,8 @@
     if (S.push && root.HD2DFx && root.HD2DPlay) S.push.release(root.HD2DFx.FX.push.out * root.HD2DPlay.clock);
   }
 
-  const api = { FIELD, MIST, enabled, setEnabled, viewState, packetView, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach };
+  const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
+    cards, ko, releaseKOs, warn, quake, still };
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());

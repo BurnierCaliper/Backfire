@@ -1688,6 +1688,8 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
+  state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油
@@ -2636,10 +2638,15 @@ function bigHitInfo(level, dmg) {
 // 第一幕固定线 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000。SS、SSS 只是更高的评价，经验倍率和 S 一样
 // 基准分倍数拉开：基准分 400 左右时，相邻评价的间距和固定线一样（C→B 500，其余各 250）
 const SCORE_GRADES = [["SSS", 2000, 2, 4.4], ["SS", 1750, 2, 3.8], ["S", 1500, 2, 3.2], ["A", 1250, 1.5, 2.6], ["B", 1000, 1.2, 2.0], ["C", 500, 1, 0.7], ["D", 0, 1, 0]];
+// B 及以上（B / A / S / SS / SSS）的分数线再 ×1.15（克制大师上线时一起调高；不管这场有没有拿到克制大师）
+const SCORE_HIGH_LINE_MULT = 1.15;
+const SCORE_B_LINE = 1000;   // SCORE_GRADES 里 B 的第一幕固定线：固定线 ≥ 它的评价吃 ×1.15
+// 克制大师：我方主动发起的攻击里，克制或吃到天气增益的占一半及以上（至少 1 次攻击），胜利时整场分数再 ×1.5
+const SCORE_COUNTER_MASTER = { ratio: 0.5, mult: 1.5 };
 // 分数线里固定线和基准分各占多少
 const SCORE_LINE_MIX = { fixed: 0.65, par: 0.35 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
-const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境" };
+const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境", counterMaster: "克制大师" };
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2722,7 +2729,7 @@ function markPartyHurt(target, result) {
 function applyFinishBonus() {
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
-  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0, ambush: false, ambushPts: 0 };
+  const none = { extra: 0, mult: 1, speedMult: 1, flawless: false, speed: 0, flawlessPts: 0, ambush: false, ambushPts: 0, counterMaster: false, counterPts: 0 };
   if (bs.speedDone) return none;
   bs.speedDone = true;
   const turns = Number(state.turnNo) || 1;
@@ -2741,10 +2748,39 @@ function applyFinishBonus() {
   if (flawlessPts > 0) bs.parts.flawless = (bs.parts.flawless || 0) + flawlessPts;
   if (ambushPts > 0) bs.parts.ambush = (bs.parts.ambush || 0) + ambushPts;
   bs.total += speed + flawlessPts + ambushPts;
+  // 克制大师：速杀 / 无伤 / 遭遇战算完之后，整场分数再单独 ×1.5
+  const cm = counterMasterInfo();
+  const counterPts = cm.ok ? Math.floor(bs.total * (SCORE_COUNTER_MASTER.mult - 1) + 1e-6) : 0;
+  if (counterPts > 0) { bs.parts.counterMaster = (bs.parts.counterMaster || 0) + counterPts; bs.total += counterPts; }
+  bs.counterMaster = cm.ok;
   bs.speedMult = speedMult;
-  bs.finishMult = mult;
+  // 存之前取到两位小数：1.2 × 1.5 直接乘是 1.7999999999999998，结算日志会显示成「×1.7999999999999998」
+  bs.finishMult = Math.round(mult * (cm.ok ? SCORE_COUNTER_MASTER.mult : 1) * 100) / 100;
   bs.flawless = flawless;
-  return { extra: speed + flawlessPts + ambushPts, mult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts };
+  return { extra: speed + flawlessPts + ambushPts + counterPts, mult: bs.finishMult, speedMult, flawless, speed, flawlessPts, ambush, ambushPts,
+    counterMaster: cm.ok, counterPts, counterQual: cm.qual, counterAttacks: cm.attacks };
+}
+/** 克制大师的计数：记一次我方主动发起的攻击（按行动序号，一次行动打几下、打几个人都只算一次）。
+ *  只算我方自己回合里、这次行动的出手者本人打在敌人身上的攻击本身：协助攻击、借机 / 反击、持续伤害、
+ *  连带伤害（高压场地、感电……）、配置物 / 环境都不算。这次行动里任何一下克制或吃到天气增益，这次攻击就算数 */
+function noteCounterAttack(attacker, target, res, flags) {
+  if (!attacker || !attacker.isPlayer || !target || target.isPlayer || attacker.envSrc || !res) return;
+  flags = flags || {};
+  if (flags.action === false || flags.environment || flags.assist || flags.opp || flags.opportunity) return;
+  if (state._assistBy || state.combatPhase === "enemy") return;
+  const acc = state.actionAcc;
+  if (!acc || !acc.actorIsPlayer || acc.actorId !== attacker.id) return;
+  state.battleScore = state.battleScore || { total: 0, parts: {} };
+  const cm = state.battleScore.cmActs = state.battleScore.cmActs || {};
+  const key = String(state.actionSeq || 0);
+  cm[key] = !!cm[key] || !!res.advantage || (Number(res.weatherUp) || 0) > 0;
+}
+/** { attacks 我方主动攻击次数, qual 其中克制 / 天气增益的次数, ok 是否达成克制大师 } */
+function counterMasterInfo() {
+  const cm = (state.battleScore && state.battleScore.cmActs) || {};
+  const vals = Object.keys(cm).map(k => cm[k]);
+  const attacks = vals.length, qual = vals.filter(Boolean).length;
+  return { attacks, qual, ok: attacks >= 1 && qual >= attacks * SCORE_COUNTER_MASTER.ratio - 1e-9 };
 }
 /** 旧接口：返回多出来的分 */
 function applySpeedBonus() { return applyFinishBonus().extra; }
@@ -2955,7 +2991,9 @@ function gradeLines(act, par) {
   const fm = typeof Chain !== "undefined" ? Chain.fixedMult() : 1;
   return SCORE_GRADES.map(([g, line, xp, k]) => {
     const fixed = line > 0 ? Math.round((line + step) * fm) : 0;
-    const v = fixed <= 0 ? 0 : par == null ? fixed : Math.ceil((fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par) / 10 - 1e-9) * 10;
+    const raw = fixed <= 0 ? 0 : par == null ? fixed : fixed * SCORE_LINE_MIX.fixed + (Number(par) || 0) * k * SCORE_LINE_MIX.par;
+    const hi = line >= SCORE_B_LINE ? SCORE_HIGH_LINE_MULT : 1;   // B 及以上 ×1.15
+    const v = raw <= 0 ? 0 : par == null && hi === 1 ? raw : Math.ceil(raw * hi / 10 - 1e-9) * 10;
     return [g, v, xp, fixed, k];
   });
 }
@@ -6775,7 +6813,9 @@ function finishAssist(helperId, extra) {
     ? (typeof enemyAssistSkillId === "function" ? enemyAssistSkillId(helper) : "en_aa")
     : assistSkillId(helper);
   state._assistBy = helper.id;      // 协助攻击期间（图纸「恶眼」的伤害加成看这个）
-  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; }
+  const prevAssistOf = RAGE_HOLD.assistOf;
+  RAGE_HOLD.assistOf = target;     // 易怒蛮牛：这次协助攻击打到 target 的每一下都算这次失衡（rageBlocked）
+  try { runSkill(sidSkill); } finally { state._assistBy = null; target._bossAssistWindow = false; RAGE_HOLD.assistOf = prevAssistOf; }
   state.attackerId = prevAtk;
   state.targetId = prevT;
   if (typeof fishFrenzyContinue === "function") fishFrenzyContinue(job, helper, target);   // 沙鱼群起：下一只接着上
@@ -7893,7 +7933,30 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
   return extra;
 }
 
+/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush） */
 function dealTo(attacker, target, opt) {
+  if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
+  RAGE_HOLD.depth++;
+  let out, ok = false;
+  try { out = dealToInner(attacker, target, opt); ok = true; }
+  finally {
+    RAGE_HOLD.depth--;
+    // 中途出错：这一击作废，暂存的记录一起丢掉（不然会挂到下一次毫不相干的攻击上发作；意图预测还会留下指向模拟单位的记录）
+    if (!ok && RAGE_HOLD.depth === 0) RAGE_HOLD.pending = [];
+  }
+  if (RAGE_HOLD.depth === 0) {
+    const notes = raceRageFlush();
+    if (notes.length) {
+      // 打配置物 / 危墙的替身（dealToStructure）：formatHitLines 只输出 out.lines
+      if (out && out.structure && Array.isArray(out.lines)) out.lines.push(...notes);
+      else if (out && Array.isArray(out.extra)) out.extra.push(...notes);
+      else appendLog(notes.join("\n"));
+    }
+  }
+  return out;
+}
+
+function dealToInner(attacker, target, opt) {
   if (target) target._brokeNow = false;   // 新的一击：上一次「立刻恢复」留下的记号作废
   opt = opt || {};
   // 原始击破（后面会被目标一侧的效果改写，例如「加倍击破」翻倍）：导体额外那一下按它重新结算
@@ -8398,6 +8461,7 @@ function dealTo(attacker, target, opt) {
         addScore("brk", brkReal * SCORE_RULES.brk * scoreTargetMul(target), attacker, scoreBonus);
         scoreWeatherHelp(attacker, target, res, true);
       }
+      noteCounterAttack(attacker, target, res, flags);
     }
     if (target && target.isPlayer) scoreWeatherHelp(attacker, target, res, false);
     if (target && target.isPlayer) {
@@ -11051,6 +11115,7 @@ function bossQuickRecover(u, notes) {
   if (!u.stunned || u.dead) return;
   const out = [];
   recoverFromStun(u, out);
+  if (typeof raceRageMarkBroke === "function") raceRageMarkBroke(u);   // 易怒蛮牛：这一击（含纯击破的一段）打出了失衡，整击不发作
   u._brokeNow = true;           // 这一下确实打进了失衡：后面「打进失衡时」的效果读 brokeInto，不看已经清掉的 stunned
   u._bossAssistWindow = true;   // 排上队的协助攻击还要打它（飞碟触灵本体平时不可直击，只有失衡时的协助攻击打得到）
   out.forEach(s => notes.push(s.replace("晕眩结束", "晕眩标记没攒满，失衡立刻结束")));

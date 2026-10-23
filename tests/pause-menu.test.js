@@ -109,6 +109,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function newPage(t, opt) {
   if (!browser) { t.skip(skipWhy); return null; }
   const context = await browser.newContext(Object.assign({ viewport: { width: 1360, height: 900 } }, opt || {}));
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));

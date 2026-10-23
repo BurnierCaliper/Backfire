@@ -59,25 +59,25 @@ function propSnap(p) {
 }
 
 /* ---------- 1. 开关 ---------- */
-test("开关「新画面（HD-2D）」：默认关；记在本机 localStorage（读写都包 try/catch：读不了按默认关、存不了也不报错）", () => {
+test("开关「新画面（HD-2D）」：默认开（#316）；记在本机 localStorage，明确选过关（存着 off）的照旧关（读写都包 try/catch：读不了按默认开、存不了也不报错）", () => {
   const F = field();
   const mem = () => { const m = new Map(); return { m, getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); } }; };
-  assert.equal(F.FIELD.defaultOn, false, "默认关（主人试过再改默认）");
+  assert.equal(F.FIELD.defaultOn, true, "默认开（#316：主人要新画面当默认）");
   const s = mem();
-  assert.equal(F.enabled(s), false, "没存过 = 关");
-  assert.equal(F.setEnabled(true, s), true);
-  assert.equal(s.m.get(F.FIELD.storageKey), "on");
-  assert.equal(F.enabled(s), true, "开了记住");
-  F.setEnabled(false, s);
-  assert.equal(F.enabled(s), false, "关了也记住");
+  assert.equal(F.enabled(s), true, "没存过 = 开");
+  assert.equal(F.setEnabled(false, s), true);
+  assert.equal(s.m.get(F.FIELD.storageKey), "off");
+  assert.equal(F.enabled(s), false, "选过关：照旧关");
+  F.setEnabled(true, s);
+  assert.equal(F.enabled(s), true, "开了也记住");
   s.m.set(F.FIELD.storageKey, "乱写的");
-  assert.equal(F.enabled(s), false, "认不得的值：按默认关");
+  assert.equal(F.enabled(s), true, "认不得的值：按默认开");
   const broken = { getItem() { throw new Error("SecurityError"); }, setItem() { throw new Error("QuotaExceededError"); } };
   assert.doesNotThrow(() => F.enabled(broken));
-  assert.equal(F.enabled(broken), false, "读不了：按默认关");
+  assert.equal(F.enabled(broken), true, "读不了：按默认开");
   assert.doesNotThrow(() => F.setEnabled(true, broken));
   assert.equal(F.setEnabled(true, broken), false, "存不了：不报错，告诉外面没存上");
-  assert.equal(F.enabled(null), false, "没有 localStorage：关");
+  assert.equal(F.enabled(null), true, "没有 localStorage：按默认开");
   const src = code(read("hd2d/hd2d-field.js"));
   const get = src.slice(src.indexOf("function enabled("), src.indexOf("function setEnabled("));
   const set = src.slice(src.indexOf("function setEnabled("), src.indexOf("}", src.indexOf("catch", src.indexOf("function setEnabled("))) + 1);
@@ -106,9 +106,9 @@ function fakePage() {
 }
 const settle = () => new Promise(r => setImmediate(r));
 
-test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、不碰旧战场，按钮写「新画面 关」；点一下才加载，加载不了（没有 WebGL）就退回旧画面、开关记成关、给一句提示", async () => {
+test("本机选过关（存着 off）：一切照旧——boot 不加载 three.js / 场景、不碰旧战场，按钮写「新画面 关」；点一下才加载，加载不了（没有 WebGL）就退回旧画面、开关记成关、给一句提示", async () => {
   const F = field();
-  const mem = new Map(), storage = { getItem: k => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
+  const mem = new Map([[F.FIELD.storageKey, "off"]]), storage = { getItem: k => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
   let loads = 0;
   const hints = [];
   const P = fakePage();
@@ -142,6 +142,37 @@ test("关着时一切照旧：开关没开，boot 不加载 three.js / 场景、
   assert.equal(P2.els["g-hd2d-toggle"].getAttribute("aria-pressed"), "true");
 });
 
+test("本机没选过（#316）：默认开——打开页面就加载新画面、开关按下；打不开（没有 WebGL）照旧退回旧画面、开关记成关、提示为什么；记成关以后再打开页面照旧关", async () => {
+  const F = field();
+  const mem = new Map(), storage = { getItem: k => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => { mem.set(k, String(v)); } };
+  // 没选过、能打开：一打开页面就加载（不用点开关、不用滚轮），开关写「新画面 …」按下
+  const P = fakePage();
+  let loads = 0;
+  F.boot({ doc: P.doc, storage, load: () => { loads++; return new Promise(() => {}); }, hint: () => {}, reduced: () => true });
+  assert.equal(loads, 1, "没选过：打开页面就加载新画面");
+  assert.equal(P.els["g-hd2d-toggle"].getAttribute("aria-pressed"), "true", "开关按下");
+  assert.equal(P.els["g-hd2d-toggle"].textContent, F.FIELD.label.loading, "正在加载");
+  assert.equal(mem.has(F.FIELD.storageKey), false, "默认开不往本机写（玩家没选过）");
+  // 没选过、打不开：退回旧画面，开关记成关，提示为什么
+  const P2 = fakePage(), hints = [];
+  let loads2 = 0;
+  F.boot({ doc: P2.doc, storage, load: () => { loads2++; return Promise.reject(new Error("WebGL 不可用")); }, hint: (m) => hints.push(m), reduced: () => true });
+  assert.equal(loads2, 1);
+  await settle(); await settle();
+  assert.equal(F.on(), false, "打不开：还是旧画面");
+  assert.equal(mem.get(F.FIELD.storageKey), "off", "开关记成关");
+  assert.equal(P2.els["g-hd2d-toggle"].textContent, F.FIELD.label.off);
+  assert.equal(P2.els["g-hd2d-toggle"].getAttribute("aria-pressed"), "false");
+  assert.ok(hints.length === 1 && /新画面/.test(hints[0]) && /WebGL/.test(hints[0]), "提示为什么打不开：" + hints[0]);
+  assert.ok(!P2.els["g-app"].classList.contains("hd2d-on"), "旧战场露着");
+  // 记成关以后再打开页面：照旧关，不再去加载
+  const P3 = fakePage();
+  let loads3 = 0;
+  F.boot({ doc: P3.doc, storage, load: () => { loads3++; return new Promise(() => {}); }, hint: () => {}, reduced: () => true });
+  assert.equal(loads3, 0, "记着关：不加载");
+  assert.equal(P3.els["g-hd2d-toggle"].getAttribute("aria-pressed"), "false");
+});
+
 test("关着时 game.html 的战场照旧：顶栏多一个「新画面」开关（默认写关）；旧战场 #g-field 的结构一点没变；页面不预先加载 three.js、布局、场景（开了才载）；game.js 接新画面的地方都先看开关", () => {
   const html = read("game.html");
   const btn = /<button class="g-btn" id="g-hd2d-toggle"[^>]*>([^<]*)<\/button>/.exec(html);
@@ -170,7 +201,7 @@ test("关着时 game.html 的战场照旧：顶栏多一个「新画面」开关
   assert.match(g, /const field3d = \(\) => !!\(window\.HD2DField && HD2DField\.on\(\)\);/);
   assert.match(g, /function centerOf\(id\) \{\s*if \(field3d\(\)\) return field3dRect\(id\);/, "演出位置：开着问 3D，关着照旧量单位卡");
   assert.match(g, /function zoneRectOf\(zone\) \{\s*if \(field3d\(\)\) return HD2DField\.zoneRectOf\(zone\);/);
-  assert.match(g, /if \(window\.HD2DField\) HD2DField\.view\(snaps\);/, "setView 每次都告诉新画面（新画面自己看开没开）");
+  assert.match(g, /if \(window\.HD2DField\) HD2DField\.view\(snaps, \{ animate: !!animate \}\);/, "setView 每次都告诉新画面（新画面自己看开没开；#330 起带上这一下演不演）");
   assert.match(g, /const wfxField = field3d\(\) \? null : fieldEl;/, "天气叠加层：开着时画在新画面上，旧战场不放（关着照旧）");
   // 页面的 CSS：只有 .g-app.hd2d-on（开着）时才藏旧战场
   const css = read("hd2d/hd2d.css");
@@ -232,7 +263,8 @@ test("开着时布局拿到的是投影后的数据：战斗状态过 OnlineView
   const paint = src.slice(src.indexOf("function paint("), src.indexOf("function syncWeather("));
   assert.match(paint, /battleLookSync\(\)/);
   assert.match(paint, /viewState\(st, snaps, \{ OV: root\.OnlineView, itemCatalog: catalog\(\) \}\)/);
-  assert.match(paint, /L\.build\(v, layoutOpts\(v, S\.sc\.view\(\), S\.sc\.portrait\)\)/);
+  // #316：白卡的卡片快照、量到的卡片大小也一起交给布局
+  assert.match(paint, /L\.build\(v, layoutOpts\(v, S\.sc\.view\(\), S\.sc\.portrait, cards \? \{ cards, sizes: S\.sizes \} : null\)\)/);
   assert.doesNotMatch(src, /\.shp\b|shpMax|baseShp/, "新画面的代码不碰坚毅生命");
   assert.doesNotMatch(src, /\bst\.units\b|state\.units/, "不绕开白名单直接读单位");
 });
