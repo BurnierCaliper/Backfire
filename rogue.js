@@ -2639,8 +2639,11 @@ const Rogue = (function () {
     { id: "shop", name: "商店消费", desc: () => "在商店花费 500 奎支", target: () => 500 },
     { id: "weather", name: "更换天气", desc: () => "主动将天气改为指定天气 1 次", target: () => 1 }
   ];
+  /** 按哪天换题：默认读本机时钟；setGrowthDailyClock(() => 日期) 换成别的时钟（测试固定日期用），传空恢复本机时钟 */
+  let growthDailyClock = () => new Date();
+  function setGrowthDailyClock(fn) { growthDailyClock = typeof fn === "function" ? fn : () => new Date(); }
   function growthDailyKey(run) {
-    const d = new Date();
+    const d = growthDailyClock();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   }
   function ensureGrowthDaily(run) {
@@ -3083,7 +3086,7 @@ function advanceDays(run, n) {
     canClinic, cyberInfo, cyberPreview, cyberCost, modifyHero, cyberwarePacketFor, cyberwarePreviewFor, installCyberware, removeCyberware, healCost, healHero,
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
-    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump,
+    drawInfo, drawHero, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook

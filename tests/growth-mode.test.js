@@ -2,13 +2,26 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const vm = require("node:vm");
 const H = require("./headless");
 const plain = (x) => JSON.parse(JSON.stringify(x));
 
-function fresh(seed, party) {
-  const c = H.load();
+// 每日挑战按「今天」换题（rogue.js · growthDailyKey），不固定的话哪天跑测试、结果就跟着哪天变（#320）：这里一律按这一天换题
+const DAILY_DAY = new Date("2026-10-22T12:00");
+function fresh(seed, party, c) {
+  c = c || H.load();
+  c.Rogue.setGrowthDailyClock(() => DAILY_DAY);
   const run = c.Rogue.newRun({ party: party || ["kolt", "helu"], seed, growth: true });
   return { c, run, R: c.Rogue, G: c.ROGUE_GROWTH || c.S.ROGUE_GROWTH };
+}
+/** 把这套规则环境里的本机时钟拨到某一天（时间照常往前走；带参数的 new Date(...) 不受影响） */
+function pretendToday(c, ymd) {
+  const Real = vm.runInContext("Date", c);
+  const shift = new Real(`${ymd}T12:00`).getTime() - Real.now();
+  c.Date = class extends Real {
+    constructor(...a) { if (a.length) super(...a); else super(Real.now() + shift); }
+    static now() { return Real.now() + shift; }
+  };
 }
 const fusion = (c) => c.bagCount("heart_fusion");
 function finishQuickTask(run, R) {
@@ -115,8 +128,8 @@ test("团灭只算任务失败，角色不会永久死亡", () => {
   assert.equal(run.stage, "camp");
 });
 
-test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
-  const { c, run, R } = fresh("G7b");   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭
+/** 自动打：能抽就抽、接第一个任务、走第一条路，休息 / 跳过检定 / 离开商店，战斗交给模拟器；返回经过的阶段 */
+function autoPlay({ c, run, R }) {
   const { BattleSim } = c;
   const seen = new Set();
   for (let i = 0; i < 400 && run.tasksDone < 6; i++) {
@@ -142,10 +155,47 @@ test("自动打 40 步：不会结束、不会进首领战，队伍平均等级�
     } else if (run.stage === "camp") R.camp(run);
     else assert.fail("不该出现的阶段：" + run.stage);
   }
+  return seen;
+}
+
+test("自动打 40 步：不会结束、不会进首领战，队伍平均等级决定敌人等级", () => {
+  const g = fresh("G7b");   // 种子换过：决一死战拦下所有攻击后，带灯的队伍战况变了，原种子刚好全灭
+  const seen = autoPlay(g);
+  const { run } = g;
   assert.notEqual(run.stage, "over");
   assert.ok(!seen.has("boss"));
   assert.ok(run.tasksDone >= 1, `完成任务 ${run.tasksDone}`);
   assert.ok(run.party.length >= 2);
+});
+
+test("换日期也稳定：本机时钟假装是 10-22、10-23（不固定换题日期时这天会全灭）各打一遍，两局完全一样", () => {
+  const ends = ["2026-10-22", "2026-10-23"].map(day => {
+    const c = H.load();
+    pretendToday(c, day);
+    assert.equal(vm.runInContext("new Date().getDate()", c), Number(day.slice(8)), "本机时钟拨到了这一天");
+    const g = fresh("G7b", null, c);
+    autoPlay(g);
+    const { run } = g;
+    return plain({ stage: run.stage, tasksDone: run.tasksDone, day: run.day, daily: run.growthDaily.key, kuizhi: c.S.state.kuizhi,
+      party: run.party.concat(run.reserve).map(h => `${h.kit} ${h.level}`), dead: run.deadKits || [], log: run.log.map(l => l.text) });
+  });
+  assert.equal(ends[0].daily, "2026-10-22", "按固定的日期换题");
+  assert.deepEqual(ends[1], ends[0]);
+  assert.notEqual(ends[0].stage, "over");
+});
+
+test("每日挑战跟着注入的时钟换题；不注入（或传空）照旧用本机日期", () => {
+  const c = H.load();
+  pretendToday(c, "2026-10-23");
+  const R = c.Rogue;
+  const run = R.newRun({ party: ["kolt", "helu"], seed: "G9", growth: true });
+  assert.equal(R.growthDaily(run).key, "2026-10-23", "默认读本机日期（规则不变）");
+  R.setGrowthDailyClock(() => new Date("2026-10-05T12:00"));
+  const a = plain(R.growthDaily(run));
+  assert.equal(a.key, "2026-10-05", "时钟换了一天就换题");
+  assert.deepEqual(plain(R.growthDaily(run)), a, "同一天再问还是这三个");
+  R.setGrowthDailyClock(null);
+  assert.equal(R.growthDaily(run).key, "2026-10-23", "传空恢复本机时钟");
 });
 
 test("坚毅生命耗尽才真正死亡：移出队伍，再抽到从 1 级重新培养", () => {
