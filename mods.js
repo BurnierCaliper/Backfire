@@ -207,7 +207,6 @@ function bpAfterAttack(attacker, target, res, flags, notes) {
       target.statuses = target.statuses || {};
       if (key === "burn") target.statuses.burn = (Number(target.statuses.burn) || 0) + 1;
       else target.statuses[key] = true;
-      if (key === "high") target.highApplyTurn = state.turnNo;
       if (typeof popStatus === "function") popStatus(target, key);
       notes.push(`愿你常胜：属性效果绝佳，对 ${target.name} 施加了状态。`);
     }
