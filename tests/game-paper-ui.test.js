@@ -414,6 +414,70 @@ test("3D 白卡让开浮在战场上的面板（第 4 步）：几种窗口大�
   }
 });
 
+/* ---------- 合并 #321（平铺纸纹）以后：单机的纸片画面也照 #321 的要求 ---------- */
+test("#321 单机也一样：纸纹是一张平铺的小纹理（撕边 clip-path、影子挂在 .olp-ply 上）；开局画好以后开打、选技能 / 取消、开关「工具 ▾」和抽屉、收起展开技能栏、拖窗口大小都不再画纹理；页面上的纹理不超过种类那么多张；离开纸片画面撕边、影子层一起拿掉", { timeout: 90000 }, async t => {
+  const o = await soloPage(t); if (!o) return; const { page } = o;
+  await page.waitForFunction(() => { const h = document.querySelector("#g-app > .g-hud"); return !!h && h.dataset.olpTex === "dock" && PaperUI.pending() === 0; }, null, { timeout: 30000 });
+  // 技能栏后面那张纸：平铺、撕边是 clip-path；影子挂在补进去的 .olp-ply 上；技能吊牌的影子挂在自己身上（不补节点）
+  const sheet = await page.evaluate(() => {
+    const el = document.querySelector("#g-app > .g-hud"), cs = getComputedStyle(el, "::before"), ply = el.querySelector(":scope > .olp-ply"), sk = document.querySelector("#g-skills .sk");
+    return { repeat: cs.backgroundRepeat, size: cs.backgroundSize, clip: cs.clipPath.slice(0, 8), ply: ply ? getComputedStyle(ply).filter : "", sk: getComputedStyle(sk).filter, skPly: !!sk.querySelector(".olp-ply"),
+      url: /^url\("blob:/.test(el.style.getPropertyValue("--olp-tex")) };
+  });
+  assert.ok(sheet.repeat === "repeat" && /^256px( auto)?$/.test(sheet.size) && sheet.clip === "polygon(" && sheet.url, "平铺、撕边、blob: 地址：" + JSON.stringify(sheet));
+  assert.match(sheet.ply, /drop-shadow/, "影子层");
+  assert.ok(/drop-shadow/.test(sheet.sk) && !sheet.skPly, "技能吊牌的影子挂在自己身上：" + JSON.stringify(sheet));
+  // 开打（「工具 ▾」里的「开始战斗」，同一个按钮）
+  await page.evaluate(() => document.getElementById("g-start").click());
+  await page.waitForFunction(() => state.combatStarted && state.combatPhase === "player" && GAME.depth === 0, null, { timeout: 15000 });
+  await settle(page);
+  // 量：画了几张纹理（只数 PAPER.art.tile 见方的画布：别的模块的画布不算）、同步编码了几次
+  await page.evaluate(() => {
+    window.__paint = { ctx: 0, put: 0, data: 0 };
+    const S = PaperUI.BASE.art.tile, C = HTMLCanvasElement.prototype, X = CanvasRenderingContext2D.prototype, g = C.getContext, d = C.toDataURL, p = X.putImageData;
+    const tile = c => c && c.width === S && c.height === S;
+    C.getContext = function (...a) { if (tile(this)) __paint.ctx++; return g.apply(this, a); };
+    C.toDataURL = function (...a) { if (tile(this)) __paint.data++; return d.apply(this, a); };
+    X.putImageData = function (...a) { if (tile(this.canvas)) __paint.put++; return p.apply(this, a); };
+  });
+  const dock = () => page.evaluate(() => { const h = document.querySelector("#g-app > .g-hud"); return { h: h.offsetHeight, tex: h.style.getPropertyValue("--olp-tex"), paint: Object.assign({}, __paint) }; });
+  const before = await dock();
+  // 选一个技能：技能栏多出选目标的提示，变高；Esc 取消：变回去
+  await page.click("#g-skills .sk:not([disabled])");
+  await page.waitForFunction(h => document.querySelector("#g-app > .g-hud").offsetHeight !== h, before.h);
+  await page.waitForTimeout(300);
+  const picked = await dock();
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(h => document.querySelector("#g-app > .g-hud").offsetHeight === h, before.h);
+  // 「工具 ▾」下拉、右边的抽屉：开出来是新的面板（新的大小），关上
+  await openTools(page);
+  await page.waitForFunction(() => document.querySelector("#g-app > .g-top").dataset.olpTex === "kraft");
+  await page.click('#g-paper [data-olp="tools"]');
+  await page.click("#g-log .gp-drawer-tab");
+  await page.waitForFunction(() => document.getElementById("g-log").dataset.olpTex === "receipt");
+  await page.click("#g-log .gp-drawer-tab");
+  // 技能栏收起再展开
+  await page.click("#g-app > .g-hud .hd2d-dock-toggle");
+  await page.waitForTimeout(150);
+  await page.click("#g-app > .g-hud .hd2d-dock-toggle");
+  // 拖着窗口变大变小
+  for (const [w, h] of [[1280, 820], [1100, 720], [1366, 768], [1440, 900]]) { await page.setViewportSize({ width: w, height: h }); await page.waitForTimeout(80); }
+  await page.waitForTimeout(400);
+  const back = await dock();
+  assert.notEqual(picked.h, before.h, "选技能时技能栏高度变了：" + before.h + " → " + picked.h);
+  assert.deepEqual([picked.tex, back.tex], [before.tex, before.tex], "一直是那一张纹理");
+  assert.deepEqual([back.paint, await page.evaluate(() => PaperUI.pending())], [{ ctx: 0, put: 0, data: 0 }, 0], "一张都没画、没有同步编码");
+  // 页面上贴着的纹理：一套配色最多种类那么多张
+  const n = await page.evaluate(() => ({ n: new Set([...document.querySelectorAll("[data-olp-tex]")].map(e => e.style.getPropertyValue("--olp-tex"))).size, kinds: Object.keys(PaperUI.BASE.art.kinds).length }));
+  assert.ok(n.n <= n.kinds, "纹理张数：" + JSON.stringify(n));
+  // 离开纸片画面：纸纹、撕边、影子层都不留（旧画面的技能栏、顶栏、记录栏照旧用）
+  await page.evaluate(() => HD2DField.switchTo("old"));
+  await page.waitForFunction(() => !document.body.classList.contains("g-paper"));
+  await settle(page);
+  assert.deepEqual(await page.evaluate(() => ["[data-olp-tex]", '[style*="--olp-clip"]', '[style*="--olp-tex"]', ".olp-ply"].map(s => document.querySelectorAll("#g-app " + s).length)), [0, 0, 0, 0]);
+  assert.deepEqual(o.errors, []);
+});
+
 /* ---------- 第 3 步：收据、选目标的按钮条、天气换色不串 ---------- */
 /** 战斗记录里塞几条和 game.js（pushLogCard / addLogPhase）画的一样的记录；技能栏里摆一条和 game.js · showPickBar 一样的选目标按钮条 */
 const fakeLog = page => page.evaluate(() => {
@@ -533,7 +597,9 @@ test("天气换色不串：纸片画面里旧皮肤（game.css / weather-fx.css�
       if (!document.querySelector("#g-app > .g-top.gp-open")) document.querySelector('#g-paper [data-olp="tools"]').click();
       const pv = document.getElementById("g-pvbox"); pv.innerHTML = '<h4>斩击 · 预演</h4><div class="ln">消耗 1 行动点</div><div class="ln key">→ 狂徒：12 伤害</div>'; pv.classList.add("live");
     });
-    await page.waitForFunction(() => !!document.querySelector("#g-app > .g-top.gp-open[data-olp-tex]") && !!document.querySelector("#g-log[data-olp-tex]") && !!document.querySelector("#g-app > .g-hud[data-olp-tex]"));
+    // 纸纹挪到空闲时画（#321：换到没画过的一套配色时这一套的每种纸排着画，纸板按钮排在后面）：等这一套都画好、贴上
+    await page.waitForFunction(() => PaperUI.pending() === 0 && !!document.querySelector("#g-app > .g-top.gp-open[data-olp-tex]") && !!document.querySelector("#g-log[data-olp-tex]") &&
+      !!document.querySelector("#g-app > .g-hud[data-olp-tex]") && !!document.querySelector("#g-app > .g-hud .endturn[data-olp-tex]"), null, { timeout: 30000 });
     await settle(page);
     const withWeather = await looks(page, PAPER_PARTS);
     assert.equal(await page.evaluate(() => document.body.dataset.olpWeather), PAPER_WEATHER[w], "纸片自己的天气色调照旧：" + w);
