@@ -58,10 +58,10 @@ test("巨刃划空：1 距离以内的敌人都能选", () => {
   assert.equal(JSON.stringify(c.skillRangeFor(chuan, "chuan_blade")), JSON.stringify({ min: 0, max: 1 }));
 });
 
-test("评价：分数线下调 250，新增 SS / SSS（经验倍率同 S）", () => {
+test("评价：分数线下调 250，新增 SS / SSS（经验倍率同 S）；B 及以上 ×1.15（克制大师）", () => {
   const c = H.load();
   const lines = c.gradeLines(1).map(x => x[0] + x[1] + "x" + x[2]).join(" ");
-  assert.equal(lines, "SSS2000x2 SS1750x2 S1500x2 A1250x1.5 B1000x1.2 C500x1 D0x1");
+  assert.equal(lines, "SSS2300x2 SS2020x2 S1730x2 A1440x1.5 B1150x1.2 C500x1 D0x1");
 });
 
 test("跑团：从战斗回到探索，先切画面再布置下一场（不弹开战大字）", () => {

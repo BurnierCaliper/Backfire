@@ -368,6 +368,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
+  - **以前**：评价只看分数；分数线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000（和本场基准分混合），没有奖励克制或借天气的打法。
+  - **现在**：统计我方主动发起的攻击（一次行动打几下、打几个人都算一次；协助攻击、借机 / 反击、持续伤害、连带伤害、环境不算），其中有克制或吃到天气增益（任一即可）的占一半及以上、且至少 1 次攻击时，胜利结算在速杀 / 无伤 / 遭遇战之后整场分数再 ×1.5，结算画面写「克制大师」。不管有没有达成，B / A / S / SS / SSS 的分数线都 ×1.15（向上取整到 10），C 线不变。
 - **不稳、空手格挡改成附赠动作 −1，不再清零**（作者裁定；app.js · `applyBonusPenalties`（新）/ `refreshEconomy` / `refreshEnemyEconomy` / `performAssistBlock` 日志；vehicle.js · `vehicleBonusFloor`（新）/ `vehicleEconomy`；codex.js · `CODEX_EFFECTS` 不稳；rulebook.js「行动点与附赠动作」「协助格挡」两章；tests/bonus-penalty.test.js、tests/enemy-race-perks.test.js）
   - **以前**：不稳、空手格挡成功的下一回合直接把附赠动作清零；玩家这边清零后才加沙暴顺风 +1（所以照样有 1 个），敌人那边最后才清零，两边顺序不一样。
   - **现在**：所有附赠加成（沙暴顺风、警戒、千里马、单局图纸、绯秋 · 剑术+ 留到这回合的附赠、敌人载具驾驶员最少 1 个）先算完，再按惩罚各 −1：不稳 −1、空手格挡 −1，两个都有 −2，最少 0。我方和敌人同一个顺序（`app.js · applyBonusPenalties`）。作者裁定剑术+ 留下的和驾驶员托底也算加成：以前剑术+ 是扣完再加（不稳 + 空手 + 留 1 个，有 1 个；现在 1 + 1 − 2 = 0），驾驶员是扣完再托到 1（不稳照样 1 个；现在托底 1 再扣 → 0）。易怒蛮牛发作的那回合，载具驾驶员和别的敌人一样没有附赠（作者裁定：特性写的是失去附赠，不托底到 1；以前最后托底会留 1 个）。日志写实际扣掉的数：本来就是 0、没东西可扣时不写「−1」，写「本来就没有附赠动作，没有可扣的」。易怒蛮牛本身（发作后那回合没有附赠）的规则没变，只是驾驶员不再托底到 1。
