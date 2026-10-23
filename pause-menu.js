@@ -3,7 +3,8 @@
  *     按下时有开着的面板（PAUSE_MENU.layers）、有东西要取消（PauseMenu.addBlocker：选着技能、正在选目标、在播演出……），
  *     或者别的处理拿这一下取消了东西（preventDefault），就不打开；打字的时候（输入框、聊天框里）也不打开。
  *   · 菜单里的每一项由对应的模块自己登记（PauseMenu.register）：克制表（matchup-ui.js；联机玩家在 online-ui.js）、
- *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配 / 音效开关（online-ui.js）、教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
+ *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配 / 音效开关（online-ui.js）、新画面的画质（hd2d/hd2d-field.js，#321）、
+ *     教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
  *     点一项 = 关掉暂停页面 + 打开对应的面板，和以前点原来的按钮一样；开关这一类（stay，例：音效 开 / 关）点了菜单不收起，只换成新的状态。
  *   · 联机不会真的暂停：只盖住自己的画面，房间、计时照旧走（标题写「菜单」，下面一行小字说明）。
  * 只开关画面上的面板，不碰任何规则和联机数据。 */
@@ -33,13 +34,17 @@
       lobby: { label: "大厅", hint: "房间大厅：成员和大厅交流" },
       // 音效开关（#304，联机玩家；online-ui.js 登记）：和单机顶栏的「音效」按钮同一个本机开关（sfx.js 的 localStorage 键）
       sfx: { label: "音效", on: "音效 开", off: "音效 关", hint: "打中、击倒、轮到你的提示音……只影响这台电脑" },
+      // 画质（#321，新画面开着时；hd2d/hd2d-field.js 登记，单机 / 联机同一个本机设置）：点一下换下一档（自动 → 高 → 低），菜单不收起。
+      // autoLow = 选的是自动、一直卡，这一次打开页面已经降到低
+      quality: { label: "画质", auto: "画质 自动", autoLow: "画质 自动（太卡，已降到低）", high: "画质 高", low: "画质 低",
+        hint: "新画面（3D 战场）的画质：低 = 像素比最高 1、不加景深和泛光；自动 = 先用高，一直卡就降到低。只影响这台电脑" },
       // 离开房间（联机；online-ui.js 登记）：#298 把它收进「消息与成员」面板最底下以后玩家找不到，单独放一项（点了先确认）
       leave: { label: "离开房间", hostLabel: "离开并保存", hint: "回到标题页；之后可以用「回到房间」再进来", hostHint: "保存这场跑团，回到标题页",
         confirmTitle: "离开房间？", confirmText: "你会回到标题页，房间里的人照常继续。\n之后可以在标题页点「回到房间」再进来。",
         hostConfirmTitle: "离开并保存？", hostConfirmText: "会先保存这场跑团，然后你回到标题页；你不在的时候玩家那边会暂停。", cancel: "留下" }
     },
     // 先后（小的在前）；没写的排在最后
-    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70, leave: 90 },
+    order: { tutorial: 10, matchup: 20, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70, quality: 75, leave: 90 },
     // 教程（#263）：教程页挂出 window.Tutorial.open() 后这一项才出现。#263 的入口名不一样就改这一行
     tutorial: { global: "Tutorial", method: "open" },
     // Esc / 菜单按钮在这些画面里有效（<body data-screen>）；联机时（主持人、玩家）在哪个画面都有效

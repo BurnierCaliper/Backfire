@@ -263,8 +263,9 @@ test("开着时布局拿到的是投影后的数据：战斗状态过 OnlineView
   const paint = src.slice(src.indexOf("function paint("), src.indexOf("function syncWeather("));
   assert.match(paint, /battleLookSync\(\)/);
   assert.match(paint, /viewState\(st, snaps, \{ OV: root\.OnlineView, itemCatalog: catalog\(\) \}\)/);
-  // #316：白卡的卡片快照、量到的卡片大小也一起交给布局
-  assert.match(paint, /L\.build\(v, layoutOpts\(v, S\.sc\.view\(\), S\.sc\.portrait, cards \? \{ cards, sizes: S\.sizes \} : null\)\)/);
+  // #316：白卡的卡片快照、量到的卡片大小也一起交给布局（#339：画面的四边让多少由 fitCover 试，排的还是投影过的 v）
+  assert.match(paint, /const more = cards \? \{ cards, sizes: S\.sizes \} : null/);
+  assert.match(paint, /fitCover\(\(view\) => L\.build\(v, layoutOpts\(v, view, S\.sc\.portrait, more\)\)/);
   assert.doesNotMatch(src, /\.shp\b|shpMax|baseShp/, "新画面的代码不碰坚毅生命");
   assert.doesNotMatch(src, /\bst\.units\b|state\.units/, "不绕开白名单直接读单位");
 });

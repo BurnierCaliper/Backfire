@@ -13,6 +13,8 @@
   let remote = null, notice = "", systemNotice = "", readying = false, restoring = false, started = false, settledResult = null;
   let queue = Promise.resolve(), gmQueue = Promise.resolve(), animation = Promise.resolve(), actionMenu = null, manualResolve = null, manualPhase = false;
   let offlineWait = null, storageError = false, epoch = 0;
+  // 主持人放弃战斗（abandonBattle）时加一：之前排队、还没执行的主持人操作（gm.* 指令、旧面板的编辑）一律作废，不落到之后摆的新战场上
+  let battleEpoch = 0;
   let pausedAt = null, resumeAI = false, awaitingResync = false;
   // 房间玩法：trpg 跑团（有主持人） / rogue 联机单局（online-rogue.js：投票、各人钱包、按需求分战利品）
   let mode = "trpg";
@@ -507,7 +509,13 @@
   async function submit(cmd) {
     try {
       if (!isHost()) return await rpc("cmd", { command: cmd });
-      const run = async () => { while (GAME.depth > (manualPhase || GAME.onlineEditWindow ? 1 : 0)) await new Promise(r => setTimeout(r, 50)); return execute(cmd, identity.id); };
+      const at = battleEpoch;
+      const run = async () => {
+        while (GAME.depth > (manualPhase || GAME.onlineEditWindow ? 1 : 0)) await new Promise(r => setTimeout(r, 50));
+        // 排队等演出的时候主持人放弃了这场战斗（abandonBattle，#322）：冲着那场战斗的主持人操作作废
+        if (cmd.type.startsWith("gm.") && at !== battleEpoch) error("这场战斗已经放弃，排队的主持人操作没有执行");
+        return execute(cmd, identity.id);
+      };
       if (cmd.type.startsWith("gm.") && cmd.type !== "gm.msg") { const next = gmQueue.then(run, run); gmQueue = next.catch(() => {}); return await next; }
       return await (immediate(cmd) ? execute(cmd, identity.id) : enqueue(run));
     } catch (e) { notice = e.message; notify(); return { ok: false, error: e.message }; }
@@ -515,9 +523,14 @@
   async function waitUntilReady() { while (active && isPaused()) await new Promise(r => setTimeout(r, 100)); }
   function queueHostEdit(fn) {
     if (!isHost()) return Promise.reject(new Error("只有主持人可以执行此操作"));
+    const at = battleEpoch;
     const run = async () => {
       while (GAME.depth > (manualPhase || GAME.onlineEditWindow ? 1 : 0)) await new Promise(r => setTimeout(r, 50));
-      await waitUntilReady(); const result = await GAME.actLegacy(fn);
+      await waitUntilReady();
+      // 排队的时候主持人放弃了这场战斗（abandonBattle，#322）：这条编辑是冲着那场战斗的，不执行（旧面板早已拿到占位的返回值）
+      if (at !== battleEpoch) return undefined;
+      const result = await GAME.actLegacy(fn);
+      if (at !== battleEpoch) return result;   // 执行到一半放弃了：不再存队伍记忆、不再判胜负
       if (typeof TRPG !== "undefined" && TRPG.active) GAME.rememberCampaign();
       GAME.refresh(); if (Screens.is("trpg")) TrpgFlow.refresh(); if (state.combatStarted) GAME.checkEnd(); publish(); return result;
     };
@@ -724,6 +737,15 @@
       publish(); return { ok: true };
     },
     touch() { if (isHost()) publish(); },
+    /** 主持人放弃这场战斗回到探索（game.js · abandonBattle，#322）：手动操控敌人的阶段放开、掉线玩家的倒计时清掉，
+     *  之前排队还没执行的主持人操作作废（battleEpoch）；玩家那边跟着交回探索后发的包切回探索画面 */
+    abandonBattle() {
+      if (!isHost()) return;
+      battleEpoch++;
+      manualPhase = false; resumeAI = false; offlineWait = null;
+      if (manualResolve) { const finish = manualResolve; manualResolve = null; finish(); }
+      GAME.onlineEnemyCursor = {}; GAME.onlineEditWindow = false;
+    },
     /** 联机跑团：主持人能选的队员（大厅 / 探索时换人用）：[{ kit, name, on }] */
     partyChoices() {
       if (!isHost() || rogue() || typeof livePartyCards !== "function") return [];

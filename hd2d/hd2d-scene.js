@@ -26,6 +26,10 @@
  *                                                     告诉外面按量到的重排（hd2d-field.js）
  *   sc.overhead({ elevation, dist, secs, ease }) / sc.descend({ secs, ease })   转场：镜头升到战场正上方往下看 / 从正上方降回远景（数值在 hd2d-field.js 的 MIST）；
  *                                                     转场占着镜头（state.lock）：拖动、滚轮、双指、推镜头都不接，重排只换铭牌，降回远景了才交还
+ * 画面节奏、画质（#321）：每一帧先问 hd2d-pace.js 画不画——有演出（options.busy()）、镜头在动、天气粒子、打雷、刚变过时满帧画，画面静止时降帧
+ *   （减少动态效果时不画）；满帧画时量帧时间，一直卡就叫 options.onSlow()（正式画面拿它把「自动」画质降一档）。
+ *   createHd2dScene(container, { quality: { pixelRatio, bokeh, bloom }, busy() {...}, onSlow() {...} })   开场的画质（不给 = QUALITY，高画质）
+ *   sc.setQuality({ pixelRatio, bokeh, bloom })   换画质：像素比上限、景深 / 泛光开不开（hd2d-field.js 的 FIELD.quality）；sc.drawn = 一共画了几帧
  * 旧画面单位卡的动画（#330；白卡自己的冲撞 / 受击…… 在 hd2d-play.js，这里只管 3D 里的）：
  *   setBattle 的 meta.move = 换了区的铭牌滑多少秒（hd2d-field.js 按演出倍率给；0 = 直接摆过去）：锚点在两个地台之间插值（hd2d-fx.js · slideAt），镜头不动
  *   布局的 zone.threats（区域预警）：地台上一圈红框（下回合就落地的一明一暗）+ 前沿一块预警字；sc.zoneFx(区号, "warn", { secs }) 地台闪一下（高能自爆预警）
@@ -53,13 +57,19 @@ const L = window.HD2DLayout;
 const C = window.HD2DCamera;
 /** 区域场景的美术（#242，hd2d-scene-art.js）：场景自己的光照 / 调色（矿内、矿底压暗；矿底不分白天黑夜）。没加载就照旧按光影主题 */
 const ART = window.HD2DSceneArt || { lighting: () => null, weather: (k, w) => ({ fx: w || "none" }) };
+/** 什么时候画一帧、帧时间（#321，hd2d-pace.js，普通脚本，比这个模块先加载）：没加载（浏览器缓存里还是旧的页面）就照旧每帧都画 */
+const P = window.HD2DPace || null;
 
 /* ---------- 配置 ---------- */
+/** 画质（#321）：没给 options.quality 时用这一套（高画质，和以前一样）——像素比最高 pixelRatio（还要看屏幕本身的）、景深 bokeh、泛光 bloom 开不开。
+ *  低画质、「自动」按帧时间降一档在 hd2d-field.js 的 FIELD.quality（暂停页面里选，记在本机） */
+const QUALITY = { pixelRatio: 2, bokeh: true, bloom: true };
 const CAM = {
   fov: L.CONFIG.camera.fov,   // 视角窄一点，像看沙盘模型（取景算法在 hd2d-layout.js 的 fitView）；中景 / 近景的视野在 C.CAMERA
   maxAzimuth: 0.5,            // 左右最多转多少弧度（拖动能转到的俯角范围每一段不同：C.CAMERA[段].tilt）
   near: 1, far: 220,          // 近裁剪面每一段不同（C.CAMERA[段].clip）；滚轮不再缩放，在三段之间跳
-  panPad: 3                   // 平移时目标点最多离战场边缘多远
+  panPad: 3,                  // 平移时目标点最多离战场边缘多远
+  still: 1e-8                 // 镜头（位置、看的那一点）和上一次画的时候差不到这么多（距离的平方）算没动（#321：没动、别的也不动就降帧）
 };
 /* 景深：焦点在镜头看的那一点（远景是战场中间，中景 / 近景是选中的区），离焦点差 1 个单位约糊 aperture 这么多；
  * 比焦点近的最多糊 maxblur，比焦点远的最多糊各主题的 dofFar × 这一段的 far（远景剪影只稍微出焦）；
@@ -299,6 +309,14 @@ export function createHd2dScene(container, options) {
   composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(heatPass);
   composer.addPass(new OutputPass());
   composer.addPass(grade);
+  // 画质（#321）：像素比上限（resize / applyPixels 用）、景深 / 泛光这两道开不开（低画质关掉；setQuality 换）
+  let quality = Object.assign({}, QUALITY, options.quality || {});
+  function applyPasses() { bokeh.enabled = quality.bokeh !== false; bloom.enabled = quality.bloom !== false; }
+  applyPasses();
+  // 画面节奏（#321，hd2d-pace.js）：lastDraw 上一次画的时间（秒）、lastFull 上一次是满帧画的、wakeUntil 变过以后满帧画到什么时候、meter 帧时间、drawn 一共画了几帧
+  let lastDraw = null, lastFull = false, wakeUntil = 0, meter = null, drawn = 0;
+  /** 有东西变了（铭牌、标记、选中、镜头、窗口、画质……）：接下来 PACE.wake 秒满帧画 */
+  function wake() { if (P) wakeUntil = performance.now() / 1000 + P.PACE.wake; }
 
   // 镜头（每个玩家自己的）：tier 远 / 中 / 近、zone 选中的区（null = 跟着当前行动单位）、close 特写的单位（近景里双击，#237；null = 没在特写）、
   // pose 这一段的镜头（hd2d-camera.js · pose / closePose）、cur 这一帧实际用的（过渡中是插值出来的）、tween 正在过渡、
@@ -540,6 +558,10 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--mi", MECH.icon + "px");   // 首领机制的图标（#283）
     labels.domElement.style.setProperty("--mg", MECH.gap + "px");
     if (state.layout.cardW > 0) labels.domElement.style.setProperty("--cw", state.layout.cardW + "px");   // 白卡（#316）的宽：布局按同一个宽排站位
+    if (state.layout.compact) {   // 紧凑卡（#341）的宽高：布局按同一个尺寸排站位
+      labels.domElement.style.setProperty("--kw", state.layout.compact.w + "px");
+      labels.domElement.style.setProperty("--kh", state.layout.compact.h + "px");
+    }
     const UC = window.UnitCard;
     state.layout.units.forEach(u => {
       live.add(u.id);
@@ -597,12 +619,16 @@ export function createHd2dScene(container, options) {
     p.measure = true;
   }
   /** 白卡画出来以后量一下卡片本来的大小（不算缩放）：和布局按的（u.size：估的，或者上一次量的）差了一像素以上就交给外面（hd2d-field.js 按量到的重排，
-   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量 */
+   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量。
+   *  现在是紧凑卡的（#341，大小固定）：先拿掉 .compact 量完整的卡，量完换回去 */
   function measureCards() {
     let out = null;
     state.plates.forEach((p, id) => {
       if (!p.measure || !p.card || !p.u) return;
+      const small = p.el.classList.contains("compact");
+      if (small) p.el.classList.remove("compact");
       const w = p.card.wrap.offsetWidth, h = p.card.wrap.offsetHeight;
+      if (small) p.el.classList.add("compact");
       if (!(w > 0 && h > 0)) return;
       p.measure = false;
       p.size = { w, h };
@@ -614,6 +640,7 @@ export function createHd2dScene(container, options) {
   /** 当前行动 / 选中 / 悬停：铭牌加样式，脚下的光圈开关；悬停 / 选中的铭牌叠在最上面（CSS2DRenderer 按 renderOrder 先排）。
    *  近景：选中的区的铭牌放大（.big），别的区的变淡、糊掉（.dim）——按这一段镜头（state.pose.plates）定 */
   function markPlates() {
+    wake();
     const mk = state.marks || NO_MARKS;
     state.plates.forEach(p => {
       const actor = p.id === state.actorId, sel = p.id === state.selectedId;
@@ -621,8 +648,11 @@ export function createHd2dScene(container, options) {
       p.big = !!(q && q.big); p.dim = !!(q && q.dim);
       // 特写（#237）：这个单位的铭牌再放大 zoom 倍、在最上面；别的压到它的藏起来
       p.close = !!(q && q.close); p.hide = !!(q && q.hide); p.zoom = q && q.zoom > 0 ? q.zoom : 1;
-      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大已经算在里面），每帧按 L.cardScale 再乘远近
+      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大、挤的区缩小（#341）已经算在里面），每帧按 L.cardScale 再乘远近
       p.base = q && q.scale > 0 ? q.scale : null;
+      // 挤的区换成紧凑卡（#341，hd2d.css 的 .hd2d-plate.compact：名字 + 血量数字、血条、架势 + 状态图标；鼠标 / 键盘停上去照旧是完整的卡）
+      p.compact = !!(q && q.compact && p.card);
+      p.el.classList.toggle("compact", p.compact);
       // 白卡：当前行动 / 能点的目标 / 鼠标停着的目标 / 不是目标变暗，用旧画面单位卡的那几个样式（game.css 的 is-actor / is-targetable / is-hover / is-dim）
       if (p.card) {
         const w = p.card.wrap;
@@ -657,6 +687,7 @@ export function createHd2dScene(container, options) {
     state.world = null;
   }
   function setBattle(layout, meta) {
+    wake();
     state.layout = layout; state.meta = Object.assign({ weather: "none", theme: "day" }, meta || {});
     // 场景的光照（#242）：换成场景自己的那一套；矿底这种不分白天黑夜的，按它定的光影主题画（地台亮边、远景剪影、飘浮物都跟着）
     const lit = ART.lighting(THEMES, state.meta.theme, layout.ground);
@@ -680,6 +711,7 @@ export function createHd2dScene(container, options) {
     state.bounds = layout.bounds;
     const fx = ART.weather(layout.ground, state.meta.weather || "none").fx;   // 室内的场景（下水道）不画天上来的天气（#241，hd2d-scene-art.js · weather）
     const plan = weatherPlan(fx, state.meta.theme);   // 雷鸣：远景要画乌云
+    state.particles = !!(plan.main || plan.streak || plan.ribbon);   // 有天气粒子在飞：满帧画（#321；飘浮物飘得慢，不算）
     const look = L.GROUNDS[layout.ground] || {};   // 远景跟着区域（沙漠 → 沙丘，采矿场 → 岩壁，城市 → 楼群）
     syncBackdrop(layout, state.meta.backdrop || look.backdrop || backdropOf(state.meta.theme), plan, look.skyline);
     // 天气：闪电从默认镜头的画面上沿外面劈下来；远处的雷劈在哪问远景。
@@ -777,6 +809,7 @@ export function createHd2dScene(container, options) {
   }
   /** 把镜头摆成 p（位置、朝向、视野、近裁剪面；景深和雾每帧按 state.cur 设） */
   function applyPose(p) {
+    wake();
     state.cur = p;
     if (Math.abs(camera.fov - p.fov) > 1e-4 || Math.abs(camera.near - p.clip) > 1e-4) { camera.fov = p.fov; camera.near = p.clip; camera.updateProjectionMatrix(); }
     controls.target.set(p.target.x, p.target.y, p.target.z);
@@ -878,6 +911,7 @@ export function createHd2dScene(container, options) {
   /** 选中的区：地台顶面靠边一圈细框（跟着不规则的外轮廓走：离边 inset、宽 width，#237） */
   let focusRing = null, focusKey = "";
   function placeFocus() {
+    wake();
     const z = state.layout && state.layout.zones.find(q => q.id === state.zone);
     if (!z) { if (focusRing) focusRing.visible = false; return; }
     const key = z.id + "|" + outlineSig(z);
@@ -901,6 +935,7 @@ export function createHd2dScene(container, options) {
     m.visible = true;
   }
   function placeMarks() {
+    wake();
     markMeshes.forEach(m => { m.visible = false; });
     const mk = state.marks, l = state.layout;
     if (!mk || !l) return;
@@ -1088,26 +1123,36 @@ export function createHd2dScene(container, options) {
     const edge = state.backdrop && state.backdrop.groundEdge;
     ground.position.x = cx; ground.position.z = edge != null ? edge + BACKDROP.ground.size / 2 : cz;
   }
+  /** 平移（右键拖动）不让看的那一点离开战场太远。这一段镜头本来看的那一点（state.pose.target）总在范围里（#341：卡摞得高时取景把它往上挪，
+   *  以前高度夹在 2 以下，每帧把镜头往下拽，最上面的卡顶出画面） */
   function clampPan() {
     if (!state.bounds) return;
-    const b = state.bounds, t = controls.target, P = CAM.panPad;
-    const nx = THREE.MathUtils.clamp(t.x, b.minX - P, b.maxX + P), nz = THREE.MathUtils.clamp(t.z, b.minZ - P, b.maxZ + P), ny = THREE.MathUtils.clamp(t.y, -1, 2);
+    const b = state.bounds, t = controls.target, P = CAM.panPad, o = state.pose && state.pose.target;
+    const span = (lo, hi, v) => (o && Number.isFinite(v) ? [Math.min(lo, v), Math.max(hi, v)] : [lo, hi]);
+    const [x0, x1] = span(b.minX - P, b.maxX + P, o && o.x), [y0, y1] = span(-1, 2, o && o.y), [z0, z1] = span(b.minZ - P, b.maxZ + P, o && o.z);
+    const nx = THREE.MathUtils.clamp(t.x, x0, x1), nz = THREE.MathUtils.clamp(t.z, z0, z1), ny = THREE.MathUtils.clamp(t.y, y0, y1);
     const d = new THREE.Vector3(nx - t.x, ny - t.y, nz - t.z);
     if (d.lengthSq() > 0) { t.add(d); camera.position.add(d); }
   }
 
   /* ---------- 尺寸 / 循环 ---------- */
-  function resize() {
+  /** 画布的像素：画面大小 × 像素比（屏幕本身的，最多到画质的 pixelRatio，#321）；只换像素、不重排（换画质时也用它）。返回画面大小 */
+  function applyPixels() {
     const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
-    const pr = Math.min(window.devicePixelRatio || 1, 2);
+    const pr = Math.min(window.devicePixelRatio || 1, quality.pixelRatio > 0 ? quality.pixelRatio : QUALITY.pixelRatio);
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     composer.setPixelRatio(pr);
     composer.setSize(w, h);
+    grade.uniforms.res.value.set(w * pr, h * pr);
+    wake();
+    return { w, h };
+  }
+  function resize() {
+    const { w, h } = applyPixels();
     labels.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
     bokeh.uniforms.aspect.value = camera.aspect;
-    grade.uniforms.res.value.set(w * pr, h * pr);
     const portrait = w / h < 0.85;
     state.wantFit = true;                    // 窗口变了：铭牌位置按新画面重排，镜头回到默认
     if (portrait !== state.portrait) {
@@ -1119,7 +1164,7 @@ export function createHd2dScene(container, options) {
 
   // 点到空地（没拖动）：取消选中
   let downAt = null;
-  renderer.domElement.addEventListener("pointerdown", (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+  renderer.domElement.addEventListener("pointerdown", (e) => { downAt = { x: e.clientX, y: e.clientY }; wake(); });   // 按下就满帧画（拖动转镜头马上跟手，#321）
   renderer.domElement.addEventListener("pointerup", (e) => {
     const click = downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 5;
     downAt = null;
@@ -1204,11 +1249,49 @@ export function createHd2dScene(container, options) {
     });
   }
 
+  /** 上一次画的时候镜头在哪（位置、看的那一点、视野）：这一帧和它比动了没有（#321，动了就满帧画） */
+  const camWas = { pos: new THREE.Vector3(Infinity, Infinity, Infinity), target: new THREE.Vector3(), fov: 0 };
+  const camMoved = () => camWas.pos.distanceToSquared(camera.position) > CAM.still || camWas.target.distanceToSquared(controls.target) > CAM.still || Math.abs(camWas.fov - camera.fov) > 1e-6;
+
   function frame() {
     if (disposed) return;
     raf = requestAnimationFrame(frame);
     // 页面在后台、画面没排出来（正式画面切到别的界面时整个战斗画面藏起来，容器宽 0）：不画
-    if (document.hidden || !container.clientWidth) { clock.getDelta(); return; }
+    if (document.hidden || !container.clientWidth) { clock.getDelta(); lastFull = false; return; }
+    const tweening = !!state.tween;
+    // 镜头（每一帧都走，不贵）：过渡中按时间插值（位置、朝向、视野、焦点、景深、雾一起走，铭牌的抬高也跟着）；到了以后交还给 OrbitControls（小幅转动 / 平移）
+    if (state.tween) {
+      controls.update();                   // 拖动留下的惯性在过渡期间衰减掉（不然到了以后镜头还会自己漂一下）；镜头马上被插值盖掉
+      const p = C.at(state.tween, now() - state.tween.t0);
+      applyPose(p);
+      state.plates.forEach(pl => setLift(pl, pl.liftFrom + (pl.liftTo - pl.liftFrom) * p.k));
+      if (p.k >= 1) {
+        // 推镜头推到了：等演出播完 poseRelease 拉回来再交还拖动；转场升到正上方（lock = up）：停在那里，等拆掉。从正上方降回远景了（down）：交还给玩家
+        const pushed = state.tween.push || state.tween.lock === "up";
+        if (state.tween.lock === "down") state.lock = false;
+        state.tween = null;
+        if (!pushed) arrive();
+      }
+    } else if (!state.lock) {              // 转场停在正上方时 OrbitControls 不碰镜头
+      clampPan();
+      controls.update();
+    }
+    // 这一帧画不画（#321，hd2d-pace.js）：有演出、镜头在动、天气粒子、打雷、刚变过 → 满帧画；画面静止 → 一秒 PACE.idle 帧（减少动态效果时不画）
+    //   铭牌在换区滑动、地台在闪（#330）也算演出
+    const t = now();
+    let sliding = zoneFlashes.length > 0;
+    if (!sliding) state.plates.forEach(p => { if (p.slide) sliding = true; });
+    const sig = { fx: sliding || !!(options.busy && options.busy()), tween: tweening, moved: camMoved(), particles: !!state.particles, motion: state.motion,
+      flash: weather.flash, shake: weather.shake.x !== 0 || weather.shake.y !== 0, storm: weather.storm, woke: t < wakeUntil };
+    const full = !P || P.busy(sig);
+    if (P && !P.due(lastDraw, t, sig)) return;
+    // 帧时间（画质「自动」降一档，hd2d-field.js）：只量接连两帧都是满帧画的；一直卡就告诉外面
+    if (P && options.onSlow) {
+      const r = P.meter(meter, lastDraw == null ? 0 : t - lastDraw, full && lastFull);
+      meter = r.m;
+      if (r.slow) options.onSlow();
+    }
+    lastDraw = t; lastFull = full; drawn++;
     const dt = Math.min(0.1, clock.getDelta());
     const moving = state.motion, adt = moving ? dt : 0;   // 减少动态效果：动画时间停住
     animT += adt;
@@ -1227,23 +1310,6 @@ export function createHd2dScene(container, options) {
     heatPass.uniforms.time.value = animT;
     grade.uniforms.time.value = animT;
     updateLamps(T, dt);
-    // 镜头：过渡中按时间插值（位置、朝向、视野、焦点、景深、雾一起走，铭牌的抬高也跟着）；到了以后交还给 OrbitControls（小幅转动 / 平移）
-    if (state.tween) {
-      controls.update();                   // 拖动留下的惯性在过渡期间衰减掉（不然到了以后镜头还会自己漂一下）；镜头马上被插值盖掉
-      const p = C.at(state.tween, now() - state.tween.t0);
-      applyPose(p);
-      state.plates.forEach(pl => setLift(pl, pl.liftFrom + (pl.liftTo - pl.liftFrom) * p.k));
-      if (p.k >= 1) {
-        // 推镜头推到了：等演出播完 poseRelease 拉回来再交还拖动；转场升到正上方（lock = up）：停在那里，等拆掉。从正上方降回远景了（down）：交还给玩家
-        const pushed = state.tween.push || state.tween.lock === "up";
-        if (state.tween.lock === "down") state.lock = false;
-        state.tween = null;
-        if (!pushed) arrive();
-      }
-    } else if (!state.lock) {              // 转场停在正上方时 OrbitControls 不碰镜头
-      clampPan();
-      controls.update();
-    }
     // 铭牌：DOM 自己就正对镜头；这里管飞行的上下浮动、影子跟着缩放、行动光圈旋转，以及按远近缩放 / 变淡（近景里别的区再淡一截）
     const focus = camera.position.distanceTo(controls.target), tNow = now();
     state.plates.forEach(p => {
@@ -1298,6 +1364,7 @@ export function createHd2dScene(container, options) {
     labels.render(scene, camera);
     if (shaking) { camera.position.sub(shakeV); camera.updateMatrixWorld(); }
     measureCards();   // 白卡（#316）：刚画出来 / 内容变了的卡量一下大小，和布局按的不一样就让外面重排
+    camWas.pos.copy(camera.position); camWas.target.copy(controls.target); camWas.fov = camera.fov;
   }
 
   const ro = new ResizeObserver(resize);
@@ -1325,7 +1392,17 @@ export function createHd2dScene(container, options) {
     setMarks,   // 选目标 / 选区的标记（正式画面，hd2d-field.js · marksOf）：{ targets, dim, aim, zones, hoverZone, gaps }；null = 都不标
     stepTier(dir) { setTier(C.stepTier(state.tier, dir)); },
     /** 沙暴的风（世界里的方向 { x, z }，hd2d-wfx.js · windOf）：3D 的沙粒、拖影、大团沙尘顺着它飞（#240） */
-    setWind(w) { weather.setWind(w); },
+    setWind(w) { weather.setWind(w); wake(); },
+    /** 换画质（#321，hd2d-field.js 的 FIELD.quality 给）：{ pixelRatio 像素比上限, bokeh 景深, bloom 泛光 }，没写的按 QUALITY。
+     *  马上换（像素、两道后期），帧时间从头量（自动降档不拿换之前的算） */
+    setQuality(q) {
+      quality = Object.assign({}, QUALITY, q || {});
+      applyPasses(); applyPixels();
+      meter = null; lastFull = false;
+    },
+    get quality() { return Object.assign({}, quality); },
+    /** 一共画了几帧（#321：静止时降帧，看画了多少用） */
+    get drawn() { return drawn; },
     /** 这一帧雷击的闪光（0–1，减少动态效果时已经减弱过）：天气的 2D 层跟着淡掉，不把闪白压暗一块（#240） */
     get flash() { return weather.flash; },
     /** 攻击演出的适配器（hd2d-fx.js · adapter）问的：这一刻的镜头、一块铭牌现在在哪（抬多高、是不是近景放大的那张）、一个区的地台 */
@@ -1336,8 +1413,8 @@ export function createHd2dScene(container, options) {
       const p = state.plates.get(id);
       if (!p || !p.u) return null;
       const g = p.group.position, out = { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
-      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
-      const sz = p.size || p.u.size;
+      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的；换成紧凑卡的是紧凑卡的大小，#341）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
+      const sz = p.compact && !p.hover && p.u.compact ? p.u.compact : p.size || p.u.size;
       if (p.card && sz && p.base != null) Object.assign(out, { w: sz.w, h: sz.h, s: p.base });
       return out;
     },

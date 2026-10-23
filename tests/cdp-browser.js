@@ -1,6 +1,7 @@
 // 没装 Playwright 时的备用浏览器（#298 的画面测试用）：直接用 Chrome 的调试协议（CDP）开一个无界面的 Chrome，
 // 只实现测试里用到的那几个 Playwright 接口：
 //   browser.newContext({ viewport, isMobile, hasTouch }) / context.newPage() / context.close() / browser.close()
+//   context.addInitScript(fn) / page.addInitScript(fn)（每次打开页面之前先跑：tests/old-screen.js 用它在页面加载前记着「新画面 关」，#339）
 //   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / focus / fill / keyboard.press /
 //   waitForFunction / waitForSelector / waitForTimeout / isVisible / locator(sel).count / innerText / evaluate / click / on("pageerror")
 // 只在 Linux（GitHub 上跑测试的机器自带 Chrome）或者用环境变量 CHROME_PATH 指定了 Chrome 时才用；
@@ -70,6 +71,8 @@ class Page {
     if (opt.hasTouch) await this.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   }
   on(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); }
+  /** 以后每次打开 / 换页面，在页面自己的脚本之前先跑 fn（同 Playwright 的 addInitScript） */
+  addInitScript(fn) { return this.send("Page.addScriptToEvaluateOnNewDocument", { source: typeof fn === "function" ? `(${fn})()` : String(fn) }); }
   async goto(url) {
     const loaded = new Promise(r => { this.onLoad = r; });
     await this.send("Page.navigate", { url });
@@ -219,14 +222,20 @@ class Locator {
 }
 
 class Context {
-  constructor(conn, id, opt) { this.conn = conn; this.id = id; this.opt = opt || {}; this.pages = []; }
+  constructor(conn, id, opt) { this.conn = conn; this.id = id; this.opt = opt || {}; this.pages = []; this.inits = []; }
   async newPage() {
     const { targetId } = await this.conn.send("Target.createTarget", { url: "about:blank", browserContextId: this.id });
     const { sessionId } = await this.conn.send("Target.attachToTarget", { targetId, flatten: true });
     const page = new Page(this.conn, sessionId);
     await page.init(this.opt);
+    for (const fn of this.inits) await page.addInitScript(fn);
     this.pages.push(page);
     return page;
+  }
+  /** 这个环境里以后打开的页面（已经开着的也算）每次加载之前先跑 fn */
+  async addInitScript(fn) {
+    this.inits.push(fn);
+    for (const p of this.pages) await p.addInitScript(fn);
   }
   async close() {
     this.pages.forEach(p => p.off());

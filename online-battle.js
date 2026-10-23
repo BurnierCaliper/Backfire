@@ -89,7 +89,9 @@
     if (f.innate) a.push("固有");
     return a.join(" · ");
   }
-  const gapName = (t) => ({ open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" })[t] || "间隔";
+  const gapName = (t) => ({ open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙", wave: "驻波墙" })[t] || "间隔";
+  /** 驻波墙（频域造物，主机 online-view.js 发来 gap.wave）：「火·降幅」 */
+  const waveTag = (w) => `${ELE_NAME[w && w.el] || "?"}·${w && w.mode === "amplify" ? "增幅" : "降幅"}`;
   /** 队伍栏 / 技能栏里面换成 html（#317）：hud-patch.js 按 key（data-ob-unit / data-ob-skill）对上，同一个人、同一个技能还是同一个按钮，
    *  只改变了的（以前每画一遍整块换 innerHTML：新画面一闪一闪，纸片画面的纸纹也跟着重贴）。没加载 hud-patch.js（只加载了一部分脚本的测试页）
    *  就整块换，内容没变照样不碰 */
@@ -200,9 +202,12 @@
       });
       field.querySelectorAll(".g-gap").forEach(g => {
         const gp = (data.gaps || {})[g.dataset.key] || {};
-        g.className = "g-gap gap-" + (gp.type || "open") + (g.classList.contains("horiz") ? " horiz" : "");
+        const wave = gp.type === "wave" && gp.wave ? gp.wave : null;
+        g.className = "g-gap gap-" + (gp.type || "open") + (wave ? ` wave-${wave.mode === "amplify" ? "amplify" : "dampen"} el-${wave.el || "physical"}` : "") + (g.classList.contains("horiz") ? " horiz" : "");
         const hp = gp.type === "bridge" || gp.type === "wall" ? " " + (gp.hp || 0) : "";
-        g.innerHTML = `<span class="gap-lab">${esc(gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
+        g.innerHTML = wave
+          ? `<span class="gap-lab">${esc(gapName("wave"))}<b>${esc(waveTag(wave))}</b></span>`
+          : `<span class="gap-lab">${esc(gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
       });
     }
 

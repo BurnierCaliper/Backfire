@@ -237,9 +237,26 @@
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
     const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒", frenzy: "狂暴" };
     const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
+    const TIP_GAP = { open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙", wave: "驻波墙" };
+    const TIP_ELE = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
+    /** 间隔现在的样子：「危墙（耐久 12）」「机关门（关着）」 */
+    const gapStateTip = (g) => !g ? "畅通" : (TIP_GAP[g.type] || "间隔") +
+      (g.type === "wall" || g.type === "bridge" ? `（耐久 ${Number(g.hp) || 0}）` : g.type === "door" ? (g.open ? "（开着）" : "（关着）") : "");
     function unitTip(node) {
       const T = global.UnitTip, data = displayState || view.state || {};
       if (!T) return "";
+      // 两区之间的间隔（危墙、桥、驻波墙……）：和本机画面一样写名字、耐久 / 开关，驻波墙另写它过滤的属性和降幅 / 增幅
+      if (node.classList && node.classList.contains("g-gap") && node.dataset.key) {
+        const key = node.dataset.key, gp = (data.gaps || {})[key] || {}, where = "（" + key.replace("-", "–") + " 区之间）";
+        if (gp.type === "wave" && gp.wave) {
+          const w = gp.wave, el = TIP_ELE[w.el] || "?", amp = w.mode === "amplify";
+          const text = `这一道过滤${el}属性，${amp ? "增幅" : "降幅"}：穿过它的${el}属性伤害${amp ? "提高，击破照常" : "降低，并且不造成任何击破"}；任何单位穿过时${amp ? "获得坚挺和振奋" : "受到不稳和虚弱"}。`;
+          return T.html({ kind: "gap", gapType: "wave", text }, [], { name: `驻波墙·${el}·${amp ? "增幅" : "降幅"}${where}`,
+            sub: w.saved && w.saved.type && w.saved.type !== "open" ? "暂时取代：" + gapStateTip(w.saved) : "" });
+        }
+        return T.html({ kind: "gap", gapType: gp.type || "open" }, [], { name: (TIP_GAP[gp.type || "open"] || "间隔") + where,
+          sub: gp.type === "wall" || gp.type === "bridge" ? `耐久 ${Number(gp.hp) || 0}` : gp.type === "door" ? (gp.open ? "开着" : "关着") : "" });
+      }
       if (node.dataset.propId) {
         const p = (data.props || []).find(x => String(x.id) === node.dataset.propId);
         if (!p) return "";
@@ -271,7 +288,7 @@
       // 分阶段的首领 / 精英：主机算好的阶段编号（display.stage），能力只列这一阶段的，和单机一样
       return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs });
     }
-    const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id]");
+    const hoverable = (t) => t && t.closest && t.closest("[data-unit-id], [data-prop-id], .g-gap[data-key]");
     stage.addEventListener("mouseover", event => {
       const node = hoverable(event.target);
       if (!node || !global.UnitTip || (global.matchMedia && global.matchMedia("(hover: none)").matches)) return;
@@ -801,6 +818,7 @@
       document.body.classList.toggle(global.OnlinePaper ? global.OnlinePaper.PAPER.bodyClass : "ol-paper", on);
       toolsOpen = false; swapOpen = null;
       if (on) paperDrawer = global.OnlinePaper.isOpen("drawer", paperStore);
+      else paperCover();   // 出纸片画面：新画面不用再让开纸片的面板（进来时贴纸纹那一下量）
       setTimeout(() => { if (!destroyed && typeof dispatchEvent === "function" && typeof Event === "function") dispatchEvent(new Event("resize")); }, 0);
     }
     /** 「工具 ▾」下拉里的：原来舞台顶上那一排里除了角色资料 / 武器 / 背包（挪到队伍栏下面）的几个，同一个画法、同一个处理（不留两份）；
@@ -887,12 +905,24 @@
       const grit = global.OnlinePaper.grit(document);   // 印章、喷漆的斑驳（只一点点）
       if (grit) b.style.setProperty("--olp-grit", `url("${grit}")`);
     }
-    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、撕边、不均匀的影子、天气；按尺寸缓存）。
-     *  每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起贴 */
+    /** 3D 白卡让开浮在战场上的面板（#339 第 4 步）：量一下顶栏胶带、吊牌、左上角的队伍、技能栏、右边的抽屉（OnlinePaper.PAPER.cover）交给新画面
+     *  （hd2d-field.js · cover：换成战场里的坐标、算上下左右让多少，变了才重排）；不是纸片画面时交 null。和上次一样就不交 */
+    let paperCoverKey = "null";
+    function paperCover() {
+      const F = global.HD2DField;
+      if (!F || typeof F.cover !== "function" || !global.OnlinePaper) return;
+      const rects = paperOn && !destroyed ? global.OnlinePaper.cover(document) : null, key = JSON.stringify(rects);
+      if (key === paperCoverKey) return;
+      paperCoverKey = key;
+      F.cover(rects);
+    }
+    /** 纸片美术（第 3 步）：面板贴上照 mock.html 程序生成的纹理（online-paper.js · dress：揉皱的纸、天气，每种纸 × 每套配色一张平铺的小纹理，开局画好；
+     *  撕边、影子按面板大小只换 CSS 变量，#321）。每次画完叫一次；面板大小变了（收起 / 展开、窗口变了）由 ResizeObserver 叫，下一帧一起换撕边（不画纹理） */
     let paperSizer = null, paperDressQueued = false;
     function paperDress() {
       if (!paperOn || !global.OnlinePaper) return;
       global.OnlinePaper.dress(document, null, paperTheme);
+      paperCover();
       // 技能栏现在多高（--olp-dock-h）：手机上右边缘的竖标签挂在它上面，技能栏换行变高了也不压在一起
       const hud = stage.querySelector(".ol-battle > .g-hud"), dockH = hud && hud.offsetHeight ? hud.offsetHeight + "px" : "";
       if (document.body.style.getPropertyValue("--olp-dock-h") !== dockH) document.body.style.setProperty("--olp-dock-h", dockH);
@@ -1563,7 +1593,10 @@
           const T = global.UnitTip;
           if (!T) return;
           if (!on || (global.matchMedia && global.matchMedia("(hover: none)").matches)) { T.hide(); return; }
-          const key = String(id), h = el ? unitTip({ dataset: key.indexOf("prop:") === 0 ? { propId: key.slice(5) } : { unitId: key } }) : "";
+          // 新画面上间隔的字牌（驻波墙，hd2d-field.js · syncWaveTags）悬停也走同一份说明
+          const key = String(id), node = key.indexOf("gap:") === 0 ? { classList: { contains: c => c === "g-gap" }, dataset: { key: key.slice(4) } }
+            : { dataset: key.indexOf("prop:") === 0 ? { propId: key.slice(5) } : { unitId: key } };
+          const h = el ? unitTip(node) : "";
           if (h) T.show(el, h); else T.hide();
         },
         zone: z => { if (animating) { skip3d(); return; } if (z != null) battleCb.onZone(z); },
@@ -2076,6 +2109,7 @@
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);
       while (hostMounts.length) hostMounts.pop().remove(); document.body.classList.remove("ol-has-side", "ol-host-online", "ol-in-battle", "ol-side-collapsed", "ol-paper");
       pauseItems.forEach(off => off()); if (global.PauseMenu) global.PauseMenu.setOnline(null);
+      paperCover();   // #339：新画面不用再让开纸片的面板（destroyed 了交 null）
       if (turnCue) turnCue.unmark();   // 标签页标题上的「▶ 轮到你」去掉
       for (const off of unsubs) if (typeof off === "function") off();
       for (const node of [...nodes, ...titleButtons]) node.remove();

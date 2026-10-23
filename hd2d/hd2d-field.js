@@ -31,15 +31,19 @@
  *   HD2DField.marksOf(marks, layout, actorId)               game.js 的标记 → 场景要的（纯函数）
  *   HD2DField.wire(input)                                   场景的点击 / 悬停 → GAME.fieldInput（纯函数）
  *   HD2DField.gapRect(lens, gap, offset)                    危墙 / 桥梁在屏幕上的矩形（纯函数）
+ *   HD2DField.waveTagsOf(v)                                 画面那一份里的驻波墙 → 间隔上贴的字牌（纯函数，#345：3D 场景包还没有驻波墙的模型）
  *   HD2DField.mistPlan(to, { reduced, live }) / wheelGate(s, deltaY, 秒) / mistPuffs()   云雾转场的几段、战场上的一次滚动、一团团云雾（纯函数）
  *   HD2DField.packetView(pv, { OB, OV })                    联机玩家收到的那一份 → 画面用的（纯函数，#289）
+ *   HD2DField.quality(storage) / setQuality(choice, storage) / levelOf(choice, dropped) / nextQuality(choice)   画质（#321，见 FIELD.quality；读写都包 try/catch）
  * 页面（game.js 调）：on() / view(snaps, { animate }) / actor(id) / marks(m) / rectOf(id) / zoneRectOf(区号)；switchTo("old" | "new") / transition()；boot() 在页面加载完自己跑。
  *   联机玩家（online-ui.js 调，#289）：attach(spec) → 把手 { on, view, actor, marks, play, skip }；detach(spec)。spec 见下面的「画面挂在哪」
  *   攻击演出（#283）：numbers(list) 弹纸片风数字 / paper(id) 打中那一下的纸片感 / unpaper() 画布复原 / push(出手的, 目标) 推镜头（返回要等的毫秒，不推 = 0）/ release() 拉回
  *   卡片动画（#330，旧画面单位卡有的动画 3D 白卡也有）：cards() → hd2d-play.js · HD2DPlay.cards（冲撞 / 冲一下 / 后坐 / 挪一下 / 受击 + 击退 / 格挡 / 登场 / 慢动作）；
  *     ko(id, { hold, slow }) / releaseKOs() 被打倒的敌人先留在场上、演完再淡出；warn(id, on) 高能自爆预警（白卡 + 脚下的地台）；quake(力度) 震屏；still() 新画面开着且减少动态效果。
  *     换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相：view 的 animate 一开就演（hd2d-scene.js 按 setBattle 的 move 秒数插值）
- * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js）。数值、文字都在 FIELD。 */
+ *   纸片画面（#339，game-paper.js / online-ui.js 调）：cover(rects) 浮在战场上的面板（视口矩形，paper-ui.js · coverRects；null = 没有），
+ *     取景让开它们（纯函数 coverInsets 算上下左右让多少、fitCover 让不下时少让一点；左右交给布局的 view.left / right，不改场景包）
+ * 纯函数的部分 Node 里能 require（tests/hd2d-field.test.js、tests/hd2d-cover.test.js）。数值、文字都在 FIELD。 */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) module.exports = factory(root, require("./hd2d-layout.js"));
   else root.HD2DField = factory(root, null);
@@ -49,14 +53,18 @@
   /* ---------- 配置 ----------
    *   storageKey / defaultOn   本机记住开关的键（存 "on" / "off"）、默认（#316 起默认开：本机没选过的打开页面就是新画面；明确选过关的照旧关）
    *   toggleId                 战斗顶栏的开关按钮；label 按钮上写的字（开 / 关 / 正在加载）；text 打不开时的提示（{0} = 浏览器给的原因）
-   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
+   *   scripts                  开了才按顺序加载的普通脚本（场景要 HD2DLayout / HD2DCamera / HD2DPace，铭牌要 HD2DUI，技能栏 / 队伍栏的新外壳要 HD2DShell）；scene 最后加载的场景包（也是普通脚本：
    *                            hd2d-scene.js 和 three.js 由 tools/build-hd2d.js 打成一个，加载后挂在 window[sceneGlobal] 上）。
    *                            全用普通脚本，直接双击打开 game.html（file://）也能开新画面——浏览器不让 file:// 加载 ES 模块
    *   live                     演出途中每一下的快照盖到投影上的字段（会变的：站位、血量、架势、行动点 / 附赠、倒下 / 濒死 / 失衡、飞 / 潜、藏起来）；
    *                            名字、状态、实际 ATK 这些用这一刻的战斗状态投影出来的
    *   cardKeys                 白卡（#316：3D 铭牌画旧画面的单位卡）的快照交给场景时只带的字段（白名单）
    *   pad                      取景时让开战场上沿的首领机制横幅 / 援军倒计时、下沿的镜头按钮，再多留几像素
-   *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」 */
+   *   drag                     右键拖动（平移镜头）挪过几像素就不算「右键取消」
+   *   quality                  画质（#321：联机玩家那边新画面更卡、操作延迟更大）。暂停页面里那一项（字在 pause-menu.js 的 PAUSE_MENU.items.quality）点一下换下一档，
+   *                            单机 / 联机同一个本机设置：storageKey 本机记住的键（存 choices 里的一个）、choices 点一下按这个顺序换、dflt 没记过时用哪个；
+   *                            levels 每一档交给场景的（hd2d-scene.js · setQuality：pixelRatio 像素比上限、bokeh 景深、bloom 泛光；低 = 像素比最多 1、不加景深和泛光）；
+   *                            auto「自动」：先用 from 那一档，满帧画时一直卡（hd2d-pace.js 量的帧时间，场景叫 onSlow）就降到 to——只降一次，这一次打开页面都用它，不记在本机 */
   const FIELD = {
     storageKey: "backfire-hd2d-field",
     defaultOn: true,
@@ -68,16 +76,27 @@
     text: {
       fail: "新画面打不开（这个浏览器用不了 WebGL：{0}），先用旧画面"
     },
-    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
+    scripts: ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-pace.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"],
     scene: "hd2d-scene.bundle.js",
     sceneGlobal: "HD2DSceneBundle",
     live: ["zone", "layers", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "dead", "dying", "stunned", "upOnShp", "hidden", "flying", "submerged"],
     pad: 6,
+    // 浮在战场上的面板（#339：纸片画面的顶栏胶带、吊牌、左上角的队伍、底下的技能栏、右边的抽屉；纸片画面量好了交给 cover()）取景时让开：
+    //   gap 面板外面再留多少像素；min 比这还窄 / 还矮的不算；max 一块面板最多让出战场宽 / 高的多少（再多就不让这一块：手机上拉开盖满屏幕的抽屉）；
+    //   room 左右（上下）加起来让完至少还剩战场宽（高）的多少，让太多就按比例缩回来；
+    //   steps 地方不够时上下让几成（照全让排出来有卡被推出画面——窗口小、卡多：卡是固定像素大小的——就往下一级少让一点，左右照让；都不行左右也不让）
+    cover: { gap: 8, min: 12, max: 0.45, room: 0.3, steps: [1, 0.5, 0] },
     drag: 5,
     // 白卡（#316）的快照只带 unit-card.js 画卡要读的这些字段（UnitCard.create / update / headOf），别的一概不带——坚毅生命不在里面
     cardKeys: ["id", "name", "vehicle", "level", "atk", "race", "racePerks", "iv", "isPlayer", "isProp", "isDevice", "neutral", "neutralTags",
       "layers", "highEnergy", "overkill", "killBig", "upOnShp", "def", "defMax", "dur", "ap", "apMax", "bonus", "bonusMax", "flying", "hung",
-      "status", "badges", "res", "intents", "marks", "casts", "stunned", "dying", "dead", "hidden"]
+      "status", "badges", "res", "intents", "marks", "casts", "stunned", "dying", "dead", "hidden"],
+    quality: {
+      storageKey: "backfire-hd2d-quality",
+      choices: ["auto", "high", "low"], dflt: "auto",
+      levels: { high: { pixelRatio: 2, bokeh: true, bloom: true }, low: { pixelRatio: 1, bokeh: false, bloom: false } },
+      auto: { from: "high", to: "low" }
+    }
   };
   /* ---------- 新旧画面之间的云雾转场（#261 追加）----------
    * 主人：「在远景情况下如果还继续缩小，就会变回之前的战斗画面，具体是镜头上升到正上方然后一阵白色云雾后切换成之前的战斗画面」。
@@ -130,6 +149,35 @@
       storage.setItem(FIELD.storageKey, on ? "on" : "off");
       return true;
     } catch (e) { return false; }
+  }
+
+  /* ---------- 画质（#321，数值在 FIELD.quality）---------- */
+  /** 本机记着的画质（FIELD.quality.choices 里的一个）；没记过、记了认不得的、读不了都按 dflt（自动） */
+  function quality(storage) {
+    const Q = FIELD.quality;
+    try {
+      const v = storage ? storage.getItem(Q.storageKey) : null;
+      return Q.choices.includes(v) ? v : Q.dflt;
+    } catch (e) { return Q.dflt; }
+  }
+  /** 记住画质；认不得的、存不了（隐私模式、存满了）不报错，返回 false */
+  function setQuality(choice, storage) {
+    try {
+      if (!storage || !FIELD.quality.choices.includes(choice)) return false;
+      storage.setItem(FIELD.quality.storageKey, choice);
+      return true;
+    } catch (e) { return false; }
+  }
+  /** 这一刻用哪一档（FIELD.quality.levels 的键）：选了高 / 低就是它；自动 = auto.from，这一次打开页面卡过（dropped）就是 auto.to */
+  function levelOf(choice, dropped) {
+    const Q = FIELD.quality;
+    if (choice === "auto" || !own(Q.levels, choice)) return dropped ? Q.auto.to : Q.auto.from;
+    return choice;
+  }
+  /** 暂停页面里点一下换到的下一档（按 FIELD.quality.choices 的顺序，转一圈） */
+  function nextQuality(choice) {
+    const c = FIELD.quality.choices, i = c.indexOf(choice);
+    return c[(i + 1) % c.length];
   }
 
   /* ---------- 画面用的数据（纯函数）---------- */
@@ -310,6 +358,8 @@
     cards: null, ko: new Map(), seen: null };
   const T = { busy: false, to: null, step: null, plan: null, mist: null, pre: null, gen: 0, gesture: null };
   const env = { doc: null, storage: null, load: null, hint: null, title: "", reduced: null, wait: null, now: null, toggle: null, home: null };
+  /** 画质（#321）：choice 这一次打开页面在暂停页面里选过的（存不了也照它；null = 照本机记着的）、dropped「自动」一直卡、已经降过一档（这一次打开页面都用低的） */
+  const QS = { choice: null, dropped: false };
   let keysBound = false;
   /** 这个脚本所在的目录（hd2d/）：开了以后从这里加载布局、场景 */
   let BASE = "hd2d/";
@@ -350,8 +400,8 @@
   };
   let host = SOLO;
 
-  /** 页面加载完（game.js 的 boot 之后）接上开关、战场上的滚轮；本机记着开就直接打开（刚打开页面，不播转场）。
-   *  opts（测试用）：doc / storage / load / hint 换成假的，reduced()（减少动态效果）/ wait(秒, fn)（计时器）/ now()（秒）也能换 */
+  /** 页面加载完（game.js 的 boot 之后）接上开关、战场上的滚轮、暂停页面里的「画质」（#321）；本机记着开就直接打开（刚打开页面，不播转场）。
+   *  opts（测试用）：doc / storage / load / hint 换成假的，reduced()（减少动态效果）/ wait(秒, fn)（计时器）/ now()（秒）/ pauseMenu（暂停页面）也能换 */
   function boot(opts) {
     opts = opts || {};
     stopMist();
@@ -360,6 +410,7 @@
     host = SOLO;
     S.want = false; S.loading = null; S.broken = false;
     T.gesture = null;
+    QS.choice = null; QS.dropped = false;
     env.doc = opts.doc || root.document || null;
     env.storage = opts.storage !== undefined ? opts.storage : storageOf();
     env.load = opts.load || loadModules;
@@ -377,6 +428,7 @@
     // 战场上的滚轮在捕获阶段先过这里（比新画面场景自己的滚轮先看到）：转场中不理、旧画面往前滚转到新画面
     bindWheel(env.doc.getElementById("g-field"));
     if (env.doc === root.document && !keysBound && typeof root.addEventListener === "function") { keysBound = true; root.addEventListener("keydown", onKey); }
+    registerQuality(opts.pauseMenu || root.PauseMenu);
     paintToggle();
     if (enabled(env.storage)) start();
   }
@@ -599,6 +651,8 @@
     try {
       const input = h.input();
       S.sc = create(stage, Object.assign({
+        // 画质（#321）：这一刻的那一档；有演出在播时照常满帧画（静止时场景自己降帧）；「自动」一直卡就降一档
+        quality: FIELD.quality.levels[qualityLevel()], busy: fxBusy, onSlow,
         onCameraChange: syncCam,
         onPortraitChange: () => { if (S.sc) paint(true); },
         onViewChange: () => { if (S.sc) paint(true); },
@@ -632,13 +686,15 @@
   }
   /** 拆掉 3D 战场，旧画面露出来；refresh = 让旧画面再画一遍（单机：game.js 把天气叠加层放回去） */
   function teardown(refresh) {
+    stopWaveTags();
     if (S.sc) { try { S.sc.dispose(); } catch (e) {} }
     if (S.wfx) { try { S.wfx.dispose(); } catch (e) {} }
     if (S.stage && S.stage.remove) S.stage.remove();
     const hadStage = !!S.stage;
     // 纸片风数字、影子拿掉，attack-fx 的画布复原（旧画面照旧画在没压扁的画布上）
     if (hadStage && root.HD2DPlay) { root.HD2DPlay.clear(); root.HD2DPlay.shadeIn(null); }
-    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = S.viewSnaps = S.cards = S.seen = null;
+    S.sc = S.wfx = S.ad = S.push = S.stage = S.cam = S.camInfo = S.layout = S.view = S.viewSnaps = S.cards = S.seen = S.base = S.coverIns = null;
+    S.coverLevel = 0;
     S.sizes = new Map();
     S.ko.clear();
     S.pushed = false;
@@ -667,7 +723,11 @@
     // 白卡（#316）：铭牌画旧画面的单位卡——卡片快照（单机：game.js 的快照；联机玩家：收到的包，packetView 里转好的）、量到的卡片大小一起交给布局
     // 被打倒、还没淡完的敌人（#330）先留在布局里
     const kept = lingering(v0, host.cards ? host.cards(v0) : null, !!animate), v = kept.v, cards = kept.cards;
-    S.layout = L.build(v, layoutOpts(v, S.sc.view(), S.sc.portrait, cards ? { cards, sizes: S.sizes } : null));
+    // 取景让开四边的界面（#339：浮着的面板让不下时少让一点，卡不会被推出画面）；场景记着最后用的上下（数字摆位也让开）
+    const more = cards ? { cards, sizes: S.sizes } : null, sv = S.sc.view();
+    const fit = fitCover((view) => L.build(v, layoutOpts(v, view, S.sc.portrait, more)), { width: sv.width, height: sv.height }, S.base, S.coverIns, S.coverLevel);
+    S.layout = fit.layout; S.coverLevel = fit.level;
+    S.sc.setInsets({ top: fit.view.top, bottom: fit.view.bottom });
     // 换了区的铭牌在两个地台之间滑过去（#330，场景按这个秒数插值；跳过 / 减少动态效果 / 不是演出中的刷新 = 0，直接摆过去）
     const move = root.HD2DFx ? root.HD2DFx.moveSecs(clockNow(), { animate: !!animate, reduced: !S.sc.motion }) : 0;
     S.sc.setBattle(S.layout, { weather: v.weather || "none", theme: v.light || "day", actorId: S.actorId, move });
@@ -676,6 +736,7 @@
     syncWeather();
     koMarks();
     arrivals(!!animate);
+    syncWaveTags();   // 驻波墙的字牌（#345）
   }
   /** 这一刻的演出倍率（1 正常、0.5 两倍速、0 跳过）：单机是 game.js 的 G.fxClock，联机玩家是他那边给的钟；都没有按 1 */
   function clockNow() {
@@ -825,17 +886,85 @@
       tier: cam.tier || S.sc.tier, close: cam.close != null, zone: cam.zone != null ? cam.zone : S.sc.zone, reduced: !S.sc.motion, layout: S.layout
     });
   }
-  /** 取景让开战场上沿的一摞（首领机制横幅 / 援军倒计时，game.js 放在 #g-field 的 .g-topstack 里，照旧露在新画面上面）和下沿的镜头按钮；变了返回 true */
+  /** 取景让开战场上沿的一摞（首领机制横幅 / 援军倒计时，game.js 放在 #g-field 的 .g-topstack 里，照旧露在新画面上面）、下沿的镜头按钮（S.base），
+   *  和浮在战场上的面板（#339，纸片画面交给 cover() 的：S.coverIns；排布局时 fitCover 一起算）；变了返回 true（让不下时从全让重新试） */
   function insets() {
     const field = S.stage && S.stage.parentNode;
     const top = field && field.querySelector ? field.querySelector(":scope > .g-topstack") : null;
     const t = top && top.offsetHeight > 0 ? top.offsetTop + top.offsetHeight + FIELD.pad : 0;
     const b = S.cam && S.cam.bar ? S.cam.bar.offsetHeight + 2 * FIELD.pad : 0;
-    S.sc.setInsets({ top: t, bottom: b });
-    const key = t + "|" + b;
+    const c = coverInsets({ width: S.stage.clientWidth, height: S.stage.clientHeight }, coverOnStage());
+    S.base = { top: t, bottom: b }; S.coverIns = c;
+    const key = [t, b, c.top, c.bottom, c.left, c.right, S.stage.clientWidth, S.stage.clientHeight].join("|");
     if (key === S.insetKey) return false;
-    S.insetKey = key;
+    S.insetKey = key; S.coverLevel = 0;
     return true;
+  }
+  /**
+   * 取景让开四边的界面（#339）：base = { top, bottom } 本来就要让的（首领横幅、镜头按钮），cover = coverInsets 算的浮着的面板，
+   * build(view) = 按这个画面（{ width, height, top, bottom, left, right }）排一次布局。先照全让排；排出来有卡被推出画面
+   * （地方太小：卡是固定像素大小的，取景越拉越远、后排越抬越高）就上下少让一点（FIELD.cover.steps，左右照让），都不行左右也不让。
+   * from = 从第几级开始试（上次成了的那一级，同一套让法不用每次从头试）。返回 { layout, view, level }
+   */
+  function fitCover(build, view, base, cover, from) {
+    base = base || {}; cover = cover || {};
+    const levels = FIELD.cover.steps.map(k => ({ k, side: true })).concat([{ k: 0, side: false }]);
+    let out = null, last = "";
+    for (let i = Math.min(Math.max(0, from || 0), levels.length - 1); i < levels.length; i++) {
+      const lv = levels[i], vw = {
+        width: view.width, height: view.height,
+        top: Math.max(base.top || 0, Math.round((cover.top || 0) * lv.k)), bottom: Math.max(base.bottom || 0, Math.round((cover.bottom || 0) * lv.k)),
+        left: lv.side ? cover.left || 0 : 0, right: lv.side ? cover.right || 0 : 0
+      };
+      const key = [vw.top, vw.bottom, vw.left, vw.right].join("|");
+      if (out && key === last) { out.level = i; continue; }   // 和上一级一样（没有浮着的面板）：不用再排
+      last = key;
+      out = { layout: build(vw), view: vw, level: i };
+      if (onScreen(out.layout, vw)) break;
+    }
+    return out;
+  }
+  /** 布局里的卡（远景抬高以后的屏幕矩形）是不是都在画面里 */
+  function onScreen(layout, view) {
+    return ((layout && layout.units) || []).every(u => !u.rect || (u.rect.x0 >= -1 && u.rect.y0 >= -1 && u.rect.x1 <= view.width + 1 && u.rect.y1 <= view.height + 1));
+  }
+  /** 纸片画面交给 cover() 的面板矩形（视口坐标）换成战场里的坐标（战场左上角是 0, 0） */
+  function coverOnStage() {
+    if (!S.cover || !S.stage || typeof S.stage.getBoundingClientRect !== "function") return [];
+    const o = S.stage.getBoundingClientRect();
+    return S.cover.map(r => ({ left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top }));
+  }
+  /**
+   * 浮在战场上的面板要让开多少（#339，纯函数）：view = { width, height } 战场的大小，rects = 面板在战场里的矩形（像素，战场左上角是 0, 0）。
+   * 每块面板从它贴着的那条边让：上下左右里让出去占战场比例最小的那一条（左上角的队伍让左边窄窄一条，比让上面一大截划算；底下的技能栏让下面）；
+   * 在战场外面的、太窄 / 太矮的（< cover.min）不算；一块要让的比 cover.max 还多（手机上拉开盖满屏幕的抽屉）就不让它。
+   * 左右（上下）加起来让完至少留 cover.room，让太多按比例缩回来。返回 { top, bottom, left, right }（像素，都是整数）
+   */
+  function coverInsets(view, rects) {
+    const C = FIELD.cover, W = Math.max(1, Number(view && view.width) || 0), H = Math.max(1, Number(view && view.height) || 0);
+    const out = { top: 0, bottom: 0, left: 0, right: 0 };
+    (rects || []).forEach(r => {
+      if (!r) return;
+      const x0 = Math.max(0, r.left), y0 = Math.max(0, r.top), x1 = Math.min(W, r.right), y1 = Math.min(H, r.bottom);
+      if (!(x1 - x0 >= C.min && y1 - y0 >= C.min)) return;
+      const best = [["left", x1 + C.gap, W], ["right", W - x0 + C.gap, W], ["top", y1 + C.gap, H], ["bottom", H - y0 + C.gap, H]]
+        .map(([side, px, size]) => ({ side, px: Math.ceil(px), share: px / size })).filter(s => s.share <= C.max)
+        .sort((a, b) => a.share - b.share)[0];
+      if (best) out[best.side] = Math.max(out[best.side], best.px);
+    });
+    [["left", "right", W], ["top", "bottom", H]].forEach(([a, b, size]) => {
+      const total = out[a] + out[b], cap = size * (1 - C.room);
+      if (total > cap) { const k = cap / total; out[a] = Math.floor(out[a] * k); out[b] = Math.floor(out[b] * k); }
+    });
+    return out;
+  }
+  /** 浮在战场上的面板（#339：纸片画面量好的视口矩形 [{ left, top, right, bottom }]，paper-ui.js · coverRects；null / 空 = 没有）：
+   *  取景让开它们；让的变了就重排一次（镜头回到这一段的默认位置），没变什么都不做 */
+  function cover(rects) {
+    const list = (rects || []).filter(r => r && [r.left, r.top, r.right, r.bottom].every(Number.isFinite))
+      .map(r => ({ left: r.left, top: r.top, right: r.right, bottom: r.bottom }));
+    S.cover = list.length ? list : null;
+    if (S.sc && S.stage && S.stage.clientWidth && insets()) paint(true);
   }
 
   /* ---------- 镜头按钮：远 / 中 / 近、看的那个区；中景 / 近景时两边的换区箭头（键盘左右键也行） ---------- */
@@ -893,6 +1022,47 @@
     if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
     const K = root.HD2DCamera.CAMERA.keys;
     if ((e.key === K.prev || e.key === K.next) && S.sc.tier !== "far") { e.preventDefault(); S.sc.stepZone(e.key === K.prev ? -1 : 1); }
+  }
+
+  /* ---------- 画质、演出在播（#321）----------
+   * 暂停页面里的「画质」：点一下按 FIELD.quality.choices 换下一档（自动 → 高 → 低），菜单不收起；记在本机（存不了也照这一次选的），单机 / 联机同一个。
+   * 新画面开着时才有这一项（关着时画质用不上）。字在 pause-menu.js 的 PAUSE_MENU.items.quality。只换这台电脑上的画面，不碰战斗状态、不发给别人 */
+  /** 现在选的（这一次打开页面选过的优先，不然本机记着的） */
+  const qualityChoice = () => (QS.choice != null ? QS.choice : quality(env.storage));
+  /** 这一刻用哪一档（FIELD.quality.levels 的键） */
+  const qualityLevel = () => levelOf(qualityChoice(), QS.dropped);
+  /** 演出在播（场景按需渲染时看它：播着就照常满帧画）：整包演出（hd2d-play.js：联机玩家、原型）、单机的出招演出 / 敌人行动（game.js 的 G.depth） */
+  function fxBusy() {
+    if (root.HD2DPlay && root.HD2DPlay.busy) return true;
+    return host === SOLO && !!(root.GAME && root.GAME.depth > 0);
+  }
+  /** 场景量到一直卡（hd2d-pace.js · meter）：选的是「自动」、还没降过 → 降一档（这一次打开页面都用它，不记在本机）；选了高 / 低就不管 */
+  function onSlow() {
+    if (qualityChoice() !== "auto" || QS.dropped) return;
+    QS.dropped = true;
+    applyQuality();
+  }
+  /** 画质换到这一刻的那一档（场景是旧的、没有 setQuality 就算了），暂停页面的字跟着换 */
+  function applyQuality() {
+    if (S.sc && typeof S.sc.setQuality === "function") S.sc.setQuality(FIELD.quality.levels[qualityLevel()]);
+    if (root.PauseMenu && typeof root.PauseMenu.refresh === "function") root.PauseMenu.refresh();
+  }
+  /** 暂停页面里点「画质」：换下一档、记在本机，马上用上 */
+  function cycleQuality() {
+    QS.choice = nextQuality(qualityChoice());
+    setQuality(QS.choice, env.storage);
+    applyQuality();
+  }
+  /** 「画质」那一项写什么（PAUSE_MENU.items.quality）：自动卡过、降了一档时另写一句 */
+  function qualityLabel(PM) {
+    const words = PM.CONFIG && PM.CONFIG.items && PM.CONFIG.items.quality, c = qualityChoice();
+    if (!words) return c;
+    return c === "auto" && QS.dropped ? words.autoLow : words[c] || words.label;
+  }
+  /** 在暂停页面登记「画质」（同一个 id 再登记会换掉旧的：重新 boot 也只有一项）；没有暂停页面（Node 里、原型页）就算了 */
+  function registerQuality(PM) {
+    if (!PM || typeof PM.register !== "function") return;
+    PM.register({ id: "quality", stay: true, visible: () => !!S.want, label: () => qualityLabel(PM), run: cycleQuality });
   }
 
   /* ---------- game.js 调的（单机；联机玩家的画面挂着时不管，快照照样记着）---------- */
@@ -1040,6 +1210,67 @@
   /** 一个区的地台在屏幕上的外框（范围攻击画满整个区：game.js · zoneRectOf） */
   function zoneRectOf(zone) { return S.sc && S.ad ? S.ad.zoneRectOf(Number(zone)) : null; }
 
+  /* ---------- 驻波墙（Helumica「频域造物」，#345）----------
+   * 打好的 3D 场景包里还没有驻波墙的模型（hd2d-world.js · buildGap 按畅通画）：在间隔那一块地的正上方贴一块字牌「驻波墙 火·降幅」
+   * （降幅冷色、增幅暖色、描边是属性色，和旧画面的竖条一样，hd2d.css · .hd2d-wave-tag），每一帧按这一刻的镜头投影（gapRect）摆位。
+   * 悬停说明走和铭牌一样的入口（场景回调 onUnitHover("gap:…")：单机 game.js · unitTipHtml，联机 online-ui.js · unitTip）。
+   * 只读画面那一份（投影过的 gaps[key].wave：属性、降幅 / 增幅），不碰规则的 state */
+  const WAVE_TAG = { ele: { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" } };
+  /** 画面那一份里的驻波墙 → 要贴的字牌（纯函数）：[{ key, el, mode, label }] */
+  function waveTagsOf(v) {
+    const gaps = (v && v.gaps) || {};
+    return Object.keys(gaps).sort().filter(k => gaps[k] && gaps[k].type === "wave" && gaps[k].wave).map(k => {
+      const w = gaps[k].wave, amp = w.mode === "amplify", known = own(WAVE_TAG.ele, w.el);
+      return { key: k, el: known ? w.el : "physical", mode: amp ? "amplify" : "dampen", label: `${known ? WAVE_TAG.ele[w.el] : "?"}·${amp ? "增幅" : "降幅"}` };
+    });
+  }
+  let waveRaf = 0;
+  function stopWaveTags() { if (waveRaf && root.cancelAnimationFrame) root.cancelAnimationFrame(waveRaf); waveRaf = 0; }
+  /** 排完一次（paint）：字牌按画面那一份增删、改字；有驻波墙就每一帧跟着镜头摆位，没有就停 */
+  function syncWaveTags() {
+    const stage = S.stage, d = env.doc;
+    if (!stage || !d || typeof stage.querySelector !== "function") return;
+    const tags = waveTagsOf(S.view);
+    let box = stage.querySelector(".hd2d-wave-tags");
+    if (!tags.length) { if (box) box.remove(); stopWaveTags(); return; }
+    if (!box) { box = d.createElement("div"); box.className = "hd2d-wave-tags"; stage.appendChild(box); }
+    const want = new Set(tags.map(t => t.key));
+    box.querySelectorAll(".hd2d-wave-tag").forEach(n => { if (!want.has(n.dataset.key)) n.remove(); });
+    tags.forEach(t => {
+      let n = [...box.querySelectorAll(".hd2d-wave-tag")].find(x => x.dataset.key === t.key);
+      if (!n) {
+        n = d.createElement("div");
+        n.dataset.key = t.key;
+        const hover = (on) => { const inp = host.input ? host.input() : null; if (inp && inp.onUnitHover) inp.onUnitHover("gap:" + t.key, on, n); };
+        n.addEventListener("mouseenter", () => hover(true));
+        n.addEventListener("mouseleave", () => hover(false));
+        box.appendChild(n);
+      }
+      n.className = `hd2d-wave-tag wave-${t.mode} el-${t.el}`;
+      n.innerHTML = `驻波墙<b>${t.label}</b>`;   // 字都来自上面两张固定的表
+    });
+    placeWaveTags();
+    if (!waveRaf && typeof root.requestAnimationFrame === "function") {
+      const tick = () => {
+        waveRaf = 0;
+        if (!S.stage || !S.stage.querySelector(".hd2d-wave-tag")) return;
+        placeWaveTags();
+        waveRaf = root.requestAnimationFrame(tick);
+      };
+      waveRaf = root.requestAnimationFrame(tick);
+    }
+  }
+  /** 字牌摆到间隔那一块地在屏幕上的中心（按这一刻的镜头）；这条间隔不在布局里（换了棋盘）就藏起来 */
+  function placeWaveTags() {
+    if (!S.sc || !S.stage || !S.layout || !root.HD2DFx) return;
+    const lens = root.HD2DFx.lens(S.sc.lensNow());
+    S.stage.querySelectorAll(".hd2d-wave-tag").forEach(n => {
+      const g = S.layout.gaps.find(x => x.key === n.dataset.key), r = g ? gapRect(lens, g, null) : null;
+      n.hidden = !r;
+      if (r) { n.style.left = Math.round(r.x) + "px"; n.style.top = Math.round(r.y) + "px"; }
+    });
+  }
+
   /* ---------- 攻击演出：纸片风数字、纸片感、推镜头（#283，game.js · playTape 一下一下调；都交给 hd2d-play.js）---------- */
   /** 数字摆位要的画面：战场那一格在视口里的位置（数字和铭牌的矩形一样是视口坐标）、大小，上下被首领横幅 / 镜头按钮盖住的像素（场景的 insets） */
   function fxView() {
@@ -1075,8 +1306,9 @@
     if (S.push && root.HD2DFx && root.HD2DPlay) S.push.release(root.HD2DFx.FX.push.out * root.HD2DPlay.clock);
   }
 
-  const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
-    cards, ko, releaseKOs, warn, quake, still };
+  const api = { FIELD, MIST, enabled, setEnabled, locked, setLocked, quality, setQuality, levelOf, nextQuality, viewState, packetView, cardsOf, layoutOpts, marksOf, wire, gapRect, mistPlan, wheelGate, wheelPixels, mistPuffs, boot, on, view, actor, marks, rectOf, zoneRectOf, numbers, paper, unpaper, push, release, switchTo, transition, attach, detach,
+    cards, ko, releaseKOs, warn, quake, still, waveTagsOf,
+    cover, coverInsets, fitCover };   // #339：3D 白卡让开浮在战场上的面板
   // 页面里：等页面加载完（game.js 的 boot 先登记在 DOMContentLoaded 上，先跑）再接开关
   if (!(typeof module === "object" && module.exports) && root.document) {
     if (root.document.readyState === "loading") root.document.addEventListener("DOMContentLoaded", () => boot());
