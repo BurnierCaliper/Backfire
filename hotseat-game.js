@@ -144,7 +144,9 @@
       return;
     }
     if (cmd.type === "chat" || tableTypes.has(cmd.type)) return;   // 小队聊天、检定、属性点申请不受询问、战斗阶段影响
-    if (choice || session.snapshot().ask) fail("正在等待其他操作者回应");
+    // 主持人放弃这场战斗回到探索：等人回答的询问 / 分步选择由它收回（trpg-ui.js · backFromBattle → abandon），不用等（#322）
+    const leaving = cmd.type === "trpg.ui" && cmd.action === "backFromBattle";
+    if ((choice || session.snapshot().ask) && !leaving) fail("正在等待其他操作者回应");
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {
       if (GAME.depth > 0 && !GAME.tape) fail("正在播放行动，请稍候");
@@ -241,7 +243,8 @@
       const owner = session.ownerOf(unit.id) || ownerByKit[unit.weaponOf || unit.kit] || gm();
       choice = { id: "choice-" + (++choiceNo), title, owner,
         options: options.map((o, index) => Object.assign({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } }, choiceTarget(o) ? { target: choiceTarget(o) } : {})),
-        finish: index => resolve(options[index].value) };
+        finish: index => resolve(options[index].value),
+        drop: () => resolve(null) };   // 主持人放弃了这场战斗（abandon）：等着的流程收到 null，看到战斗已经放弃就退出
       authority.broadcast(); refresh();
     });
   }
@@ -495,6 +498,18 @@
       if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }
       authority.broadcast(); refresh();
       return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };
+    },
+    /** 主持人放弃这场战斗、回到探索（game.js · abandonBattle，#322）：收回等人回答的协助询问、分步选择——
+     *  等着的流程收到「没人回答」，看到战斗已经放弃就直接退出；行动顺序回到战前（交回探索后 afterCommand 再按角色对齐分配） */
+    abandon() {
+      if (!active()) return false;
+      const pending = choice;
+      choice = null; restoredAsk = null; newRoundSpends = null;
+      executing++;
+      try { session.reset(); } finally { executing--; }
+      if (pending) pending.drop();
+      authority.broadcast(); refresh();
+      return true;
     },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
       askRemainingMs: snapshot.ask && snapshot.ask.deadline != null ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },

@@ -214,12 +214,13 @@ test("原型的浏览器脚本能通过语法检查，规则文件加载顺序�
   // 然后是界面图标 icons.js / hud-icons.js（#238：技能按钮的属性角标、队伍栏的效果徽章，原样加载），
   // 最后是天气动效 weather-fx.js（#240：正式画面的 2D 天气叠加层，原样加载，压在 3D 画面上）。
   // 战场自己的模块（#261 起在正式目录 hd2d/，../../hd2d/…）另外核对：都在、和原型页以前一样按这个顺序
-  // （#297：hd2d-ui.js 后面接技能栏 / 队伍栏的 hd2d-shell.js，和正式画面的新画面同一份）
+  // （#297：hd2d-ui.js 后面接技能栏 / 队伍栏的 hd2d-shell.js，和正式画面的新画面同一份；
+  //   #321：hd2d-camera.js 后面接 hd2d-pace.js，场景每一帧问它画不画，也和正式画面同一份）
   const all = [...html.matchAll(/<script src="\.\.\/\.\.\/([^"]+)"><\/script>/g)].map(m => m[1]);
   const tags = all.filter(f => !f.startsWith("hd2d/"));
   assert.equal(tags.join(), H.RULE_FILES.filter(f => fs.existsSync(path.join(__dirname, "..", f))).concat(["online-view.js", "attack-fx.js", "hit-fx.js", "icons.js", "hud-icons.js", "weather-fx.js"]).join());
   const ours = all.filter(f => f.startsWith("hd2d/")).map(f => f.slice(5));
-  assert.equal(ours.join(), ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"].join());
+  assert.equal(ours.join(), ["hd2d-layout.js", "hd2d-scene-art.js", "hd2d-scenes-mine.js", "hd2d-scenes-city.js", "hd2d-scenes-desert.js", "hd2d-ui.js", "hd2d-shell.js", "hd2d-camera.js", "hd2d-pace.js", "hd2d-fx.js", "hd2d-play.js", "hd2d-wfx.js"].join());
   ours.forEach(f => assert.ok(fs.existsSync(HP.mod(f)), f + " 在 hd2d/ 里"));
   assert.ok(/import \{ createHd2dScene \} from "\.\.\/\.\.\/hd2d\/hd2d-scene\.js";/.test(mod[1]), "页面主脚本从 hd2d/ 引场景");
 });

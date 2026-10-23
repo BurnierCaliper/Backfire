@@ -671,7 +671,7 @@ const EnemyAI = (function () {
     // （以前过不去，两区制桥塌后近战双方永远碰不到），有一样近、不用越过空隙的路就走那条；后撤不越过空隙，宁可留在原地打
     if (step != null && !u.flying && typeof getGap === "function" && getGap(u.zone, step).type === "void") {
       const near = zdist(step, target.zone);
-      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "bridge" || (g.type === "door" && g.open); };
+      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "wave" || g.type === "bridge" || (g.type === "door" && g.open); };   // 驻波墙不挡移动
       const alt = adjacentZones(u.zone).map(Number).find(z => z !== step && passable(z) && zdist(z, target.zone) === near &&
         !(state.fields && state.fields[z] && state.fields[z].abyss));
       if (near >= zdist(u.zone, target.zone)) step = null;

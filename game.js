@@ -37,6 +37,7 @@
     skillTap: null,    // 触屏：不用选目标的技能点了一下、正在预演（再点同一个按钮才放出去）
     view: new Map(),   // 当前画面显示的快照 id → snap
     version: 0,
+    battleGen: 0,      // 放弃战斗（abandonBattle）时加一：之前还在半路的演出 / 敌人回合 / 询问醒过来对不上就直接退出
     level: 1,
     partyKits: ["ruby", "yuito", "hiaki", "tou"],
     enemyPlan: [
@@ -52,6 +53,8 @@
   if (window.AttackFx) AttackFx.setClock(G.fxClock);
   const hotseat = () => window.HotseatGame && HotseatGame.isActive();
   const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
+  /** 从 gen 那一刻起这场战斗被放弃了（abandonBattle）：半路的流程醒过来先看这个，是就直接退出，不再结算、不碰之后摆的新战场 */
+  const abandoned = (gen) => gen !== G.battleGen;
 
   function wait(ms) {
     if (G.instant) return Promise.resolve();
@@ -723,6 +726,8 @@
         if (!p.dead && s.dead) {
           beats.push({ kind: "kill", id });
           if (G.koHold && !s.isPlayer) c.wrap.classList.add("ko-held");   // 这段演完再淡出（releaseKOs）
+          // 新画面（#330）：3D 战场上也先留着它（这段演完再淡出；不在演出里就马上开始淡出），淡完才拿掉
+          if (!s.isPlayer && field3d() && typeof HD2DField.ko === "function") HD2DField.ko(id, { hold: !!G.koHold, slow: !!s.killBig });
         }
         if (!p.dying && s.dying && !s.dead) beats.push({ kind: "down", id });
         const healed = sumCur(s) - sumCur(p);
@@ -748,8 +753,9 @@
     paintSandStir(snaps);
     paintMechBar(snaps);
     fitZones();
-    // 新画面（HD-2D，hd2d/hd2d-field.js）：这一帧的快照也交给它（演出的每一下、refreshAll 的现在的状态），它自己看开没开、投影后再排
-    if (window.HD2DField) HD2DField.view(snaps);
+    // 新画面（HD-2D，hd2d/hd2d-field.js）：这一帧的快照也交给它（演出的每一下、refreshAll 的现在的状态），它自己看开没开、投影后再排；
+    // animate（#330）：和旧卡的换区移动一样——演的时候换了区的铭牌在两个地台之间滑过去、新出现的单位亮个相
+    if (window.HD2DField) HD2DField.view(snaps, { animate: !!animate });
     return beats;
   }
 
@@ -820,6 +826,11 @@
   }
   /** 新画面（HD-2D，hd2d/hd2d-field.js）开着没有：开着时战场那一格是 3D 战场，旧的区和单位卡照旧排、只是看不见 */
   const field3d = () => !!(window.HD2DField && HD2DField.on());
+  /** 新画面开着：3D 铭牌上的白卡也照旧画面的单位卡动（#330，hd2d/hd2d-play.js · HD2DPlay.cards：冲撞、后坐、受击、格挡、登场、慢动作……；
+   *  跳过、演出倍率 0、减少动态效果时它自己不演）；关着 = null。旧卡的动画照旧（看不见，但位置、样式照旧排） */
+  const cards3d = () => (field3d() && typeof HD2DField.cards === "function" ? HD2DField.cards() : null);
+  /** 新画面开着时：跳过、减少动态效果不震屏（#330；3D 战场在 #g-field 里，震屏 / 顿帧挂在 #g-app 上，画布和铭牌一起震、一起变色）。旧画面照旧 */
+  const noQuake3d = () => field3d() && (G.skip || (typeof HD2DField.still === "function" && HD2DField.still()));
   /** 新画面开着：单位 / 危墙在 3D 战场上的屏幕矩形（铭牌、间隔按这一刻的镜头投影），和 centerOf 一样的写法；找不到返回 null */
   function field3dRect(id) {
     const b = HD2DField.rectOf(id);
@@ -956,6 +967,9 @@
       c.wrap.classList.add("knock");
     }
     c.wrap.classList.add("hit");
+    // 新画面（#330）：3D 白卡也闪一下属性色、顺着挨打的方向被打退（方向按 3D 铭牌在屏幕上的位置）
+    const k3 = cards3d();
+    if (k3) k3.hit(id, element || "physical", !!big, from && !G.skip ? from : null);
     // 属性受击特效（hit-fx.js）：火焰窜起、电弧、冰晶、酸液……
     const box = boxOf(id) || (field3d() ? null : c.wrap.getBoundingClientRect());   // 新画面开着：按 3D 的铭牌（看不见的单位卡不算）
     if (box && !G.sim && !G.skip && window.HitFx) HitFx.burst(element || "physical", box, { big: !!big });
@@ -1150,6 +1164,9 @@
   async function dashTo(id, t, o) {
     o = o || {};
     const c = cards.get(id), a = rectOf(id);
+    // 新画面（#330）：3D 白卡照样往后一收再朝 t 扑上去（按屏幕投影的方向），同一个钟、同样的时长，和下面看不见的旧卡一起走
+    const k3 = cards3d();
+    if (k3 && a && t) k3.dash(id, t, o);
     if (!c || !a || !t) return;
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
     const reach = o.reach >= 999 ? d : Math.max(16, Math.min(d - Math.min(a.w, t.w) * .5, o.reach || (o.heavy ? 112 : 92)));
@@ -1171,7 +1188,8 @@
   }
   /** 一张卡往 (dx, dy) 挪一下再回来（夕夏处决往后退、维塔斯扯下往后拉） */
   function nudgeCard(id, dx, dy, ms) {
-    const c = cards.get(id);
+    const c = cards.get(id), k3 = cards3d();
+    if (k3) k3.nudge(id, dx, dy, ms);   // 新画面（#330）：3D 白卡也挪一下
     if (!c || G.skip) return;
     const token = String(fxRandom());
     c.wrap.dataset.dash = token;
@@ -1182,14 +1200,15 @@
   }
   /** 画面震：power ≥ 1 大震，否则小震 */
   function shakeField(power) {
-    if (G.sim || G.skip) return;
+    if (G.sim || G.skip || noQuake3d()) return;
     const app = $("g-app"), cls = power >= 1 ? "quake" : "quake-s";
     app.classList.remove("quake", "quake-s"); void app.offsetWidth; app.classList.add(cls);
     realTimeout(() => app.classList.remove(cls), power >= 1 ? 600 : 340);
   }
   /** 卡片上临时挂一个样式（发抖、被打飞、消失……），ms 后摘掉 */
   function flashClass(id, name, ms) {
-    const c = cards.get(id);
+    const c = cards.get(id), k3 = cards3d();
+    if (k3) k3.cls(id, name, ms);   // 新画面（#330）：3D 白卡挂同一个样式（game.css 的 .unit-wrap.fx-*）
     if (!c || G.skip) return;
     c.wrap.classList.remove(name); void c.wrap.offsetWidth; c.wrap.classList.add(name);
     realTimeout(() => c.wrap.classList.remove(name), sp(ms || 500) + 40);
@@ -1249,6 +1268,8 @@
   }
   /** 远程：往后一顿再回来（后坐力） */
   function recoil(c, a, t, px) {
+    const k3 = cards3d();
+    if (k3) k3.recoil(c.id, t, px);   // 新画面（#330）：3D 白卡也往后一顿
     const dx = t.x - a.x, dy = t.y - a.y, d = Math.hypot(dx, dy) || 1, k = px || 8;
     const token = String(fxRandom());
     c.wrap.dataset.dash = token;
@@ -1272,7 +1293,8 @@
     }, sp(hold));
   }
   async function lunge(actorId, targetId) {
-    const a = centerOf(actorId), t = centerOf(targetId), c = cards.get(actorId);
+    const a = centerOf(actorId), t = centerOf(targetId), c = cards.get(actorId), k3 = cards3d();
+    if (k3) k3.lunge(actorId, targetId);   // 新画面（#330）：3D 白卡也朝目标那张卡冲一下
     if (!a || !t || !c) return;
     const dx = t.x - a.x, dy = t.y - a.y;
     const len = Math.max(1, Math.hypot(dx, dy));
@@ -1319,6 +1341,7 @@
   }
 
   async function playBeats(beats, hold) {
+    const gen = G.battleGen;
     let longest = 0;
     const fallen = [];
     beats.forEach(b => {
@@ -1351,11 +1374,16 @@
       }
     });
     if (longest) await wait(longest);
-    for (const s of fallen) await announceDeath(s);
+    for (const s of fallen) {
+      if (abandoned(gen)) return;   // 战斗已经放弃：后面的阵亡提示不再弹
+      await announceDeath(s);
+    }
   }
 
   /** 一段演出放完：留着的被打倒的敌人开始淡出，红叉跟着一起淡（卡片的淡出见 game.css · .unit-wrap.dead） */
   function releaseKOs() {
+    // 新画面（#330）：3D 战场上留着的也开始淡出（hd2d-field.js 自己摘 3D 白卡的 .ko-held，淡完拿掉）
+    if (field3d() && typeof HD2DField.releaseKOs === "function") HD2DField.releaseKOs();
     document.querySelectorAll(".unit-wrap.ko-held").forEach(w => w.classList.remove("ko-held"));
     G.koHandles.forEach(k => (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500)));
     G.koHandles = [];
@@ -1408,6 +1436,16 @@
     advShake.t = setTimeout(() => f.classList.remove("adv-shake"), 420);
   }
   async function playTape(tape, after, meta) {
+    const gen = G.battleGen;
+    // 演到一半这场战斗被放弃了（abandonBattle）：收起这段演出改过的画面（慢放、推近的镜头），后面的出手、受击、数字不再演到之后的新战场上
+    const gone = () => {
+      if (!abandoned(gen)) return false;
+      G.slow = 1;
+      $("g-app").classList.remove("hitstop");
+      zoomOut();
+      if (window.HD2DField && HD2DField.release) HD2DField.release();
+      return true;
+    };
     const pops = tape.filter(e => e.type === "pop");
     comboPrime(pops);
     const stunId = newStunId(after, pops);
@@ -1448,9 +1486,11 @@
       const prevSlow = G.slow;
       G.slow = 1.7;
       for (let i = 0; i < opps.length; i++) {
+        if (abandoned(gen)) break;
         const o = opps[i];
-        const moverCard = cards.get(o.targetId);
+        const moverCard = cards.get(o.targetId), k3 = cards3d();
         if (moverCard) moverCard.wrap.classList.add("slow-move");
+        if (k3) k3.slow(o.targetId, true);   // 新画面（#330）：3D 白卡也压暗（慢动作；换区滑过去的时长跟着 G.slow 变慢）
         banner(`${esc(o.name || "敌人")} · 借机攻击 → ` + whoHtml(unitById(o.targetId)));
         // 借机攻击也按招式演（匕首狂徒一刀、狼队长一爪），打中的人往外一歪
         const os = strikePlan({ actorId: o.attackerId, targetId: o.targetId, skillName: "借机攻击" }, [{ kind: "dmg", main: true, value: 1, unitId: o.targetId, element: oppElement(o) }], null);
@@ -1459,9 +1499,11 @@
         hit(o.targetId, os ? os.move.el : "physical", false, null, oFrom);
         if (os && window.AttackFx) AttackFx.impact(rectOf(o.targetId), os.move, { from: oFrom });
         if (moverCard) moverCard.wrap.classList.remove("slow-move");
+        if (k3) k3.slow(o.targetId, false);
       }
       G.slow = prevSlow;
       if (!meta.slow) $("g-app").classList.remove("hitstop");
+      if (gone()) return;
     }
     // 单人模式的支援：出手的是登场的伙伴，主角不前冲（伙伴的前冲在 partner 里播）
     const supportTape = pops.some(e => e.kind === "partner");
@@ -1492,7 +1534,7 @@
     }
     // 镜头推近：所有协助攻击，和碎渣重炮、狂瀑这几招；其他界面压暗
     const zoomed = !!(strike && !G.sim && ((meta._cmd && meta._cmd.type === "assistAnswer") || (scr && scr.zoom)));
-    if (zoomed) { await zoomIn(strike.targetId); await wait(300); strikeFrom = rectOf(strike.actorId); }
+    if (zoomed) { await zoomIn(strike.targetId); await wait(300); if (gone()) return; strikeFrom = rectOf(strike.actorId); }
     // 拉斯缪尔的能量罐：他（或 EDC）这一下让累积能量变了，就在他身边画出罐子，水位慢慢走到新的刻度
     const tank = window.AttackFx && !G.sim && !G.skip ? rasTankOf(meta, cmd) : null;
     if (tank) AttackFx.tank(rectOf(tank.id), tank.from, tank.to, { ms: tank.ms });
@@ -1507,12 +1549,14 @@
     const blockerId = blockerOf(meta, tape);   // 协助格挡的人：冲上去挡
     if (blockerId) motions.push(lunge(blockerId, meta.actorId));
     if (motions.length) await Promise.all(motions);
+    if (gone()) return;
     // 格挡成功：兵刃相接的一声「铛——」+ 两人连线的中点一把金色火花（玩家的协助格挡、空手格挡，敌人的格挡都算）
     const parried = parriedOf(meta, tape);
     if (parried) {
       if (window.Sfx) Sfx.parry();
-      const pc = cards.get(blockerId || meta.targetId);
+      const pc = cards.get(blockerId || meta.targetId), k3 = cards3d();
       if (pc) { pc.wrap.classList.remove("parry"); void pc.wrap.offsetWidth; pc.wrap.classList.add("parry"); }
+      if (k3) k3.parry(blockerId || meta.targetId);   // 新画面（#330）：挡下来的那张 3D 白卡也一闪
       if (window.AttackFx && !G.sim) {
         const b = rectOf(blockerId || meta.targetId), a = rectOf(meta.actorId);
         // 协助格挡：火花在两人连线的中点；自己格挡（空手格挡、敌人格挡）：火花在格挡的人身上
@@ -1562,6 +1606,7 @@
     G.koHold = (G.koHold || 0) + 1;
     try {
       for (let i = 0; i < pops.length; i++) {
+        if (abandoned(gen)) return;
         const e = pops[i];
         const beatsBefore = e.snap ? setView(e.snap, true) : [];
         const s = G.view.get(e.unitId);
@@ -1610,8 +1655,9 @@
           await wait(chain ? 40 : 55);
         } else if (e.kind === "partner") {
           // 伙伴登场：亮相、停一下，再冲向目标
-          const pc = cards.get(e.unitId);
+          const pc = cards.get(e.unitId), k3 = cards3d();
           if (pc) { pc.wrap.classList.remove("enter"); void pc.wrap.offsetWidth; pc.wrap.classList.add("enter"); }
+          if (k3) k3.enter(e.unitId);   // 新画面（#330）：3D 白卡也亮个相
           if (!paperPop(e.unitId, e)) popup(e.unitId, e.text || "支援！", "txt e-" + e.element, { dur: 1.2 });
           if (window.Sfx && !G.sim) Sfx.parry();
           await wait(420);
@@ -1638,20 +1684,24 @@
           }
         } else if (e.kind === "highboom") {
           // 自爆前先预警：单位卡闪两下（薄荷色描边 + 高能液体发白），再炸
-          const bc = cards.get(e.unitId);
+          const bc = cards.get(e.unitId), warn3d = field3d() && typeof HD2DField.warn === "function";
           if (bc && !G.skip) {
             bc.wrap.classList.remove("high-warn"); void bc.wrap.offsetWidth; bc.wrap.classList.add("high-warn");
+            if (warn3d) HD2DField.warn(e.unitId, true);   // 新画面（#330）：3D 白卡闪两下，脚下的地台跟着闪
             if (window.Sfx && !G.sim) Sfx.ui("toggle");
             await wait(300);
             if (window.Sfx && !G.sim) Sfx.ui("toggle");
             await wait(chain ? 300 : 360);
             bc.wrap.classList.remove("high-warn");
+            if (warn3d) HD2DField.warn(e.unitId, false);
           }
           procBadge(e.unitId, "high");
-          // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清
+          // 高能自爆：震屏 + 大字 + 爆炸声 + 大号数字，停久一点让人看清（新画面开着时跳过、减少动态效果不震）
           const app = $("g-app");
-          app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
-          realTimeout(() => app.classList.remove("quake"), 700);
+          if (!noQuake3d()) {
+            app.classList.remove("quake"); void app.offsetWidth; app.classList.add("quake");
+            realTimeout(() => app.classList.remove("quake"), 700);
+          }
           if (window.Sfx) Sfx.boom();
           hit(e.unitId, "energy", true);
           comboHit(e, Math.floor(Number(e.value) || 0));
@@ -1677,6 +1727,7 @@
         }
       }
       if (heldBeats.length) await playBeats(heldBeats);
+      if (abandoned(gen)) return;   // 放弃了：不把这场的结算画面盖到新战场上
       if (zoomed) zoomOut();
       const beats = setView(after, true);
       pendingStun.forEach(b => {
@@ -1703,7 +1754,9 @@
   }
 
   async function perform(thunk, meta, system = false, context) {
+    const gen = G.battleGen;
     if (system && window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
+    if (abandoned(gen)) return null;   // 等房间恢复的时候这场战斗被放弃了：不再结算
     meta = meta || {};
     G.skip = false;
     G.tape = [];
@@ -1748,26 +1801,31 @@
     if (result && result.executed === false) return null;
     const after = snapAll();
     await playTape(tape, after, meta);
+    if (abandoned(gen)) return null;   // 演到一半放弃了：这场的记录不写进之后的新战场
     pushLog(meta, tape);
     refreshHud();
     return tape;
   }
 
   async function act(thunk, meta, context) {
+    const gen = G.battleGen;
     pushUndo((meta && meta.skillName) || "行动");
     G.depth++;
     syncBusy();
     comboStart();
     try {
       const tape = await perform(thunk, meta, !!context, context);
+      if (abandoned(gen)) return;
       if (hotseat() && tape === null) return false;
       await resolveQueues();
       if (hotseat()) return true;
     } finally {
+      // 这场战斗已经放弃（abandonBattle 把 G.depth、画面都收拾好了）：不再收尾，免得把之后摆的新战场当成这场来结算
+      if (abandoned(gen)) return;
       comboEnd();
       G.depth--;
       G.version++;
-      syncBusy();
+      syncBusy(true);
       if (hotseat()) autoSelect(true);
       refreshAll();
       checkEnd();
@@ -1775,10 +1833,11 @@
     }
   }
 
-  function syncBusy() {
+  /** 演出中 / 演完：quiet = 先不画技能栏（后面 refreshAll 马上就画，#317：一次只画一遍） */
+  function syncBusy(quiet) {
     $("g-app").classList.toggle("busy", G.depth > 0);
     paintUndo();
-    refreshHud();
+    if (!quiet) refreshHud();
   }
 
   /* ================= 7. 格挡与协助 ================= */
@@ -1792,6 +1851,7 @@
   /** d100 检定动画（协助格挡、事件里的熟练项检定共用）：数字滚动后停在 spec.roll，按 spec.ok 变色。
    *  spec：{ who, chance, roll, ok, note, okText, failText } */
   function playBlockCheck(spec) {
+    const gen = G.battleGen;
     return new Promise(resolve => {
       const box = $("g-check");
       const num = $("g-check-num");
@@ -1806,6 +1866,7 @@
       let ticks = 0;
       const target = Math.max(1, Math.min(100, Number(spec.roll) || 1));
       const step = () => {
+        if (abandoned(gen)) { resolve(spec); return; }   // 战斗已经放弃：骰子框已经收起，不再动它
         ticks++;
         if (G.skip && ticks > 4) delay = 400;
         if (delay < 220) {
@@ -1828,9 +1889,11 @@
   }
 
   async function resolveQueues() {
+    // 每次等完（询问、检定动画、演出）先看这场战斗是不是已经放弃了（abandonBattle）：放弃了就不再往下结算
+    const gen = G.battleGen;
     for (let guard = 0; guard < 40; guard++) {
       if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
-      if (G.ended) return;
+      if (abandoned(gen) || G.ended) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
@@ -1843,6 +1906,7 @@
           if (window.AttackFx && !G.sim) AttackFx.threat(rectOf(attacker.propId ? "prop:" + attacker.propId : attacker.id), rectOf(target.id));
           try { choice = await promptBlock(job, attacker, target, helpers, walls); }
           finally { if (window.AttackFx) AttackFx.clearThreat(); }
+          if (abandoned(gen)) return;
         }
         const blocker = unitById(choice);
         let forced = null;
@@ -1859,6 +1923,7 @@
             ok,
             note: iai ? "居合：必定成功" : ""
           });
+          if (abandoned(gen)) return;
         }
         const seq = job.seq;
         // 连续协助格挡：这个人没挡住、还有别人能挡时，这一击还没落下（同一击仍在队首）——
@@ -1891,6 +1956,7 @@
             foes.map(u => ({ id: u.id })), (id) => `${k.name} 切刀 → ${targetName(id)}`, [{ label: "不切换", value: "no" }]);
           pick = got && typeof got === "object" ? { swap: false } : got ? { swap: true, targetId: got } : { swap: false };
         } else pick = await openChoice("更换刀头", `${k.name} 可以更换刀头。切刀攻击只能打同区目标。`, opts, { label: "不切换", value: { swap: false } });
+        if (abandoned(gen)) return;
         const swapTarget = (pick && pick.swap && pick.targetId) || null;
         if (pick && pick.swap) {
           // 换刀头的追击：和协助攻击一样播攻击演出（冲上去打同区那名敌人）
@@ -1914,6 +1980,7 @@
         const opts = [{ label: "移到最前", sub: `下一发就是${last}`, value: "front" }, { label: "留在最后", value: "stay" }];
         const pick = hotseat() ? await HotseatGame.ownedChoice(lg, "解开保险", opts)
           : await openChoice("解开保险", `最后一发是${last}。要把它移到队列最前面吗？`, opts, { label: "留在最后", value: "stay" });
+        if (abandoned(gen)) return;
         systemCommand({ type: "longgeSafetyAnswer", front: pick === "front" });
         continue;
       }
@@ -1942,6 +2009,7 @@
               (step.units || []).map(u => ({ id: u.id })), (id) => `环境扫描 → ${targetName(id)}`, [{ label: "放弃扫描", value: SKIP }]);
             v = got && typeof got === "object" ? SKIP : got;
           } else v = await ask(`环境扫描 · ${job.zone} 区`, `协助攻击附带的环境扫描。${step.label}`, opts);
+          if (abandoned(gen)) return;
           if (v == null || v === SKIP) { skipped = true; break; }
           picks[step.key] = v;
         }
@@ -1973,6 +2041,7 @@
             const answer = await HotseatGame.requestAsk("assist", target.name + " 失衡 · 协助攻击", options, () => eligibleAssisters(breaker, target), job);
             choice = answer.unitId; hotseatExtra = answer.extra;
           } else choice = job.vsPlayer ? aiPickAssister(list) : await promptAssist(job, target, list);
+          if (abandoned(gen)) return;
         }
         const helper = unitById(choice);
         let extra = hotseatExtra;
@@ -1991,6 +2060,7 @@
             blades,
             { label: "取消", value: null }
           );
+          if (abandoned(gen)) return;
           if (!pick) {
             systemCommand({ type: "assistAnswer", helper: null, extra: {} });
             continue;
@@ -2003,6 +2073,7 @@
           const modes = [{ label: "手杖", sub: "移动到敌人那一区戳刺 0.5 ATK 冰；有子弹则耗 1 发给同区友方治疗", value: "cane" }];
           if (ammo) modes.push({ label: "霰弹枪", sub: `耗 1 发子弹 · 1.5 ATK 子弹属性（${typeof longgeAmmoText === "function" ? longgeAmmoText(helper) : ""}）`, value: "gun" });
           const pick = modes.length === 1 ? "cane" : await openChoice("龙哥协助攻击", "选择手杖还是霰弹枪。无论哪种都会立刻解锁扳机，并窥探 2。", modes, { label: "取消", value: null });
+          if (abandoned(gen)) return;
           if (!pick) {
             systemCommand({ type: "assistAnswer", helper: null, extra: {} });
             continue;
@@ -2012,6 +2083,7 @@
           if (pick === "cane" && ammo) {
             const opts = longgeHealOptions(helper, target).map(u => ({ label: u.name, sub: u.id === helper.id ? "自己" : `${u.zone} 区`, value: u.id }));
             const heal = opts.length === 1 ? opts[0].value : await openChoice("龙哥 · 手杖治疗", `戳刺后会耗 1 发子弹治疗：选一名 ${target.zone} 区的友方（含自己）。蓝弹固定治疗等级 + 5，红弹治疗已损失血量的 40%。`, opts, { label: "让程序选（血量比例最低）", value: null });
+            if (abandoned(gen)) return;
             if (heal) extra.heal = heal;
           }
         }
@@ -2569,13 +2641,14 @@
     paintMarks({ pick: false, targets: [], hover: null, zones: [], hoverZone: null });
   }
 
-  function disarm() {
+  /** 取消正在选的技能 / 目标。quiet：先不画技能栏（接下来马上还要画的地方用：选下一个技能、切人、结束回合；一次操作只画一遍，#317） */
+  function disarm(quiet) {
     const a = G.arm;
     G.arm = null;
     if (a && a.reject) a.reject();
     unmarkTargets();
     clearPreview();
-    refreshHud();
+    if (!quiet) refreshHud();
   }
 
   /** 进入目标选择。candidates: [{id, preview}]；返回被点中的 id，取消返回 null */
@@ -2658,6 +2731,11 @@
     if (String(id).indexOf("gap:") === 0) {
       const key = String(id).slice(4), g = (state.gaps || {})[key];
       if (!g) return "";
+      // 驻波墙：名字写属性和降幅 / 增幅，副标题写暂时取代的是什么，正文是这一道墙的说明（app.js · waveWallText）
+      if (typeof isWaveGap === "function" && isWaveGap(g)) {
+        const base = g.wave.saved && g.wave.saved.type && g.wave.saved.type !== "open" ? "暂时取代：" + gapStateText(g.wave.saved) : "";
+        return UnitTip.html({ kind: "gap", gapType: "wave", text: waveWallText(g.wave) }, [], { name: waveWallName(g.wave) + "（" + key.replace("-", "–") + " 区之间）", sub: base });
+      }
       const hp = (g.type === "bridge" || g.type === "wall") ? `耐久 ${g.hp || 0}` : g.type === "door" ? (g.open ? "开着" : "关着") : "";
       return UnitTip.html({ kind: "gap", gapType: g.type }, [], { name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", sub: hp });
     }
@@ -2869,11 +2947,12 @@
     if (!actor) return;
     const why = blockReason(actor, sk);
     if (why) { flashHint(`${sk.name}：${why}`); return; }
-    disarm();
+    // 这一下只画一遍（#317）：取消上一个不画；接着选目标 / 区域、直接出手都会画，都没画（弹选项）才在这一下跑完时补画
+    disarm(true);
     const my = G.arm = { skillId: sk.id, actorId: actor.id };
     const stale = () => G.arm !== my;
     const cancel = () => { if (!stale()) disarm(); };
-    refreshHud();
+    hudSoon();
     const label = (id) => `${actor.name} · ${sk.name}${id ? " → " + targetName(id) : ""}`;
 
     if (sk.id === "__stand") {
@@ -3017,31 +3096,43 @@
   const aiPickAssister = EnemyAI.pickAssister;
 
   async function enemyPhase() {
+    const gen = G.battleGen;   // 敌人回合中这场战斗被放弃了（abandonBattle）：每次等完先看，放弃了就当回合已经结束（返回 true）
     if (window.OnlineGame?.isHost()) GMCommands.beginEnemyRound(state.turnNo);
     const order = EnemyAI.actingOrder();
     for (const id of order) {
       if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
+      if (abandoned(gen)) return true;
       if (window.OnlineGame?.isHost() && (!GMCommands.enemyMayAct(unitById(id)) || GMCommands.isManual(unitById(id)))) continue;
       for (let n = 0; n < 5; n++) {
         if (window.OnlineGame?.isHost() && n < (G.onlineEnemyCursor?.[id] || 0)) continue;
         if (window.OnlineGame?.isHost() && (GMCommands.isManual(unitById(id)) || !GMCommands.enemyMayAct(unitById(id)))) break;
         if (window.OnlineGame?.isHost()) await OnlineGame.waitUntilReady();
+        if (abandoned(gen)) return true;
         const u = unitById(id);
         if (!u || !(unitAlive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const sig = `${u.ap}|${u.bonus}|${u.zone}`;
         const actKey = `act:${state.turnNo}:${id}:${n}`;
         const tape = await perform({ type: "battle.enemyAction", actor: id, step: n, seed: actKey }, {}, true);
+        if (abandoned(gen)) return true;
         if (tape === null) break;
         await resolveQueues();
         if (window.OnlineGame?.isHost()) await OnlineGame.flushGM();
+        if (abandoned(gen)) return true;
         if (checkEnd()) return true;
         const v = unitById(id);
         if (!v || `${v.ap}|${v.bonus}|${v.zone}` === sig) break;
         await wait(450);
+        if (abandoned(gen)) return true;
       }
       await wait(450);
+      if (abandoned(gen)) return true;
     }
-    if (window.OnlineGame?.isHost() && !G.ended) { await OnlineGame.manualEnemyPhase(); if (checkEnd()) return true; if (OnlineGame.takeAIResume()) return enemyPhase(); }
+    if (window.OnlineGame?.isHost() && !G.ended) {
+      await OnlineGame.manualEnemyPhase();
+      if (abandoned(gen)) return true;
+      if (checkEnd()) return true;
+      if (OnlineGame.takeAIResume()) return enemyPhase();
+    }
     return false;
   }
 
@@ -3056,6 +3147,7 @@
   const kbdFocus = el => { const hit = el && el.closest ? el.closest(SPACE_SAFE) : null; return !!hit && hit !== pointerFocusEl; };
   /** 空格：热座 / 联机里结束的是当前这个单位的行动；它还有行动点或附赠没用时先问一句 */
   async function spaceStartOrEnd() {
+    const gen = G.battleGen;
     if (state.combatStarted && hotseat() && !G.depth && !G.ended && !choiceResolve) {
       const cur = unitById(HotseatGame.currentUnit());
       if (cur && ((cur.ap || 0) > 0 || (cur.bonus || 0) > 0)) {
@@ -3063,26 +3155,30 @@
           { label: "确定结束", value: "yes" },
           { label: "继续行动", value: "no" }
         ]);
-        if (ans !== "yes") return;
+        if (abandoned(gen) || ans !== "yes") return;
       }
     }
     return clickStartOrEnd();
   }
   async function clickStartOrEnd() {
     if (G.depth > 0 || G.ended || choiceResolve) return;
+    const gen = G.battleGen;
     if (!state.combatStarted) {
       if (window.HotseatGame && !HotseatGame.canStart()) return;
       await askOpeningChoices();
+      if (abandoned(gen)) return;   // 等开战前的选择时主持人放弃了这场战斗：不再开战
       pushUndo("开始战斗");
       if (hotseat()) HotseatGame.startCombat();
       else dispatch({ type: "startCombat" });
       if (window.Sfx) Sfx.ui("turn");   // 开战：第一回合开始
       if (hotseat()) await resolveQueues();
+      if (abandoned(gen)) return;
       if (state.ambush) {
         // 遭遇战：我方第一回合被跳过，直接进敌人回合
         phaseCard("遭遇战 · 被偷袭", "enemy");
         refreshAll();
         await wait(900);
+        if (abandoned(gen)) return;
         endTurn(true);
         return;
       }
@@ -3104,6 +3200,7 @@
   }
   async function askRetreat() {
     if (!canRetreat() || choiceResolve) return;
+    const gen = G.battleGen;
     const pv = retreatPreview();
     const text = pv.lines.join("；") + "。";
     let guardId = null;
@@ -3112,26 +3209,30 @@
       const pickG = await openChoice("撤退 · 谁来断后", text + " 选一名还站着的角色断后。",
         guards.map(u => ({ label: u.name, sub: `血量 ${sumHp(u)}`, value: u.id })),
         { label: "不撤了", value: null });
-      if (!pickG) return;
+      if (abandoned(gen) || !pickG) return;
       guardId = pickG;
     } else {
       const ok = await openChoice("撤退", text, [{ label: "撤退", value: "yes" }], { label: "不撤了", value: null });
-      if (ok !== "yes") return;
+      if (abandoned(gen) || ok !== "yes") return;
     }
     if (hotseat() && !canRetreat()) return;
     const success = await act({ type: "retreat", rearguard: guardId });
+    if (abandoned(gen)) return;   // 撤退演出中主持人放弃了这场战斗：不再按撤退结算
     if (!G.ended && (!hotseat() || success && state.retreated)) finish(false, "retreat");
   }
   const sumHp = (u) => (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
 
   /** 开战前的选择。柯尔特可以自行决定初始刀头（不算「更换刀头」，不触发追击伤害）。 */
   async function askOpeningChoices() {
+    // 等选择的时候主持人放弃了这场战斗（abandonBattle，例：初始刀头分给了玩家、玩家还没选）：不再往场上写
+    const gen = G.battleGen;
     // 双相冲动+：诺拉自选初始状态
     const nora = typeof findKit === "function" ? findKit("nora", state.units) : null;
     if (nora && nora.isPlayer && typeof passivePlus === "function" && passivePlus(nora, 2)) {
       const opts = [{ label: "温和", value: "gentle" }, { label: "残忍", value: "cruel" }];
       const pick = hotseat() ? await HotseatGame.ownedChoice(nora, "诺拉 · 初始状态", opts)
         : await openChoice("诺拉 · 初始状态", "双相冲动+：开局时可以自行选择初始状态，回合开始时不会再随机改变。", opts, { label: "保持当前", value: (nora.resources || {}).mood || "gentle" });
+      if (abandoned(gen)) return;
       systemCommand({ type: "openingChoice", actor: nora.id, mood: pick === "cruel" ? "cruel" : "gentle" });
       addLogPhase(`诺拉 初始状态：${pick === "cruel" ? "残忍" : "温和"}`);
     }
@@ -3148,12 +3249,14 @@
       ],
       { label: "保持电钻", value: "drill" }
     );
+    if (abandoned(gen)) return;
     systemCommand({ type: "openingChoice", actor: k.id, bit: pick === "acid" ? "acid" : "drill" });
     addLogPhase(`柯尔特 初始刀头：${k.resources.bit === "acid" ? "酸液炮（远距离）" : "电钻（近距离）"}`);
   }
 
   async function endTurn(ambush = false) {
     if (G.depth > 0 || G.ended || !state.combatStarted || state.combatPhase !== "player" || choiceResolve) return;
+    const gen = G.battleGen;
     if (hotseat() && !ambush) {
       const ack = HotseatGame.submit({ type: "endTurn" });
       if (!ack.ok) { flashHint(ack.error); return; }
@@ -3166,26 +3269,33 @@
         { label: "确定结束", value: "yes" },
         { label: "继续行动", value: "no" }
       ], { label: "取消", value: "no" });
-      if (ans !== "yes") return;
+      if (abandoned(gen) || ans !== "yes") return;
     }
-    disarm();
+    disarm(true);   // 下面 syncBusy 马上画（#317：一次只画一遍）
     pushUndo(`结束第 ${state.turnNo} 回合`);
     G.depth++;
     syncBusy();
     try {
+      // 敌人回合中（演出、敌人行动、等人回答协助格挡、主持人手动操控敌人）这场战斗被放弃了：每次等完先看，放弃了就直接退出
       const endKey = `end:${state.turnNo}`;
       await perform({ type: hotseat() ? "battle.endPlayerTurn" : "endTurn", seed: endKey }, { phase: "玩家回合结束 · 敌人回合开始" }, hotseat());
+      if (abandoned(gen)) return;
       await resolveQueues();   // 敌人回合开始时落下的死刑：每一段先问协助格挡
-      if (checkEnd()) return;
+      if (abandoned(gen) || checkEnd()) return;
       refreshTop();
       phaseCard("敌人回合", "enemy");
       await wait(750);
+      if (abandoned(gen)) return;
       const over = await enemyPhase();
+      if (abandoned(gen)) return;
       if (!over && !G.ended) {
         await wait(250);
+        if (abandoned(gen)) return;
         await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
+        if (abandoned(gen)) return;
         if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
         await resolveQueues();
+        if (abandoned(gen)) return;
         if (!checkEnd()) {
           phaseCard(`第 ${state.turnNo} 回合`, "player");
           if (hotseat()) HotseatGame.beginRound();
@@ -3193,9 +3303,10 @@
         }
       }
     } finally {
+      if (abandoned(gen)) return;   // 放弃了：abandonBattle 已经把 G.depth、画面收拾好，不再收尾
       G.depth--;
       G.version++;
-      syncBusy();
+      syncBusy(true);
       refreshAll();
       checkEnd();
     }
@@ -3309,6 +3420,38 @@
   function reviewLog() {
     $("g-result").classList.remove("show");
     $("g-logs").scrollTop = $("g-logs").scrollHeight;
+  }
+
+  /** 放弃这场战斗（跑团主持人没结算就回到探索环节：trpg-ui.js · backFromBattle，#322）。
+   *  正在播的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人的阶段、选到一半的技能目标都停下作废——
+   *  还在半路的流程醒过来看到 battleGen 变了就直接退出（不再结算、不碰之后摆的新战场）。这场当作已经结束（不结算），
+   *  选择框、骰子框、点选、横幅收起，G.depth 清零。规则状态不在这里动：接着由跑团按开战前的队伍记忆重新摆场 */
+  function abandonBattle() {
+    G.battleGen++;
+    G.ended = true;
+    G.depth = 0;
+    G.tape = null;
+    G.skip = false;
+    G.slow = 1;
+    G.koHold = 0;
+    // 弹着的选择框（格挡、撤退、阵亡提示……）按「取消」收起；等它的流程醒过来看到放弃了就退出
+    if (choiceResolve) choiceResolve.cancel();
+    choiceResolve = null;
+    disarm(true);   // 选到一半的技能 / 目标
+    cancelSkillTap();
+    showPickBar(null);
+    for (const id of ["g-choice", "g-check", "g-combo"]) { const box = $(id); if (box) box.classList.remove("show"); }
+    combo.on = false;
+    $("g-app").classList.remove("hitstop");
+    zoomOut();
+    releaseKOs();
+    hideBanner(0);
+    if (window.AttackFx) { AttackFx.clearAim(); AttackFx.clearThreat(); AttackFx.skip(); }
+    if (window.HD2DField && HD2DField.release) HD2DField.release();
+    if (window.UnitTip) UnitTip.hide();
+    if (hotseat()) HotseatGame.abandon();   // 收回等人回答的协助询问 / 分步选择，行动顺序回到战前
+    if (window.OnlineGame?.isHost()) OnlineGame.abandonBattle();   // 放开主持人手动敌人阶段、清掉掉线倒计时、作废排队的主持人操作
+    syncBusy(true);
   }
 
   function encSummary(spec) {
@@ -3513,7 +3656,7 @@
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
     if (unitById(id) && unitById(id).escort) return;   // 护送对象玩家不能操作
-    if (G.arm) disarm();
+    if (G.arm) disarm(true);   // 下面马上画（#317：一次只画一遍）
     G.actorId = id;
     refreshHud();
     idleBox();
@@ -3640,11 +3783,54 @@
     b.title = G.undo.length ? `撤销：${G.undo[G.undo.length - 1].label}（Ctrl+Z）` : "还没有可以撤销的操作（Ctrl+Z）";
   }
 
+  /* ---------- 技能栏 / 队伍栏按需更新（#317）----------
+   * 主人反馈新画面选技能时一闪一闪：以前每画一遍都 innerHTML = "" 整块重建（图标、贴纸 SVG 重新解析，悬停状态丢掉），
+   * 点一个要选目标的技能还要画三遍（disarm、armSkill、pickUnit 各一遍）。现在按钮按 data-id / data-skill 对上：
+   * 同一个人、同一个技能还是同一个按钮，只改变了的 class / 属性；按钮里面变了也只换变了的那几个节点（hud-patch.js）。
+   * 一次操作只画一遍：接下来马上还要画的地方先不画（disarm(true) / syncBusy(true)），armSkill 用 hudSoon */
+  let hudPaints = 0;   // refreshHud 画过几遍（hudSoon 看这一下里有没有人画过）
+  /** 属性和现在不一样才写：v 是 null / false = 拿掉，true = 空值（disabled、hidden） */
+  function hudAttr(e, k, v) {
+    if (v == null || v === false) { if (e.hasAttribute(k)) e.removeAttribute(k); return; }
+    const s = v === true ? "" : String(v);
+    if (e.getAttribute(k) !== s) e.setAttribute(k, s);
+  }
+  function hudCls(e, c) { if (e.className !== c) e.className = c; }
+  /** 按钮里面换成 html：hud-patch.js 只改变了的节点；没加载它（只加载了一部分脚本的测试页）就整块换，内容没变照样不碰 */
+  function hudInner(e, h) {
+    if (window.HudPatch) { HudPatch.html(e, h); return; }
+    if (e.__hudHtml !== h) { e.innerHTML = h; e.__hudHtml = h; }
+  }
+  /** 一排按钮按 key 记下来（keyOf(按钮) → key，对不上的不是这里画的、拿掉）：返回 Map，用过的 delete 掉 */
+  function hudKeep(box, keyOf) {
+    const m = new Map();
+    [...box.childNodes].forEach(b => {
+      const k = b.nodeType === 1 ? keyOf(b) : null;
+      if (k != null && !m.has(k)) m.set(k, b); else box.removeChild(b);
+    });
+    return m;
+  }
+  /** 把 b 放到 box 的第 i 个（已经在那就不动） */
+  function hudPlace(box, b, i) {
+    const at = box.children[i] || null;
+    if (at !== b) box.insertBefore(b, at);
+  }
+  /** 第 n 个以后的都拿掉（这一遍没用上的旧按钮） */
+  function hudTrim(box, n) { while (box.children.length > n) box.removeChild(box.lastElementChild); }
+  /** 同一下操作里后面多半还要再画（选目标 pickUnit / pickZone、出手 syncBusy 都会画）：先不画，
+   *  这一下同步的部分跑完（微任务：浏览器画出来之前）还没人画过才补画一遍 */
+  function hudSoon() {
+    const n = hudPaints;
+    Promise.resolve().then(() => { if (hudPaints === n) refreshHud(); });
+  }
+
   function refreshHud() {
+    hudPaints++;
     refreshTop();
-    // 队伍
+    // 队伍（#317：按 data-id 对上，同一个人还是同一个按钮）
     const party = $("g-party");
-    party.innerHTML = "";
+    const keepPc = hudKeep(party, b => (b.dataset.id ? "u:" + b.dataset.id : b.classList.contains("pc-armory") ? "armory" : b.classList.contains("pc-sheet") ? "sheet" : null));
+    let pcs = 0;
     const all = state.units.filter(u => u.isPlayer && !u.hidden && !u.fused && !u._removed && !u.escort);   // 护送对象玩家不能操作，不进队伍栏
     const heroes = all.filter(u => !isWeaponUnit(u));
     const ordered = [];
@@ -3670,37 +3856,44 @@
     ordered.forEach((u, i) => {
       const s = snapUnit(u);
       const op = operatorOf(u);
-      const b = el("button", "pc" + (isWeaponUnit(u) ? " weapon" : "") + (s.dead ? " downed" : "") +
-        (u.id === G.actorId ? " on" : "") + ((s.ap + s.bonus === 0 && !s.dying) || s.stunned ? " off" : ""));
+      const cls = "pc" + (isWeaponUnit(u) ? " weapon" : "") + (s.dead ? " downed" : "") +
+        (u.id === G.actorId ? " on" : "") + ((s.ap + s.bonus === 0 && !s.dying) || s.stunned ? " off" : "") + (shell ? " pm" : "");
       const pct = sumMax(s) ? (sumCur(s) / sumMax(s)) * 100 : 0;
       let econ = "";
       for (let k = 0; k < Math.max(s.apMax, s.ap); k++) econ += `<i class="econ-ap${k < s.ap ? " on" : ""}"></i>`;
       for (let k = 0; k < Math.max(s.bonusMax, s.bonus); k++) econ += `<i class="econ-bonus${k < s.bonus ? " on" : ""}"></i>`;
-      b.innerHTML = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
+      let inner = `<span class="n"><span>${esc(u.name)}</span><span class="k">${i < 9 ? "" : ""}</span></span>${op ? `<span class="pc-op" title="操控者">${esc(op)}</span>` : ""}
         <div class="mini"><i style="width:${pct}%"></i></div>
         <div class="u-econ">${s.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ}${!s.dead && s.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!s.dead && s.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`;
       // 新画面：主职责头像 + 名字 / 等级 / 操控者（倒下也写上）+ 身上的效果 + 分层血条
       if (shell) {
         const pu = shellView(u);
-        b.classList.add("pm");
-        if (pu) b.innerHTML = shell.member(pu, { tag: [op, s.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
+        if (pu) inner = shell.member(pu, { tag: [op, s.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
       }
-      b.dataset.id = u.id;
+      const b = keepPc.get("u:" + u.id) || el("button", cls);
+      keepPc.delete("u:" + u.id);
+      hudCls(b, cls);
+      hudInner(b, inner);
+      hudAttr(b, "data-id", u.id);
       b.onclick = () => { if (G.depth === 0 && !choiceResolve && !u.dead) selectActor(u.id); };
-      party.appendChild(b);
+      hudPlace(party, b, pcs++);
     });
     if (heroes.length) {
-      const info = el("button", "pc pc-sheet");
-      info.innerHTML = `<span class="n"><span>角色资料</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">技能 · 数值</div>`;
-      info.title = "查看每个角色的数值、被动和技能说明";
-      info.dataset.sheet = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
-      party.appendChild(info);
-      const arm = el("button", "pc pc-sheet pc-armory");
-      arm.innerHTML = `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`;
-      arm.title = "查看武器补正、atk 明细、改装件和客制化";
-      arm.dataset.armory = info.dataset.sheet;
-      party.appendChild(arm);
+      const sheetKit = G.actorId && unitById(G.actorId) ? unitById(G.actorId).kit : heroes[0].kit;
+      const info = keepPc.get("sheet") || el("button", "pc pc-sheet");
+      hudCls(info, "pc pc-sheet");
+      hudInner(info, `<span class="n"><span>角色资料</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">技能 · 数值</div>`);
+      hudAttr(info, "title", "查看每个角色的数值、被动和技能说明");
+      if (info.dataset.sheet !== sheetKit) info.dataset.sheet = sheetKit;
+      hudPlace(party, info, pcs++);
+      const arm = keepPc.get("armory") || el("button", "pc pc-sheet pc-armory");
+      hudCls(arm, "pc pc-sheet pc-armory");
+      hudInner(arm, `<span class="n"><span>武器工坊</span></span><div class="u-econ" style="font-size:11px;color:var(--muted)">补正 · 改装</div>`);
+      hudAttr(arm, "title", "查看武器补正、atk 明细、改装件和客制化");
+      if (arm.dataset.armory !== sheetKit) arm.dataset.armory = sheetKit;
+      hudPlace(party, arm, pcs++);
     }
+    hudTrim(party, pcs);
     cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
     if (window.HD2DField) HD2DField.actor(state.combatPhase === "player" ? G.actorId : null);   // 新画面：同一个人描金边、脚下光圈
 
@@ -3709,7 +3902,7 @@
     G.skillTap = null;
     stopSkillPv(true);
     const box = $("g-skills");
-    box.innerHTML = "";
+    const keepSk = hudKeep(box, b => (b.dataset.skill != null ? b.dataset.skill : null));   // #317：同一个技能还是同一个按钮
     const actor = unitById(G.actorId);
     // 武器生物化（唤出武器人 / 收回为武器）单独放到结束回合左边的特殊按钮里，不占技能栏
     const allSkills = gameSkills(actor);
@@ -3739,21 +3932,21 @@
     };
     const sb = $("g-summon");
     if (sb) {
-      sb.hidden = !summonSk;
+      hudAttr(sb, "hidden", !summonSk);
       sb.onclick = sb.onmouseenter = sb.onmouseleave = null;
       if (summonSk) {
         const why = blockReason(actor, summonSk);
         const back = /_return$/.test(summonSk.id) || summonSk.id === "weapon_retrieve";
-        const ele = mainElementOf(actor);
-        sb.className = "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : "");
-        sb.style.setProperty("--el", ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)");
-        sb.dataset.skill = summonSk.id;
-        sb.disabled = !!why;
+        const ele = mainElementOf(actor), color = ele ? `var(--${ele})` : "var(--sk-hazard, #f2c230)";
+        hudCls(sb, "summonbtn" + (back ? " back" : "") + (G.arm && G.arm.skillId === summonSk.id ? " armed" : ""));
+        if (sb.style.getPropertyValue("--el") !== color) sb.style.setProperty("--el", color);
+        hudAttr(sb, "data-skill", summonSk.id);
+        hudAttr(sb, "disabled", !!why);
         const cost = [];
         if (summonSk.cost.ap) cost.push(`行动 ${summonSk.cost.ap}`);
         if (summonSk.cost.bonus) cost.push(`附赠 ${summonSk.cost.bonus}`);
-        sb.innerHTML = `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`;
-        sb.setAttribute("aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
+        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`);
+        hudAttr(sb, "aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
         wireSkill(sb, summonSk, why);
       }
     }
@@ -3761,25 +3954,33 @@
     const actorView = shell ? shellView(actor) : null;   // 新画面：绯秋的刀、夕夏的引擎跟着变属性，读投影里的
     list.forEach((sk, i) => {
       const why = blockReason(actor, sk);
-      const b = el("button", "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : ""));
-      b.dataset.skill = sk.id;
+      let cls = "sk" + (G.arm && G.arm.skillId === sk.id ? " armed" : "");
       const cost = [];
       if (sk.cost.ap) cost.push(`<span class="ap">行动 ${sk.cost.ap}</span>`);
       if (sk.cost.bonus) cost.push(`<span class="bn">附赠 ${sk.cost.bonus}</span>`);
       if (!cost.length) cost.push("不耗行动");
-      b.innerHTML = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
-      if (why) { b.disabled = true; b.setAttribute("aria-label", `${sk.name}：${why}`); }
+      let inner = `<span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(sk.name)}</span><span class="cost">${cost.join(" ")}</span>`;
+      let label = why ? `${sk.name}：${why}` : null;
       // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、点击、悬停说明照旧（下面 wireSkill 接的还是这个按钮）
       if (shell) {
         const nb = shell.skillButton({ id: sk.id, name: sk.name, hint: sk.hint, cost: sk.cost }, i, actorView, { key: i < 9 ? i + 1 : "" });
-        nb.cls.split(" ").forEach(c => b.classList.add(c));
-        b.innerHTML = nb.html;
-        b.setAttribute("aria-label", nb.label + (why ? "：" + why : ""));
+        cls += " " + nb.cls;
+        inner = nb.html;
+        label = nb.label + (why ? "：" + why : "");
       }
+      // 同一个技能还是上一遍那个按钮：只改变了的（选中、灰掉、数字键、费用、读屏念的）
+      const b = keepSk.get(sk.id) || el("button", cls);
+      keepSk.delete(sk.id);
+      hudCls(b, cls);
+      hudAttr(b, "data-skill", sk.id);
+      hudInner(b, inner);
+      hudAttr(b, "disabled", !!why);
+      hudAttr(b, "aria-label", label);
       // 悬停：浮窗里显示完整技能说明（照角色卡，skill-text.js）；停一会儿就按当前数值预演
       wireSkill(b, sk, why);
-      box.appendChild(b);
+      hudPlace(box, b, i);
     });
+    hudTrim(box, list.length);
     G.skillsShown = list;
     // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
     const acting = !!state.combatStarted && state.combatPhase === "player";
@@ -3790,25 +3991,29 @@
       let gh = "";
       try { if (window.HudIcons && actor && actor.isPlayer && !isWeaponUnit(actor)) gh = HudIcons.gauge(HudIcons.gaugeState(actor, state.units)); } catch (e) { gh = ""; }
       if (gauge.dataset.html !== gh) { gauge.innerHTML = gh; gauge.dataset.html = gh; }
-      gauge.setAttribute("aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
+      hudAttr(gauge, "aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
     }
 
+    // 开始战斗 / 结束回合：字没变就不碰（#317）
     const et = $("g-endturn");
+    let etText;
     if (!state.combatStarted) {
       et.disabled = G.depth > 0 || G.ended;
-      et.innerHTML = "开始战斗<small>空格</small>";
+      etText = "开始战斗<small>空格</small>";
     } else {
       et.disabled = G.depth > 0 || G.ended || state.combatPhase !== "player";
-      et.innerHTML = "结束回合<small>空格</small>";
+      etText = "结束回合<small>空格</small>";
     }
     if ($("g-start")) {
       $("g-start").disabled = !!state.combatStarted || G.ended;
-      $("g-start").textContent = state.combatStarted ? "战斗中" : "开始战斗";
+      const t = state.combatStarted ? "战斗中" : "开始战斗";
+      if ($("g-start").textContent !== t) $("g-start").textContent = t;
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
-      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); et.innerHTML = "结束单位行动<small>空格</small>"; }
+      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动<small>空格</small>"; }
     }
+    hudInner(et, etText);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
   }
 
@@ -4521,7 +4726,9 @@
       if (!state.gaps || !state.gaps[key]) dispatch({ type: "battle.panel", action: "normalizeGaps" });
       const g = state.gaps[key];
       const keep = ["is-targetable", "is-hover", "hit"].filter(c => node.classList.contains(c));
-      node.className = "g-gap gap-" + (g.type || "open") + (keep.length ? " " + keep.join(" ") : "");
+      // 驻波墙（频域造物）：按降幅 / 增幅、过滤的属性上色（game.css · .gap-wave）
+      const wave = typeof isWaveGap === "function" && isWaveGap(g) ? g.wave : null;
+      node.className = "g-gap gap-" + (g.type || "open") + (wave ? ` wave-${wave.mode === "amplify" ? "amplify" : "dampen"} el-${wave.el}` : "") + (keep.length ? " " + keep.join(" ") : "");
       if (!node._bound) {
         node._bound = true;
         const id = "gap:" + key;
@@ -4531,7 +4738,9 @@
       }
       const hp = (g.type === "bridge" || g.type === "wall") ? (" " + (g.hp || 0)) : "";
       const door = g.type === "door" ? (g.open ? " 开" : " 关") : "";
-      node.innerHTML = `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;
+      node.innerHTML = wave
+        ? `<span class="gap-lab">${esc(gapLabel(g.type))}<b>${esc(ELE[wave.el] || wave.el)}·${wave.mode === "amplify" ? "增幅" : "降幅"}</b></span>`
+        : `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;
     });
   }
 
@@ -5362,6 +5571,7 @@
   G.aiStep = EnemyAI.step; G.aiTarget = EnemyAI.target; G.AI_SPEC = EnemyAI.SPEC; G.aiSpecial = EnemyAI.special;
   G.endTurn = endTurn;
   G.checkEnd = checkEnd;
+  G.abandonBattle = abandonBattle;
   G.refresh = refreshAll;
   G.flashHint = flashHint;   // 新画面（hd2d/hd2d-field.js）打不开时在提示栏说一声
   G.fitZones = fitZones;
@@ -5370,9 +5580,13 @@
   G.actLegacy = fn => act(fn, { skillName: "主持人操作", onlineLegacy: true });
   G.resolveOnlineEdits = async () => {
     if (!window.OnlineGame?.isHost() || G.depth || G.ended) return;
+    const gen = G.battleGen;
     G.depth++; syncBusy();
     try { await resolveQueues(); }
-    finally { G.depth--; G.version++; syncBusy(); autoSelect(true); refreshAll(); if (state.combatStarted) checkEnd(); resumeHotseat(); }
+    finally {
+      // 等协助询问时这场战斗被放弃了（abandonBattle 已经收拾好）：不再收尾
+      if (!abandoned(gen)) { G.depth--; G.version++; syncBusy(); autoSelect(true); refreshAll(); if (state.combatStarted) checkEnd(); resumeHotseat(); }
+    }
   };
   G.onlineCheckpoint = () => JSON.parse(JSON.stringify({ state, campaign: G.campaign, partyKits: G.partyKits, enemyPlan: G.enemyPlan,
     encounter: G.encounter || null, lastEncounter: G.lastEncounter, level: G.level, ended: G.ended, lastOutcome: G.lastOutcome, actorId: G.actorId,
@@ -5386,14 +5600,23 @@
   };
   G.resumeOnline = async () => {
     if (!state.combatStarted || G.ended || G.depth) return;
+    const gen = G.battleGen;   // 接着打的这段里主持人放弃了这场战斗（abandonBattle）：每次等完先看，放弃了就直接退出
     G.depth++; syncBusy();
     try {
       await resolveQueues();
+      if (abandoned(gen)) return;
       if (state.combatPhase === "enemy") {
         const over = await enemyPhase();
-        if (!over) { await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true); await resolveQueues(); if (window.Sfx) Sfx.ui("turn"); }
+        if (abandoned(gen)) return;
+        if (!over) {
+          await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true);
+          if (abandoned(gen)) return;
+          await resolveQueues();
+          if (abandoned(gen)) return;
+          if (window.Sfx) Sfx.ui("turn");
+        }
       }
       if (!G.ended && ["setup", "enemy"].includes(HotseatGame.getView().phase)) HotseatGame.beginRound();
-    } finally { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); }
+    } finally { if (!abandoned(gen)) { G.depth--; syncBusy(); autoSelect(true); refreshAll(); checkEnd(); resumeHotseat(); } }
   };
 })();

@@ -89,7 +89,11 @@ test("浏览器 · 用 file:// 打开 game.html：点开关就建好 3D 战场�
     assert.equal(await page.textContent("#g-hd2d-toggle"), await page.evaluate(() => HD2DField.FIELD.label.on));
     assert.ok(await page.evaluate(() => document.querySelectorAll(".hd2d-plate").length >= 3), "铭牌都在");
     assert.deepEqual(errors, []);
-    await page.click("#g-hd2d-toggle");
+    // #339：单机开着新画面换成纸片画面，开关收进了「工具 ▾」下拉（旧顶栏原地变的）：先打开下拉再点
+    await page.waitForFunction(() => document.body.classList.contains("g-paper") && !!document.querySelector('#g-paper [data-olp="tools"]'), null, { timeout: 30000 });
+    await page.click('#g-paper [data-olp="tools"]');
+    await page.waitForSelector("#g-app > .g-top.gp-open #g-hd2d-toggle", { state: "visible" });
+    await page.click("#g-app > .g-top #g-hd2d-toggle");
     await page.waitForFunction(() => !HD2DField.on() && !HD2DField.transition().busy, null, { timeout: 60000 });
     assert.equal(await page.evaluate(() => !!document.querySelector(".hd2d-field")), false, "关掉拆干净");
     assert.deepEqual(errors, []);

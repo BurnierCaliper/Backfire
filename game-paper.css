@@ -1,0 +1,202 @@
+/* 单机战斗画面的纸片风排版（#339，game-paper.js；和联机玩家的同一套样子，设计在 docs/ui-paper/）
+ * 只在 body.ol-paper.g-paper 时生效：game-paper.js 只在单机的战斗画面开着新画面（3D 战场建好了）时加这两个类；
+ * 新画面关着时的旧画面一条都套不上（每条规则都以 body.ol-paper.g-paper 开头）。
+ * 和联机一样的部分（顶栏胶带、吊牌、左上角队伍、底下技能栏、纸纹、字体……）都在 online-paper.css（那边的规则加了单机 .g-app 的那一份选择器，
+ * 不另写一套），这里只放单机独有的几块：
+ *   · #g-app 不再分顶栏 / 战场 / 右侧栏的格子，战场铺满整个画面
+ *   · 旧顶栏（.g-top）原地变成「工具 ▾」下拉：同一批按钮，分组排好（game-paper.js · GPAPER.tools），平时藏着
+ *   · 战斗记录（#g-log）变成右边的抽屉：平时收成右边缘一个竖标签
+ *   · 悬停预演（.pvbox）、评分（#g-rank）、横幅、回合大字：让开顶栏、抽屉，浮在战场上 */
+
+/* ---------- 战场铺满 ---------- */
+body.ol-paper.g-paper.hotseat-active { padding-top: 0; }   /* 热座栏让开了（内容在顶栏、吊牌上） */
+/* 顶栏胶带、吊牌（#g-paper）压在战场、面板上面，但在单机的弹框下面：问答（.choice）、面板（.sheet）是 50，检定 55，结算 60（game.css）——
+ * 弹框开着时顶栏跟着压暗、点不到，和旧顶栏一样 */
+body.ol-paper.g-paper #g-paper { z-index: 44; }
+body.ol-paper.g-paper .g-app { display: block; position: relative; height: 100vh; height: 100dvh; padding: 0; overflow: hidden; }
+body.ol-paper.g-paper .g-app > .g-field { position: absolute; inset: 0; height: auto; min-height: 0; padding: 0; border: 0; }
+
+/* ---------- 左上角队伍里的「角色资料 / 武器工坊」（game.js 画在队伍栏最后的两个按钮）：和联机的「角色资料 / 武器 / 背包」一样排在名单下面一行 ---------- */
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > :not(.pc-sheet) { grid-column: 1 / -1; }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > .pc-sheet { display: flex; align-items: center; justify-content: center; text-align: center; text-shadow: none; }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > .pc-sheet .n { font: inherit; color: inherit; }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > .pc-sheet .u-econ { display: none; }   /* 「技能 · 数值」这行小字：悬停说明里有 */
+
+/* ---------- 「工具 ▾」下拉：旧顶栏原地变的（同一批按钮、同一个 id、同一个点击处理）。平时藏着，点「工具 ▾」才挂在顶栏右边下面 ---------- */
+body.ol-paper.g-paper .g-app > .g-top { display: none; }
+body.ol-paper.g-paper .g-app > .g-top.gp-open {
+  position: fixed; z-index: 46;   /* 压在抽屉（45）上面、弹框（50）下面 */ top: calc(var(--olp-top) + var(--olp-bar) + 6px); right: calc(var(--olp-edge) + 96px); bottom: auto; left: auto;
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 6px; width: min(450px, calc(100vw - 2 * var(--olp-edge)));
+  height: auto; overflow: visible; padding: 8px 12px 12px; white-space: normal;
+  color: var(--olp-kraft-ink); background: var(--olp-kraft); background-image: none; border: 0; box-shadow: var(--olp-shadow);
+}
+body.ol-paper.g-paper .g-app > .g-top > :is([data-gp-hide], .spacer, [data-pause-open]) { display: none !important; }   /* 字挪到胶带上了；菜单在胶带上 */
+body.ol-paper.g-paper .g-app > .g-top > * { order: var(--gp-last, 99); min-width: 0; }   /* 没分组的（以后顶栏多出来的按钮）排在最后，照样在 */
+body.ol-paper.g-paper .g-app > .g-top > .gp-tools-h {
+  grid-column: 1 / -1; margin: 6px 0 0; padding-bottom: 2px; font: 400 15px/1.2 var(--olp-label); color: var(--olp-kraft-ink);
+  border-bottom: 1.5px dashed color-mix(in srgb, var(--olp-kraft-ink) 40%, transparent);
+}
+body.ol-paper.g-paper .g-app > .g-top > .gp-tools-h:first-of-type { margin-top: 0; }
+body.ol-paper.g-paper .g-app > .g-top > .gp-tools-h[hidden] { display: none !important; }
+/* 带下拉框的（天气、敌人等级、经验）：字和框上下排，框占满格子 */
+body.ol-paper.g-paper .g-app > .g-top > label {
+  --muted: var(--olp-kraft-ink); flex-direction: column; align-items: stretch !important; gap: 2px !important; min-height: 38px; font: 700 12px/1.2 var(--olp-sans);
+}
+body.ol-paper.g-paper .g-app > .g-top select {
+  width: 100%; height: 28px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); border-radius: 2px; box-shadow: 1px 2px 0 rgba(0, 0, 0, .3);
+}
+/* 按钮本身的样子（米白卡片）和联机「工具 ▾」里的同一份（online-paper.css）；灰着的照旧点不了，还是米白卡片、只是淡一点
+ * （底色、描边写全：旧皮肤的天气规则给灰按钮的那一条权重比上面那份高，见下面「天气换色不串」） */
+body.ol-paper.g-paper .g-app > .g-top .g-btn:disabled {
+  opacity: .5; cursor: default; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3);
+}
+body.ol-paper.g-paper .g-app > .g-top a.g-btn { display: flex; align-items: center; justify-content: center; text-decoration: none; }
+
+/* ---------- 右边：战斗记录的抽屉（#g-log）——平时只剩右边缘一个竖标签「战斗记录」；拉出来是一长条收据 ---------- */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer {
+  position: fixed; z-index: 45; top: calc(var(--olp-under) + 30px); right: var(--olp-edge); bottom: auto; left: auto;
+  display: flex; flex-direction: column; width: min(340px, calc(100vw - 2 * var(--olp-edge)));
+  /* 让开底下的技能栏（--olp-dock-h：game-paper.js 量的实际高度，技能多了换行变高也跟着让） */
+  height: min(560px, calc(100vh - var(--olp-under) - 30px - var(--olp-dock-h, 210px) - 24px)); min-height: 200px; overflow: visible; transform: none; transition: none;
+  color: var(--olp-receipt-ink); background: var(--olp-receipt); background-image: none; border: 0; box-shadow: var(--olp-shadow);
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > :not(.gp-drawer-tab, .olp-ply) { position: relative; z-index: 1; }   /* 影子层 .olp-ply（#321）照 online-paper.css 压在纸下面 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs { min-height: 0; }
+/* 抽屉上的标签：收着时是竖着的「战斗记录」（有联机小队的新消息时盖红章数字）；拉开时是纸上边探出来的一张小标签「收起 ▸」 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-drawer-tab {
+  position: absolute; z-index: 2; right: 10px; top: -30px; height: 32px; padding: 3px 14px 7px; cursor: pointer;
+  font: 400 17px/1.2 var(--olp-label); color: var(--olp-kraft-ink); background: var(--olp-kraft); border: 0;
+  box-shadow: 1px -1px 3px rgba(0, 0, 0, .35); clip-path: polygon(5% 0, 95% 4%, 100% 100%, 0 100%);
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-drawer-tab:focus-visible { outline: 2px solid var(--olp-stamp); outline-offset: 2px; }
+body.ol-paper.g-paper .g-app > .g-log .gp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed {
+  top: 36%; right: 0; width: 40px; height: auto; min-height: 0; color: var(--olp-kraft-ink); background: var(--olp-kraft); box-shadow: var(--olp-shadow);
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > :not(.gp-drawer-tab, .olp-ply) { display: none !important; }   /* 纸片的影子层（#321）：收着时也留着 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > .gp-drawer-tab {
+  position: relative; top: auto; right: auto; display: block; width: 100%; height: auto; min-height: 150px; padding: 14px 0 40px; clip-path: none; box-shadow: none;
+  writing-mode: vertical-rl; font-size: 21px; letter-spacing: 3px; background: transparent;
+  text-shadow: 0 1px 0 color-mix(in srgb, var(--olp-kraft) 60%, #fff);
+}
+body.ol-paper.g-paper .g-app > .g-log .gp-drawer-dot {
+  position: absolute; bottom: 8px; right: 50%; min-width: 26px; padding: 2px 5px; transform: translateX(50%) rotate(-8deg); writing-mode: horizontal-tb;
+  font: 400 15px/1.1 var(--olp-stencil); letter-spacing: 0; text-align: center; text-shadow: none; color: var(--olp-stamp);
+  background: color-mix(in srgb, var(--olp-stamp) 8%, transparent); border: 2.5px solid var(--olp-stamp); border-radius: 4px;
+  -webkit-mask-image: var(--olp-grit, none); mask-image: var(--olp-grit, none); -webkit-mask-size: 120px; mask-size: 120px;
+}
+body.ol-paper.g-paper .g-app > .g-log .gp-drawer-dot[hidden] { display: none; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .log-tools {
+  justify-content: center; padding: 4px 16px 8px; color: var(--olp-receipt-ink); background: transparent; border: 0;
+  border-bottom: 1.5px dashed color-mix(in srgb, var(--olp-receipt-ink) 32%, transparent);
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .log-tools > span { display: none; }   /* 「战斗记录」几个字挪到收据顶上（.gp-rc-head）了 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .log-tools > .mobile-only { display: none !important; }   /* 手机上原来的「收起」：抽屉自己的标签收 */
+/* 复制本回合 / 复制全部：贴在收据上的两张牛皮纸小标签 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .log-tools .g-btn {
+  height: auto; min-height: 28px; padding: 2px 10px; font: 400 14px/1.2 var(--olp-label); color: var(--olp-kraft-ink); background: var(--olp-kraft);
+  border: 0; border-radius: 2px; box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); text-shadow: none; animation: none;
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed)::after { right: 96px; }   /* 贴着抽屉的那条胶带（online-paper.css）让开「收起 ▸」标签 */
+
+/* ---------- 战斗记录 = 一长条热敏收据（和联机的收据同一个样子：online-paper.css 的 .ol-side-log；顶上的字、一排等号在 paper-ui.js · BASE.receipt，game-paper.js 画 .gp-rc-head）----------
+ * 单机的记录是 game.js 画的一张张卡片（.lg：标题 .t、每行 .s、计算过程 details），结构不动（复制本回合 / 复制全部照旧读规则层的纯文字），只换样子：
+ * 打印体、每条之间虚线、「回合 / 阶段」那一句（.lg.phase）写成居中的「*** … ***」（和联机收据的「*** 第 N 回合 ***」一样）、本行动合计上面一排虚线、靠右加粗；
+ * 热敏纸是单色的：属性颜色的数字（app.js · colorizeLogLine 的 .dmg-*）改成收据的墨色加粗，名字我方青、敌人红（和吊牌、红章同一套变量）。
+ * 白天白纸、夜里黑纸、天气改色调都是变量（--olp-receipt*）跟着走 */
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-rc-head { flex: none; padding: 16px 20px 4px; text-align: center; font: 13.5px/1.4 var(--olp-mono); color: var(--olp-receipt-ink); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-rc-head b { display: block; font: 700 17px/1.3 var(--olp-mono); letter-spacing: 4px; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-rc-head span { display: block; font-size: 12px; color: var(--olp-receipt-muted); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .gp-rc-head i {
+  display: block; overflow: hidden; margin-top: 6px; white-space: nowrap; font-style: normal; letter-spacing: 1px; line-height: 1.2; color: var(--olp-receipt-muted);
+}
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs { padding: 8px 20px 34px; font: 13.5px/1.55 var(--olp-mono); color: var(--olp-receipt-ink); font-variant-numeric: tabular-nums; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg { padding: 5px 0; border: 0; border-bottom: 1px dashed color-mix(in srgb, var(--olp-receipt-ink) 32%, transparent); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg :is(.t, .s, summary, pre) { font-family: var(--olp-mono); color: var(--olp-receipt-ink); text-shadow: none; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .t { font-size: 13.5px; font-weight: 900; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .s { font-size: 12.5px; line-height: 1.5; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .s.hit { font-weight: 700; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg :is(.s.cost, summary, pre) { color: var(--olp-receipt-muted); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .s.warn { color: var(--olp-stamp); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .s.sum { text-align: right; font-weight: 900; border-top: 1px dashed color-mix(in srgb, var(--olp-receipt-ink) 45%, transparent); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .t .who.player { color: var(--olp-turn); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg .t .who.enemy { color: var(--olp-stamp); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg [class*="dmg-"] { color: inherit; font-weight: 900; text-shadow: none; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg.phase { padding: 8px 0 2px; border-bottom: 0; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg.phase .t { text-align: center; font-weight: 400; letter-spacing: 1px; color: var(--olp-receipt-muted); }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg.phase .t::before { content: "*** "; }
+body.ol-paper.g-paper .g-app > .g-log.gp-drawer > .logs > .lg.phase .t::after { content: " ***"; }
+
+/* ---------- 选目标时的按钮条（game.js · showPickBar：「不选」「不切换」「放弃（Esc）」……，在技能栏里技能那一排上面；技能栏收起时也露着）：
+ * 米白卡片的小按钮（和吊牌下面的「延后 / 换位」同一个样子），「放弃」是红章色；「或者：」是纸上的淡字 ---------- */
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar { margin: 2px 0 8px; gap: 8px; }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar::before { font: 400 15px/1.2 var(--olp-label); color: var(--olp-muted); }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn {
+  height: auto; min-height: 32px; padding: 3px 12px; font: 700 13px/1.2 var(--olp-sans); color: var(--olp-paper-ink); background: var(--olp-card);
+  border: 1.5px solid rgba(0, 0, 0, .4); border-radius: 2px; box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); text-shadow: none; animation: none; cursor: pointer;
+}
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn:hover { background: color-mix(in srgb, var(--olp-card) 80%, var(--olp-ring)); }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn small { color: var(--olp-muted); }
+body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn.danger { color: var(--olp-stamp); border-color: var(--olp-stamp); }
+
+/* ---------- 天气换色不串（第 3 步）----------
+ * 旧皮肤按 #g-app[data-weather] 给顶栏、技能栏、记录栏、预演框和里面的按钮 / 字换的底色、渐变、描边、呼吸发光、沙雾那一层（game.css、weather-fx.css），
+ * 纸片画面里一条都不该套上：纸片的天气色调只有一份（paper-ui.js · BASE.weathers：--olp-* 变量、纸纹上的沙粒 / 水渍 / 霜 / 雾）。
+ * 纸片自己写了的（底色、字色）多数本来就比旧皮肤的天气规则权重高；下面把剩下的压回去：旧皮肤天气规则会动、纸片又没写的那几样，
+ * 和权重比纸片高的那几条（灰着的按钮、技能：旧皮肤的天气规则是 .g-app[data-weather] :is(.sk[disabled]:not(.ob-wait):hover, …)）。
+ * 关着纸片画面时一条都套不上，旧皮肤的天气样子照旧（tests/game-paper-ui.test.js 拿掉 data-weather 前后逐项对比） */
+body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-hud, .g-log, .pvbox, .g-btn, .endturn, .summonbtn, .sk, .pc) { animation: none; }   /* 微光的呼吸发光 */
+body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-hud, .g-log) { --muted: inherit; --faint: inherit; --gold: inherit; }   /* 酷暑 / 微光改的字色变量 */
+body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-hud, .g-log, .pvbox)::before { filter: none; clip-path: none; animation: none; }   /* 沙暴的沙雾那一层（纸纹也挂在 ::before 上） */
+body.ol-paper.g-paper .g-app[data-weather] :is(.g-top, .g-log, .pvbox):not([data-olp-tex])::before { content: none; background: none; }
+/* 贴了纸纹的按钮、技能：底下不再垫旧皮肤的底图（天气的渐变、旧皮肤的噪点；纸纹盖不住撕边那一圈）——纸板按钮的底图就是纸纹，不算 */
+body.ol-paper.g-paper .g-app [data-olp-tex]:not(.summonbtn, .endturn) { background-image: none !important; }
+/* 灰着的技能照旧淡到 .4（和 game.css 的 .sk[disabled] 一样），名字、消耗的字不换色（和 online-paper.css 里没灰的一样：纸上的深色字；「工具 ▾」里灰着的按钮在上面「工具 ▾」那一段） */
+body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) { opacity: .4; border-style: none; }
+body.ol-paper.g-paper .g-app[data-weather] > .g-hud.hd2d-shell .skills .sk[disabled]:not(.ob-wait) :is(.nm, .key, .cost) { color: var(--olp-kraft-ink); }
+/* 预演框：每一行是纸上的字（旧皮肤天气给 .pvbox .ln 换的颜色不要）；不能用的原因是红章色 */
+body.ol-paper.g-paper .g-app > .pvbox.live .ln { color: inherit; }
+body.ol-paper.g-paper .g-app > .pvbox.live .ln.pv-why { color: var(--olp-stamp); }
+
+/* ---------- 热座栏：行动顺序、提示挪到吊牌上了（online-paper.css 把整条藏起来）；一台电脑上的热座（没联网）那一条还有「当前操作员」「分配角色」，
+ * 那一条有能点的东西时照旧留着（同一个 #hs-bar，hotseat-ui.js 照旧画、照旧接点击），缩成一张牛皮纸条贴在左下角技能栏上面；
+ * 联机房主的那一条只有字（模式、阶段：胶带上都有了），照旧藏 ---------- */
+body.ol-paper.g-paper #hotseat-root:has(> #hs-bar :is(select, button)) {
+  display: block !important; position: fixed; z-index: 43; top: auto; right: auto; left: var(--olp-edge); bottom: calc(var(--olp-dock-h, 200px) + 18px);
+  max-width: calc(100vw - 2 * var(--olp-edge)); color: var(--olp-kraft-ink); background: var(--olp-kraft); border: 0; box-shadow: var(--olp-shadow);
+}
+body.ol-paper.g-paper #hotseat-root > :is(#hs-order, #hs-notice) { display: none !important; }
+body.ol-paper.g-paper #hs-bar { min-height: 0; padding: 6px 10px; gap: 8px; }
+body.ol-paper.g-paper #hs-bar :is(label, .hs-phase) { color: var(--olp-muted); }
+body.ol-paper.g-paper #hs-bar .hs-tag { font-size: 18px; }
+body.ol-paper.g-paper #hs-bar select { min-height: 32px; padding: 3px 6px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); }
+body.ol-paper.g-paper #hs-bar .hs-button { min-height: 32px; padding: 3px 10px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); }
+
+/* ---------- 浮在战场上的：悬停预演只在预演时出来（挂在技能栏右上方）；评分、横幅、回合大字让开顶栏和抽屉 ---------- */
+body.ol-paper.g-paper .g-app > .pvbox { display: none; }
+body.ol-paper.g-paper .g-app > .pvbox.live {
+  display: block; position: fixed; z-index: 28; right: calc(var(--olp-edge) + 48px); bottom: calc(var(--olp-dock-h, 200px) + 18px); left: auto; top: auto;
+  width: min(340px, calc(100vw - 2 * var(--olp-edge))); max-height: 34vh; min-height: 0; overflow-y: auto; pointer-events: none; padding: 10px 14px;
+  color: var(--olp-paper-ink); background: var(--olp-card); background-image: none; border: 0; box-shadow: var(--olp-shadow);
+}
+body.ol-paper.g-paper .g-app > .pvbox.live :is(h4, .ln.key) { color: var(--olp-paper-ink); text-shadow: none; }
+body.ol-paper.g-paper .g-rank { top: calc(var(--olp-under) + 4px); right: calc(var(--olp-edge) + 52px); bottom: auto; }
+body.ol-paper.g-paper.gp-drawer-open .g-rank { right: calc(var(--olp-edge) + min(340px, calc(100vw - 2 * var(--olp-edge))) + 18px); }
+body.ol-paper.g-paper .banner { top: calc(var(--olp-under) + 52px); left: 50%; transform: translateX(-50%); }
+body.ol-paper.g-paper .phase-card { left: 0; right: 0; }
+
+/* ---------- 手机竖屏：下拉排两列、占满宽；抽屉收着时竖标签挂在技能栏上面，拉出来盖满屏幕（和联机一样） ---------- */
+@media (max-width: 760px) {
+  body.ol-paper.g-paper .g-app > .g-top.gp-open { right: var(--olp-edge); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed { top: auto; bottom: calc(var(--olp-dock-h, 190px) + 12px); }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer.gp-collapsed > .gp-drawer-tab { min-height: 120px; font-size: 18px; letter-spacing: 2px; }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed) { z-index: 60; inset: 0; width: auto; height: auto; min-height: 0; padding-top: 44px; }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed) > .gp-drawer-tab { top: 6px; right: 8px; min-width: 56px; }
+  body.ol-paper.g-paper .g-app > .pvbox.live { left: 8px; right: 8px; width: auto; }
+  body.ol-paper.g-paper .g-rank { top: var(--olp-under); left: auto; right: 52px; }
+  body.ol-paper.g-paper #g-field > .g-topstack { top: 2px; }   /* game.css 手机上让开评分横栏的那一截不要了（让开吊牌的在 online-paper.css） */
+}
+@media (prefers-reduced-motion: reduce) {
+  body.ol-paper.g-paper .g-app > :is(.g-top, .g-log) { transition: none !important; animation: none !important; }
+}

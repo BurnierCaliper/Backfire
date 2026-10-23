@@ -1,6 +1,7 @@
 /* Antlerscale: Backfire · 七种属性的图标（画法同 art/style-guide.html 的贴纸图标）
  * Icons.element(el) → 一段内联 SVG：底下一层粗描边（颜色 --eo，默认白），上面一层属性色（currentColor）。
- * 伤害数字前面用（game.js · popup / 预览牌）。Icons.weather(w)：顶栏的天气图标。 */
+ * 伤害数字前面用（game.js · popup / 预览牌）。Icons.element(el, { rim: false })：不画底下那层白描边，只留属性色（新画面的技能按钮，#317）。
+ * Icons.weather(w)：顶栏的天气图标。 */
 (function (root) {
   "use strict";
   const GLYPH = {
@@ -32,11 +33,12 @@
   }
   const NAME = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
 
-  /** 属性图标的 SVG 字符串；不认识的属性返回空串 */
-  function element(el) {
+  /** 属性图标的 SVG 字符串；不认识的属性返回空串。o.rim = false：不画底下那层白描边（.o），只留属性色那一层（.c） */
+  function element(el, o) {
     const g = GLYPH[el];
     if (!g) return "";
-    return `<svg class="eicon" viewBox="0 0 48 48" aria-label="${NAME[el]}" role="img"><g class="o">${g}</g><g class="c">${g}</g></svg>`;
+    const rim = !(o && o.rim === false);
+    return `<svg class="eicon" viewBox="0 0 48 48" aria-label="${NAME[el]}" role="img">${rim ? `<g class="o">${g}</g>` : ""}<g class="c">${g}</g></svg>`;
   }
 
   /* 昼夜图标：太阳 / 月亮（同样的粗线画法） */

@@ -192,6 +192,23 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 .g-gap.gap-wall { background: #c9b8a8; color: #4a3a2c; }
 .g-gap.gap-door { background: #cfd6c8; color: #3d4a36; }
 .g-gap.gap-void { background: #1c1c1c; color: #c8c8c8; }
+/* 驻波墙（Helumica「频域造物」）：不挡移动的一道波纹。降幅偏冷、增幅偏暖，描边是它过滤的属性的颜色 */
+.g-gap.gap-wave {
+  --wave-el: var(--harmonic);
+  background: repeating-linear-gradient(0deg, #e6def3 0 5px, #d3c6ea 5px 10px);
+  color: #3b2f52;
+  box-shadow: inset 0 0 0 2px var(--wave-el);
+}
+.g-gap.gap-wave.wave-amplify { background: repeating-linear-gradient(0deg, #f7e8cb 0 5px, #ebd09c 5px 10px); color: #5a3f12; }
+.g-gap.gap-wave .gap-lab b { font-weight: 700; margin-top: 4px; color: var(--wave-el); filter: brightness(.8); }
+.g-gap.gap-wave.horiz .gap-lab b { margin: 0 0 0 4px; }
+.g-gap.gap-wave.el-fire { --wave-el: var(--fire); }
+.g-gap.gap-wave.el-acid { --wave-el: var(--acid); }
+.g-gap.gap-wave.el-electric { --wave-el: var(--electric); }
+.g-gap.gap-wave.el-ice { --wave-el: var(--icee); }
+.g-gap.gap-wave.el-energy { --wave-el: var(--energy); }
+.g-gap.gap-wave.el-physical { --wave-el: var(--physical); }
+.g-gap.gap-wave.el-harmonic { --wave-el: var(--harmonic); }
 .g-gap.is-targetable { outline: 2px dashed #8a6a32; cursor: pointer; }
 .grp {
   flex-shrink: 0;
@@ -1485,7 +1502,7 @@ details.smith { margin: 0 0 10px; border: 1px solid var(--line, #3a3a3a); border
 details.smith > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 4px 0; }
 details.smith .sm-lore { margin: 4px 0 10px; font-size: 12px; color: var(--muted); line-height: 1.6; }
 details.smith .sm-price { color: var(--gold); }
-details.smith .sm-prog { margin-left: auto; font-size: 12px; color: var(--muted); }
+details.smith .sm-prog { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
 details.smith .sm-prog.ready { color: var(--gold); font-weight: 600; }
 .bp-row { margin: 0 0 10px; }
 .bp-row .s-name small { display: block; }

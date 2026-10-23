@@ -39,7 +39,7 @@ test("在任务板上找工匠升级；不在场的工匠不能用", () => {
   assert.throws(() => R.upgradeWeapon(run, "torque", absent));
 });
 
-test("同一位工匠升级满 5 次才能领图纸，只能领一次", () => {
+test("同一位工匠升级满 5 次才能领图纸；领完计数归零，不能马上再领", () => {
   const { R, run } = atBoard("SM2");
   const id = run.smiths[0];
   if (R.smithInfo(run, id).needsIntro) R.introduceSmith(run, id);

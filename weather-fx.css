@@ -150,12 +150,12 @@
 .g-app[data-weather="heat"] :is(.pvbox h4, .lg .t, .hint b, .g-round) { color: #1c0604; }
 .g-app[data-weather="heat"] :is(.pc, .sk, .g-btn, .g-top select, .endturn) { background: #e8685a; border-color: #5e1210; color: #1c0604; }
 .g-app[data-weather="heat"] :is(.pc.on, .sk.armed, .sk:hover, .g-btn:hover) { background: #d8564a; border-color: #3e0606; }
-.g-app[data-weather="heat"] :is(.sk[disabled], .sk[disabled]:hover, .pc.off, .g-btn:disabled) { opacity: 1; background: #f5b3a8; border-color: #9a4a44; border-style: dashed; color: #5a1a16; }
+.g-app[data-weather="heat"] :is(.sk[disabled]:not(.ob-wait), .sk[disabled]:not(.ob-wait):hover, .pc.off, .g-btn:disabled) { opacity: 1; background: #f5b3a8; border-color: #9a4a44; border-style: dashed; color: #5a1a16; }
 .g-app[data-weather="heat"] :is(.g-top, .g-hud, .g-log) { --muted: #4a1610; --faint: #5a1a16; --gold: #661202; }
 .g-app[data-weather="heat"] .sk .cost .ap { color: #061e4a; }
 .g-app[data-weather="heat"] .sk .cost .bn { color: #540a04; }
 .g-app[data-weather="heat"] .pc-armory .n span { color: #540804; }
-.g-app[data-weather="heat"] :is(.sk[disabled], .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #5a1a16; }
+.g-app[data-weather="heat"] :is(.sk[disabled]:not(.ob-wait), .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #5a1a16; }
 .wfx-heat { background: linear-gradient(0deg, rgba(255, 80, 64, .24), rgba(255, 110, 96, .08) 40%, transparent 70%);
   -webkit-mask-image: linear-gradient(0deg, #000 0%, rgba(0,0,0,.75) 35%, rgba(0,0,0,.2) 70%, transparent 95%);
           mask-image: linear-gradient(0deg, #000 0%, rgba(0,0,0,.75) 35%, rgba(0,0,0,.2) 70%, transparent 95%); }
@@ -200,8 +200,8 @@
 .g-app[data-weather="glow"] :is(.pvbox h4, .lg .t, .hint b, .g-round) { color: #0c1428; text-shadow: none; }
 .g-app[data-weather="glow"] :is(.pc, .sk, .g-btn, .g-top select, .endturn) { background: linear-gradient(100deg, #6fd8e2, #ec8ccc); border-color: #1e5a78; color: #14203a; }
 .g-app[data-weather="glow"] :is(.pc.on, .sk.armed, .sk:hover, .g-btn:hover) { background: linear-gradient(100deg, #f49ad4, #e47cc4); border-color: #5a1048; color: #2a1030; box-shadow: 0 0 8px rgba(240, 112, 200, .55); }
-.g-app[data-weather="glow"] :is(.sk[disabled], .sk[disabled]:hover, .pc.off, .g-btn:disabled) { opacity: 1; background: linear-gradient(100deg, #c8eef0, #f4d2ea); border-color: #6a7a9a; border-style: dashed; color: #2e3a58; box-shadow: none; }
-.g-app[data-weather="glow"] :is(.sk[disabled], .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #2e3a58; }
+.g-app[data-weather="glow"] :is(.sk[disabled]:not(.ob-wait), .sk[disabled]:not(.ob-wait):hover, .pc.off, .g-btn:disabled) { opacity: 1; background: linear-gradient(100deg, #c8eef0, #f4d2ea); border-color: #6a7a9a; border-style: dashed; color: #2e3a58; box-shadow: none; }
+.g-app[data-weather="glow"] :is(.sk[disabled]:not(.ob-wait), .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #2e3a58; }
 .g-app[data-weather="glow"] .sk .cost .ap { color: #0a2a6a; }
 .g-app[data-weather="glow"] .sk .cost .bn { color: #6a0a3a; }
 .g-app[data-weather="glow"] .pc-armory .n span { color: #5a0a3a; }
@@ -241,8 +241,8 @@
 .g-app[data-weather="phase"] :is(.pvbox h4, .lg .t, .hint b, .g-round) { color: #ffffff; text-shadow: none; }
 .g-app[data-weather="phase"] :is(.pc, .sk, .g-btn, .g-top select, .endturn) { background: #7a2c6a; border-color: #e070c8; color: #fff4fd; }
 .g-app[data-weather="phase"] :is(.pc.on, .sk.armed, .sk:hover, .g-btn:hover) { background: #a03c88; border-color: #f8b0dc; color: #ffffff; box-shadow: 0 0 8px rgba(240, 138, 200, .5); }
-.g-app[data-weather="phase"] :is(.sk[disabled], .sk[disabled]:hover, .pc.off, .g-btn:disabled) { opacity: 1; background: #461a3a; border-color: #9c5a88; border-style: dashed; color: #d2b6dc; box-shadow: none; }
-.g-app[data-weather="phase"] :is(.sk[disabled], .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #d2b6dc; }
+.g-app[data-weather="phase"] :is(.sk[disabled]:not(.ob-wait), .sk[disabled]:not(.ob-wait):hover, .pc.off, .g-btn:disabled) { opacity: 1; background: #461a3a; border-color: #9c5a88; border-style: dashed; color: #d2b6dc; box-shadow: none; }
+.g-app[data-weather="phase"] :is(.sk[disabled]:not(.ob-wait), .pc.off, .g-btn:disabled) :is(.nm, .n, .cost, .key, .pc-op, .k, .u-econ) { color: #d2b6dc; }
 .g-app[data-weather="phase"] .sk .cost .ap { color: #a8d8ff; }
 .g-app[data-weather="phase"] .sk .cost .bn { color: #ffb4c8; }
 .g-app[data-weather="phase"] .pc-armory .n span { color: #ffc0dc; }

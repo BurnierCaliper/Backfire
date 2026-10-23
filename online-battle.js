@@ -89,7 +89,17 @@
     if (f.innate) a.push("固有");
     return a.join(" · ");
   }
-  const gapName = (t) => ({ open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙" })[t] || "间隔";
+  const gapName = (t) => ({ open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙", wave: "驻波墙" })[t] || "间隔";
+  /** 驻波墙（频域造物，主机 online-view.js 发来 gap.wave）：「火·降幅」 */
+  const waveTag = (w) => `${ELE_NAME[w && w.el] || "?"}·${w && w.mode === "amplify" ? "增幅" : "降幅"}`;
+  /** 队伍栏 / 技能栏里面换成 html（#317）：hud-patch.js 按 key（data-ob-unit / data-ob-skill）对上，同一个人、同一个技能还是同一个按钮，
+   *  只改变了的（以前每画一遍整块换 innerHTML：新画面一闪一闪，纸片画面的纸纹也跟着重贴）。没加载 hud-patch.js（只加载了一部分脚本的测试页）
+   *  就整块换，内容没变照样不碰 */
+  function patchHtml(node, html, key) {
+    if (!node) return;
+    if (root.HudPatch) { root.HudPatch.html(node, html, { key }); return; }
+    if (node.__hudHtml !== html) { node.innerHTML = html; node.__hudHtml = html; }
+  }
 
   /** 倒计时文字：还剩 N 秒（截止时间是本机的钟，online-game.js · localDeadlines） */
   function tickCountdowns(rootEl) {
@@ -192,9 +202,12 @@
       });
       field.querySelectorAll(".g-gap").forEach(g => {
         const gp = (data.gaps || {})[g.dataset.key] || {};
-        g.className = "g-gap gap-" + (gp.type || "open") + (g.classList.contains("horiz") ? " horiz" : "");
+        const wave = gp.type === "wave" && gp.wave ? gp.wave : null;
+        g.className = "g-gap gap-" + (gp.type || "open") + (wave ? ` wave-${wave.mode === "amplify" ? "amplify" : "dampen"} el-${wave.el || "physical"}` : "") + (g.classList.contains("horiz") ? " horiz" : "");
         const hp = gp.type === "bridge" || gp.type === "wall" ? " " + (gp.hp || 0) : "";
-        g.innerHTML = `<span class="gap-lab">${esc(gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
+        g.innerHTML = wave
+          ? `<span class="gap-lab">${esc(gapName("wave"))}<b>${esc(waveTag(wave))}</b></span>`
+          : `<span class="gap-lab">${esc(gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
       });
     }
 
@@ -255,9 +268,10 @@
         Array.from({ length: Math.max(u.bonusMax || 0, u.bonus || 0) }, (_, k) => `<i class="econ-bonus${k < (u.bonus || 0) ? " on" : ""}"></i>`).join("");
       // 新画面：主职责头像 + 名字 / 等级 /「你」（倒下也写上）+ 身上的效果 + 分层血条
       const member = (u) => SH.member(u, { tag: [mine.has(u.id) ? "你" : "", u.dead ? "倒下" : ""].filter(Boolean).join(" · ") });
-      hud.querySelector(".party").innerHTML = allies.map(u => `<button type="button" class="pc${SH ? " pm" : ""}${u.weaponOf ? " weapon" : ""}${u.dead ? " downed" : ""}${u.id === ui.current ? " on" : ""}${mine.has(u.id) ? " mine" : " off"}" data-ob-unit="${esc(u.id)}" title="${esc(mine.has(u.id) ? "你的角色" : "队友")}">${SH ? member(u) : `
+      // #317：call() 前后各画一遍也不再整块换：同一个人还是同一个按钮，只改变了的
+      patchHtml(hud.querySelector(".party"), allies.map(u => `<button type="button" class="pc${SH ? " pm" : ""}${u.weaponOf ? " weapon" : ""}${u.dead ? " downed" : ""}${u.id === ui.current ? " on" : ""}${mine.has(u.id) ? " mine" : " off"}" data-ob-unit="${esc(u.id)}" title="${esc(mine.has(u.id) ? "你的角色" : "队友")}">${SH ? member(u) : `
         <span class="n"><span>${esc(u.name || u.id)}</span><span class="k">${mine.has(u.id) ? "你" : ""}</span></span><div class="mini"><i style="width:${pct(u)}%"></i></div>
-        <div class="u-econ">${u.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ(u)}${!u.dead && u.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!u.dead && u.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`}</button>`).join("");
+        <div class="u-econ">${u.dead ? '<span style="font-size:11px;color:#9d9081">倒下</span>' : econ(u)}${!u.dead && u.stunned ? '<span style="font-size:11px;color:var(--gold)">失衡</span>' : ""}${!u.dead && u.dying ? '<span style="font-size:11px;color:var(--foe)">濒死</span>' : ""}</div>`}</button>`).join(""), "data-ob-unit");
       const cur = units.find(u => u.id === ui.current);
       const gauge = hud.querySelector(".hi-gauge");
       const gh = cur && mine.has(cur.id) && cur.hud && root.HudIcons ? HudIcons.gauge(cur.hud) : "";
@@ -270,22 +284,25 @@
       const listed = pick ? pick.rest.map(r => r.o) : skills;
       shown = pick ? { skills: listed, summon: pick.summon ? pick.summon.o : null } : null;
       const hints = SH ? SH.hintsOf(cur) : null;
-      hud.querySelector(".skills").innerHTML = listed.map((o, i) => {
+      // #317：同一个技能还是同一个按钮，只改选中、灰掉、原因、费用这些变了的
+      patchHtml(hud.querySelector(".skills"), listed.map((o, i) => {
         const cost = o.cost || costText(o.value);   // 房主算好的消耗优先（online-actions.js · costLabel）
         // 灰掉的技能写明原因（行动点不足 / 没有能用的道具…），鼠标悬停和读屏都能看到
         const why = o.disabled ? (o.reason || "现在不能使用") : ui.busy ? "正在同步，请稍候" : "";
         if (SH) {
           // 新画面：左上角属性、右上角攻击 / 技能、按技能轮流换颜色，数字键写在右下角；灰掉、原因、点击、悬停说明照旧
           const nb = SH.skillButton({ id: o.value, name: o.label, hint: hints[o.value] || "" }, i, cur, { key: i < 9 ? i + 1 : "", cost: o.disabled ? why : cost });
-          return `<button type="button" class="sk ${nb.cls}${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(nb.label + (why && !o.disabled ? "：" + why : ""))}">${nb.html}</button>`;
+          return `<button type="button" class="sk ${nb.cls}${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ui.busy ? " ob-wait" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(nb.label + (why && !o.disabled ? "：" + why : ""))}">${nb.html}</button>`;
         }
-        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
+        return `<button type="button" class="sk${ui.armed === o.value ? " armed" : ""}${o.disabled ? " blocked" : ui.busy ? " ob-wait" : ""}" data-ob-skill="${esc(o.value)}"${o.disabled || ui.busy ? " disabled" : ""}${why ? ` title="${esc(why)}"` : ""} aria-label="${esc(o.label + (why ? "：" + why : ""))}">
           <span class="key">${i < 9 ? i + 1 : ""}</span><span class="nm">${esc(o.label)}</span><span class="cost">${esc(o.disabled ? why : cost)}</span></button>`;
-      }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : "");
+      }).join("") || (ui.acting && mine.has(ui.current) ? '<p class="ol-muted">正在取技能…</p>' : ""), "data-ob-skill");
       paintSummon(shown && shown.summon, cur, ui);
       if (SH) SH.who(hud, ui.acting ? SH.whoHtml(cur, true) : "");   // 技能栏上面那一行：谁在行动（敌人回合空着）
       const end = hud.querySelector(".endturn");
       end.disabled = !(ui.acting && mine.has(ui.current)) || !!ui.busy;
+      // 只是在等主机回话（ui.busy）才灰掉的按钮挂 ob-wait：online.css 的 .ob-wait 让它晚一点才变灰，主机回得快就不闪（#317 追加）
+      end.classList.toggle("ob-wait", !!(ui.busy && ui.acting && mine.has(ui.current)));
       // 提示栏：现在要做什么；分步里的「选项」类选择、可以不选的步骤、取消，放成按钮
       const m = ui.menu;
       let hint = esc(ui.hint || "");
@@ -317,12 +334,16 @@
       const cost = o.cost || (root.SkillText && SkillText.skillCostText ? SkillText.skillCostText(o.value) : "");
       const sb = SH.summonButton({ id: o.value, name: o.label }, cur, { cost: o.disabled ? why : cost, key: isTouch() ? "" : SH.SHELL.summonKey });
       b.type = "button";
-      b.className = "summonbtn" + (sb.back ? " back" : "") + (ui.armed === o.value ? " armed" : "") + (o.disabled ? " blocked" : "");
+      // 变了的才写（#317）
+      const cls = "summonbtn" + (sb.back ? " back" : "") + (ui.armed === o.value ? " armed" : "") + (o.disabled ? " blocked" : ui.busy ? " ob-wait" : "");
+      if (b.className !== cls) b.className = cls;
       b.dataset.obSkill = o.value;
       b.disabled = !!(o.disabled || ui.busy);
-      b.style.setProperty("--el", sb.color || "var(--sk-hazard, #f2c230)");
+      const color = sb.color || "var(--sk-hazard, #f2c230)";
+      if (b.style.getPropertyValue("--el") !== color) b.style.setProperty("--el", color);
       if (summonHtml !== sb.html) { b.innerHTML = sb.html; summonHtml = sb.html; }
-      b.setAttribute("aria-label", sb.label + (why && !o.disabled ? "：" + why : ""));
+      const label = sb.label + (why && !o.disabled ? "：" + why : "");
+      if (b.getAttribute("aria-label") !== label) b.setAttribute("aria-label", label);
       if (why) b.title = why; else b.removeAttribute("title");
     }
 
