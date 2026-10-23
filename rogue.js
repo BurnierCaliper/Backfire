@@ -278,6 +278,7 @@ const Rogue = (function () {
       const weather = rollTaskWeather(run);
       insertChecks(types);
       const cols = buildRoute(types, tpl);   // 放在最后掷：主干、天气和以前完全一样
+      spaceRests(types, cols);               // 按小时补休息点：任何一条路线连续不长休都不超过 REST_GAP_MAX 小时（不掷随机数）
       return {
         weather,
         kind: tpl.kind, name: tpl.name,
@@ -341,6 +342,48 @@ const Rogue = (function () {
       }
       return opts;
     });
+  }
+  /* ---------- 休息点间隔：按小时算 ----------
+   * 一段 = 从任务起点（或上一个休息点）走到下一个休息点（或任务终点）累计的小时：每走一站路程 travel 小时 + 节点本身的小时。
+   * 力竭 20 小时起算，这里留 2 小时余量：任何一条路线上任何一段都不超过 18 小时。 */
+  const REST_GAP_MAX = 18;
+  const nodeHours = (t) => (NODE[t] && NODE[t].hours) || 0;
+  const travelMax = () => Number(C.hours.travel) || 0;   // 按没有向导的最坏情况算
+  /** 普通任务：一列一列往后看，这一列所有分支里最慢的那条，走完后要是连走到休息点都超了，就在这一列前面插一个休息点（单节点列，所有路线必经）。
+   *  只看每列最大值 = 覆盖所有路线的最坏情况。不掷随机数，种子流不变 */
+  function spaceRests(types, cols) {
+    const T = travelMax();
+    let cum = 0;
+    for (let c = 0; c < cols.length; c++) {
+      if (types[c] === "rest") { cum = 0; continue; }
+      const step = (c > 0 ? T : 0) + Math.max(...cols[c].map(nodeHours));
+      const last = c === cols.length - 1;
+      // 走完这一列之后：不是最后一列就还得能走到下一个休息点（+ 路程），最后一列只要不超
+      if (c > 0 && cum + step + (last ? 0 : T) > REST_GAP_MAX) {
+        types.splice(c, 0, "rest");
+        cols.splice(c, 0, ["rest"]);
+        cum = 0;
+        continue;   // 下一轮重新看原来这一列
+      }
+      cum += step;
+    }
+    return cols;
+  }
+  /** 一条路线（每列一组可选节点）上最坏的不长休小时数：检查所有路线（按连线做最大值 DP） */
+  function worstRestGap(cols) {
+    const T = travelMax();
+    let best = cols[0].map(t => (t === "rest" ? 0 : nodeHours(t)));
+    let worst = Math.max(...best);
+    for (let c = 1; c < cols.length; c++) {
+      const nb = cols[c].map(() => -Infinity);
+      routeLinks(cols[c - 1].length, cols[c].length).forEach(([i, j]) => { nb[j] = Math.max(nb[j], best[i]); });
+      best = nb.map((v, j) => {
+        const h = v + T + (cols[c][j] === "rest" ? 0 : nodeHours(cols[c][j]));
+        worst = Math.max(worst, h);
+        return cols[c][j] === "rest" ? 0 : h;
+      });
+    }
+    return worst;
   }
   /** 第 c 列有 k 个节点、第 c+1 列有 m 个：按上下位置比例连线，互不交叉。返回 [[i, j], …] */
   function routeLinks(k, m) {
@@ -1115,6 +1158,15 @@ const Rogue = (function () {
     t.pick = t.pick || [];
     t.pick.push(0);
   }
+  /** 悬赏：从任务起点或上一个休息点到现在（路线上最后一站走完）累计的小时 */
+  function huntHoursSinceRest(t) {
+    let h = 0;
+    for (let i = t.nodes.length - 1; i >= 0; i--) {
+      if (t.nodes[i].type === "rest") return h;
+      h += nodeHours(t.nodes[i].type) + (i > 0 ? travelMax() : 0);
+    }
+    return h;
+  }
   /** 刚走完路线上的最后一站：决定下一站是什么（目标那一战之后就没有了 → 任务完成） */
   function huntNext(run, node, notes) {
     const t = run.task, h = t.hunt;
@@ -1135,7 +1187,17 @@ const Rogue = (function () {
           return { preset, name: "【目标】" + ((p && p.name) || preset) };
         });
         notes.push(h.found >= h.need ? `线索凑齐了：找到了悬赏目标 ${h.target.name}！` : `虽然没问出什么，${h.target.name} 却自己找上门来了！`);
-        pushHuntNode(t, { type: "elite", target: true });
+        // 目标那一战打完就结束：走过去要是会超 REST_GAP_MAX，先插一个休息点
+        if (huntHoursSinceRest(t) + travelMax() + nodeHours("elite") > REST_GAP_MAX) {
+          h.targetAfterRest = true;
+          pushHuntNode(t, { type: "rest" });
+        } else pushHuntNode(t, { type: "elite", target: true });
+        return;
+      }
+      // 下一站 X 之后还要再走一个线索检定，之后还得能走到休息点：最坏情况会超 REST_GAP_MAX 就这一站强制是休息点
+      const T = travelMax(), worstOther = Math.max(...Object.keys(BOUNTY().other).filter(k => k !== "rest").map(nodeHours));
+      if (huntHoursSinceRest(t) + (T + worstOther) + (T + nodeHours("check")) + T > REST_GAP_MAX) {
+        pushHuntNode(t, { type: "rest" });
         return;
       }
       const w = Object.assign({}, BOUNTY().other);
@@ -1143,6 +1205,11 @@ const Rogue = (function () {
       const type = withRng(`${run.seed}:hunt:${run.taskNo}:${t.nodes.length}`, () => pickWeighted(w));
       if (type === "rest") h.restUsed = true;
       pushHuntNode(t, { type });
+      return;
+    }
+    if (h.targetAfterRest) {
+      h.targetAfterRest = false;
+      pushHuntNode(t, { type: "elite", target: true });
       return;
     }
     const ex = h.lastFailProfs || (h.lastFailProf ? [h.lastFailProf] : []);
@@ -3075,7 +3142,7 @@ function advanceDays(run, n) {
     battleSpec, applyPartyToField, finishBattle,
     checkInfo, checkChance, checkOdds, attemptCheck, skipCheck, heroProfs, parleyOptions, parley,
     role2Options, soloBattleInfo,
-    restPlan, restOptions, canLongRest, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
+    restPlan, restOptions, canLongRest, worstRestGap, REST_GAP_MAX, sheetData, armoryData, lowHpWarning, escortInfo, partOffers, buyPart, sellPart, canSellParts, partStock, partSellPrice, partInstallCost, installPart, removePart, restAtNode, leaveNode, canShortRestBefore, canShortRestAtNode, shortRestBeforeNode,
     ambushChance, watchOptions,
     interludeOptions, campStatus: campStatusOf, buy, setSellHooks, shopSellView, sellItem, buybackItem, shopPoints, redeemList, redeem, craftPlace, craftList, craftOdds, craft, knowsRecipe, learnOptions, learnRecipe, rollRecipeChip, salvageList, salvage, setCraftHooks, setCraftJob, craftQueue, craftQueued, bagCounts, inventory, recipeStatus, recipeBook, materialUses, workshopAvailable, craftListGrouped, craftPreview, recipesUsingMaterial, setBagOwnership, bagByCategory, materialBar, cyberSummary, modInstallPreview, matchupChart: (w, o) => matchupChart(w, o), matchupForState: (st, id) => matchupForState(st, id), itemCategory: id => itemCategory(id),  canShop, shopItemName, shopStock, smithOptions, smithCost, upgradeWeapon, repairWeapon, taskPay,
     presentSmiths, smithInfo, claimBlueprint, installBlueprint, blueprintById, weaponModsOf,
