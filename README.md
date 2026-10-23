@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新画面（HD-2D）补上旧画面单位卡的动画：冲撞、受击击退、击倒、换区滑动、登场、格挡、顿帧 / 震屏、区域预警**（主人提，issue #330；hd2d/hd2d-play.js：新增 `HD2DPlay.cards`（3D 白卡的卡片动画），`play` 接上卡片动画 / 被打倒的先留着 / 高能自爆预警 / 震屏；hd2d/hd2d-field.js：新增 `cards` / `ko` / `releaseKOs` / `warn` / `quake` / `still`，`paint` 把被打倒的先留在布局里（`lingering`）、新出现的亮相（`arrivals`）、换区滑多少秒交给场景，`view` / 联机把手的 `view` 带上 `animate`，`play` 交出卡片动画；hd2d/hd2d-fx.js：新增 `FX.card`、`dirOf` / `dashOf` / `knockOf` / `moveSecs` / `slide` / `slideAt`，`cues` 带上 `booms` / `enters`；hd2d/hd2d-scene.js：新增 `placeAt` / `slideTo` / `slideStep`（铭牌的 3D 锚点在两个地台之间插值）、`THREAT` / `syncThreats` / `pulseThreats`（区域预警）、`ZONE_FX` / `zoneFx` / `stepFlashes`（地台闪），`syncPlates` 给倒下的拿掉影子；hd2d/hd2d-layout.js：新增 `threatsOf`，区带上 `threats`；hd2d/hd2d.css：冲撞中的铭牌压在最上面、倒下的白卡不接鼠标、预警字；game.js：新增 `cards3d` / `noQuake3d`，`dashTo` / `lunge` / `recoil` / `nudgeCard` / `flashClass` / `hit` / `shakeField` / `releaseKOs` / `setView` / `playTape` 接上新画面；online-ui.js：`paintField3d` 播包时 `view({ animate })`；测试：新增 tests/hd2d-card-fx.test.js，tests/hd2d-field.test.js / tests/hd2d-field-fx.test.js 跟着改了接线的断言。场景包（hd2d/hd2d-scene.bundle.js）要重新打：`npm run build:hd2d`）
+  - **以前**：新画面（#316 起默认开）的 3D 铭牌就是旧画面的白卡，但旧画面卡片上的动画一样都没有：近身攻击不冲撞、受击不闪不退、被打倒的敌人快照一变倒下就从 3D 战场上消失（红叉画在空地上）、换区直接跳过去、召唤 / 援军 / 伙伴登场不亮相、格挡只有火花没有卡片一闪、高能自爆没有预警、地台上看不到敌人标定的范围攻击；联机玩家的新画面近身不冲、支援不拉线、协助格挡不冲上去挡、高能自爆不震屏；新画面开着时系统开了减少动态效果照样大震（高能自爆跳过了也震）。
+  - **现在**：旧画面卡片上的那一套原样套在 3D 白卡上（同一份 game.css 样式，数照 game.js / game.css 现有的，放在 hd2d-fx.js 的 `FX.card`）：
+    - **冲撞**：近身攻击先背着目标往后一收 12 像素、再朝目标那张卡扑 92 像素（heavy 112），停一下回位；冲过去就消失的（keep）停住；没挑出招式的出手、协助格挡冲一下 26 像素；远程后坐、专属演出挪一下、临时样式（发抖、被打飞……）也有。方向按屏幕投影（朝目标那张卡），位移按卡片这一刻的缩放换回卡片像素；冲撞中的铭牌压在别的铭牌上面。
+    - **受击**：卡片闪一下属性色（`.hit`），有出手的人时顺着挨打的方向被打退（`.knock`，11 像素，大伤害 17）。
+    - **击倒**：被打倒的敌人先留在 3D 战场上（白卡画倒下的样子 + `.ko-held`），这一段演完再照 game.css 的 `.unit-wrap.dead` 淡出（0.5 + 1.2 秒，一记重击打死的 1.4 + 2.4 秒），已经不在画面数据里的快点淡掉（`.gone` 0.45 秒），淡完才拿掉；倒下的白卡不接鼠标、脚下的影子拿掉。
+    - **换区移动**：铭牌的 3D 锚点在两个地台之间滑过去（0.75 秒 × 演出倍率：2× 快一半、借机攻击的慢放跟着慢），后排抬高跟着慢慢变，镜头不动；借机攻击时被追打的卡压暗（`.slow-move`）。开新一场、撤销、窗口变了这些不是演出中的刷新照旧直接摆过去。
+    - **登场**：伙伴登场、演出中新出现的召唤 / 援军亮个相（`.enter`）。
+    - **格挡**：挡下来的那张卡一闪（`.parry`）；联机玩家的新画面也有协助格挡冲上去挡、火花在两人中间。
+    - **顿帧 / 震屏**：3D 战场（画布 + 铭牌）就在 `#g-field` 里，`.quake` / `.quake-s` / `.hitstop` 一起震、一起变色，顿帧中 3D 白卡的受击跟着放慢；联机玩家的新画面高能自爆也震屏。
+    - **区域预警 / 高能自爆预警**：敌人标定、之后回合才落地的范围攻击（投影里的 `zoneView.threats`），地台上一圈红框（下一回合就落地的换亮红、一明一暗）+ 前沿一块预警字（和旧画面区角上的 `.zthreat` 一样）；高能自爆前白卡闪两下（`.high-warn`），脚下的地台跟着闪薄荷色。
+    - 单机（game.js 每一处旧卡动画旁边都叫新画面，旧卡照旧）和联机玩家（hd2d-play.js 播收到的包）一样；跳过、演出倍率 0、系统开了减少动态效果时都不演（被打倒的照以前马上拿掉、换区直接摆过去、新画面开着时不震屏、预警框不闪）。只用投影过的数据（白卡快照、区域预警都过 online-view.js 的白名单），不显示坚毅生命。新画面关着时旧画面一点不变。
 - **新的战斗计分：「克制大师」；B 及以上的分数线 ×1.15**（app.js · SCORE_COUNTER_MASTER、SCORE_HIGH_LINE_MULT、noteCounterAttack、counterMasterInfo、applyFinishBonus、gradeLines；game.js 结算画面 / 战斗统计；game.html 评价说明；测试 tests/counter-master.test.js）
   - **以前**：评价只看分数；分数线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000（和本场基准分混合），没有奖励克制或借天气的打法。
   - **现在**：统计我方主动发起的攻击（一次行动打几下、打几个人都算一次；协助攻击、借机 / 反击、持续伤害、连带伤害、环境不算），其中有克制或吃到天气增益（任一即可）的占一半及以上、且至少 1 次攻击时，胜利结算在速杀 / 无伤 / 遭遇战之后整场分数再 ×1.5，结算画面写「克制大师」。不管有没有达成，B / A / S / SS / SSS 的分数线都 ×1.15（向上取整到 10），C 线不变。

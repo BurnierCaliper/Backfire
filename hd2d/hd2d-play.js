@@ -205,9 +205,10 @@
       // 高能自爆（game.js · playTape 的 highboom）：卡片闪两下预警（脚下的地台跟着闪），再炸——震屏、卡片受击、弹「高能自爆」
       for (const id of cue.booms) {
         if (me.skipped) break;
-        if (warn) warn(id, true);
-        await wait(AttackFx.after(F.FX.card.warn.ms + F.FX.card.warn.gap));
-        if (warn) warn(id, false);
+        if (warn && warn(id, true)) {                   // 预警闪了才等（原型页没有白卡、跳过、减少动态效果：不闪也不等）
+          await wait(AttackFx.after(F.FX.card.warn.ms + F.FX.card.warn.gap));
+          warn(id, false);
+        }
         if (me.skipped) break;
         if (typeof opts.quake === "function") opts.quake(1);
         const r = ad.rectOf(id);

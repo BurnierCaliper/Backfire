@@ -1376,7 +1376,7 @@
   /** 一段演出放完：留着的被打倒的敌人开始淡出，红叉跟着一起淡（卡片的淡出见 game.css · .unit-wrap.dead） */
   function releaseKOs() {
     // 新画面（#330）：3D 战场上留着的也开始淡出（hd2d-field.js 自己摘 3D 白卡的 .ko-held，淡完拿掉）
-    if (window.HD2DField && typeof HD2DField.releaseKOs === "function") HD2DField.releaseKOs();
+    if (field3d() && typeof HD2DField.releaseKOs === "function") HD2DField.releaseKOs();
     document.querySelectorAll(".unit-wrap.ko-held").forEach(w => w.classList.remove("ko-held"));
     G.koHandles.forEach(k => (k.slow ? k.h.release(2400, 1400) : k.h.release(1200, 500)));
     G.koHandles = [];
