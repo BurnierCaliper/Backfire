@@ -6179,6 +6179,20 @@ function convertRasLight(pct, bonusRate) {
   return gain;
 }
 
+/* 柯尔特「过度自信」的满血减伤（koltPrideCut）：cut 受到的伤害减几成，plusCut 过度自信+（被动强化 2）减几成 */
+const KOLT_PRIDE = { cut: 0.25, plusCut: 0.45 };
+/** 过度自信的满血减伤现在生不生效。dealTo 结算、暴虐猎手的斩杀预判（enemies.js · ratExecFlags）和角色仪表（hud-icons.js · gaugeState）用这同一个判断——
+ *  以前仪表自己按「现有血量 ≥ 现在的血量上限」算：上限被临时护盾 / 临时层抬高时明明在减伤却写「未满血」，被动被图纸放弃时照样亮（作者 10/20 反馈）。
+ *  生效：被动开着、不在起身中（靠坚毅生命）、现有血量 ≥ 进入战斗时的血量上限（prideMaxHp；中途上场还没记下的按现在不含临时部分的上限）。
+ *  返回减伤比例：0 = 不生效，否则 KOLT_PRIDE.cut / plusCut */
+function koltPrideCut(u) {
+  if (!u || u.kit !== "kolt" || u.dead || u.upOnShp) return 0;
+  if (typeof passiveOn === "function" && !passiveOn(u)) return 0;
+  const mx = Number(u.prideMaxHp != null ? u.prideMaxHp : baseMaxHp(u)) || 0;
+  if (!(mx > 0) || totalCurHp(u) < mx) return 0;
+  return typeof passivePlus === "function" && passivePlus(u, 2) ? KOLT_PRIDE.plusCut : KOLT_PRIDE.cut;
+}
+
 /* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
  *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
  *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
@@ -8499,11 +8513,10 @@ function dealToInner(attacker, target, opt) {
   }
   // 过度自信：现有血量 ≥ 进入战斗时的血量上限即减伤（并少受 1 击破）。战斗中上限被抬高也照原来的上限算，
   // 所以靠临时层、护盾把血量堆过原来的上限就会触发
-  if (target && target.kit === "kolt" && flags.action && !target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
-    const cur = totalCurHp(target);
+  if (target && target.kit === "kolt" && flags.action) {
     if (target.prideMaxHp == null) target.prideMaxHp = baseMaxHp(target);   // 中途上场的：第一次挨打时记下
-    const mx = Number(target.prideMaxHp) || 0;
-    if (mx > 0 && cur >= mx) flags.prideReduce = typeof passivePlus === "function" && passivePlus(target, 2) ? 0.45 : true;   // 过度自信+：45%
+    const cut = koltPrideCut(target);   // 和角色仪表同一个判断
+    if (cut) flags.prideReduce = cut;   // 过度自信+：45%
   }
   if (attacker && (attacker.kit === "helu" || attacker.kit === "ecmo") && target && target.focuses && target.focuses.length) {
     flags.focusLayer = pickFocusLayer(target);

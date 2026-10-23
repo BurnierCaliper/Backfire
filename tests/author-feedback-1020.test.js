@@ -97,3 +97,66 @@ test("联机跑团：战斗模板里「Lv随队」的敌人、援军、配置物
   assert.deepEqual(enc.waves[0].enemies.map(e => e.level), [8], "援军");
   assert.equal(enc.features.find(f => f.type === "prop").level, 8, "配置物");
 });
+
+/* ---------- 2. 柯尔特「过度自信」：仪表和实际生效同一个判断 ---------- */
+
+/** 柯尔特 + Helumica 对狂徒，都在 1 区。角色仪表（hud-icons.js）和联机投影（online-view.js）装进同一个环境：和画面里一样，能直接调用规则里的函数 */
+function koltSetup() {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], seed: "FB20" });
+  c.startCombat();
+  load(c, "hud-icons.js");
+  load(c, "online-view.js");
+  const S = c.S.state;
+  S.units.forEach(u => { u.zone = 1; });
+  const kolt = S.units.find(u => u.kit === "kolt"), foe = S.units.find(u => u.kit === "thug_knife");
+  return { c, S, kolt, foe, HI: c.HudIcons,
+    gauge: () => c.HudIcons.gaugeState(kolt, S.units),
+    // 联机玩家收到的仪表：房主按白名单投影好的（online-view.js · projectUnit 的 hud）
+    online: () => plain(c.OnlineView.projectUnit(kolt).hud) };
+}
+const hitKolt = (c, a, t) => c.dealTo(a, t, { atk: 10, mult: 1, element: "physical", baseBreak: 1, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+const prideIn = out => /过度自信：血量不低于进入战斗时的上限/.test(((out && out.res && out.res.log) || []).join("\n"));
+
+test("柯尔特满血减伤：临时护盾把上限抬高时规则照样减伤，仪表也亮（以前按现在的上限算，写「未满血」）；联机玩家收到的仪表一样", () => {
+  const { c, kolt, foe, HI, gauge, online } = koltSetup();
+  const base = c.baseMaxHp(kolt);
+  assert.equal(kolt.prideMaxHp, base, "开战记下进入战斗时的上限");
+  assert.equal(gauge().full, true, "开战满血：亮");
+  // 掉一点血：不亮、不减
+  kolt.layers[kolt.layers.length - 1].current -= 3;
+  assert.equal(gauge().full, false);
+  assert.match(HI.gauge(gauge()), /未满血/);
+  // 拿到临时护盾：现有血量回到进入战斗时的上限以上（现在的上限也被抬高了）
+  c.addTempShield(kolt, 10);
+  assert.ok(c.totalCurHp(kolt) >= base && c.totalCurHp(kolt) < c.totalMaxHp(kolt), "够进入战斗时的上限、不到现在的上限");
+  assert.equal(gauge().full, true, "仪表跟着亮");
+  assert.match(HI.gauge(gauge()), /满血减伤 25%/);
+  assert.equal(online().full, true, "联机玩家收到的仪表也亮");
+  assert.match(HI.gauge(online()), /满血减伤 25%/);
+  // 规则也是同一个判断：现在生效，真的挨打时结算里有过度自信减伤
+  assert.equal(c.koltPrideCut(kolt), 0.25);
+  assert.ok(prideIn(hitKolt(c, foe, kolt)), "真的挨打时结算里有过度自信减伤");
+});
+
+test("柯尔特满血减伤：被动被图纸放弃时规则不减伤，仪表不亮、写「过度自信已放弃」（以前照亮「满血减伤」）；起身中写「起身中不减伤」；联机玩家收到的一样", () => {
+  const { c, S, kolt, foe, HI, gauge, online } = koltSetup();
+  S.weaponMods = { torque: { noPassive: true } };
+  kolt.weaponLevels = Object.assign({}, kolt.weaponLevels, { torque: 4 });   // 图纸的武器 4 级才生效
+  assert.equal(c.passiveOn(kolt), false, "图纸放弃了柯尔特的被动");
+  assert.equal(gauge().full, false, "仪表不亮");
+  assert.match(HI.gauge(gauge()), /过度自信已放弃/);
+  assert.deepEqual([online().full, online().noPassive], [false, true]);
+  assert.match(HI.gauge(online()), /过度自信已放弃/);
+  assert.equal(c.koltPrideCut(kolt), 0);
+  assert.ok(!prideIn(hitKolt(c, foe, kolt)), "结算也不减");
+  // 起身中（靠坚毅生命）：不减伤，仪表写明
+  S.weaponMods = {};
+  kolt.upOnShp = true;
+  kolt.layers.forEach(l => { l.current = l.max; });
+  assert.equal(gauge().full, false);
+  assert.match(HI.gauge(gauge()), /起身中不减伤/);
+  assert.match(HI.gauge(online()), /起身中不减伤/);
+  assert.equal(c.koltPrideCut(kolt), 0);
+  assert.doesNotMatch(JSON.stringify(online()), /shp|坚毅/i, "仪表的数据里没有坚毅生命");
+});
