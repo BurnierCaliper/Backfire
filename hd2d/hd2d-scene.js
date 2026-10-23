@@ -540,6 +540,10 @@ export function createHd2dScene(container, options) {
     labels.domElement.style.setProperty("--mi", MECH.icon + "px");   // 首领机制的图标（#283）
     labels.domElement.style.setProperty("--mg", MECH.gap + "px");
     if (state.layout.cardW > 0) labels.domElement.style.setProperty("--cw", state.layout.cardW + "px");   // 白卡（#316）的宽：布局按同一个宽排站位
+    if (state.layout.compact) {   // 紧凑卡（#341）的宽高：布局按同一个尺寸排站位
+      labels.domElement.style.setProperty("--kw", state.layout.compact.w + "px");
+      labels.domElement.style.setProperty("--kh", state.layout.compact.h + "px");
+    }
     const UC = window.UnitCard;
     state.layout.units.forEach(u => {
       live.add(u.id);
@@ -597,12 +601,16 @@ export function createHd2dScene(container, options) {
     p.measure = true;
   }
   /** 白卡画出来以后量一下卡片本来的大小（不算缩放）：和布局按的（u.size：估的，或者上一次量的）差了一像素以上就交给外面（hd2d-field.js 按量到的重排，
-   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量 */
+   *  同一区的卡才不会因为估小了而压住）。还没摆进画面（宽 0）的下一帧再量。
+   *  现在是紧凑卡的（#341，大小固定）：先拿掉 .compact 量完整的卡，量完换回去 */
   function measureCards() {
     let out = null;
     state.plates.forEach((p, id) => {
       if (!p.measure || !p.card || !p.u) return;
+      const small = p.el.classList.contains("compact");
+      if (small) p.el.classList.remove("compact");
       const w = p.card.wrap.offsetWidth, h = p.card.wrap.offsetHeight;
+      if (small) p.el.classList.add("compact");
       if (!(w > 0 && h > 0)) return;
       p.measure = false;
       p.size = { w, h };
@@ -621,8 +629,11 @@ export function createHd2dScene(container, options) {
       p.big = !!(q && q.big); p.dim = !!(q && q.dim);
       // 特写（#237）：这个单位的铭牌再放大 zoom 倍、在最上面；别的压到它的藏起来
       p.close = !!(q && q.close); p.hide = !!(q && q.hide); p.zoom = q && q.zoom > 0 ? q.zoom : 1;
-      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大已经算在里面），每帧按 L.cardScale 再乘远近
+      // 白卡（#316）：这一段的基础缩放（hd2d-camera.js · pose 给的，特写的放大、挤的区缩小（#341）已经算在里面），每帧按 L.cardScale 再乘远近
       p.base = q && q.scale > 0 ? q.scale : null;
+      // 挤的区换成紧凑卡（#341，hd2d.css 的 .hd2d-plate.compact：名字 + 血量数字、血条、架势 + 状态图标；鼠标 / 键盘停上去照旧是完整的卡）
+      p.compact = !!(q && q.compact && p.card);
+      p.el.classList.toggle("compact", p.compact);
       // 白卡：当前行动 / 能点的目标 / 鼠标停着的目标 / 不是目标变暗，用旧画面单位卡的那几个样式（game.css 的 is-actor / is-targetable / is-hover / is-dim）
       if (p.card) {
         const w = p.card.wrap;
@@ -1088,10 +1099,14 @@ export function createHd2dScene(container, options) {
     const edge = state.backdrop && state.backdrop.groundEdge;
     ground.position.x = cx; ground.position.z = edge != null ? edge + BACKDROP.ground.size / 2 : cz;
   }
+  /** 平移（右键拖动）不让看的那一点离开战场太远。这一段镜头本来看的那一点（state.pose.target）总在范围里（#341：卡摞得高时取景把它往上挪，
+   *  以前高度夹在 2 以下，每帧把镜头往下拽，最上面的卡顶出画面） */
   function clampPan() {
     if (!state.bounds) return;
-    const b = state.bounds, t = controls.target, P = CAM.panPad;
-    const nx = THREE.MathUtils.clamp(t.x, b.minX - P, b.maxX + P), nz = THREE.MathUtils.clamp(t.z, b.minZ - P, b.maxZ + P), ny = THREE.MathUtils.clamp(t.y, -1, 2);
+    const b = state.bounds, t = controls.target, P = CAM.panPad, o = state.pose && state.pose.target;
+    const span = (lo, hi, v) => (o && Number.isFinite(v) ? [Math.min(lo, v), Math.max(hi, v)] : [lo, hi]);
+    const [x0, x1] = span(b.minX - P, b.maxX + P, o && o.x), [y0, y1] = span(-1, 2, o && o.y), [z0, z1] = span(b.minZ - P, b.maxZ + P, o && o.z);
+    const nx = THREE.MathUtils.clamp(t.x, x0, x1), nz = THREE.MathUtils.clamp(t.z, z0, z1), ny = THREE.MathUtils.clamp(t.y, y0, y1);
     const d = new THREE.Vector3(nx - t.x, ny - t.y, nz - t.z);
     if (d.lengthSq() > 0) { t.add(d); camera.position.add(d); }
   }
@@ -1336,8 +1351,8 @@ export function createHd2dScene(container, options) {
       const p = state.plates.get(id);
       if (!p || !p.u) return null;
       const g = p.group.position, out = { x: g.x, y: g.y, z: g.z, lift: p.lift, big: p.big, zoom: p.zoom, hide: p.hide, zone: p.u.zone };
-      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
-      const sz = p.size || p.u.size;
+      // 白卡（#316）：卡片本来的大小（量到的，没量到用布局估的；换成紧凑卡的是紧凑卡的大小，#341）和这一段的基础缩放——攻击演出、纸片数字按这张卡在屏幕上的位置（hd2d-fx.js · adapter）
+      const sz = p.compact && !p.hover && p.u.compact ? p.u.compact : p.size || p.u.size;
       if (p.card && sz && p.base != null) Object.assign(out, { w: sz.w, h: sz.h, s: p.base });
       return out;
     },

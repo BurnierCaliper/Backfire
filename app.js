@@ -524,12 +524,6 @@ function gainHighFromHits(target, res, extra, reason) {
   });
 }
 
-/** 本回合刚被施加高能（施加时记下 highApplyTurn）：这一回合受到的能量伤害不累积高能值（瑞比扳机的说明）。
- *  现在只有高能余波用它（applyTypedDotIn · highGain）；打中（dealTo → gainHighFromHits）没有这条判断 */
-function highFreshThisTurn(unit) {
-  return !!unit && unit.highApplyTurn != null && Number(unit.highApplyTurn) === Number(state.turnNo);
-}
-
 function tagHighFrom(unit, kit) {
   if (!unit || !kit) return;
   unit.highTags = unit.highTags || [];
@@ -2396,7 +2390,6 @@ function turretShot(p, hitPlayers, notes) {
     if (dealt > 0) {
       u.statuses = u.statuses || {};
       u.statuses.high = true;
-      u.highApplyTurn = state.turnNo;
       notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：打出 2 次 ${dmg} 能量（实际 ${dealt}），施加高能。`);
     } else {
       notes.push(`防卫炮台锁定 ${u.name}（atk 最高）：打出 2 次 ${dmg} 能量，${walled ? "被屏障挡下" : "没有造成伤害"}，不施加高能。`);
@@ -2466,7 +2459,8 @@ function pulseResonanceDamage(source, amount, element) {
   notes.push(`共振：${source.name} 的 ${share} 伤害分享给 ${others.map(o => o.name).join("、")}（不回传）`);
   others.forEach(o => {
     o._resoBusy = true;
-    applyTypedDot(o, share, element || "harmonic", notes, `共振←${source.name}`);
+    // 分享的是能量伤害：带高能的照样累积高能值（applyTypedDotIn）
+    applyTypedDot(o, share, element || "harmonic", notes, `共振←${source.name}`, { highGain: "共振分享能量伤害" });
     o._resoBusy = false;
   });
   return notes;
@@ -3447,11 +3441,13 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
     else if ("by" in opts) creditPlayerHit(unit, opts.by);
     else creditPlayerHit(unit, actingPlayerId());
   }
-  // opts.highGain（高能自爆的余波）要先累积高能值再判自爆：applyCombat 里会判一次，这里像行动中那样先记下（_highDefer），
-  // 下面累积完再判（flushHighBooms：这一下打死、已经清了场的敌人照样带着高能自爆）
-  if (opts.highGain) state._highDefer = (Number(state._highDefer) || 0) + 1;
+  // 能量伤害（余波、共振分享、衍射回传、激活高能、环境伤害、检定失败受伤……）都和打中一样累积高能值（#348），
+  // 要先累积再判自爆：applyCombat 里会判一次，这里像行动中那样先记下（_highDefer），
+  // 下面累积完再判（flushHighBooms：这一下打死、已经清了场的敌人照样带着高能自爆）。opts.highGain 是日志里写的来源
+  const highGain = element === "energy" ? (opts.highGain || "能量伤害") : "";
+  if (highGain) state._highDefer = (Number(state._highDefer) || 0) + 1;
   try { notes.push(...applyCombat(unit, res, null)); }
-  finally { if (opts.highGain) state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+  finally { if (highGain) state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
   if (rotOwner) {
     const after = byType();
     rotOwner.resources = rotOwner.resources || {};
@@ -3476,11 +3472,11 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
   if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
   if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
-  // opts.highGain（值是日志里写的来源）：带高能状态的单位照打中时的口径累积高能值（gainHighFromHits），累积完再判自爆；
-  // 本回合刚被施加高能的不累积
-  if (opts.highGain && !highFreshThisTurn(unit)) gainHighFromHits(unit, res, notes, opts.highGain);
+  // 带高能状态的单位照打中时的口径累积高能值（gainHighFromHits：只认能量、真的扣到血才掷），累积完再判自爆；
+  // 从施加高能的那一刻起就累积（#348：刚被施加高能的那一回合也算，不再单独排除）
+  if (highGain) gainHighFromHits(unit, res, notes, highGain);
   checkHighBoom(unit);
-  if (opts.highGain && !state._highDefer) flushHighBooms();
+  if (highGain && !state._highDefer) flushHighBooms();
   // 共振分享、高压场地都按「真的受到的伤害」：没受到伤害（免疫、濒死倒地、0 伤）就不触发
   if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
@@ -7478,7 +7474,6 @@ function resetBattleFlags(u) {
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
   u.highEnergy = 0;
-  u.highApplyTurn = null;
   u.highFrom = null;
   u._imbalanceLock = false;
   u.shpBurnBase = null;
@@ -7809,7 +7804,8 @@ function triggerOneStatus(t, src, key) {
   }
   if (pick.key === "high") {
     const dmg = (Number(t.highEnergy) || 0) * sm;
-    applyTypedDot(t, dmg, "energy", notes, `${t.name} 激活高能 ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""}`);
+    // 这一下也是能量伤害：先累积高能值，再判自爆（applyTypedDotIn；行动里的照旧等行动结束统一判，只炸一次）
+    applyTypedDot(t, dmg, "energy", notes, `${t.name} 激活高能 ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""}`, { highGain: "激活高能的能量伤害" });
     return notes;
   }
   notes.push(`${t.name} 身上没有可激活的状态。`);
@@ -7906,10 +7902,7 @@ function runOnConnect(attacker, target, spec, res) {
   if (spec.status) {
     target.statuses = target.statuses || {};
     target.statuses[spec.status] = spec.statusVal != null ? spec.statusVal : true;
-    if (spec.status === "high") {
-      target.highApplyTurn = state.turnNo;
-      if (attacker && attacker.kit === "ruby") tagHighFrom(target, "ruby");
-    }
+    if (spec.status === "high" && attacker && attacker.kit === "ruby") tagHighFrom(target, "ruby");
     if (typeof popStatus === "function") popStatus(target, spec.status);
     const stName = ({ high: "高能", burn: "燃烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", weak: "虚弱" })[spec.status] || spec.status;
     notes.push(`${target.name} 被施加${stName}。`);
@@ -8111,7 +8104,7 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
     if (share > 0) {
       extra.push("衍射 + 共振：共享部分 " + share + " 回传一次。");
       target._resoBusy = true;
-      applyTypedDot(target, share, ele, extra, "衍射回传");
+      applyTypedDot(target, share, ele, extra, "衍射回传", { highGain: "衍射回传能量伤害" });   // 能量攻击回传的也累积高能值
       target._resoBusy = false;
     }
   }
@@ -12299,9 +12292,9 @@ function runSkillInner(id, optRun) {
       t.statuses.high = true;
       popStatus(t, "high");
       tagHighFrom(t, "ruby");
-      t.highApplyTurn = state.turnNo;
       t.statuses.latestElement = "energy";
-      lines.push(`${t.name} 被施加高能。本回合受到的能量伤害不累积高能值，从下回合起每段能量伤害各掷一次 1d4+1。`);
+      // 从施加的那一刻起就累积（#348：以前的说明写成下回合才开始累积，是旧 bug 留下的）
+      lines.push(`${t.name} 被施加高能。从现在起受到的每段能量伤害各掷一次 ${statusDotDice("high", t.level || 1, currentWeatherFor(t)).label} 累积高能值。`);
     } else if (id === "ruby_assist") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "energy", mult: 1, hits: 1, diceN: 1, diceS: 4, baseBreak: 0, atk, flags: { action: true, assist: true } });
@@ -14685,7 +14678,7 @@ function dmDealAttack(input) {
     const m = isMain ? (isNaN(mult) ? 1 : mult) : (isNaN(splash) ? (isNaN(mult) ? 1 : mult) : splash);
     const b = isMain ? (isNaN(br) ? 1 : br) : (isNaN(splashBr) ? 0 : splashBr);
     if (!a) {
-      if (flat > 0 || m === 0) applyTypedDot(t, flat || 0, element, notes, `${t.name} 环境伤害（${ELE[element] || element}）`);
+      if (flat > 0 || m === 0) applyTypedDot(t, flat || 0, element, notes, `${t.name} 环境伤害（${ELE[element] || element}）`, { highGain: "环境能量伤害" });
       if (b > 0 && typeof dealBreak === "function") dealBreak(t, b, element, notes, "主持人击破");
       return;
     }
@@ -14736,7 +14729,7 @@ function dmDealEnv(input) {
   if (!list.length) { appendLog("主持人环境伤害：没有目标。勾选波及单位，或改成整个区域。"); return; }
   notes.push("目标：" + list.map(u => u.name).join("、"));
   list.forEach(u => {
-    if (flat > 0) applyTypedDot(u, flat, element, notes, `${u.name} 环境伤害（${ELE[element] || element}）`);
+    if (flat > 0) applyTypedDot(u, flat, element, notes, `${u.name} 环境伤害（${ELE[element] || element}）`, { highGain: "环境能量伤害" });   // 选能量时带高能的累积高能值
     if (br > 0 && typeof dealBreak === "function") dealBreak(u, br, element, notes, "环境击破");
   });
   appendLog(notes.join("\n"));
