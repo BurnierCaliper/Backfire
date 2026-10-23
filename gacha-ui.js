@@ -15,17 +15,46 @@
     if (r.kind === "character") return r.levelUp ? `已有角色 · 升到 ${r.level} 级` : `新角色加入 · ${r.level} 级`;
     return KIND[r.kind] || "";
   }
-  /** 抽取机面板：融合体数量、三种概率、单抽 / 十连按钮（不够就置灰写原因） */
-  function panelHtml(d, fusionName) {
+  /** 奎支说明：按 ROGUE_GACHA.kuizhiMode 从配置读（byLight 按光色；flat 每抽 base + 按光色 extra） */
+  function kuizhiText(cfg) {
+    const order = ["gray", "blue", "purple", "gold"];
+    if (!cfg) return "";
+    if (cfg.kuizhiMode === "flat" && cfg.kuizhiFlat) {
+      const ex = cfg.kuizhiFlat.extra || {};
+      const extra = order.filter(l => Number(ex[l])).map(l => `${LIGHT[l]} +${ex[l]}`).join(" · ");
+      return `每抽附赠 ${Number(cfg.kuizhiFlat.base) || 0} 奎支${extra ? `（按光色另加：${extra}）` : ""}`;
+    }
+    const t = cfg.kuizhiByLight || {};
+    return `每抽按光色附赠奎支：${order.map(l => `${LIGHT[l]} ${Number(t[l]) || 0}`).join(" · ")}`;
+  }
+  /** 保底说明（配置 ROGUE_GACHA.pity）和这一刻是否生效：rates 来自 drawInfo().rates = drawRates(run) */
+  function pityText(cfg) {
+    const tiers = ((cfg && cfg.pity) || []).slice().sort((a, b) => a.below - b.below);
+    if (!tiers.length) return "没有保底";
+    return "保底：能用的角色（队伍 + 候补）" + tiers.map(t => `少于 ${t.below} 人${t.hero >= 1 ? "必出角色" : `出角色 ${pct(t.hero)}`}`).join("，");
+  }
+  function pityNote(d, cfg) {
+    const r = d.rates || {}, base = cfg && cfg.share ? Number(cfg.share.hero) : null;
+    if (d.allMaxed || !(Number(r.hero) > 0)) return "";
+    if (r.hero >= 1) return "人手不足：必出角色";
+    if (base != null && r.hero > base + 1e-9) return `人手不足：角色概率提高到 ${pct(r.hero)}`;
+    return "";
+  }
+  /** 抽取机面板：融合体数量、三种概率（d.rates，不写死）、单抽 / 十连按钮（不够就置灰写原因）。cfg 默认读全局 ROGUE_GACHA */
+  function panelHtml(d, fusionName, cfg) {
+    cfg = cfg || (typeof ROGUE_GACHA !== "undefined" ? ROGUE_GACHA : null);   // const 全局不挂在 window 上
     const r = d.rates || {};
     const ten = 10 * (d.cost || 1);
     const tenWhy = !d.canDraw ? d.why : d.fusion < ten ? `${fusionName}不够十连（要 ${ten}，有 ${d.fusion}）` : "";
+    const note = pityNote(d, cfg);
+    const kz = kuizhiText(cfg);
     return `<div class="gacha-panel">
       <p class="r-hint">每抽投入 ${d.cost} 个${esc(fusionName)}，不一定是角色：
         <span class="g-rate g-gold">角色 ${pct(r.hero)}</span>
         <span class="g-rate g-purple">武器升级材料 ${pct(r.weapon)}</span>
-        <span class="g-rate g-blue">制作材料 ${pct(r.craft)}</span>（没有保底）。
-        抽到新角色加入队伍（满员进候补），已有的角色 +1 级；每抽按光色附赠奎支：灰 100 · 蓝 150 · 紫 500 · 金 1000。${d.allMaxed ? "<b>所有角色都已满级，现在只出材料。</b>" : ""}</p>
+        <span class="g-rate g-blue">制作材料 ${pct(r.craft)}</span>（${esc(pityText(cfg))}；十连每抽重新算人数）。
+        抽到新角色加入队伍（满员进候补），已有的角色 +1 级${kz ? `；${esc(kz)}` : ""}。${d.allMaxed ? "<b>所有角色都已满级，现在只出材料。</b>" : ""}</p>
+      ${note ? `<p class="r-hint g-pity"><b>${esc(note)}</b></p>` : ""}
       <p class="r-hint">手里有 <b class="g-fusion">${d.fusion}</b> 个${esc(fusionName)}。</p>
       <div class="gacha-btns">
         <button class="g-btn r-main" id="r-draw" ${d.canDraw ? "" : "disabled"}>${d.canDraw ? `抽一次（${d.cost}）` : esc(d.why)}</button>
@@ -81,5 +110,5 @@
     if (reduced() || (opt && opt.instant)) finish(); else timer = setTimeout(step, 250);
     return ov;
   }
-  global.GachaUI = { panelHtml, resultHtml, summaryHtml, detail, play, LIGHT };
+  global.GachaUI = { panelHtml, pityNote, pityText, kuizhiText, resultHtml, summaryHtml, detail, play, LIGHT };
 })(typeof window !== "undefined" ? window : globalThis);

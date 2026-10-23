@@ -271,11 +271,13 @@ const ROGUE_SOLO = {
  *   完成任务得到赫心融合体，在抽取机里抽（概率见下面 ROGUE_GACHA）：抽到角色时新角色入队（满员进候补），抽到已有的角色 +1 级
  *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
  *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
+ *   fusionPerDay  每过一天发几个赫心融合体
  *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
 const ROGUE_GROWTH = {
   startParty: 2,
   partyMax: 4,
   fusionPerTask: 1,
+  fusionPerDay: 1,
   drawCost: 1,
   recruitLevel: 1,
   maxLevel: 20,
@@ -288,9 +290,12 @@ const ROGUE_GROWTH = {
  *   craftMats   null = 道具制作材料（items.js · CRAFT_MATERIALS）全部等概率
  *   light       每次结果的光色（给抽卡界面用）：gold / purple / blue / gray
  *   kuizhiMode  ⚠ 待定（等作者拍板）："byLight" 按光色给奎支（kuizhiByLight）；"flat" 每抽固定 kuizhiFlat.base + 按光色的 kuizhiFlat.extra
+ *   pity        保底：可用角色（队伍 + 候补，不算永久死亡的）少于 below 人时，出角色的概率改成 hero，剩下的按 share 的 weapon:craft 分；
+ *               取满足条件里 below 最小的一档。十连里每抽重新算人数（rogue.js · drawRates）。所有角色都满级时不看保底（只出材料）
  *   dailyTaskFusion  每完成 1 个每日挑战给几个赫心融合体；dailyAllFusion 三个全完成额外给几个 */
 const ROGUE_GACHA = {
   share: { hero: 0.30, weapon: 0.40, craft: 0.30 },
+  pity: [{ below: 2, hero: 1 }, { below: 4, hero: 0.70 }],
   weaponMats: [
     { id: "mat_metal",   w: 50 },
     { id: "mat_alloy",   w: 30 },
@@ -307,7 +312,7 @@ const ROGUE_GACHA = {
   dailyAllFusion: 5
 };
 if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
-  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支`, goods: true };
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支。保底：能用的角色（队伍 + 候补）少于 2 人必出角色，少于 4 人出角色 70%`, goods: true };
 }
 
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
