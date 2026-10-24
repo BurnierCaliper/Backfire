@@ -180,8 +180,9 @@ const EnemyAI = (function () {
   /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
    *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
    *  狂暴这回合还有免费移动也不耗（effects.js · frenzyFreeMoveReady）；
-   *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动 */
-  function canPayMove(u, dest) {
+   *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动。
+   *  lastAp：原地出不了手，精英 / 首领可以把最后 1 行动点花在这一步上（firingStep、aiPlan 的第二次规划） */
+  function canPayMove(u, dest, lastAp) {
     if (!u || u.noMove || u.self === "frost") return false;
     if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
     const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
@@ -190,9 +191,10 @@ const EnemyAI = (function () {
     const leaveAcid = !!fromF.acid && !u.flying;
     if (wanderer && (overVoid || leaveAcid)) return (u.bonus || 0) >= 1;
     const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
-    // 这两种移动要花行动点：杂兵照常 1 点够；精英 / 首领的计划是「附赠移动 + 行动点出手」，花掉最后 1 点就没法出手了，要留 1 点
+    // 这两种移动要花行动点：杂兵照常 1 点够；精英 / 首领的计划是「附赠移动 + 行动点出手」，花掉最后 1 点就没法出手了，要留 1 点。
+    // 原地出不了手时（lastAp）留着也没用，1 点就够：以前一律要 2 点，精英每回合只有 1 行动点，站在酸液上整场走不出来
     const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
-    if (apMove) return (u.ap || 0) >= (rank === "minion" ? 1 : 2);
+    if (apMove) return (u.ap || 0) >= (rank === "minion" || lastAp ? 1 : 2);
     if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
     if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(u)) return true;   // 狂暴：走这一步不花行动点，杂兵走完还能出手
     return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
@@ -212,7 +214,8 @@ const EnemyAI = (function () {
    *  想保持距离的远程单位再优先没有敌人的区）。走一步也打不到、又没有固定射程的单位，就朝目标靠近一步。
    *  only：强制目标（嘲讽 / 决一死战）时只算那一个人。找不到返回 null */
   function firingStep(u, spec, prey, target, list, only) {
-    if (!canPayMove(u)) return null;
+    // 只在这里打不到要打的人时才来找站位：不走也出不了手，离开酸液可以花掉最后 1 行动点
+    if (!canPayMove(u, null, true)) return null;
     // 手册：强盗头子守在亡命之王身边（远处的人用远程手段打），不为了找站位离开王；被挟持的王也不动
     if (u.kit === "bandit_boss" && !(u.resources && u.resources.mutinied)) {
       const king = typeof findKit === "function" ? findKit("outlaw_king", state.units) : null;
@@ -559,8 +562,10 @@ const EnemyAI = (function () {
     return Math.min(from, next) + "-" + Math.max(from, next);
   }
 
-  /** 手册第十章的行为描述 → 一次行动。 */
-  function aiPlanBase(u) {
+  /** 手册第十章的行为描述 → 一次行动。
+   *  pass：aiPlan 的第二次规划给 { lastAp: true }（见 canPayMove）；有一步只因为要留 1 行动点出手才没走时记 pass.held */
+  function aiPlanBase(u, pass) {
+    pass = pass || {};
     if (typeof mutinyTick === "function") mutinyTick();
     const prey = validPrey(u);
     if (!prey.length) return null;
@@ -680,8 +685,12 @@ const EnemyAI = (function () {
 
     // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
     if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
-    // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）
-    if (step != null && !canPayMove(u, step)) step = null;
+    // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）。
+    // 只是为了留 1 行动点出手才没走的（离开酸液 / 越过空隙）记下来：原地出不了手时 aiPlan 再规划一次，这一步花掉最后 1 行动点
+    if (step != null && !canPayMove(u, step, pass.lastAp)) {
+      if (canPayMove(u, step, true)) pass.held = true;
+      step = null;
+    }
     let sid = aiSpecial(u, spec, target, prey, has, list);
     // 不换目标 / 换招式的：自己找目标的、选区的；清扫机的施加共振（目标已经按「看得见、没有共振」挑好了，
     // 换成别的招式会去打已经有共振的人、或者往人堆里走）
@@ -778,7 +787,10 @@ const EnemyAI = (function () {
       if (fp === "wait") return null;
       if (fp) return fp;
     }
-    const plan = aiPlanBase(u);
+    // 精英 / 首领离开酸液地面 / 越过空隙要花行动点，平时留着唯一的行动点出手（canPayMove）；
+    // 为此没走、原地又规划不出任何行动（谁都打不到，或者打得到的不是要打的人）时，再规划一次，最后 1 行动点拿来走这一步
+    const pass = {};
+    const plan = aiPlanBase(u, pass) || (pass.held ? aiPlanBase(u, { lastAp: true }) : null);
     if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
     if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动
     const info = plan && plan.ai;
