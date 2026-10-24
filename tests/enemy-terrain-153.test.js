@@ -67,15 +67,19 @@ test("L-19 图鉴伤害骰注明随等级变化", () => {
   assert.equal(c.bestiaryStats("thug_knife", 15, 2).diceScale, "", "固定骰的不加注");
 });
 
-test("L-20 站在酸液上的精英只剩 1 行动点 + 1 附赠：不规划移动（离开酸液要扣行动点）", () => {
-  const { c, S, P, E } = field([{ id: "captain_wolf", lv: 5, zone: 3 }]);
-  const w = E("captain_wolf");
-  S.units.filter(u => u.isPlayer).forEach(u => { u.zone = 1; });
-  S.fields[3].acid = true;
+// 原地谁都打不到时（以前这里的场景：狼队长隔两区才有人），用最后 1 行动点走出来：#340 第 5 条，tests/elite-acid-move.test.js
+test("L-20 站在酸液上的精英只剩 1 行动点 + 1 附赠、原地打得到人：不规划移动（离开酸液要扣行动点）", () => {
+  // 强盗头子（没有亡命之王）追血量最低的人：1 区的夕夏血最少，想走过去；同区有柯尔特，远程也打得到夕夏
+  const { c, S, P, E } = field([{ id: "bandit_boss", lv: 5, zone: 2 }]);
+  const b = E("bandit_boss"), k = P("kolt"), h = P("helu");
+  tank(k); k.zone = 2;
+  h.zone = 1; h.layers.forEach(l => { l.current = Math.min(l.current, 5); });
+  S.fields[2].acid = true;
   S.combatPhase = "enemy";
-  w.ap = 1; w.bonus = 1; w.stunned = false;
-  const plan = c.EnemyAI.plan(w);
-  assert.ok(!plan || !plan.ai || plan.ai.kind !== "move", "不把唯一的行动点花在离开酸液上：" + JSON.stringify(plan && plan.ai));
+  b.ap = 1; b.bonus = 1; b.stunned = false; b.race = null;
+  const plan = c.EnemyAI.plan(b);
+  assert.ok(!plan || !plan.ai || plan.ai.kind !== "move", "不把唯一的行动点花在离开酸液上：" + JSON.stringify(plan && plan.ai && { kind: plan.ai.kind, dest: plan.ai.dest }));
+  assert.equal(plan.ai.sid, "en_boss_far", "原地用远程打夕夏");
 });
 
 test("L-21 已迁走 / 逃走（_removed）的单位不在 fieldUnits / visibleEnemies 里", () => {
