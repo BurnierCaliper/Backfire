@@ -554,20 +554,60 @@ function sleepFor(plan, kit) {
   return s && ITEM_CATALOG[s] && Number(ITEM_CATALOG[s].sleep) > 0 ? s : "";
 }
 
+/** 这次长休每人吃哪种食物（这个角色要吃的几份都吃这一种）：plan.food 里选了的照选的吃，先从库存里扣；
+ *  没选的人在剩下的库存里分（仿照 defaultSleepPlan，以前一律吃背包里最便宜的一种，总量够也报不够，#340）——
+ *  挑缺得最少的分法；缺得一样多时挑最省的（贵的食物用得越少越好）；再一样，前面的人先吃便宜的。
+ *  返回 { kit: 食物 id }（死亡的角色不吃，不在里面） */
+function restFoodPlan(plan) {
+  const chosen = (plan && plan.food) || {};
+  const left = FOOD_ORDER.map(id => bagCount(id));
+  const out = {}, todo = [];
+  partyHeroes().filter(h => !h.dead).forEach(h => {
+    const n = heroRestCost(h).food;
+    if (chosen[h.kit]) {
+      out[h.kit] = chosen[h.kit];
+      const i = FOOD_ORDER.indexOf(chosen[h.kit]);
+      if (i >= 0) left[i] -= n;
+    } else todo.push({ kit: h.kit, n, same: -1 });
+  });
+  // 份数一样的人互换不改变结果：后面的人只试不比前一个同份数的人便宜的食物（每种分法只试一次）
+  todo.forEach((h, i) => { for (let j = i - 1; j >= 0 && h.same < 0; j--) if (todo[j].n === h.n) h.same = j; });
+  const used = FOOD_ORDER.map(() => 0), pick = [];
+  let best = null, bestPick = null;
+  // 比较用：[缺几份, 最贵的用几份, …, 最便宜的用几份]，越小越好
+  const score = () => [used.reduce((s, u, i) => s + Math.max(0, u - left[i]), 0)].concat(used.slice().reverse());
+  const better = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+  (function walk(i) {
+    if (i === todo.length) {
+      const s = score();
+      if (!best || better(s, best)) { best = s; bestPick = pick.slice(); }
+      return;
+    }
+    for (let t = todo[i].same >= 0 ? pick[todo[i].same] : 0; t < FOOD_ORDER.length; t++) {
+      pick[i] = t; used[t] += todo[i].n;
+      walk(i + 1);
+      used[t] -= todo[i].n;
+    }
+  })(0);
+  todo.forEach((h, i) => { out[h.kit] = FOOD_ORDER[bestPick[i]]; });
+  return out;
+}
+
 /** 长休计划：plan = { hours, food: { kit: foodId }, sleep: { kit: 睡眠道具 id 或 "" }, force }
- *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配） */
+ *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配：restFoodPlan / defaultSleepPlan） */
 function longRestNeeds(plan) {
   plan = plan || {};
   const heroes = partyHeroes().filter(h => !h.dead);
   let water = 0;
   const food = {}, sleep = {};
+  const eat = plan.free ? {} : restFoodPlan(plan);
   // plan.free：这次长休不消耗水和食物（单局按小时补的休息点，rogue.js · freeRestHere）；睡眠道具照常
   heroes.forEach(h => {
     const c = heroRestCost(h);
     const sid0 = sleepFor(plan, h.kit);
     if (plan.free) { if (sid0) sleep[sid0] = (sleep[sid0] || 0) + 1; return; }
     water += c.water;
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    const fid = eat[h.kit];
     food[fid] = (food[fid] || 0) + c.food;
     const sid = sleepFor(plan, h.kit);
     if (sid) sleep[sid] = (sleep[sid] || 0) + 1;
@@ -606,9 +646,10 @@ const AMMO_ORDERS = (() => {
 /** 长休界面用：每个角色要多少、现在选了什么，以及能选的食物 / 睡眠道具（带库存）。plan 同 longRestNeeds */
 function longRestOptions(plan) {
   plan = plan || {};
+  const eat = restFoodPlan(plan);
   const heroes = partyHeroes().filter(h => !h.dead).map(h => {
     const c = heroRestCost(h);
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    const fid = eat[h.kit];
     const spit = canSpit(h.kit) ? ((plan.spit && SPIT_ELEMENTS.indexOf(plan.spit[h.kit]) >= 0) ? plan.spit[h.kit] : spitElementOf(h.kit)) : null;
     const ammo = canOrderAmmo(h) ? ((plan.ammo && plan.ammo[h.kit] != null) ? plan.ammo[h.kit] : ((LEDGER.ammoOrder || {})[h.kit] || "")) : null;
     return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit), spit, ammo };
@@ -625,10 +666,6 @@ function longRestOptions(plan) {
   // 弹序选项：空 = 开局随机；其余是 3 红 3 蓝的排法，按「红红红蓝蓝蓝」这样写
   const ammoOrders = [{ id: "", name: "开局随机" }].concat(AMMO_ORDERS.map(id => ({ id, name: id.replace(/R/g, "红").replace(/B/g, "蓝") })));
   return { heroes, foods, sleeps, spitElements, ammoOrders, water: ledgerWater(), plan: { food, sleep, spit, ammo }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
-}
-/** 默认吃最便宜的、背包里有的食物 */
-function defaultFoodFor() {
-  return FOOD_ORDER.find(id => bagCount(id) > 0) || FOOD_ORDER[0];
 }
 
 function unitNameOf(kit) {
@@ -693,7 +730,8 @@ function campStatus(plan) {
 
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
-  plan = plan || {};
+  // 每人吃什么在扣食物之前定下来，扣食物和算食物加成都用这一份（以前扣完再取默认，可能按没吃的那种算加成）
+  plan = Object.assign({}, plan, { food: restFoodPlan(plan) });
   const hours = Math.max(8, Math.min(12, Number(plan.hours) || 8));
   const need = longRestNeeds(plan);
   const before = restSnapshot();
@@ -746,7 +784,7 @@ function ledgerLongRest(plan, notes) {
     h.dying = false;
     h.upOnShp = false;
     h.stunned = false;
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    const fid = plan.food[h.kit];
     // 不耗补给的长休（plan.free）没吃食物，也就没有食物的坚毅加成
     const foodBonus = plan.free && !plan.force ? 0 : ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
     const sid = sleepFor(plan, h.kit);
