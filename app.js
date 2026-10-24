@@ -9337,8 +9337,9 @@ function zoneReachable(unit, dest, walk) {
   return null;
 }
 
-/** 技能里的「移动」（燕飞、圣战起始、居合、引火烧身、爱意、电钻突进、逃离……）能不能走到 dest：
+/** 技能里的「移动」（燕飞、圣战起始、居合、引火烧身、爱意、电钻突进、逃离、直流短接、猛扑、发射针尖、针尖剑斩……）能不能走到 dest：
  *  沿相连的区走，危墙 / 关着的机关门 / 空隙（地面单位）挡路，最多 maxSteps 步（不给就不限）；地面单位不能主动走进深渊。
+ *  leap：写着「跃」的移动（猛扑）和飞行一样能越过空隙，危墙 / 关着的门照样挡，落点照旧按本人算（地面单位不能跳进深渊）。
  *  走得到返回 null，否则返回原因。以前这些技能直接改所在区，能穿墙 */
 /** 选目标时：技能要先移动到目标那一区才出手的（绯秋居合普攻），走不过去（深渊、墙、门）的目标不列出 */
 function skillTargetMoveOk(actor, id, u) {
@@ -9348,8 +9349,9 @@ function skillTargetMoveOk(actor, id, u) {
   }
   return true;
 }
-function skillMoveWhy(unit, dest, maxSteps) {
-  const why = zoneReachable(unit, dest);
+function skillMoveWhy(unit, dest, maxSteps, leap) {
+  const mover = leap && !unit.flying ? { zone: unit.zone, flying: true } : unit;   // 跃：路上的空隙当飞过去
+  const why = zoneReachable(mover, dest);
   if (why) return why;
   const f = state.fields[Number(dest)] || {};
   if (f.abyss && !unit.flying) return "深渊不能站人。";
@@ -9357,17 +9359,17 @@ function skillMoveWhy(unit, dest, maxSteps) {
     const pass = (x, y) => {
       const g = getGap(x, y);
       return !(g.type === "wall" || (g.type === "door" && !g.open) ||
-        (g.type === "void" && !(unit.flying || (state.forceVoid && state.forceVoid[gapKey(x, y)]))));
+        (g.type === "void" && !(mover.flying || (state.forceVoid && state.forceVoid[gapKey(x, y)]))));
     };
     const path = zonePath(Number(unit.zone), Number(dest), pass);
     if (!path || path.length - 1 > maxSteps) return `移动 ${maxSteps} 距离走不到那一区。`;
   }
   return null;
 }
-/** 技能里最多移动 maxSteps 距离能走到的区（不含原地；不给 maxSteps 就不限距离） */
-function skillMoveZones(unit, maxSteps) {
+/** 技能里最多移动 maxSteps 距离能走到的区（不含原地；不给 maxSteps 就不限距离；leap 见 skillMoveWhy） */
+function skillMoveZones(unit, maxSteps, leap) {
   const out = [];
-  for (let z = 1; z <= Number(state.zoneMode); z++) if (!skillMoveWhy(unit, z, maxSteps)) out.push(z);
+  for (let z = 1; z <= Number(state.zoneMode); z++) if (!skillMoveWhy(unit, z, maxSteps, leap)) out.push(z);
   return out;
 }
 
@@ -9665,9 +9667,9 @@ function skillFlowStepsAll(id, actor, picks) {
     return steps;
   }
   if (id === "kolt_short") {
-    // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选）
-    const zones = envZones(actor, "electric", 1);
-    return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出能铺高压场地的区）", zones }];
+    // 只给场地能变成高压的区域（固有场地 / 深渊 / 损毁地面 / 被锁定的区不能选），别的区还要走得到（koltShortZones）
+    const zones = koltShortZones(actor);
+    return [{ key: "dest", type: "zone", optional: zones.includes(Number(actor.zone)), label: "可先移动至多 1 区（只列出走得到、能铺高压场地的区）", zones }];
   }
   if (id === "kolt_cannon") {
     const acid = ((findKit("kolt", state.units) || actor).resources || {}).bit === "acid";
@@ -10186,13 +10188,17 @@ function skillFlowStepsAll(id, actor, picks) {
     return steps;
   }
   if (id === "mochi_pounce") {
+    // 猛扑是「跃」：和飞行一样能越过空隙，危墙、关着的门照样挡；年糕是地面单位，不能跳进深渊（skillMoveWhy 的 leap）。
+    // 距离 1 的目标要跳得过去才列出（以前只看距离，能隔墙扑过去）；同区的目标要有地方带过去才列出（不然选完卡在选区那一步）
+    const carry = skillMoveZones(actor, null, true);
+    const reach = z => Number(z) === Number(actor.zone) ? carry.length > 0 : !skillMoveWhy(actor, z, 1, true);
     const steps = [{
       key: "target",
       type: "unit",
       optional: false,
       label: "猛扑目标（距离1敌人，或同区带走）",
-      units: fieldUnits().filter(u => !u.isPlayer && (Number(u.zone) === Number(actor.zone) || zoneDist(actor.zone, u.zone, state.zoneMode) === 1))
-        .concat((state.props || []).filter(p => p.movable !== false && (Number(p.zone) === Number(actor.zone) || zoneDist(actor.zone, p.zone, state.zoneMode) === 1)).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
+      units: fieldUnits().filter(u => !u.isPlayer && reach(u.zone))
+        .concat((state.props || []).filter(p => p.movable !== false && reach(p.zone)).map(p => ({ id: "prop:" + p.id, name: p.name, zone: p.zone })))
     }];
     const t = unitById(picks.target) || propByRef(picks.target);
     if (t && Number(t.zone) === Number(actor.zone)) {
@@ -10201,8 +10207,7 @@ function skillFlowStepsAll(id, actor, picks) {
         type: "zone",
         optional: false,
         label: "把目标带到哪一区",
-        // 猛扑是「跃」：和飞行一样能越过空隙（危墙、关着的门照样挡）
-        zones: zones.filter(z => Number(z) !== Number(actor.zone) && !zoneReachable({ zone: actor.zone, flying: true }, z))
+        zones: carry
       });
     }
     return steps;
@@ -11515,7 +11520,7 @@ const SKILL_REQUIREMENT = {
   tou_sonic:      (a) => (res(a).shield || 0) < 1 ? "没有圣盾"
     : !skillFlowSteps("tou_sonic", a, {}).length ? "距离 1 以内没有可以打的目标" : null,
   kolt_short:     (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "直流短接需要电钻模式"
-    : !envZones(a, "electric", 1).length ? "附近没有能变成高压场地的区域（固有场地 / 深渊 / 损毁地面 / 被锁定）" : null,
+    : !koltShortZones(a).length ? "附近没有能变成高压场地、又走得到的区域（固有场地 / 深渊 / 损毁地面 / 被锁定，或隔着危墙 / 关着的门 / 空隙）" : null,
   // 只改变天气 / 场地的技能：改不了就不能用（免得白白花掉行动点）
   latte_ice:      () => state.weather === "snow" ? "已经是雪天" : weatherChangeWhy("snow"),
   helu_wave:      (a) => state.weather !== "phase" ? weatherChangeWhy("phase")
@@ -11608,6 +11613,12 @@ const SKILL_REQUIREMENT = {
   vitas_infuse:   () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
   vitas_rip:      () => piercedTarget(noraOf()) ? null : "场上没有刺入的目标",
   vitas_dance:    () => piercedTarget(noraOf()) ? "场上有刺入单位时无法使用" : null,
+  // 针尖剑斩：有刺入对象时先移动到第一个刺入对象那一区再斩（不限距离，和以前一样），走不过去就不能用（#340 第 4 条，以前能穿墙）
+  vitas_slash:    (a) => {
+    const pin = piercedTarget(noraOf());
+    const why = pin && Number(pin.zone) !== Number(a.zone) ? skillMoveWhy(a, Number(pin.zone), null) : null;
+    return why ? `走不到刺入目标 ${pin.name} 所在的 ${pin.zone} 区（${why.replace(/。$/, "")}）` : null;
+  },
   nora_soothe:    (a) => noraMood(a) === "gentle" ? "维塔斯已处于温和" : null,
   hiaki_allin:    (a) => (Number(a.resources && a.resources.smashUsed) || 0) >= allinMaxUses(a)
     ? "本场全力以赴已用完" : null,
@@ -11678,6 +11689,10 @@ function envZones(actor, kind, range) {
     if (!fieldChangeWhy(z, kind)) out.push(z);
   }
   return out;
+}
+/** 直流短接能选的区：能变成高压场地的原区，加上移动 1 距离走得到的区（危墙 / 关着的门 / 空隙那边、深渊不算；以前能穿墙过去铺） */
+function koltShortZones(actor) {
+  return envZones(actor, "electric", 1).filter(z => Number(z) === Number(actor.zone) || !skillMoveWhy(actor, z, 1));
 }
 
 /** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出）/
@@ -11928,7 +11943,7 @@ function skillTargetError(a, id, t) {
   // 处决只能对晕眩中的敌人：扣行动点之前就拦下（以前先扣点再说不行，预览也会误判成有效）
   if (id === "xia_execute" && t && t.id && !isStructureToken(state.targetId) && !t.stunned) return "处决只能对晕眩中的敌人使用";
   // 技能里的移动要走得到：危墙 / 关着的机关门 / 空隙挡路，地面单位不能主动走进深渊（以前直接改所在区，能穿墙）
-  const moveTo = (dest, maxSteps) => (dest == null || Number(dest) === Number(a.zone) ? null : skillMoveWhy(a, Number(dest), maxSteps));
+  const moveTo = (dest, maxSteps, leap) => (dest == null || Number(dest) === Number(a.zone) ? null : skillMoveWhy(a, Number(dest), maxSteps, leap));
   let moveWhy = null;
   if (id === "hiaki_aa" && t && t.id && !isStructureToken(state.targetId) && (res(a).stance || "draw") === "iai") moveWhy = moveTo(t.zone, 1);
   if (id === "tou_start" && flp.dest != null) moveWhy = moveTo(flp.dest, 1);
@@ -11940,6 +11955,14 @@ function skillTargetError(a, id, t) {
   if (id === "ras_flee" && flp.dest != null) {
     if (Number(flp.dest) === Number(a.zone)) return "逃离要离开所在的区域";
     moveWhy = moveTo(flp.dest, res(findKit("ras", state.units) || a).unstable ? null : 1);   // 不稳态不限距离
+  }
+  // #340 第 4 条：直流短接先移动至多 1 距离；猛扑跃向距离 1 的目标，或带着同区的目标跃到选的区（跃：空隙能越过）
+  if (id === "kolt_short" && flp.dest != null) moveWhy = moveTo(flp.dest, 1);
+  if (id === "mochi_pounce") {
+    const tg = flp.target ? (unitById(flp.target) || propByRef(flp.target)) : t;
+    const d = tg && tg.zone != null ? zoneDist(a.zone, tg.zone, state.zoneMode) : null;
+    if (d === 0) moveWhy = moveTo(flp.dest, null, true);
+    else if (d === 1) moveWhy = moveTo(tg.zone, 1, true);
   }
   if (moveWhy) return moveWhy;
   // 冰美式：治疗「距离 1 以内的同伴」，清场「距离 1 的一个区域」（以前不限距离）
@@ -12607,8 +12630,13 @@ function runSkillInner(id, optRun) {
       if (Number(tgt.zone) === Number(a.zone)) {
         const dest = fl && fl.picks.dest;
         if (!dest) { lines.push("带走同区目标时要再选目的地区。"); return paintSkillLog(lines.join("\n")); }
+        const from = Number(a.zone);
         a.zone = dest;
-        displaceTo(tgt, dest, lines, "被带走", { flyOver: true });
+        // 目标带不走（千钧、再次霜结、被缠住、路上的桥塌了……）：年糕也留在原区，照样出手（以前自己跳过去，隔着一区打这一下）
+        if (!displaceTo(tgt, dest, lines, "被带走", { flyOver: true })) {
+          a.zone = from;
+          lines.push(`${tgt.name} 没被带走，${a.name} 留在 ${from} 区。`);
+        }
       } else {
         a.zone = tgt.zone;
         lines.push(`猛扑跃到 ${tgt.name} 所在的 ${tgt.zone} 区。`);
@@ -12789,7 +12817,12 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       setPierce(a, t, lines);
       if (noraMood(a) === "cruel") noraFrost(a, t, lines);
-      else { a.zone = t.zone; lines.push(`温和：诺拉移动到 ${t.zone} 区。`); }
+      else {
+        // 温和：移到目标那一区也要走得到（危墙 / 关着的门 / 空隙挡路，不能走进深渊）；走不过去就留在原区，刺入照旧
+        const why = Number(t.zone) === Number(a.zone) ? null : skillMoveWhy(a, Number(t.zone), 1);
+        if (why) lines.push(`温和：诺拉没有移动，${why}`);
+        else { a.zone = t.zone; lines.push(`温和：诺拉移动到 ${t.zone} 区。`); }
+      }
     } else if (id === "nora_summon") {
       const w = spawnWeapon(a, "vitas");
       lines.push(w ? "维塔斯 已分出。" : "维塔斯无法唤出。");
