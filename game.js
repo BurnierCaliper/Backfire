@@ -404,6 +404,7 @@
     G.undo.push({
       label: label || "行动",
       st: saveState(),
+      logPages: (state.logPages || []).length,   // 规则层的日志不进快照（战斗记录不删），只记当时有几页：撤销时把之后新开的回合页并回来（foldLogPages）
       ledger: typeof LEDGER !== "undefined" ? LEDGER.save() : null,
       actorId: G.actorId,
       apWarnTurn: G.apWarnTurn
@@ -421,10 +422,21 @@
     refreshAll();
     flashHint(`已撤销：${u.label}` + (G.undo.length ? `（还能再撤 ${G.undo.length} 步）` : ""));
   }
+  /** 撤的是「结束回合」「开始战斗」时，那之后新开的回合页（app.js · startLogTurn）并回撤销后的这一页，行一条不删，接着往这一页记。
+   *  startLogTurn 按最后一页的回合号 +1 算下一回合：那一页留着，撤销后再结束回合，回合数就会跳一号（#340 第 3 条） */
+  function foldLogPages(count) {
+    const pages = state.logPages;
+    if (!Array.isArray(pages) || !(count >= 1) || pages.length <= count) return;
+    const keep = pages[count - 1];
+    pages.splice(count).forEach(p => (p.lines || []).forEach(l => keep.lines.push(l)));
+    state.logIndex = count - 1;
+    renderLog();
+  }
   function undoRules() {
     if (!canUndo()) return;
     const u = G.undo.pop();
     restoreState(u.st);
+    foldLogPages(u.logPages);
     if (u.ledger && typeof LEDGER !== "undefined") {
       const water = ledgerWater();
       LEDGER.load(u.ledger);
