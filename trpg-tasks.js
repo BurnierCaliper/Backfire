@@ -4,14 +4,16 @@
  *   { id, name, kind, goal, days, status: draft 草稿 / posted 已发布 / active 进行中 / done 已完成 / failed 失败,
  *     reward: { kuizhi, xp, items: [{ id, qty }], parts: [改装件 id], blueprints: [图纸 id], intactKuizhi },
  *     escort: null 或 { kind: cart / vip, name, hp, def, atk, level, cur 当前血量（null = 满）, lost },
- *     nodes: [{ type, note, enemies: [{ id, lv, zone }], weather, zoneMode, done }], index 走到第几站 }
+ *     nodes: [{ id, type, note, enemies: [{ id, lv, zone }], weather, zoneMode, done }], index 走到第几站 }
  * 路线（nodes）、每一站的敌人和天气、奖励都由主持人预先配置，进行中也能改。
+ * 每一站有个 id（同一个任务里不重复：s1、s2…），跟着站走：主持人改路线（删站、插站、挪站）时按它认站，
+ * 走过没有（done）、奖励发过没有（granted）都跟着站，不跟位置；改完的当前站是路线里第一个还没走过的站（trpgTaskSave）。
  * 任务日志（联机玩家也看得到，trpgQuestLog）：
  *   category main 主线 / side 支线 / personal 个人；visibility { mode: party 全队 / players, ids: 房间成员 id }；gmNote 只给主持人看；
  *   个人任务：owner 是一名角色（kit），只有操控这名角色的玩家看得到（别的玩家连有这条任务都不知道，visibility 不用），
  *   每一站和完成的经验只给这名角色（奎支、物品照样进队伍）；
  *   每一站：title 玩家看到的步骤文字（空着就只写站的类型）、hidden 没揭示前玩家只看到「？？？」、reward { xp 每人, kuizhi 队伍 } 完成这一站时发；
- *   granted { nodes: 已发过奖励的站, complete } 记账：每站奖励只发一次，回退再推进不重发。
+ *   granted { nodes: 已发过奖励的站（站的 id）, complete } 记账：每站奖励只发一次，回退再推进、改路线都不重发。
  * 打战斗站：trpgTaskPrepareBattle 返回这一站的敌人配置并记下 TRPG.taskBattle，
  * 摆战场时护送对象跟着上场（trpgSpawnTaskEscort），战斗结算后 trpgTaskAfterBattle 记血量、推进路线。 */
 "use strict";
@@ -26,9 +28,9 @@ function trpgTasks() {
   LEDGER.tasks.forEach(trpgTaskUpgrade);
   return LEDGER.tasks;
 }
-/** 旧存档的任务补上任务日志的字段（分类、可见范围、每站奖励、发奖记账） */
+/** 旧存档的任务补上任务日志的字段（分类、可见范围、每站奖励、站的 id、发奖记账） */
 function trpgTaskUpgrade(t) {
-  if (!t || t._v === 2) return;
+  if (!t || t._v === 3) return;
   if (t.category !== "main" && t.category !== "personal") t.category = "side";
   if (typeof t.owner !== "string") t.owner = "";
   if (!t.visibility || !t.visibility.mode) t.visibility = { mode: "party", ids: [] };
@@ -39,8 +41,9 @@ function trpgTaskUpgrade(t) {
     n.hidden = !!n.hidden;
     if (!n.reward || typeof n.reward !== "object") n.reward = { xp: 0, kuizhi: 0 };
   });
-  if (!t.granted) t.granted = trpgTaskGranted(null, t.nodes);
-  Object.defineProperty(t, "_v", { value: 2, enumerable: false, configurable: true, writable: true });
+  trpgTaskNodeIds(t.nodes || []);
+  t.granted = trpgTaskGranted(t.granted, t.nodes);   // 旧存档记的是第几站：换成那一站的 id
+  Object.defineProperty(t, "_v", { value: 3, enumerable: false, configurable: true, writable: true });
 }
 function trpgTaskById(id) { return trpgTasks().find(t => t.id === id) || null; }
 function trpgActiveTask() { return trpgTasks().find(t => t.status === "active") || null; }
@@ -60,12 +63,35 @@ const tNum = (v, d, lo, hi) => {
   return n;
 };
 const tStr = (v, max) => String(v == null ? "" : v).slice(0, max || 200);
+/** 站的 id：字母、数字、- 和 _，最长 24 个字 */
+const trpgNodeIdOk = id => typeof id === "string" && /^[\w-]{1,24}$/.test(id);
+/** 给路线上每一站一个 id（同一个任务里不重复），跟着站走：改路线时按它认站。已经有的照旧；缺了 / 重复了的给新的 s1、s2…，
+ *  也不用 used 里的（保存时是改之前那些站的 id：同一次保存里删掉的站，它的 id 不会给新加的站，免得新站被认成它）。
+ *  不用 Math.random：战斗里的随机数按种子排好了，抽走一个后面的骰子就变了（同 lore.js · loreNewId） */
+function trpgTaskNodeIds(nodes, used) {
+  const seen = new Set();
+  const fresh = nodes.filter(n => {
+    const keep = trpgNodeIdOk(n.id) && !seen.has(n.id);
+    if (keep) seen.add(n.id);
+    return !keep;
+  });
+  const taken = new Set([...seen, ...(used || [])]);
+  let k = 0;
+  fresh.forEach(n => {
+    let id;
+    do id = "s" + ++k; while (taken.has(id));
+    n.id = id;
+    taken.add(id);
+  });
+  return nodes;
+}
 function trpgTaskNormalizeNode(n) {
   n = n || {};
   const type = TRPG_NODE_TYPES[n.type] ? n.type : "battle";
   const fight = type === "battle" || type === "elite";
   const presets = typeof enemyPresets === "function" ? enemyPresets().map(p => p.id) : [];
   return {
+    id: trpgNodeIdOk(n.id) ? n.id : "",   // 空着的由 trpgTaskNodeIds 补
     type, note: tStr(n.note, 300), done: !!n.done,
     title: tStr(n.title, 120), hidden: !!n.hidden,
     reward: { xp: tNum(n.reward && n.reward.xp, 0, 0), kuizhi: tNum(n.reward && n.reward.kuizhi, 0, 0) },
@@ -91,6 +117,7 @@ function trpgTaskNormalize(t, old) {
   const known = (id) => typeof ITEM_CATALOG !== "undefined" && ITEM_CATALOG[id];
   const kind = TRPG_TASK_KINDS[t.kind] ? t.kind : "custom";
   const e = t.escort;
+  const nodes = trpgTaskNodeIds((Array.isArray(t.nodes) ? t.nodes : []).slice(0, 20).map(trpgTaskNormalizeNode), (old.nodes || []).map(n => n && n.id));
   return {
     id: old.id || t.id,
     name: tStr(t.name, 40) || TRPG_TASK_KINDS[kind],
@@ -113,13 +140,13 @@ function trpgTaskNormalize(t, old) {
       cur: old.escort && old.escort.cur != null ? old.escort.cur : null,
       lost: !!(old.escort && old.escort.lost)
     } : null,
-    nodes: (Array.isArray(t.nodes) ? t.nodes : []).slice(0, 20).map(trpgTaskNormalizeNode),
+    nodes,
     index: old.index != null ? old.index : 0,
     category: trpgTaskCategory(t.category || old.category),
     owner: trpgTaskCategory(t.category || old.category) === "personal" ? tStr(t.owner != null ? t.owner : old.owner, 40) : "",
     visibility: trpgTaskVisibility(t.visibility || old.visibility),
     gmNote: tStr(t.gmNote, 400),
-    granted: trpgTaskGranted(old.granted || t.granted, old.nodes || t.nodes),
+    granted: trpgTaskGranted(old.granted || t.granted, nodes),
     failWhy: tStr(old.failWhy, 120)
   };
 }
@@ -138,10 +165,13 @@ function trpgTaskVisibility(v) {
   if (v && v.mode === "players") return { mode: "players", ids: (Array.isArray(v.ids) ? v.ids : []).map(x => tStr(x, 80)).filter(Boolean).slice(0, 16) };
   return { mode: "party", ids: [] };
 }
-/** 发奖记账。旧存档没有：已经走过的站当作发过了（免得推进时补发） */
+/** 发奖记账：nodes 是已经发过奖励的站的 id（按路线顺序；删掉了的站不记）。
+ *  旧存档记的是第几站：换成那一站的 id（读档时还没改过路线，位置对得上）；没有记账的：已经走过的站当作发过了（免得推进时补发） */
 function trpgTaskGranted(g, nodes) {
-  if (g && typeof g === "object") return { nodes: (Array.isArray(g.nodes) ? g.nodes : []).map(Number).filter(n => n >= 0), complete: !!g.complete };
-  return { nodes: (Array.isArray(nodes) ? nodes : []).map((n, i) => (n && n.done ? i : -1)).filter(i => i >= 0), complete: false };
+  nodes = Array.isArray(nodes) ? nodes : [];
+  if (!g || typeof g !== "object") return { nodes: nodes.filter(n => n && n.done).map(n => n.id), complete: false };
+  const got = (Array.isArray(g.nodes) ? g.nodes : []).map(x => (typeof x === "number" ? (nodes[x] || {}).id : x));
+  return { nodes: nodes.map(n => n && n.id).filter(id => id && got.includes(id)), complete: !!g.complete };
 }
 
 /* 主持人手册第三章「任务金钱（现行基准）」「任务经验」：按任务长度（天数）给，经验再按队伍等级分档（每人）。
@@ -192,17 +222,26 @@ function trpgTaskCreate(kind, category) {
   list.push(t);
   return [`新建${TRPG_TASK_CATEGORY[t.category]}任务草稿「${t.name}」（${TRPG_TASK_KINDS[t.kind]}）。`];
 }
-/** 保存主持人改过的任务（状态、走到第几站、护送对象当前血量保留） */
+/** 保存主持人改过的任务（状态、护送对象当前血量保留）。
+ *  改路线（删站、插站、挪站）：按站的 id 认站，每一站走过没有、奖励发过没有照改之前的那一站（编辑器交来的不算数），新加的站算没走过；
+ *  当前站 = 改完的路线里第一个还没走过的站，它后面的都算没走过（像「回退一步」：发过的奖励不收回，再走到也不重发）。
+ *  以前按位置记：删了走过的站会跳过下一站，在前面插站会把走过的站的奖励再发一次、新站的奖励记成发过了 */
 function trpgTaskSave(data) {
   const old = trpgTaskById(data && data.id);
   if (!old) return ["没有这个任务。"];
   const t = trpgTaskNormalize(data, old);
-  t.index = Math.min(old.index || 0, t.nodes.length);
-  t.granted = trpgTaskGranted(old.granted, old.nodes);
+  const was = new Map((old.nodes || []).map(n => [n.id, n]));
+  t.nodes.forEach(n => { n.done = !!(was.get(n.id) || {}).done; });
+  const at = t.nodes.findIndex(n => !n.done);
+  t.index = at < 0 ? t.nodes.length : at;
+  t.nodes.slice(t.index).forEach(n => { n.done = false; });
   if (t.escort && old.escort && old.escort.cur != null) t.escort.cur = Math.min(old.escort.cur, escortSpec(t.escort, t.escort.level).hpMax);
+  const notes = [`任务「${t.name}」已保存。`];
+  const before = (old.nodes || [])[old.index], now = t.nodes[t.index];
+  if (old.status === "active" && (before && before.id) !== (now && now.id)) notes.push(now ? `当前站改成第 ${t.index + 1} 站（${trpgNodeLabel(now)}）。` : "路线走完了，可以结算任务。");
   Object.keys(old).forEach(k => delete old[k]);
   Object.assign(old, t);
-  return [`任务「${t.name}」已保存。`];
+  return notes;
 }
 function trpgTaskDelete(id) {
   const list = trpgTasks();
@@ -248,8 +287,8 @@ function trpgTaskNodeDone(id) {
   if (next) next.hidden = false;   // 走到的下一站自动揭示
   const notes = [`任务「${t.name}」第 ${at + 1} 站（${trpgNodeLabel(n)}）完成。${next ? `下一站：${trpgNodeLabel(next)}。` : "路线走完了，可以结算任务。"}`];
   t.granted = t.granted || { nodes: [], complete: false };
-  if (!t.granted.nodes.includes(at)) {
-    t.granted.nodes.push(at);
+  if (!t.granted.nodes.includes(n.id)) {
+    t.granted.nodes.push(n.id);
     notes.push(...trpgTaskGrant(n.reward, `「${t.name}」第 ${at + 1} 站`, trpgTaskXpKits(t)));
   }
   return notes;
@@ -391,7 +430,7 @@ function trpgQuestLog(viewerId, isGM, viewerKits) {
       const steps = t.nodes.map((n, i) => {
         const state = t.status === "active" ? (i < t.index ? "done" : i === t.index ? "cur" : "todo") : t.status === "done" ? "done" : "todo";
         if (n.hidden && state !== "done" && state !== "cur") return { title: "", state, hidden: true, xp: 0, kuizhi: 0, got: false };
-        return { title: n.title || TRPG_NODE_TYPES[n.type], state, hidden: false, xp: n.reward.xp, kuizhi: n.reward.kuizhi, got: g.nodes.includes(i) };
+        return { title: n.title || TRPG_NODE_TYPES[n.type], state, hidden: false, xp: n.reward.xp, kuizhi: n.reward.kuizhi, got: g.nodes.includes(n.id) };
       });
       return {
         id: t.id, name: t.name, category: t.category, status: t.status, goal: t.goal, days: t.days,

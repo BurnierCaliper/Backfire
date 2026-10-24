@@ -111,7 +111,7 @@ test("旧存档的任务（没有分类、每站奖励、记账）补上默认�
   const log = plain(c.trpgQuestLog("p1", false));
   assert.equal(log[0].category, "side");
   const t = c.trpgTaskById("old1");
-  assert.deepEqual(plain(t.granted.nodes), [0]);
+  assert.deepEqual(plain(t.granted.nodes), [t.nodes[0].id], "记账记的是站的 id（#340 第 6 条，以前记第几站）");
   c.trpgTaskRollback("old1");
   c.trpgTaskNodeDone("old1");   // 不会崩，也不会补发
   assert.equal(t.index, 1);

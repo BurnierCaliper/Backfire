@@ -502,7 +502,7 @@
       const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
       const foes = n.template ? `：模板「${n.template.name}」` : n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
       const rw = [n.reward && n.reward.xp ? `+${n.reward.xp} 经验` : "", n.reward && n.reward.kuizhi ? `+${n.reward.kuizhi} 奎支` : ""].filter(Boolean).join(" ");
-      const got = t.granted && t.granted.nodes.includes(i);
+      const got = t.granted && t.granted.nodes.includes(n.id);
       return `<span class="tk-node${cls}${n.hidden ? " tk-hid" : ""}" title="${esc(n.note || "")}">${i + 1}. ${n.hidden ? "🔒" : ""}${esc(n.title || NODE_T()[n.type])}${n.title ? ` · ${esc(NODE_T()[n.type])}` : ""}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}${rw ? ` <b class="tk-rw${got ? " got" : ""}">${esc(rw)}${got ? " ✓" : ""}</b>` : ""}</span>`;
     }).join("")}</div>`;
   }
@@ -517,7 +517,7 @@
     if (t.status === "active") {
       if (fight) btns.push(`<button class="g-btn small tk-go" data-tk="fight:${id}">打这一站（${esc(NODE_T()[node.type])}）</button>`);
       if (node) {
-        const got = t.granted && t.granted.nodes.includes(t.index);
+        const got = t.granted && t.granted.nodes.includes(node.id);
         const rw = !got && node.reward ? [node.reward.xp ? `每人 +${node.reward.xp} 经验` : "", node.reward.kuizhi ? `+${node.reward.kuizhi} 奎支` : ""].filter(Boolean).join("、") : "";
         btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成${rw ? `（发 ${esc(rw)}）` : ""}</button>`);
       }
@@ -570,7 +570,8 @@
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
             战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>`;
-      const got = t.granted && t.granted.nodes.includes(i);
+      // 发奖记账按站的 id：编辑里删站、挪站以后「奖励已发」照样跟着那一站（新加的站还没有 id，没发过）
+      const got = !!n.id && t.granted && t.granted.nodes.includes(n.id);
       if (!n.reward) n.reward = { xp: 0, kuizhi: 0 };
       const rwRow = `<div class="tr-row">玩家看到的步骤 ${inp(`nodes.${i}.title`, n.title || "", 240)}
           ${got ? `<span class="r-hint">奖励已发 ✓（+${n.reward.xp} 经验 · +${n.reward.kuizhi} 奎支，改了也不会再发）</span>`
@@ -620,6 +621,7 @@
       <h4>路线（可以不填）</h4>
       <p class="r-hint">不填路线就是剧情任务：玩家只看到标题、描述和奖励，由你在合适的时候「结算任务」或「判定失败」。要按站推进时再加站（战斗站可以预先配置敌人、天气、战场）。
         ${t.kind !== "custom" ? `<button class="g-btn small" data-te-act="templateRoute">按「${esc(TRPG_TASK_KINDS[t.kind])}」模板填路线</button>` : ""}</p>
+      ${t.status === "active" ? `<p class="r-hint">任务进行中：删站、插站、挪站时，走过没有、奖励发过没有都跟着那一站。保存后当前站是路线里第一个还没走过的站；走过的站挪到它后面，要再走一次（奖励不重发）。</p>` : ""}
       ${nodes}
       <div class="tr-row"><button class="g-btn small" data-te-act="addNode:battle">＋ 战斗站</button><button class="g-btn small" data-te-act="addNode:rest">＋ 休息点</button><button class="g-btn small" data-te-act="addNode:event">＋ 事件</button></div>
       <div class="tr-row"><button class="g-btn" data-te-act="save">保存</button><button class="g-btn" data-te-act="cancel">取消</button></div>
@@ -634,7 +636,7 @@
       return `<h3 class="tk-sec">${title}</h3>${rows.map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("") || '<p class="r-hint">暂无。</p>'}`;
     };
     return `<p class="r-hint">任务日志：主持人在这里发布主线、支线和个人任务。新任务只有标题和描述，没有路线、没有奖励——要的话在「编辑」里加（奖励不填就没有；路线不填就是剧情任务，由你「结算」或「判定失败」）。再「发布」；队伍「接下」后有路线的按站推进，可以同时进行好几条。
-        联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进不重发，也不收回）。</p>
+        联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进、改路线都不重发，也不收回）。</p>
       <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
       ${group("main", "主线任务")}${group("side", "支线任务")}${group("personal", "个人任务（只给那名角色的玩家看）")}`;
   };
