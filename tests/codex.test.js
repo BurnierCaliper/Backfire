@@ -4,13 +4,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
 
-test("效果图鉴：七种属性状态 / 即时 / 自我 / 攻击效果各 7 条，通用状态 8 条，天气 8 种", () => {
+test("效果图鉴：七种属性状态 / 即时 / 自我 / 攻击效果各 7 条，通用状态 9 条（#405 加了目盲），天气 8 种", () => {
   const c = H.load();
   const all = c.codexEffectEntries();
   const count = (g) => all.filter(e => e.group === g).length;
   ["status", "instant", "self"].forEach(g => assert.equal(count(g), 7, g));
   assert.equal(count("attack"), 10, "七种属性攻击效果 + 穿刺 / 猛击 / 弱点特效");
-  assert.equal(count("common"), 8);
+  assert.equal(count("common"), 9);
   assert.equal(count("weather"), 8);
   assert.equal(count("element"), 7);
   assert.equal(count("layer"), 5);

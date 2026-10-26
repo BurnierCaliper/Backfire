@@ -6,7 +6,7 @@
   const esc = value => String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const copy = value => JSON.parse(JSON.stringify(value));
   const labels = { flesh: "生命", armor: "护甲", shield: "护盾", sand: "砂甲", spirit: "灵体", none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", phase: "相位" };
-  const names = { nano: "纳米", nanoReserve: "储备", bean: "咖啡豆", liquid: "咖啡液", durability: "耐久", shield: "盾", charge: "充能", energyPct: "能量", light: "光", debrisCount: "碎块", burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振", weak: "虚弱", inspire: "振奋", hide: "躲藏", advantage: "优势", chase: "紧追", sturdy: "坚固" };
+  const names = { nano: "纳米", nanoReserve: "储备", bean: "咖啡豆", liquid: "咖啡液", durability: "耐久", shield: "盾", charge: "充能", energyPct: "能量", light: "光", debrisCount: "碎块", burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振", weak: "虚弱", inspire: "振奋", hide: "躲藏", advantage: "优势", chase: "紧追", sturdy: "坚固", blind: "目盲" };
   // 玩家右侧栏收起（#298）：电脑上把「战斗 / 小队」右侧栏收成一条窄边（只剩展开按钮，收起时来了新消息挂数字），战斗画面变宽；
   // 收起状态记在这台电脑上。手机竖屏的右侧栏在底部，照旧用自己的「展开 ▴ / 收起 ▾」
   const SIDE_COLLAPSE = { key: "backfire.online.sideCollapsed", collapse: "▸", expand: "◂", collapseTitle: "收起右侧栏（战斗画面变宽）", expandTitle: "展开右侧栏：战斗记录与小队聊天" };
@@ -235,7 +235,7 @@
     document.addEventListener("click", onPaperOutside, true);
     document.addEventListener("keydown", onPaperKey, true);
     // 悬停在单位 / 配置物上：图鉴描述 + 身上效果的文字说明（unit-tip.js）
-    const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追" };
+    const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追", blind: "目盲" };
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
     const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒", frenzy: "狂暴" };
     const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };

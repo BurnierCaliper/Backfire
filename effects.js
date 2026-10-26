@@ -8,6 +8,7 @@
  *   onBroken             被打进失衡的那一刻（刺骨再触发、过载爆炸）
  *   endSelfOnStun        晕眩后自我效果结束（蓄能累积的高能值不清零）
  *   selfImmunities       自我效果带来的免疫（自焚免疫灼烧、霜结免疫冻伤……）
+ *   blindRollApplies / blindRoll / blindBlockBonus / blindOnBlocked   目盲（#405）：出手时的落空骰、被格挡的概率、挡下以后解除
  * 规则全部照手册原文，行内注释写了对应的句子。
  * 下水道狂鼠的通用机制（docs/ratfolk.md 第 2 节）也放在这里：狂暴（自我效果，enterFrenzy / FRENZY）、阵营被动「狂潮」（frenzyTide）；
  * 出血是攻击效果，在 engine.js · resolveAttack 里结算（BLEED）。
@@ -171,6 +172,50 @@ function surfaceUnit(u, notes, forced, why, element) {
   notes.push(`${u.name} ${forced ? `被${why || "打"}出沙层，下潜被迫解除` : `${why || "发动攻击"}，下潜解除`}。`);
   if (forced && typeof dealBreak === "function") dealBreak(u, 1, element || "physical", notes, "下潜被迫解除");
   return true;
+}
+
+/* ---------- 目盲（通用状态 statuses.blind，#405；数值在 engine.js · BLIND）----------
+ *   攻击有 missPct% 概率落空：app.js · dealToInner 等这一击确定打得出去（射程、躲藏、飞行、危墙都过了，代挡也换好了人）再掷 d100，
+ *   落空就到此为止——不进协助格挡、碰不到屏障，没有伤害、击破和任何命中效果。等格挡结果的那一击落下时不再掷（flags.blindChecked）。
+ *   被格挡下来的概率 +blockPct%（app.js · finalBlockChance）。落空一次、或者攻击被格挡下来一次（拿武器挡住、空手挡住、以身作盾、
+ *   敌人的自动格挡都算）就解除。 */
+function isBlind(u) {
+  return !!(u && u.statuses && u.statuses.blind);
+}
+/** 目盲解除；why：「攻击落空」「的攻击被格挡下来」 */
+function clearBlind(u, notes, why) {
+  if (!isBlind(u)) return false;
+  u.statuses.blind = false;
+  if (notes) notes.push(`${u.name} ${why}，目盲解除。`);
+  return true;
+}
+/** 这一击要不要掷落空骰（flags：dealTo 的 opt.flags）：攻击者目盲、是攻击行动。协助攻击、借机攻击这些反应照样掷。不掷的：
+ *  出手时已经掷过（等格挡结果的那一击）；环境 / 持续伤害；首领机制（锁定的机制伤害，不算攻击行动）；导体随机跳到的那一下；
+ *  维塔斯借刺入的针尖出手（针就在目标身上）；范围攻击（BLIND.aoe 打开才掷）；打濒死倒地的人（起身之前本来就不受伤害） */
+function blindRollApplies(a, t, flags) {
+  if (!isBlind(a) || !t || !flags) return false;
+  if (flags.blindChecked || !flags.action || flags.environment) return false;
+  if (flags.mechId || flags.locked || flags.conductorExtra || flags.viaPierce) return false;
+  if (flags.aoe && !BLIND.aoe) return false;
+  if (typeof isDownProtected === "function" && isDownProtected(t)) return false;
+  return true;
+}
+/** 掷落空骰：d100 ≤ BLIND.missPct 就落空，目盲随即解除。返回 { miss, roll, notes } */
+function blindRoll(a, t) {
+  const pct = Number(BLIND.missPct) || 0;
+  const roll = 1 + Math.floor(Math.random() * 100);
+  const miss = roll <= pct;
+  const notes = [`${a.name} 目盲：d100=${roll}（落空率 ${pct}%）→ ${miss ? `对 ${t.name} 的攻击落空` : "没有落空"}。`];
+  if (miss) clearBlind(a, notes, "攻击落空");
+  return { miss, roll, notes };
+}
+/** 攻击者目盲：被格挡下来的概率 +BLIND.blockPct（app.js · finalBlockChance 和其他加成加算，加完再封顶） */
+function blindBlockBonus(a) {
+  return isBlind(a) ? Number(BLIND.blockPct) || 0 : 0;
+}
+/** 攻击被格挡下来（协助格挡成功、空手格挡成功、以身作盾、敌人的自动格挡）：攻击者的目盲解除 */
+function blindOnBlocked(a, notes) {
+  return clearBlind(a, notes, "的攻击被格挡下来");
 }
 
 /** 攻击者打完一次攻击行动（dealTo，action 且不是反应） */

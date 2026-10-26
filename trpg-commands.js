@@ -154,7 +154,7 @@ const CalcCommands = (() => {
   const render = () => { if (typeof renderAll === "function") renderAll(); };
   const byId = c => unitById(c.actor);
   const unitFields = ["name", "level", "atk", "def", "defMax", "highEnergy", "flying", "stunned"];
-  const statuses = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "latestElement"];
+  const statuses = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "blind", "latestElement"];
   const instants = ["melt", "sting", "overload", "shift", "spread", "refract"];
   const weather = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
   function member(value, allowed, label) { if (!allowed.includes(value)) throw new Error("Unknown " + label + ": " + value); }

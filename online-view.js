@@ -118,7 +118,7 @@
   // nanoReserve：瑞比的储备能源（#219，不是坚毅数值，公开）
   const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
-  const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
+  const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy", "blind"];
   // 中立生物（沙漠的尘虫 / 管虫）身上的小标签（#358）：键 → 写什么，和单机旧画面 game.js · snapUnit 的 neutralTags 同一套字
   const neutralTagText = { stun: "失衡", flat: "摊平", seen: "已发现" };
   /** 中立生物的小标签：演出快照给了 neutralTags 就只认上面表里的键；规则单位按失衡 / 摊平 / 被声呐发现现算。字一律用上面那张表 */
@@ -342,7 +342,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "目盲", "落空", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
