@@ -1738,7 +1738,10 @@ function beginRound(notes) {
     // 夕夏濒死（倒地没起身）、晕眩或死了就不自动碾压（以前照碾）
     if (u.kit === "xia" && isCrushing(u) && !u.dead && !u.dying && !u.stunned) {
       const ct = crushingTarget(u);
+      const from = Number(u.zone);
       u.zone = Number(ct.zone);
+      // 休眠的敌人：抓着的敌人走进它那一区，夕夏跟过去也会叫醒它（以前不叫醒）
+      if (Number(u.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(u, notes);
       notes.push(...crushOnce(u, ct, true));
     }
     if (u.kit === "nora" && (typeof passiveOn !== "function" || passiveOn(u))) {
@@ -4723,7 +4726,8 @@ function doMove(unit, dest, moveOpt) {
   try {
     lines = withLogSink(() => {
       const waveOwn = waveLedgerOpen();   // 驻波墙：走路引起的别的移动（借机攻击击退、紧追……）也补算穿墙
-      try { doMoveInner(unit, dest, moveOpt); } finally { waveLedgerClose(waveOwn); }
+      const sleepOwn = typeof dormantLedgerOpen === "function" && dormantLedgerOpen(unit);   // 休眠的敌人：同上，走路引起的别的移动也补算进区
+      try { doMoveInner(unit, dest, moveOpt); } finally { waveLedgerClose(waveOwn); if (sleepOwn) dormantLedgerClose(sleepOwn); }
     });
   } finally { LOG_ACTOR_ID = prevActor; }
   if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
@@ -4943,6 +4947,7 @@ function chaseFollow(unit, notes) {
       enterFrozenGround(c, notes);
       applyAbyssFall(c, from, notes);
       if (typeof afterMove === "function") afterMove(c, notes);
+      if (Number(c.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(c, notes);   // 休眠的敌人：紧追跟进它的区也会醒（掉进深渊爬回原区不算）
     } else {
       notes.push(...crossing);
       notes.push(`${c.name} 紧追 ${unit.name}，但间隔挡住，没跟上。`);
@@ -7276,8 +7281,10 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       }
     }
     if (helper.kit === "tou") {
+      const from = Number(helper.zone);
       helper.zone = attacker ? attacker.zone : helper.zone;
       notes.push(`灯移动到进攻者所在 ${helper.zone} 区。`);
+      if (Number(helper.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(helper, notes);   // 休眠的敌人：灯跟到它那一区也会醒
     }
     if (helper.kit === "mochi" && attacker && !attacker.isPlayer) {
       attacker.noMove = true;
@@ -8201,6 +8208,8 @@ function dealToInner(attacker, target, opt) {
   if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
   // 驻波墙：这次行动里技能直接换过区的单位，出手之前先把穿墙补算上（借机攻击是走的人离开那一下打的，不在这里补）
   if (state._waveLedger && !opt.flags.opportunity) waveLedgerSync();
+  // 休眠的敌人：同上，出手之前先补算技能里直接换区的进区（enemies.js · dormantLedgerSync）
+  if (state._dormantLedger && !opt.flags.opportunity) dormantLedgerSync();
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -12000,11 +12009,14 @@ function runSkill(id, optRun) {
       state._highDefer = (Number(state._highDefer) || 0) + 1;
       // 驻波墙：这次行动开始时记下各单位在哪一区，技能里直接换区的移动出手前 / 行动结束时补算穿墙（最外层这一次记）
       const waveOwn = waveLedgerOpen();
+      // 休眠的敌人：同样记一份，技能里直接换区走进它那一区的也叫醒它（enemies.js · dormantLedgerOpen）
+      const sleepOwn = typeof dormantLedgerOpen === "function" && dormantLedgerOpen(a0);
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
       finally {
         state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
         if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
         waveLedgerClose(waveOwn);
+        if (sleepOwn) dormantLedgerClose(sleepOwn);
       }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
@@ -12287,6 +12299,8 @@ function runSkillInner(id, optRun) {
     let out;
     // 驻波墙：技能里直接换过区（突进、逃离……）还没补算的穿墙，先结算、先写（不然写在这一击的结果后面）
     if (state._waveLedger) waveLedgerSync(lines);
+    // 休眠的敌人：技能里直接换区走进它那一区的，出手之前先叫醒（吵醒它的是走进来这一下，不是这一击）
+    if (state._dormantLedger) dormantLedgerSync(lines);
     // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的；这一击之前攒下的话先写出去
     if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
     appendLog(lines.splice(0).join("\n"));
