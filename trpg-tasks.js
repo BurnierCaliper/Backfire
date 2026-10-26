@@ -15,7 +15,8 @@
  *   每一站：title 玩家看到的步骤文字（空着就只写站的类型）、hidden 没揭示前玩家只看到「？？？」、reward { xp 每人, kuizhi 队伍 } 完成这一站时发；
  *   granted { nodes: 已发过奖励的站（站的 id）, complete } 记账：每站奖励只发一次，回退再推进、改路线都不重发。
  * 打战斗站：trpgTaskPrepareBattle 返回这一站的敌人配置并记下 TRPG.taskBattle，
- * 摆战场时护送对象跟着上场（trpgSpawnTaskEscort），战斗结算后 trpgTaskAfterBattle 记血量、推进路线。 */
+ * 摆战场时护送对象跟着上场（trpgSpawnTaskEscort），战斗结算后 trpgTaskAfterBattle 记血量、推进路线。
+ * 联机房主在战斗里刷新：TRPG.taskBattle 跟着房间检查点走，恢复后接着认（trpgTaskBattleNormalize）。 */
 "use strict";
 
 const TRPG_TASK_KINDS = { clear: "清剿", escort: "护送", scout: "侦察", bounty: "悬赏", custom: "自定义" };
@@ -367,6 +368,12 @@ function trpgTaskAfterBattle(outcome) {
   }
   if (outcome === "win" && t.index === tb.index) notes.push(...trpgTaskNodeDone(t.id));
   return notes;
+}
+/** 联机房主的房间检查点带着正在打的任务战斗（trpg-ui.js · TrpgFlow.onlineCheckpoint / restoreOnline）：房主在任务战斗里刷新、恢复房间后接着打，
+ *  打完照样推进路线、记护送对象的血量（被摧毁 = 任务失败）。读回来时只认 { id, index }，别的（旧检查点没有、写坏了）当作不是任务战斗。
+ *  以前检查点里没有它：恢复后打赢了不推进任务、这一站的奖励不发，护送对象被摧毁也不判失败 */
+function trpgTaskBattleNormalize(tb) {
+  return tb && typeof tb.id === "string" && tb.id && Number.isInteger(tb.index) && tb.index >= 0 ? { id: tb.id, index: tb.index } : null;
 }
 /** 结算：发奖励（奎支、每人经验、物品、改装件、图纸；护送完好额外奎支） */
 function trpgTaskComplete(id) {
