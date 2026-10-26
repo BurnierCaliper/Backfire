@@ -83,15 +83,17 @@ test("抓着时被打进晕眩：那一回合不自动碾压也没法出手，�
 
 test("自动碾压被废铁墙挡下也算攻击过：连着两回合都被挡，引擎照样开着（以前第二回合熄火）", () => {
   const { c, S, x, foe } = grabbed();
-  const wall = c.makeProp("scrapwall", 1, 1);
-  wall.hp = wall.maxHp = 999;
   const hp = c.totalHp(foe);
   for (let i = 0; i < 2; i++) {
     c.endPlayerTurn();
-    if (!S.props.includes(wall)) S.props.push(wall);   // 废铁墙是敌人回合立的（回防命令），撑过我方回合，下个敌人回合开始撤掉
+    // 敌人回合立起废铁墙（回防命令）：撑过我方回合，下个敌人回合开始撤掉
+    const wall = c.makeProp("scrapwall", 1, 1);
+    wall.hp = wall.maxHp = 999;
+    S.props.push(wall);
     c.endEnemyTurn();                                   // 回合开始自动碾压：废铁墙替刀手挨这一下
     assert.equal(x.resources.crushId, foe.id, "还抓着");
     assert.equal(c.totalHp(foe), hp, "这一下被废铁墙挡下了");
+    assert.ok(wall.hp < 999, "废铁墙挨了这一下");
     assert.ok(x.resources.engine, `第 ${S.turnNo} 回合开始引擎还开着`);
   }
   assert.equal(engineOffs(S), 0);
