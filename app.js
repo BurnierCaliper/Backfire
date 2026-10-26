@@ -1735,6 +1735,20 @@ function beginRound(notes) {
   if (typeof featHook === "function") state.units.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
+    // 夕夏的引擎：先看上一回合攻击过没有、清零，再自动碾压——回合开始的自动碾压算新一回合的攻击（#386）。
+    // 以前先碾再判、判完清零，自动碾压记到了上一回合：抓着的目标在这一回合被打死 / 烧死，夕夏整回合没有行动点出不了手，下回合开始就熄火
+    if (u.kit === "xia" && u.resources) {
+      // 背水一战：起身（靠坚毅生命）继续战斗时总是启动引擎，一回合没攻击也不熄火
+      const backWater = u.upOnShp && !u.dead && (typeof passiveOn !== "function" || passiveOn(u));
+      if (u.resources.engine && !u.resources.attackedThisTurn && !u.resources.engineJustOn && !backWater) {
+        u.resources.engine = false;
+        notes.push("夕夏一回合未攻击，引擎关闭。");
+      } else if (u.resources.engineJustOn) {
+        notes.push("夕夏引擎刚启动：本回合即使未攻击也不关闭。");
+      }
+      u.resources.engineJustOn = false;
+      u.resources.attackedThisTurn = false;
+    }
     // 夕夏濒死（倒地没起身）、晕眩或死了就不自动碾压（以前照碾）
     if (u.kit === "xia" && isCrushing(u) && !u.dead && !u.dying && !u.stunned) {
       const ct = crushingTarget(u);
@@ -1783,18 +1797,6 @@ function beginRound(notes) {
       u.resources.giantTurns = (u.resources.giantTurns || 0) + 1;
     }
     if (u.resources) u.resources.blockUsedThisTurn = false;
-    if (u.kit === "xia" && u.resources) {
-      // 背水一战：起身（靠坚毅生命）继续战斗时总是启动引擎，一回合没攻击也不熄火
-      const backWater = u.upOnShp && !u.dead && (typeof passiveOn !== "function" || passiveOn(u));
-      if (u.resources.engine && !u.resources.attackedThisTurn && !u.resources.engineJustOn && !backWater) {
-        u.resources.engine = false;
-        notes.push("夕夏一回合未攻击，引擎关闭。");
-      } else if (u.resources.engineJustOn) {
-        notes.push("夕夏引擎刚启动：本回合即使未攻击也不关闭。");
-      }
-      u.resources.engineJustOn = false;
-      u.resources.attackedThisTurn = false;
-    }
   });
   state.units.forEach(u => {
     if (u.kit === "watchcrow" && !u.dead && !u.hidden) {
@@ -11011,6 +11013,9 @@ function takeFuel() {
 function crushOnce(a, t, auto) {
   const lines = [];
   if (!a || !t) return lines;
+  // 用了狂怒碾压就算夕夏攻击过（引擎不熄火）：被废铁墙挡下也算（#386）。
+  // 以前回合开始的自动碾压只靠 dealTo 里记，被屏障挡下时 dealTo 先返回、没记上；手动用的 runSkill 里本来就记
+  markXiaAttack(a);
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
