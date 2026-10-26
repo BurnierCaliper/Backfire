@@ -204,10 +204,12 @@
         const gp = (data.gaps || {})[g.dataset.key] || {};
         const wave = gp.type === "wave" && gp.wave ? gp.wave : null;
         g.className = "g-gap gap-" + (gp.type || "open") + (wave ? ` wave-${wave.mode === "amplify" ? "amplify" : "dampen"} el-${wave.el || "physical"}` : "") + (g.classList.contains("horiz") ? " horiz" : "");
-        const hp = gp.type === "bridge" || gp.type === "wall" ? " " + (gp.hp || 0) : "";
+        // 禁止通行（武器职责技能）的墙：无限耐久，和本机画面一样写「禁止通行 ∞」
+        const bar = gp.type === "wall" && gp.infinite;
+        const hp = bar ? " ∞" : gp.type === "bridge" || gp.type === "wall" ? " " + (gp.hp || 0) : "";
         g.innerHTML = wave
           ? `<span class="gap-lab">${esc(gapName("wave"))}<b>${esc(waveTag(wave))}</b></span>`
-          : `<span class="gap-lab">${esc(gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
+          : `<span class="gap-lab">${esc(bar ? "禁止通行" : gapName(gp.type || "open"))}${hp}${gp.type === "door" ? (gp.open ? " 开" : " 关") : ""}</span>`;
       });
     }
 

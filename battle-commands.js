@@ -261,7 +261,8 @@
       }
       case "ruinHp": { const f = state.fields[cmd.zone] || emptyField(); f.ruinHp = f.ruinMax = Math.max(1, Math.floor(Number(cmd.hp) || 1)); state.fields[cmd.zone] = f; break; }   // 损毁地面的耐久
       case "setHighland": { const f = state.fields[cmd.zone] || emptyField(); f.highland = !!cmd.value; state.fields[cmd.zone] = f; break; }
-      case "setGap": { const gap = state.gaps[cmd.key]; gap.type = cmd.kind; if (["bridge", "wall"].includes(gap.type)) { gap.hp = defaultGapHp(gap.type); gap.maxHp = gap.hp; gap.level = Number(g.level) || 1; } if (gap.type === "door") gap.open = false; if (gap.type === "open") { gap.hp = 0; gap.open = true; } break; }
+      // setGap：主持人改掉禁止通行（武器职责技能）的墙时，以主持人的为准（清掉 infinite / barricade）
+      case "setGap": { const gap = state.gaps[cmd.key]; gap.type = cmd.kind; delete gap.infinite; delete gap.barricade; if (["bridge", "wall"].includes(gap.type)) { gap.hp = defaultGapHp(gap.type); gap.maxHp = gap.hp; gap.level = Number(g.level) || 1; } if (gap.type === "door") gap.open = false; if (gap.type === "open") { gap.hp = 0; gap.open = true; } break; }
       case "gapHp": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = Math.max(1, Math.floor(Number(cmd.hp) || 1)); break;
       case "rollWall": state.gaps[cmd.key].hp = state.gaps[cmd.key].maxHp = rollWallHp(); break;
       case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;

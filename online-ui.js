@@ -242,7 +242,7 @@
     const TIP_GAP = { open: "畅通", wall: "危墙", bridge: "不稳桥梁", door: "机关门", void: "空隙", wave: "驻波墙" };
     const TIP_ELE = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
     /** 间隔现在的样子：「危墙（耐久 12）」「机关门（关着）」 */
-    const gapStateTip = (g) => !g ? "畅通" : (TIP_GAP[g.type] || "间隔") +
+    const gapStateTip = (g) => !g ? "畅通" : g.type === "wall" && g.infinite ? "禁止通行的墙（无限耐久）" : (TIP_GAP[g.type] || "间隔") +
       (g.type === "wall" || g.type === "bridge" ? `（耐久 ${Number(g.hp) || 0}）` : g.type === "door" ? (g.open ? "（开着）" : "（关着）") : "");
     /** 说明的是哪一个：{ gapKey } 两区之间的间隔 / { propId } 配置物 / { unitId } 单位。
      *  refOf：战场上点 / 悬停给的 id（旧画面的单位卡、新画面的铭牌：单位 id、prop:…、gap:…）；refOfNode：旧画面悬停到的单位卡 / 间隔竖条 */
@@ -263,6 +263,9 @@
           return T.html({ kind: "gap", gapType: "wave", text }, [], { name: `驻波墙·${el}·${amp ? "增幅" : "降幅"}${where}`,
             sub: w.saved && w.saved.type && w.saved.type !== "open" ? "暂时取代：" + gapStateTip(w.saved) : "" }, opt);
         }
+        // 禁止通行（武器职责技能）的墙：无限耐久，下回合开始时消失
+        if (gp.type === "wall" && gp.infinite) return T.html({ kind: "gap", gapType: "wall", text: "禁止通行（武器职责技能）：无限耐久的墙，挡住移动和对面，打不动；下回合开始时消失。" }, [],
+          { name: "禁止通行的墙" + where, sub: "无限耐久" }, opt);
         return T.html({ kind: "gap", gapType: gp.type || "open" }, [], { name: (TIP_GAP[gp.type || "open"] || "间隔") + where,
           sub: gp.type === "wall" || gp.type === "bridge" ? `耐久 ${Number(gp.hp) || 0}` : gp.type === "door" ? (gp.open ? "开着" : "关着") : "" }, opt);
       }

@@ -540,6 +540,10 @@
         if (/^高能 0$/.test(c) && [...oldChips].some(x => /^高能/.test(x))) return false;
         return true;
       });
+      // 整个没了的状态（回收这类清状态的技能也算效果）：同名的还在就不算（灼烧×2 → 灼烧×3、高能 5 → 高能 9）
+      const chipName = c => String(c).split(/[ ×（(]/)[0];
+      const nowNames = new Set((s2.status ? s2.status.split(" · ") : []).map(chipName));
+      p.lostStatus = [...oldChips].filter(c => c && c !== "无状态" && !nowNames.has(chipName(c)));
       p.resChanged = bs.res !== s2.res;
       // 资源前后的文字（快照里的 res）：卡片数值牌和预览框写「资源：之前 → 之后」；配置物的 res 是阵营
       p.resBefore = bs.res || "";
@@ -553,7 +557,7 @@
       p.adv = dmgPops.some(e => e.adv);   // 克制：预览写「克制」，要打掉的血条变浅金
       p.dis = !p.adv && dmgPops.some(e => e.dis);   // 劣势：预览写「劣势」，伤害数字和要打掉的血条变灰
       p.changed = p.dmgHi > 0 || p.healHi > 0 || p.brHi > 0 || p.stunSure || p.stunMaybe || p.killSure || p.killMaybe ||
-        p.zoneTo != null || p.newStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
+        p.zoneTo != null || p.newStatus.length > 0 || p.lostStatus.length > 0 || p.shpLoss > 0 || p.resChanged;
       if (p.changed || p.resChanged) meaningful = true;
       units.set(id, p);
     });
@@ -2304,6 +2308,7 @@
     if (p.killMaybe) h += `<span class="kill">可能击倒</span>`;
     if (p.zoneTo != null) h += `<span class="note">→ ${p.zoneTo} 区</span>`;
     if (p.newStatus.length) h += `<span class="note">+${esc(p.newStatus.join(" "))}</span>`;
+    if (p.lostStatus && p.lostStatus.length) h += `<span class="note">−${esc(p.lostStatus.join(" "))}</span>`;
     const res = resChangeText(p);
     if (res) h += `<span class="note res">${esc(res)}</span>`;
     if (h) {
@@ -2789,6 +2794,10 @@
       if (typeof isWaveGap === "function" && isWaveGap(g)) {
         const base = g.wave.saved && g.wave.saved.type && g.wave.saved.type !== "open" ? "暂时取代：" + gapStateText(g.wave.saved) : "";
         return UnitTip.html({ kind: "gap", gapType: "wave", text: waveWallText(g.wave) }, [], { name: waveWallName(g.wave) + "（" + key.replace("-", "–") + " 区之间）", sub: base });
+      }
+      // 禁止通行（武器职责技能）的墙：无限耐久，下回合开始时消失
+      if (typeof isBarricadeGap === "function" && isBarricadeGap(g)) {
+        return UnitTip.html({ kind: "gap", gapType: g.type, text: gapStatusText(g) }, [], { name: "禁止通行的墙（" + key.replace("-", "–") + " 区之间）", sub: "无限耐久" });
       }
       const hp = (g.type === "bridge" || g.type === "wall") ? `耐久 ${g.hp || 0}` : g.type === "door" ? (g.open ? "开着" : "关着") : "";
       return UnitTip.html({ kind: "gap", gapType: g.type }, [], { name: gapLabel(g.type) + "（" + key.replace("-", "–") + " 区之间）", sub: hp });
@@ -4795,11 +4804,13 @@
         node.addEventListener("mouseleave", () => onCardHover(id, false));
         node.addEventListener("click", (e) => { e.stopPropagation(); onCardClick(id); });
       }
-      const hp = (g.type === "bridge" || g.type === "wall") ? (" " + (g.hp || 0)) : "";
+      // 禁止通行（武器职责技能）的墙：无限耐久，写「禁止通行 ∞」
+      const bar = typeof isBarricadeGap === "function" && isBarricadeGap(g);
+      const hp = bar ? " ∞" : (g.type === "bridge" || g.type === "wall") ? (" " + (g.hp || 0)) : "";
       const door = g.type === "door" ? (g.open ? " 开" : " 关") : "";
       node.innerHTML = wave
         ? `<span class="gap-lab">${esc(gapLabel(g.type))}<b>${esc(ELE[wave.el] || wave.el)}·${wave.mode === "amplify" ? "增幅" : "降幅"}</b></span>`
-        : `<span class="gap-lab">${gapLabel(g.type)}${hp}${door}</span>`;
+        : `<span class="gap-lab">${bar ? "禁止通行" : gapLabel(g.type)}${hp}${door}</span>`;
     });
   }
 

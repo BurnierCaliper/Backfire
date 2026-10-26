@@ -666,6 +666,9 @@ function skillCost(id) {
     role_buffer: { bonus: 1 }, role_shelter: { bonus: 1 },
     role_boost: { bonus: 1 }, role_sturdy: { bonus: 1 },
     role_activate: { bonus: 1 }, role_lock: { bonus: 1 },
+    // 武器职责技能（武器 8 级，见 WEAPON_ROLE_SKILLS）：回收手册没写消耗（不花行动，还拿 1 行动点），创造优势花附赠动作，其余花行动点
+    wr_hone: { ap: 1 }, wr_recycle: {}, wr_weight: { ap: 1 }, wr_upright: { ap: 1 },
+    wr_mist: { ap: 1 }, wr_canopy: { ap: 1 }, wr_barricade: { ap: 1 }, wr_advantage: { bonus: 1 },
     fx_combust: {}, fx_icebreak: {}, fx_bolt: {}, fx_etch: {}, fx_backflow: {}, fx_inertia: {}, fx_diffract: {},
     xia_aa: { ap: 1 }, xia_engine: { ap: 1 }, xia_prep: { bonus: 1 }, xia_assist: {},
     xia_selfburn: { ap: 1 }, xia_crush: { ap: 1 },
@@ -1038,6 +1041,10 @@ function skillList(unit) {
     const def = roleSkillDef(rs.role, rs.n, unit);
     if (def && !list.some(s => s.id === def.id)) add(def);   // 第二副职责可能和角色自带的技能重复
   });
+  // 武器职责技能（武器 8 级，按持有者的主职责）：武器的技能都由武器人放，挂在武器人身上。
+  // 解锁看「武器等级 + 羁绊」，所以不走 add（add 的 minLv 只看武器人自己的等级）
+  const wrole = weaponRoleSkillDef(unit);
+  if (wrole && !list.some(s => s.id === wrole.id)) list.push(wrole);
   // 武器人倒下后：主人走到它倒下的区，花 1 行动点取回（本场不能再唤出，武器 atk / 格挡加成减半）
   if (typeof fallenWeapons === "function" && fallenWeapons(unit).length) {
     add({ id: "weapon_retrieve", name: "取回武器", hint: "同区 · 取回倒下的武器人 · 本场不能再唤出，武器 atk 和格挡加成减半", bare: true });
@@ -1104,6 +1111,62 @@ function roleSkillDef(role, n, unit) {
   return null;
 }
 
+/* ---------- 武器职责技能（玩家手册第三章「创建武器」、武器升级表 lv8；角色创建规则「武器升级」） ----------
+ * 武器升到 8 级解锁一项武器职责技能，「与角色的团队职责一一对应」：按持有者的主职责给。
+ * 解锁看「武器等级 + 羁绊」，和改装槽、被动升级、客制化一样（growth.js · weaponRewardLevel）。
+ * 武器的技能都由武器人放（明特的电力夺取、Ecmo 的叮咬……），武器职责技能也挂在武器人身上，唤出武器人才能用。
+ * 每场的次数（cap）按每把武器分开、记在持有者身上（app.js · wroleSpend）；结算见 app.js · runSkillInner 的 wr_ 分支。
+ * 坦克的「重组」规则还有几处要作者确认（issue #404），先不放进表里：表里没有的职责不解锁武器职责技能。 */
+const WEAPON_ROLE_SKILL_LEVEL = 8;
+const WEAPON_ROLE_SKILLS = {
+  wr_hone:      { role: "直伤",   name: "磨砺",     atk: 20 },        // atk +20，直到下一次攻击
+  wr_recycle:   { role: "异常",   name: "回收",     cap: 1, ap: 1 },  // 清除一个单位身上的一种状态效果，自己得到 1 行动点
+  wr_weight:    { role: "击破",   name: "配重",     keep: 1 },        // 架势只留 1 点，下一次造成击破的攻击加上失去的架势
+  wr_upright:   { role: "护卫",   name: "矗立",     durCap: 2 },      // 下回合前自动协助格挡，期间格挡的耐久消耗合计最多 2
+  wr_mist:      { role: "生存",   name: "治愈雾气", cap: 1 },         // 所在区域变成治愈场地
+  wr_canopy:    { role: "环境手", name: "遮风挡雨", cap: 1 },         // 所在区域变成隔离区
+  wr_barricade: { role: "控场",   name: "禁止通行", cap: 1 },         // 没有间隔效果的间隔变成无限耐久的墙，下回合开始时消失
+  wr_advantage: { role: "辅助",   name: "创造优势", cap: 2 }          // 任意一个单位获得优势
+};
+const WEAPON_ROLE_CAP_TEXT = ["", "一", "两", "三"];
+/** 技能按钮上的一行提示（数值读上面的表） */
+function weaponRoleHint(id) {
+  const s = WEAPON_ROLE_SKILLS[id];
+  if (!s) return "";
+  const per = s.cap ? ` · 每场${WEAPON_ROLE_CAP_TEXT[s.cap] || s.cap}次` : "";
+  if (id === "wr_hone") return `行动点 · atk +${s.atk} 直到下一次攻击`;
+  if (id === "wr_recycle") return `不耗行动 · 清除任意一个单位身上的一种状态效果，自己行动点 +${s.ap}${per}`;
+  if (id === "wr_weight") return `行动点 · 架势只留 ${s.keep} 点 · 下一次造成击破的攻击，击破加上失去的架势`;
+  if (id === "wr_upright") return `行动点 · 下回合前自动为同区所有友方协助格挡（不花附赠）· 期间格挡的耐久消耗合计不超过 ${s.durCap}`;
+  if (id === "wr_mist") return `行动点 · 所在区域变成治愈场地${per}`;
+  if (id === "wr_canopy") return `行动点 · 所在区域变成隔离区（不受天气影响）${per}`;
+  if (id === "wr_barricade") return `行动点 · 一条没有间隔效果的间隔变成无限耐久的墙，下回合开始时消失${per}`;
+  if (id === "wr_advantage") return `附赠 · 任意一个单位获得优势${per}`;
+  return "";
+}
+/** 这个职责的武器职责技能 id（表里没有返回 null） */
+function weaponRoleSkillId(role) {
+  return Object.keys(WEAPON_ROLE_SKILLS).find(id => WEAPON_ROLE_SKILLS[id].role === role) || null;
+}
+/** 武器人的持有者（看主职责、羁绊用）：场上的武器人去战场里找；资料卡、升级提示用的副本自己带着 _owner */
+function weaponRoleOwner(w) {
+  if (!w || !w.weaponOf) return null;
+  if (w._owner && w._owner.kit === w.weaponOf) return w._owner;
+  return weaponOwnerUnit(w);
+}
+/** 武器人现在会的武器职责技能；还没解锁、持有者的主职责没有对应的技能返回 null。
+ *  解锁等级 = 武器人的等级（就是武器等级）+ 羁绊 */
+function weaponRoleSkillDef(w) {
+  if (!w || !w.kit || !w.weaponOf) return null;
+  const owner = weaponRoleOwner(w);
+  const id = owner && owner.roles ? weaponRoleSkillId(owner.roles.primary) : null;
+  if (!id) return null;
+  const bond = typeof weaponBond === "function" ? weaponBond(owner, w.kit) : 0;
+  if ((Number(w.level) || 1) + bond < WEAPON_ROLE_SKILL_LEVEL) return null;
+  const s = WEAPON_ROLE_SKILLS[id];
+  return { id, name: s.name, hint: weaponRoleHint(id), minLv: WEAPON_ROLE_SKILL_LEVEL, weaponRole: s.role };
+}
+
 function koltBit() {
   const k = (typeof findKit === "function" && typeof state !== "undefined") ? findKit("kolt", state.units) : null;
   return (k && k.resources && k.resources.bit) || "drill";
@@ -1149,6 +1212,7 @@ function effectiveAtk(unit, units) {
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
   if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
+  if (unit.resources && unit.resources.honeAtk) base += Number(unit.resources.honeAtk) || 0;   // 磨砺（武器职责技能）：直到下一次攻击
   if (typeof frenzyAtkBonus === "function") base += frenzyAtkBonus(unit);   // 狂暴（effects.js · FRENZY）：ATK + 等级
   if (unit.race && typeof raceAtkAdjust === "function") base += raceAtkAdjust(unit, units);   // 种族被动·独狼（enemies.js）
   if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化

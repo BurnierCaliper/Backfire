@@ -41,7 +41,8 @@ const LevelUp = (function () {
     kits.forEach(k => {
       const lv = Number((c.weaponLevels || {})[k]) || 1;
       const rlv = typeof weaponRewardLevel === "function" ? weaponRewardLevel(c, k) : lv;
-      const probe = { kit: k, level: lv, isPlayer: true, weaponOf: c.kit, weaponUnit: true, resources: {}, statuses: {} };
+      // _owner：武器职责技能按持有者的主职责、羁绊解锁（party.js · weaponRoleOwner），比的是这份副本
+      const probe = { kit: k, level: lv, isPlayer: true, weaponOf: c.kit, weaponUnit: true, resources: {}, statuses: {}, _owner: c };
       weapons[k] = { kit: k, name: typeof weaponName === "function" ? weaponName(k) : k, level: lv,
         slots: typeof weaponPartSlots === "function" ? weaponPartSlots(rlv) : 0, skills: skillMap(probe) };
     });

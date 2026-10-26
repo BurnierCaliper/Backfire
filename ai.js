@@ -559,6 +559,7 @@ const EnemyAI = (function () {
     const next = path && path.length > 1 ? path[1] : from + (to > from ? 1 : -1);
     const g = getGap(from, next);
     if (!g || g.type !== "wall") return null;                            // 墙不在眼前：先照常走过去
+    if (g.infinite) return null;                                         // 禁止通行（武器职责技能）的墙打不动：不白花行动点，等它下回合开始自己消失
     return Math.min(from, next) + "-" + Math.max(from, next);
   }
 

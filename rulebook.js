@@ -481,8 +481,8 @@ const RULEBOOK_CHAPTERS = [
         ] }
       ];
     } },
-  { id: "parts", group: "growth", name: "改装件、羁绊与图纸", blurb: "武器等级 + 羁绊解锁改装槽、被动升级和客制化图纸。",
-    keywords: ["改装槽", "改装件", "羁绊", "被动升级", "客制化", "工匠"],
+  { id: "parts", group: "growth", name: "改装件、羁绊与图纸", blurb: "武器等级 + 羁绊解锁改装槽、被动升级、客制化图纸和武器职责技能。",
+    keywords: ["改装槽", "改装件", "羁绊", "被动升级", "客制化", "工匠", "武器职责技能"],
     build() {
       const G = WEAPON_PART_GEN, U = HANDBOOK_WEAPON_UPGRADE, SR = ROGUE_SMITH_RULES;
       const mains = Object.keys(G.mains).map(a => `${G.mains[a]}（${WEAPON_PART_ATTR_CN[a]}）`).join("、");
@@ -493,6 +493,12 @@ const RULEBOOK_CHAPTERS = [
       }).join("、");
       const flat = Object.keys(WEAPON_PART_FLAT_ATK).map(g => `${g} 级 +${WEAPON_PART_FLAT_ATK[g]}`).join("、");
       const plus = Object.keys(PASSIVE_PLUS_LEVEL).map(n => `${PASSIVE_PLUS_LEVEL[n]} 级：被动${"一二三四"[n - 1] || n}升级`).join("；");
+      // 武器职责技能（party.js · WEAPON_ROLE_SKILLS）：说明照技能说明（skill-text.js），去掉开头的「名字（武器 8 级 · 职责）：」
+      const wrRows = Object.keys(WEAPON_ROLE_SKILLS).map(id => {
+        const s = WEAPON_ROLE_SKILLS[id], text = (typeof SkillText !== "undefined" && SkillText.skillText(id)) || weaponRoleHint(id);
+        return [s.role, s.name, rbCost(rbBaseCost(id)), text.slice(text.indexOf("：") + 1)];
+      });
+      const wrMissing = ROLE_LIST.filter(r => !weaponRoleSkillId(r));
       return [
         { title: "武器升级", lines: [
           `武器最高 ${U.maxLevel} 级。跑团里自己在工作站最多升到 ${U.selfMaxLevel} 级，再往上要找武器工匠；单局里找路线上的工匠。`,
@@ -511,7 +517,11 @@ const RULEBOOK_CHAPTERS = [
         { title: "客制化图纸", lines: [
           `武器等级 + 羁绊到 ${BLUEPRINT_MIN_LEVEL} 级起才能装客制化图纸，一把武器装一张；不到 ${BLUEPRINT_MIN_LEVEL} 级的武器上装着的图纸不生效。图纸可能改 atk、架势、耐久，看各自的说明。`,
           `单局里在同一位工匠那里升级满 ${SR.blueprintAfter} 次，可以从他还没给过的图纸里挑一张；领完计数归零，再升级满 ${SR.blueprintAfter} 次可以领下一张。不会领到已经有的图纸，他的图纸都有了就不再计数。请工匠装上要 ${SR.installCost} 奎支。`
-        ] }
+        ] },
+        { title: "武器职责技能", lines: [
+          `武器等级 + 羁绊到 ${WEAPON_ROLE_SKILL_LEVEL} 级解锁一项武器职责技能，和持有者的主职责对应。武器职责技能由武器人使用（唤出武器人才能用），每场的次数按每把武器分开算。`
+        ], table: { head: ["主职责", "武器职责技能", "消耗", "效果"], rows: wrRows },
+          note: wrMissing.length ? `${wrMissing.join("、")}的武器职责技能还在确认，暂时没有。` : "" }
       ];
     } },
   { id: "durability", group: "growth", name: "武器耐久与武器人", blurb: "打一场 −1、武器人倒下 −2、格挡 −1；长休回满，归零就只能空手。",

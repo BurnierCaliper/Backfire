@@ -382,6 +382,24 @@
     role_gold: "黄金时间：使一个单位身上一种即时效果延长一回合。每场两次。",
     role_rally: "全队集结：所有同区域队员得到符合其主职责的增益，持续到自己晕眩或濒死。直伤 +15 atk；异常 +1 附赠动作；击破造成击破 +1；坦克 +15% 全属性减伤率；护卫 +15% 格挡成功率；生存 +50% 治疗量与护盾施加量；环境手免费锁定天气；控场可以免费任意移动友方单位。一次长休限一次。"
   };
+  /* 武器职责技能（玩家手册：武器 8 级解锁，和持有者的主职责对应；由武器人使用）：数值、次数读 party.js · WEAPON_ROLE_SKILLS */
+  if (typeof WEAPON_ROLE_SKILLS !== "undefined") {
+    const W = WEAPON_ROLE_SKILLS, lv = typeof WEAPON_ROLE_SKILL_LEVEL !== "undefined" ? WEAPON_ROLE_SKILL_LEVEL : 8;
+    const per = (id) => `每场${["", "一", "两", "三"][W[id].cap] || W[id].cap}次`;
+    const tag = (id) => `${W[id].name}（武器 ${lv} 级 · ${W[id].role}）：`;
+    Object.assign(SKILL, {
+      wr_hone: tag("wr_hone") + `消耗行动点，atk +${W.wr_hone.atk}，直到下一次攻击（这一次攻击行动里的每一击都算上，打完就没了）。加成还没用掉时不能再磨砺。`,
+      wr_recycle: tag("wr_recycle") + `不消耗行动。清除一个单位（敌我都行、不限距离）身上的一种状态效果，自己得到 ${W.wr_recycle.ap} 个行动点（可以超过上限）。` +
+        `状态效果：灼烧、感电、腐蚀、冻伤、震荡、高能、共振，以及不稳、紧追、坚挺、振奋、虚弱、躲藏、优势；即时效果、自我效果不算。${per("wr_recycle")}。`,
+      wr_weight: tag("wr_weight") + `消耗行动点，失去所有架势、只保留 ${W.wr_weight.keep} 点；下一次造成击破的攻击，击破加上失去的架势。架势只剩 ${W.wr_weight.keep} 点时用不了，还没用掉时不能再用。`,
+      wr_upright: tag("wr_upright") + `消耗行动点。下回合前，同区域的友方被攻击时自动为其执行协助格挡（不花附赠动作，照常掷格挡；没挡住其他队友还能接着挡）。` +
+        `生效期间这把武器协助格挡的耐久消耗合计不超过 ${W.wr_upright.durCap}。`,
+      wr_mist: tag("wr_mist") + `消耗行动点，将所在区域转为治愈场地（固有场地、深渊、损毁地面、被锁定的区改不了）。${per("wr_mist")}。`,
+      wr_canopy: tag("wr_canopy") + `消耗行动点，将所在区域转为隔离区：区域内不受天气效果影响，原来的场地照旧（固有场地、深渊、损毁地面、被锁定的区改不了）。${per("wr_canopy")}。`,
+      wr_barricade: tag("wr_barricade") + `消耗行动点，使一条没有间隔效果的间隔（畅通的，不限距离）变成无限血量的墙：挡住移动和对面的一切行动，打不动；下回合开始时消失。${per("wr_barricade")}。`,
+      wr_advantage: tag("wr_advantage") + `消耗附赠动作，使一个任意单位（敌我都行、不限距离）获得优势状态效果。${per("wr_advantage")}。`
+    });
+  }
 
   function kitInfo(kit) { return KIT[kit] || null; }
   /** 被动升级后的效果（武器 5 级：被动 1；10 级：被动 2） */
@@ -496,6 +514,7 @@
       if (g) { w.defMax = w.def = g.baseDef + Math.floor(lv / 5); }
       try { if (typeof computeWeaponAtk === "function") w.atk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit)); } catch (e) { /* 用卡片值 */ }
       w.weaponOf = w.weaponOf || owner.kit;
+      w._owner = owner;   // 武器职责技能按持有者的主职责、羁绊算（party.js · weaponRoleOwner）；只在这份副本上，不碰战场单位
       w.hidden = false;
     }
     let dur = null;
@@ -573,8 +592,11 @@
     const pas = info.passives || [];
     const slotLv = typeof WEAPON_PART_SLOT_LEVELS !== "undefined" ? WEAPON_PART_SLOT_LEVELS : [];
     const plusLv = typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL : {};
+    // 武器职责技能：武器 8 级，按持有者的主职责（party.js · WEAPON_ROLE_SKILLS；表里没有的职责不列）
+    const wrId = typeof weaponRoleSkillId === "function" && owner.roles ? weaponRoleSkillId(owner.roles.primary) : null;
     const track = slotLv.map((L, i) => ({ lv: L, text: `改装槽 ${i + 1}` }))
       .concat(Object.keys(plusLv).filter(n => pas[n - 1]).map(n => ({ lv: plusLv[n], text: `被动「${pas[n - 1].name}+」` })))
+      .concat(wrId ? [{ lv: WEAPON_ROLE_SKILL_LEVEL, text: `武器职责技能「${WEAPON_ROLE_SKILLS[wrId].name}」` }] : [])
       .sort((a, b) => a.lv - b.lv).map(x => Object.assign(x, { done: rlv >= x.lv }));
     const row = typeof weaponPartRow === "function" ? weaponPartRow(owner, kit) : [];
     // 客制化改了 atk（atk 加值 / 比例 / 大杀器）：武器页最上面的 ATK 直接写改后的数，不只在下面的客制化里写

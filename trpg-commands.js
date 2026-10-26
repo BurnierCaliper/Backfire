@@ -192,7 +192,7 @@ const CalcCommands = (() => {
       }
       case "gap": {
         const g = state.gaps[c.key]; if (!g) return;
-        if (c.field === "type") { g.type = c.value; if (["bridge", "wall"].includes(g.type) && !g.hp) g.maxHp = g.hp = defaultGapHp(g.type); if (g.type === "door") g.open = false; if (g.type === "open") { g.hp = 0; g.open = true; } render(); }
+        if (c.field === "type") { g.type = c.value; delete g.infinite; delete g.barricade; if (["bridge", "wall"].includes(g.type) && !g.hp) g.maxHp = g.hp = defaultGapHp(g.type); if (g.type === "door") g.open = false; if (g.type === "open") { g.hp = 0; g.open = true; } render(); }
         else if (c.field === "hp") { g.hp = Number(c.value) || 0; g.maxHp = Math.max(g.maxHp || 0, g.hp); }
         else if (c.field === "open") { g.open = c.value; render(); }
         else if (c.field === "force") state.forceVoid[c.key] = c.value;

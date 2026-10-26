@@ -389,6 +389,9 @@ const SKILL_RANGE = {
   tou_bash: { min: 0, max: 1 },        // 盾击突进：先移动 ≤1，再打到达后同区的敌人（按出发位置算是距离 0–1）
   mochi_bite: { min: 0, max: 0 },
   yuito_duet: { min: 0, max: 99 },
+  // 武器职责技能（party.js · WEAPON_ROLE_SKILLS）：回收、创造优势都是「任意一个单位」，不限距离
+  wr_recycle: { min: 0, max: 99 },
+  wr_advantage: { min: 0, max: 99 },
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -412,7 +415,9 @@ const SKILL_TARGET_SIDE = {
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
   role_double_dot: "enemy", // 加倍计量：一个敌人
   chuan_over: "anySelf",    // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
-  helu_rule: "anySelf"      // 规则干涉：同区自选任意单位拿附赠动作（敌人也行，作者 10/23），Helumica 自己也行
+  helu_rule: "anySelf",     // 规则干涉：同区自选任意单位拿附赠动作（敌人也行，作者 10/23），Helumica 自己也行
+  wr_recycle: "anySelf",    // 回收（武器职责技能）：任意一个单位身上的状态效果，武器人自己也行
+  wr_advantage: "anySelf"   // 创造优势（武器职责技能）：任意一个单位，武器人自己也行
 };
 
 /* 谐波攻击的技能（打得到下潜中的单位，effects.js · 下潜，#360）：选目标的名单——最后单独选的目标（game.js · candidateUnits）、

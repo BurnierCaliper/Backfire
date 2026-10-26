@@ -321,7 +321,8 @@
       out.fields[key].fieldLocked = !!get(field, "fieldLock");
     }
     for (const key of gapKeys) if (obj(get(get(state, "gaps"), key))) {
-      const gap = get(get(state, "gaps"), key), dto = copyFields(gap, {}, [], ["hp", "maxHp", "level"], ["open"]);
+      // infinite：禁止通行（武器职责技能）立起的墙，无限耐久（棋盘上公开的东西）
+      const gap = get(get(state, "gaps"), key), dto = copyFields(gap, {}, [], ["hp", "maxHp", "level"], ["open", "infinite"]);
       enumField(gap, dto, "type", ["open", "bridge", "wall", "door", "void", "wave"]);
       // 驻波墙（频域造物）：过滤的属性、降幅 / 增幅、暂时取代的是什么（耐久、门的开关）——都是棋盘上公开的东西，没有任何坚毅数值
       const wave = get(gap, "wave");
@@ -331,7 +332,7 @@
         enumField(wave, w, "mode", ["dampen", "amplify"]);
         const saved = get(wave, "saved");
         if (obj(saved)) {
-          const base = copyFields(saved, {}, [], ["hp", "maxHp"], ["open"]);
+          const base = copyFields(saved, {}, [], ["hp", "maxHp"], ["open", "infinite"]);
           enumField(saved, base, "type", ["open", "bridge", "wall", "door", "void"]);
           w.saved = base;
         }

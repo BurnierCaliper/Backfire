@@ -375,6 +375,7 @@ function buildGapBox(key) {
 
 function gapStatusText(g) {
   if (g.type === "open") return "可通过，可影响对面。";
+  if (isBarricadeGap(g)) return "禁止通行（武器职责技能）：无限耐久的墙，挡住移动和对面，打不动；下回合开始时消失。";
   if (g.type === "bridge") return `通过扣 1d6 耐久。现 ${g.hp}（手册 10～30）。被攻击时只有击破扣耐久。毁后变空隙。飞行无视。`;
   if (g.type === "wall") return `挡住对面。现耐久 ${g.hp}（手册 1～15）。只有击破扣耐久，伤害打不动；倒向最后一击的另一侧。`;
   if (g.type === "door") return g.open ? "门开着，可通过。" : "门关着，不能通过也不能打对面。";
@@ -465,6 +466,10 @@ function statusLine(u) {
   if (u.instant && u.instant.doubleStatus) s.push("加倍计量");
   if (u.instant && u.instant.goldHold) s.push("黄金时间" + (INSTANT_NAME[u.instant.goldHold] ? "（" + INSTANT_NAME[u.instant.goldHold] + "）" : ""));
   if (u.instant && u.instant.omenArmed) s.push("击破预告");
+  // 武器职责技能挂着的效果
+  if (u.resources && Number(u.resources.honeAtk) > 0) s.push("磨砺 atk+" + u.resources.honeAtk);
+  if (u.resources && Number(u.resources.weightBreak) > 0) s.push("配重 击破+" + u.resources.weightBreak);
+  if (u.resources && u.resources.uprightTurn) s.push("矗立");
   if (u.lockdownBy) {
     const tank = (state.units || []).find(x => x.id === u.lockdownBy);
     s.push(tank ? "禁足（" + tank.name + "）" : "禁足");
@@ -1692,6 +1697,7 @@ function refreshEnemyEconomy(u, notes) {
 function beginRound(notes) {
   notes = notes || [];
   startLogTurn();
+  expireBarricades(notes);   // 禁止通行（武器职责技能）：下回合开始时墙消失
   // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
   state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
@@ -2152,6 +2158,7 @@ function turnEnd() {
   snapshot();
   const notes = ["—— 回合结束 ——"];
   releaseTurnLocks(notes);
+  settleHone(notes);   // 磨砺：行动之外打出的攻击（格挡反击等）留下的记号也在这里了结
   if (typeof spiderRoundEnd === "function") spiderRoundEnd(notes);   // 陨体衍蛛：到点复活
   if (typeof desertRoundEnd === "function") desertRoundEnd(notes);   // 夜晚的尘虫迁徙 / 离开
   // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）
@@ -2286,6 +2293,7 @@ function turnEnd() {
       if (u.resources.guardStrike) { u.resources.guardStrike = false; u.resources.guardStrikeUsed = false; }
       if (u.resources.allReflect) u.resources.allReflect = false;
       if (u.resources.gambitStrike) u.resources.gambitStrike = false;
+      if (u.resources.uprightTurn) { u.resources.uprightTurn = false; u.resources.uprightDur = 0; notes.push(`${u.name} 矗立结束。`); }
     }
     if (u.shelterTurn) { u.shelterTurn = false; u.isolate = false; }
     if (u.harshEnv) u.harshEnv = false;
@@ -3154,6 +3162,19 @@ function trackHealBy(actor, fn) {
   }
 }
 
+/** 磨砺（武器职责技能）：这次行动里打出过攻击的单位（dealTo / dealToStructure 记的 honeSpent），atk 加成到此为止。
+ *  一个攻击行动里的每一击都吃得到加成（atk 在行动开始时就算好了），行动结束才清 */
+function settleHone(notes) {
+  (state.units || []).forEach(u => {
+    const r = u && u.resources;
+    if (!r || !r.honeSpent) return;
+    r.honeSpent = false;
+    if (!r.honeAtk) return;
+    r.honeAtk = 0;
+    const line = `${u.name} 磨砺的 atk 加成用掉了。`;
+    if (notes) notes.push(line); else appendLog(line);
+  });
+}
 function beginActionAcc(actor, skillId) {
   state.actionSeq = (Number(state.actionSeq) || 0) + 1;   // 第几次行动（用来判断一个技能是不是真的出手了）
   state.actionAcc = {
@@ -3764,7 +3785,7 @@ function getGap(a, b) {
 
 function blockedByGap(from, dest) {
   const g = getGap(from, dest);
-  if (g.type === "wall") return "危墙挡住，不能通过，也不能影响对面。";
+  if (g.type === "wall") return isBarricadeGap(g) ? "禁止通行的墙挡住，不能通过，也不能影响对面。" : "危墙挡住，不能通过，也不能影响对面。";
   if (g.type === "door" && !g.open) return "机关门关闭，不能通过，也不能影响对面。";
   return null;
 }
@@ -3775,7 +3796,7 @@ function canCross(unit, from, dest, asObject) {
   const g = getGap(from, dest);
   const flying = unit && unit.flying;
   if (g.type === "wall") {
-    paintSkillLog("危墙挡住去路。先打掉墙。");
+    paintSkillLog(isBarricadeGap(g) ? "禁止通行的墙挡住去路（打不动，下回合开始时消失）。" : "危墙挡住去路。先打掉墙。");
     return false;
   }
   if (g.type === "door" && !g.open) {
@@ -3874,7 +3895,7 @@ function crossGapsForced(obj, from, dest, notes, fall, flyOver) {
   for (let i = 0; i < path.length - 1; i++) {
     const g = getGap(path[i], path[i + 1]);
     if (shut(path[i], path[i + 1])) {
-      notes.push(`${name} 被${g.type === "wall" ? "危墙" : "关着的机关门"}挡住（${gapKey(path[i], path[i + 1])} 区之间），没有移动。`);
+      notes.push(`${name} 被${g.type === "wall" ? (isBarricadeGap(g) ? "禁止通行的墙" : "危墙") : "关着的机关门"}挡住（${gapKey(path[i], path[i + 1])} 区之间），没有移动。`);
       return false;
     }
   }
@@ -3933,6 +3954,7 @@ function waveWallText(w) {
 function gapStateText(g) {
   if (!g) return gapLabel("open");
   if (isWaveGap(g)) return waveWallName(g.wave);
+  if (isBarricadeGap(g)) return "禁止通行的墙（无限耐久）";
   if (g.type === "wall" || g.type === "bridge") return `${gapLabel(g.type)}（耐久 ${Number(g.hp) || 0}）`;
   if (g.type === "door") return `${gapLabel(g.type)}（${g.open ? "开着" : "关着"}）`;
   return gapLabel(g.type || "open");
@@ -3975,6 +3997,43 @@ function expireWaveWalls(notes) {
     Object.keys(g).forEach(x => delete g[x]);
     Object.assign(g, saved);
     notes.push(`${k} 区之间的${name}消失${g.type && g.type !== "open" ? `，${gapStateText(g)}恢复原样` : ""}。`);
+  });
+}
+
+/* ---------- 禁止通行（武器职责技能 · 控场）----------
+ * 一条没有间隔效果的间隔（畅通：没有危墙 / 机关门 / 桥 / 空隙 / 驻波墙）变成无限耐久的墙，下回合开始时消失、恢复畅通。
+ * 墙按危墙算（g.type = "wall"）：挡移动、挡住对面的一切行动；g.infinite：打不动、不会倒塌（攻击、击破、环境扫描、巨刃划空都扣不了耐久），
+ * 也不当攻击目标。g.barricade = { by, turn }：谁放的、哪一回合放的（beginRound 里过了这一回合就撤掉） */
+function isBarricadeGap(g) { return !!(g && g.type === "wall" && g.infinite); }
+/** 能封住的间隔：这块棋盘上畅通的那几条（任意距离） */
+function barricadeGapKeys() {
+  return boardGapKeys().filter(k => { const g = (state.gaps || {})[k]; return !g || (g.type || "open") === "open"; });
+}
+/** 这条间隔能不能封住：能返回 null */
+function barricadeWhy(key) {
+  key = String(key || "");
+  if (!key) return "先选要封住的间隔";
+  if (!boardGapKeys().includes(key)) return "这块战场上没有这条间隔";
+  if (!barricadeGapKeys().includes(key)) return `${key} 区之间不是畅通的间隔（有间隔效果的不能封）`;
+  return null;
+}
+function placeBarricade(key, by, notes) {
+  const g = state.gaps[key] = state.gaps[key] || emptyGap();
+  Object.keys(g).forEach(k => delete g[k]);
+  Object.assign(g, { type: "wall", hp: 0, maxHp: 0, open: false, lastFrom: null, infinite: true,
+    barricade: { by: by ? by.id : null, turn: Number(state.turnNo) || 1 } });
+  if (notes) notes.push(`禁止通行：${key} 区之间立起一道无限耐久的墙，挡住移动和对面的一切行动，下回合开始时消失。`);
+}
+/** 回合开始：放下之后过了一个回合的禁止通行撤掉，间隔恢复畅通 */
+function expireBarricades(notes) {
+  Object.keys(state.gaps || {}).forEach(k => {
+    const g = state.gaps[k];
+    if (!g || !g.barricade) return;
+    if (!isBarricadeGap(g)) { delete g.barricade; return; }   // 主持人中途改过这条间隔：以主持人改的为准
+    if (Number(g.barricade.turn) >= (Number(state.turnNo) || 1)) return;
+    Object.keys(g).forEach(x => delete g[x]);
+    Object.assign(g, emptyGap());
+    notes.push(`${k} 区之间禁止通行的墙消失，间隔恢复畅通。`);
   });
 }
 /** 攻击者所在区 → 目标所在区的连线经过的驻波墙，返回 [{ key, el, mode }]（同区是空的）。
@@ -4385,6 +4444,7 @@ function dealToStructure(attacker, target, opt) {
     if (r.smashNext) r.smashNext = false;
     if (r.pierceNext) r.pierceNext = false;
     if (r.weakNext) r.weakNext = false;
+    if (r.honeAtk) r.honeSpent = true;   // 磨砺：打物体也算一次攻击，这次行动结束清掉（settleHone）
     if (r.preparedActive && opt.usePrep !== false) {
       const whet = Number(r.whetDice) || 0;
       prep = (whet ? takeDice(whet, 6, 0) : takeDice(1, prepDieSides(attacker), 0)).total;
@@ -4414,6 +4474,11 @@ function dealToStructure(attacker, target, opt) {
   const waveAmp = waves.filter(w => w.mode === "amplify").length, waveDamp = waves.length - waveAmp;
   if (waves.length) dmg *= Math.max(0, 1 + WAVE_WALL.amplifyPct * waveAmp - WAVE_WALL.dampenPct * waveDamp);
   if (waveDamp) br = 0;
+  // 配重：危墙、桥梁按击破扣耐久，打它们也算一次造成击破的攻击（用掉）；配置物不吃击破，不用掉
+  if (r && realAttack && br > 0 && Number(r.weightBreak) > 0 && String(target.structToken || "").indexOf("gap:") === 0) {
+    br += Number(r.weightBreak) || 0;
+    r.weightBreak = 0;
+  }
   target._hit = true;
   const lines = hitStructureCore(attacker, target.structToken, { element: opt.element || "physical", dmg: Math.max(1, Math.floor(dmg)), brk: Math.max(0, br) });
   if (waves.length) {
@@ -4452,6 +4517,12 @@ function hitStructureCore(attacker, targetToken, opt) {
     if (!g) return notes;
     if (g.type !== "wall" && g.type !== "bridge") {
       notes.push("这个间隔没有可打的墙/桥。");
+      return notes;
+    }
+    // 禁止通行（武器职责技能）的墙：无限耐久，什么都扣不了它的耐久
+    if (isBarricadeGap(g)) {
+      notes.push(`攻击间隔 ${key}（禁止通行的墙）：无限耐久，打不动。下回合开始时它自己消失。`);
+      popStructure(targetToken, g.level, 0, opt.element, "打不动");
       return notes;
     }
     const dmg = Math.max(1, Math.floor(opt.dmg || (effectiveAtk(attacker, state.units) || 5)));
@@ -4504,6 +4575,7 @@ function structureTargets(actor, minD, maxD) {
   Object.keys(state.gaps || {}).forEach(k => {
     const g = state.gaps[k];
     if (!g || (g.type !== "wall" && g.type !== "bridge")) return;
+    if (isBarricadeGap(g)) return;   // 禁止通行的墙打不动，不当目标
     if (!boardGapKeys().includes(k)) return;   // 只看这块棋盘上真的有的连接
     const zs = k.split("-").map(Number);
     const z = zs.find(inR);
@@ -5532,7 +5604,7 @@ function lineBlocked(aZone, bZone) {
   // 有一条同样短、中间没有危墙 / 关着的机关门的路线就不算挡住（直排只有一条路线，和以前一样）
   const why = (a, b) => {
     const g = getGap(a, b);
-    if (g.type === "wall") return "危墙挡住，无法影响对面。";
+    if (g.type === "wall") return isBarricadeGap(g) ? "禁止通行的墙挡住，无法影响对面。" : "危墙挡住，无法影响对面。";
     if (g.type === "door" && !g.open) return "关闭的机关门挡住，无法影响对面。";
     return null;
   };
@@ -7137,10 +7209,44 @@ function eligibleBlockers(target, job) {
   return state.units.filter(u =>
     u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
     Number(u.zone) === Number(target.zone) &&
-    !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
+    !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id || uprightCovers(u, target)) &&
     blockChance(u) != null && tried.indexOf(u.id) < 0 &&
     (typeof bpCanAssistBlock !== "function" || bpCanAssistBlock(u))
   );
+}
+
+/** 矗立生效期间这把武器协助格挡扣的耐久合计到上限（WEAPON_ROLE_SKILLS.wr_upright.durCap）就不再扣：返回 true = 这次不扣 */
+function uprightDurFree(helper, notes) {
+  const r = helper && helper.resources;
+  if (!r || !r.uprightTurn) return false;
+  const cap = WEAPON_ROLE_SKILLS.wr_upright.durCap;
+  if ((Number(r.uprightDur) || 0) >= cap) {
+    if (notes) notes.push(`矗立：这段时间协助格挡的耐久消耗已经到 ${cap}，这次不扣耐久。`);
+    return true;
+  }
+  r.uprightDur = (Number(r.uprightDur) || 0) + 1;
+  return false;
+}
+/** 矗立（武器职责技能 · 护卫）生效中的 u 会不会自动替 target 协助格挡：同区的其他友方（不能为自己格挡） */
+function uprightCovers(u, target) {
+  return !!(u && target && u.isPlayer && target.isPlayer && u.id !== target.id && u.resources && u.resources.uprightTurn &&
+    Number(u.zone) === Number(target.zone));
+}
+/** 敌人的攻击打向 target：同区有矗立生效、这时能格挡的武器人，就自动替它协助格挡一次（不花附赠、不问）。
+ *  没有这样的武器人返回 null；有就照常结算这次协助格挡（掷格挡、扣耐久、格挡成功的被动……），返回 { ok, helperId } */
+function uprightAutoBlock(attacker, target, opt) {
+  const helper = eligibleBlockers(target).find(u => uprightCovers(u, target));
+  if (!helper) return null;
+  // 格挡成功的被动可能立刻打出一次行动（防守反击的协助攻击走 runSkill）：这一击还在敌人的行动里，行动记账先收好再还原
+  const keep = { actionAcc: state.actionAcc, actionKills: state.actionKills, aoePulse: state.aoePulse, flyPaid: state.flyPaid, actionWallHit: state.actionWallHit };
+  let out;
+  try { out = performAssistBlock(helper, target, attacker, null, opt && opt.atkRange); }
+  finally { Object.assign(state, keep); }
+  appendLog([`矗立：${helper.name} 自动协助格挡 ${target.name}。`].concat(out.notes || []).join("\n"));
+  if (out.ok && !out.bare) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
+  const bst = out.invalid ? null : battleStat(helper);   // 战场数据：发动协助格挡（含失败）、成功次数
+  if (bst) { bst.blocks = (bst.blocks || 0) + 1; if (out.ok) bst.blockOk = (bst.blockOk || 0) + 1; }
+  return { ok: !!out.ok && !out.bare, helperId: helper.id };
 }
 
 /** atkRange：这一击的射程（高地修正用，可不传） */
@@ -7163,9 +7269,9 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (isDownProtected(helper)) return { ok: false, notes, invalid: true };
     notes.push(`${helper.name} 起身以进行协助格挡。`);
   }
-  const freeCover = target && target.coverBy === helper.id;
+  const freeCover = target && (target.coverBy === helper.id || uprightCovers(helper, target));   // 掩护 / 矗立：不花附赠
   if (!freeCover && !spendBonus(helper, 1, "协助格挡")) return { ok: false, notes };
-  if (freeCover) notes.push(`${helper.name} 因掩护免费格挡。`);
+  if (freeCover) notes.push(`${helper.name} 因${target.coverBy === helper.id ? "掩护" : "矗立"}免费格挡。`);
   if (helper.kit === "yuito" && target && target.id !== helper.id) {
     setBond(helper, target);
     notes.push(`思念：对 ${target.name} 施加牵挂（同时只能有一名）。`);
@@ -7182,8 +7288,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     return { ok, notes, bare: true };
   }
   const chance = finalBlockChance(helper, attacker, target, atkRange);
-  // 手册第六章：发动格挡 −1 耐久（空手格挡不扣，已在上面返回）
-  if (typeof ledgerOnBlock === "function") ledgerOnBlock(helper, notes);
+  // 手册第六章：发动格挡 −1 耐久（空手格挡不扣，已在上面返回）；矗立生效期间这把武器格挡扣的耐久合计不超过 2
+  if (!uprightDurFree(helper, notes) && typeof ledgerOnBlock === "function") ledgerOnBlock(helper, notes);
   const rolls = forced.roll != null ? [Number(forced.roll)] : [1 + Math.floor(Math.random() * 100)];
   if (forced.roll == null && helper.statuses && helper.statuses.advantage) rolls.push(1 + Math.floor(Math.random() * 100));
   const roll = Math.min.apply(null, rolls);
@@ -7404,7 +7510,7 @@ function finishBlock(helperId, forced) {
   const prevActor = LOG_ACTOR_ID;
   LOG_ACTOR_ID = attacker0 ? attacker0.id : null;
   let lines;
-  try { lines = withLogSink(() => finishBlockInner(helperId, forced)); } finally { LOG_ACTOR_ID = prevActor; }
+  try { lines = withLogSink(() => { finishBlockInner(helperId, forced); settleHone(); }); } finally { LOG_ACTOR_ID = prevActor; }   // 格挡成功的反击也算攻击（磨砺用掉）
   const block = tidyActionBlock(title, lines);
   if (block.length) appendLog(block.join("\n"));
   // 下水道狂鼠（enemies.js · ratfolkSweep）：等格挡的这一击落下之后再看一遍反应（斩杀等）
@@ -7544,6 +7650,7 @@ function resetBattleFlags(u) {
   r.featUsed = {};
   delete r.apGifts;
   delete r.whetDice; delete r.unstoppableNext; delete r.reviveGuard; delete r.alertGiven; delete r.attackSeq;
+  delete r.honeAtk; delete r.honeSpent; delete r.weightBreak; delete r.uprightTurn; delete r.uprightDur;   // 武器职责技能挂着的磨砺 / 配重 / 矗立
   r.chargeTurn = null; r.chargeUsed = null; r.blinkReady = null; r.blinkUsed = null;
   delete r.frenzyMoveTurn; delete r.frenzyMoves;   // 狂暴的免费移动按回合数记（effects.js），每场从头算
   if (u.kit === "hiaki" && !r.blade) r.blade = "niu";
@@ -7673,6 +7780,38 @@ function roleSpend(a, id) {
   return c ? roleOnce(a, c.key, c.cap(a)) : true;
 }
 
+/* 武器职责技能（party.js · WEAPON_ROLE_SKILLS）的每场次数：武器人收回再唤出是一个新的单位（spawnWeapon），
+ * 所以次数记在持有者身上、按武器分开（roleOnce["wr:武器:技能"]），开战时和职责技能的次数一起清零（resetBattleFlags） */
+function wroleHolder(w) {
+  return (typeof weaponRoleOwner === "function" && weaponRoleOwner(w)) || w;
+}
+function wroleKey(w, id) { return "wr:" + ((w && w.kit) || "") + ":" + id; }
+function wroleUsed(w, id) {
+  const h = wroleHolder(w);
+  return Number((((h && h.resources) || {}).roleOnce || {})[wroleKey(w, id)]) || 0;
+}
+/** 这项武器职责技能这一场还能用几次（没有次数限制的返回 Infinity） */
+function wroleUsesLeft(w, id) {
+  const s = WEAPON_ROLE_SKILLS[id];
+  return s && s.cap ? Math.max(0, s.cap - wroleUsed(w, id)) : Infinity;
+}
+/** 用完了返回原因，还能用返回 null */
+function wroleCapWhy(w, id) {
+  const s = WEAPON_ROLE_SKILLS[id];
+  return s && wroleUsesLeft(w, id) <= 0 ? `本场${s.name}已用完（每场 ${s.cap} 次）` : null;
+}
+/** 用掉一次；用完了返回 false */
+function wroleSpend(w, id) {
+  const s = WEAPON_ROLE_SKILLS[id];
+  if (!s || !s.cap) return true;
+  if (wroleUsesLeft(w, id) <= 0) return false;
+  const h = wroleHolder(w);
+  h.resources = h.resources || {};
+  h.resources.roleOnce = h.resources.roleOnce || {};
+  h.resources.roleOnce[wroleKey(w, id)] = wroleUsed(w, id) + 1;
+  return true;
+}
+
 /* 传播（异常二）：复制一个单位身上的状态效果，施加到另一个单位。
  * 只复制七种属性状态效果；即时效果（熔融、错位……）、通用状态（虚弱、坚挺……）不复制。
  * 不会拿来源身上「没有」的东西去盖掉承受者已有的状态：灼烧按施加叠层（承受者原有层数 + 来源层数），
@@ -7764,6 +7903,62 @@ function activatableStatuses(t) {
   if (st.shockwave) out.push({ key: "shockwave", label: "震荡" });
   if (st.high) out.push({ key: "high", label: `高能 ${Number(t.highEnergy) || 0}` });
   return out;
+}
+
+/* ---------- 回收（武器职责技能 · 异常）：清除一个单位身上的一种状态效果 ----------
+ * 状态效果 = 七种属性状态效果 + 七种通用状态效果（玩家手册第四章）；即时效果、自我效果不算。敌我都行、不限距离 */
+const RECYCLE_STATUS = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso",
+  "unstable", "chase", "sturdy", "inspire", "weak", "hide", "advantage"];
+const RECYCLE_STATUS_CN = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振",
+  unstable: "不稳", chase: "紧追", sturdy: "坚挺", inspire: "振奋", weak: "虚弱", hide: "躲藏", advantage: "优势" };
+/** 单位身上能被回收清除的状态：[{ key, label }] */
+function recycleStatuses(u) {
+  const st = (u && u.statuses) || {};
+  return RECYCLE_STATUS.filter(k => k === "burn" ? (Number(st.burn) || 0) > 0 : !!st[k])   // 高能只看高能状态，蓄能攒的高能值不算
+    .map(k => ({ key: k, label: k === "burn" ? `灼烧 ${Math.floor(Number(st.burn) || 0)} 层` : RECYCLE_STATUS_CN[k] }));
+}
+/** 回收能选的单位：在场、身上有状态效果的（敌我都行） */
+function recycleUnits() {
+  return fieldUnits().filter(u => !u.fused && u.kit !== "ironwall" && recycleStatuses(u).length > 0);
+}
+/** 清掉一种状态效果，连带的东西一起还原（震荡压下的架势上限、高能值、紧追的施加者、恐惧怒吼 / 持续振奋的标记） */
+function clearOneStatus(u, key, notes) {
+  if (!u || !u.statuses) return;
+  const st = u.statuses;
+  if (key === "burn") st.burn = 0;
+  else st[key] = false;
+  if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
+  if (key === "high") {
+    if (u.self !== "store") u.highEnergy = 0;   // 蓄能（自我效果）攒的高能值不是高能状态，留着
+    u.highTags = [];
+  }
+  if (key === "chase") u.chasers = [];
+  if (key === "weak") delete st.weakFear;
+  if (key === "inspire") delete st.inspireStay;
+  if (u._statusBy) delete u._statusBy[key];
+}
+
+/* ---------- 遮风挡雨（武器职责技能 · 环境手）：所在区域变成隔离区 ----------
+ * 隔离区（手册 7.3 通用场地效果：区域内不受天气效果影响）和别的场地并存（fields[z].isolate），区里原来的场地照旧。
+ * 场地改不了的区（固有场地、深渊、损毁地面、被锁定）不能用；已经是隔离区也不用再放 */
+function canopyWhy(a) {
+  const z = Number(a && a.zone);
+  const f = (state.fields || {})[z];
+  if (!f) return "没有这个区域";
+  if (f.isolate) return `${z} 区已经是隔离区`;
+  return fieldChangeWhy(z, "isolate");
+}
+/** 治愈雾气（武器职责技能 · 生存）：所在区域变成治愈场地；场地改不了、已经是治愈场地时返回原因 */
+function mistWhy(a) {
+  const z = Number(a && a.zone);
+  const f = (state.fields || {})[z];
+  if (!f) return "没有这个区域";
+  if (f.heal) return `${z} 区已经是治愈场地`;
+  return fieldChangeWhy(z, "heal");
+}
+/** 创造优势（武器职责技能 · 辅助）能选的单位：在场、还没有优势的（敌我都行、不限距离） */
+function advantageUnits() {
+  return fieldUnits().filter(u => !u.fused && u.kit !== "ironwall" && !(u.statuses && u.statuses.advantage));
 }
 
 /** 激活一种状态：效果与「触发一次该状态的回合结束结算」完全相同。
@@ -8405,8 +8600,17 @@ function dealToInner(attacker, target, opt) {
     appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: [msg] };
   }
-  if (attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
-    const helpers = eligibleBlockers(target);
+  const blockable = attacker && !attacker.isPlayer && target && target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved;
+  // 矗立（武器职责技能）：生效中的武器人先自动替同区友方协助格挡（不花附赠、不用问）；没挡住，其他人还能接着挡
+  const tall = blockable ? uprightAutoBlock(attacker, target, opt) : null;
+  if (tall && tall.ok) {
+    opt.flags.block = "assistOk";
+    opt.flags.blockHelperId = tall.helperId;
+    opt.flags.blockResolved = true;
+    opt.flags.uprightSaver = tall.helperId;   // 结算完记格挡规避的伤害（同 finishBlockInner）
+  } else if (blockable) {
+    const tried = tall ? [tall.helperId] : [];
+    const helpers = eligibleBlockers(target, { tried });
     const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
     if (helpers.length || walls.length) {
       appendLog(`→ ${target.name}：等待协助格挡（同区可以格挡的：${helpers.map(h => h.name + " " + finalBlockChance(h, attacker, target, opt.atkRange) + "%").join("、")}）`);
@@ -8417,6 +8621,7 @@ function dealToInner(attacker, target, opt) {
         // 配置物（碎渣机炮）这类不在场上的攻击者：把它本身记下来，格挡结算时照样能找到
         fakeAttacker: (state.units || []).includes(attacker) ? null : JSON.parse(JSON.stringify(attacker)),
         targetId: target.id,
+        tried,   // 矗立自动挡过没挡住的武器人：不再列进这一击的格挡人选
         onConnect: opt.onConnect || null,
         opt: JSON.parse(JSON.stringify({
         atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
@@ -8428,6 +8633,7 @@ function dealToInner(attacker, target, opt) {
       presentBlockModal();
       return { res: { ok: false, pending: true, total: 0, breakDealt: 0, log: ["等待协助格挡选择"], perHit: [] }, extra: ["等待协助格挡选择"], pending: true };
     }
+    if (tall) opt.flags.block = "fail";
   }
   markXiaAttack(attacker);
   const flags = makeDealFlags(opt.flags);
@@ -8479,6 +8685,8 @@ function dealToInner(attacker, target, opt) {
     flags.weak = true;
     attacker.resources.weakNext = false;
   }
+  // 磨砺（武器职责技能）：atk 已经加在 effectiveAtk 里（这一整个攻击行动都吃得到），打出攻击就记下，这次行动结束时清掉（settleHone）
+  if (realAttack && attacker.resources && attacker.resources.honeAtk) attacker.resources.honeSpent = true;
   // 启动引擎+：夏 / 柏妮尔的火属性攻击动作自动消耗所有燃油，伤害 +燃油×10%（处决每点 15%）；一个动作只消耗一次
   // #44：格挡反打（opportunity）不消耗燃油
   if (flags.action && !flags.opportunity && (opt.element || "physical") === "fire" && attacker && (attacker.kit === "xia" || attacker.kit === "berniel") && xiaFuelOn()) {
@@ -8552,6 +8760,13 @@ function dealToInner(attacker, target, opt) {
   // 被决一死战 / 嘲讽牵制、又没有近身攻击的敌人：远距离攻击打同区的牵制者，同样 ×60%
   if (attacker && !attacker.isPlayer && dist === 0 && opt.atkRange === "ranged" && flags.action !== false && !flags.environment && !flags.aoe && !isReaction &&
       typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(attacker, target)) flags.pointBlank = true;
+  // 配重（武器职责技能）：下一次造成击破的攻击，击破加上失去的架势（用掉）
+  if (realAttack && br > 0 && attacker.resources && Number(attacker.resources.weightBreak) > 0) {
+    const wb = Number(attacker.resources.weightBreak) || 0;
+    br += wb;
+    attacker.resources.weightBreak = 0;
+    appendLog(`配重：${attacker.name} 这一击击破 +${wb}。`);
+  }
   const wasDeadForGhost = !!(target && target.dead);
   const wasDownForRat = !!(target && (target.dead || target.dying));   // 暴虐猎手「击杀后进入狂暴」：这一击之前还没倒下（enemies.js · ratfolkAfterHit）
   // 千钧：每个攻击行动总击破 +1 只加一次——这个行动里前面的攻击已经加过，就不再加
@@ -8586,6 +8801,13 @@ function dealToInner(attacker, target, opt) {
     atkRange: opt.atkRange || "any"
   });
   res.flags = flags;
+  // 矗立自动协助格挡挡下的这一击：格挡规避的伤害记给格挡的武器人（和 finishBlockInner 一样）
+  if (flags.uprightSaver && flags.block === "assistOk") {
+    const sv = unitById(flags.uprightSaver), bst = sv ? battleStat(sv) : null;
+    const saved = Math.max(0, Number(res.blockedRaw) || 0);
+    if (bst) bst.avoided = (bst.avoided || 0) + saved;
+    if (sv && saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), sv);
+  }
   // 种族被动（enemies.js）：这一击算出手了——迅袭的「第一个行动」用掉；注意力涣散记下这回合打的是谁
   if (attacker && flags.action && !isReaction && !flags.environment && res.ok !== false) {
     if (typeof raceMarkActed === "function") raceMarkActed(attacker);
@@ -9334,7 +9556,7 @@ function zoneReachable(unit, dest, walk) {
   // walk：自己走一步的普通移动——空隙可以花 1 行动点做运动检定越过（doMoveInner 结算），不算挡住；技能里的移动照旧过不去
   const why = (a, b) => {
     const g = getGap(a, b);
-    if (g.type === "wall") return "危墙挡住去路。";
+    if (g.type === "wall") return isBarricadeGap(g) ? "禁止通行的墙挡住去路（下回合开始时消失）。" : "危墙挡住去路。";
     if (g.type === "door" && !g.open) return "机关门关着。";
     if (g.type === "void" && !(unit.flying || walk || (state.forceVoid && state.forceVoid[gapKey(a, b)]))) return "空隙挡住地面单位。";
     return null;
@@ -9941,6 +10163,24 @@ function skillFlowStepsAll(id, actor, picks) {
     // 15 级：缓冲可以自选给哪一种血量（选完再选目标）
     return [{ key: "layer", type: "choice", optional: false, label: "缓冲给哪一种血量",
       options: ["shield", "armor", "flesh", "sand", "spirit"].map(k => ({ value: k, label: LAYER[k] })) }];
+  }
+  if (id === "wr_recycle") {
+    // 回收（武器职责技能）：任意一个单位（敌我都行、不限距离）身上的一种状态效果；不止一种时再选清哪一种
+    const steps = [{ key: "target", type: "unit", optional: false, label: "清除谁身上的状态效果（任意单位，不限距离）", units: recycleUnits() }];
+    const tgt = picks.target ? unitById(picks.target) : null;
+    const opts = tgt ? recycleStatuses(tgt) : [];
+    if (opts.length > 1) steps.push({ key: "status", type: "choice", optional: false, label: `清除 ${tgt.name} 身上的哪一种状态效果`,
+      options: opts.map(o => ({ value: o.key, label: o.label })) });
+    return steps;
+  }
+  if (id === "wr_barricade") {
+    // 禁止通行（武器职责技能）：任意一条没有间隔效果的间隔（不限距离）
+    return [{ key: "gap", type: "choice", optional: false, label: "封住哪一条间隔（只列出畅通的；下回合开始时墙消失）",
+      options: barricadeGapKeys().map(k => ({ value: k, label: `${k.replace("-", "–")} 区之间` })) }];
+  }
+  if (id === "wr_advantage") {
+    // 创造优势（武器职责技能）：任意一个单位（敌我都行、不限距离）
+    return [{ key: "target", type: "unit", optional: false, label: "谁获得优势（任意单位，不限距离）", units: advantageUnits() }];
   }
   if (id === "ruby_refuel") {
     // 补充能源（#219）：纳米 +10，或者把全部纳米压缩成储备能源。纳米是 0 时没有东西可以压缩：不问，直接 +10
@@ -11663,6 +11903,16 @@ const SKILL_REQUIREMENT = {
     || (shelterAllies(a).length ? null : "没有可以保释的友方"),
   role_spread:      () => spreadSources().length ? null : "场上没有能传播的属性状态效果（或者没有能接收的另一个单位）",
   role_boost:       (a) => boostAllies(a).length ? null : "没有可以借力移动的其他友方",
+  // 武器职责技能（party.js · WEAPON_ROLE_SKILLS）：次数用完、用了也没有效果的，扣点之前就拦下（挂着的效果还没用掉时不叠加）
+  wr_hone:          (a) => res(a).honeAtk ? `已经磨砺过了，下一次攻击 atk +${res(a).honeAtk}` : null,
+  wr_recycle:       (a) => wroleCapWhy(a, "wr_recycle") || (recycleUnits().length ? null : "场上没有带状态效果的单位"),
+  wr_weight:        (a) => res(a).weightBreak ? `配重还没用掉（下一次造成击破的攻击击破 +${res(a).weightBreak}）`
+    : (Number(a.def) || 0) <= WEAPON_ROLE_SKILLS.wr_weight.keep ? `架势只有 ${Number(a.def) || 0} 点，没有可以失去的架势` : null,
+  wr_upright:       (a) => res(a).uprightTurn ? "矗立已经生效了（到这一回合结束）" : null,
+  wr_mist:          (a) => wroleCapWhy(a, "wr_mist") || mistWhy(a),
+  wr_canopy:        (a) => wroleCapWhy(a, "wr_canopy") || canopyWhy(a),
+  wr_barricade:     (a) => wroleCapWhy(a, "wr_barricade") || (barricadeGapKeys().length ? null : "没有畅通（没有间隔效果）的间隔可以封住"),
+  wr_advantage:     (a) => wroleCapWhy(a, "wr_advantage") || (advantageUnits().length ? null : "场上的单位都已经有优势了"),
   hiaki_summon:   (a) => {
     const usable = summonableBlades(a);
     // 已经选好了哪一把就直接校验那一把
@@ -11811,6 +12061,26 @@ function roleTargetError(a, id, t) {
   return null;
 }
 
+/** 武器职责技能分步里选的对象不合法：返回原因（扣点之前拦下，见 skillTargetError） */
+function wroleTargetError(a, id, t) {
+  const fl = state.skillFlow;
+  const p = (fl && fl.picks) || {};
+  if (id === "wr_recycle") {
+    const tgt = p.target ? unitById(p.target) : t;
+    if (!tgt || offField(tgt)) return "先选一个身上有状态效果的单位";
+    const opts = recycleStatuses(tgt);
+    if (!opts.length) return `${tgt.name} 身上没有可以清除的状态效果`;
+    if (p.status != null && !opts.some(o => o.key === p.status)) return `${tgt.name} 身上没有这种状态效果`;
+  }
+  if (id === "wr_barricade") return barricadeWhy(p.gap);
+  if (id === "wr_advantage") {
+    const tgt = p.target ? unitById(p.target) : t;
+    if (!tgt || offField(tgt)) return "先选获得优势的单位";
+    if (advantageUnits().indexOf(tgt) < 0) return `${tgt.name} 已经有优势了`;
+  }
+  return null;
+}
+
 /** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
   if (typeof featOfSkill === "function" && featOfSkill(id)) {
@@ -11846,6 +12116,10 @@ function skillTargetError(a, id, t) {
   // 职责技能：分步里选的对象不合法就在扣点之前拦下
   if (/^role_(spread|shelter|boost|gold|double_dot|buffer|sturdy|halve|omen)$/.test(id)) {
     const why = roleTargetError(a, id, t);
+    if (why) return why;
+  }
+  if (/^wr_(recycle|barricade|advantage)$/.test(id)) {
+    const why = wroleTargetError(a, id, t);
     if (why) return why;
   }
   if (id === "kolt_cannon") {
@@ -12015,6 +12289,7 @@ function runSkill(id, optRun) {
         if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
         waveLedgerClose(waveOwn);
       }
+      settleHone();   // 磨砺：这次行动里打出过攻击的，atk 加成到此为止
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
       if (!state._highDefer) {
@@ -13697,6 +13972,82 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_pull") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       displaceTo(t, a.zone, lines, "被拉拽");
+    } else if (id === "wr_hone") {
+      // 磨砺（武器职责技能 · 直伤）：atk 加在 effectiveAtk 里；打出下一次攻击时 dealTo 记下，那次行动结束清掉（settleHone）
+      const s = WEAPON_ROLE_SKILLS.wr_hone;
+      a.resources.honeAtk = s.atk;
+      lines.push(`磨砺：${a.name} 的 atk +${s.atk}，直到下一次攻击。`);
+    } else if (id === "wr_recycle") {
+      // 回收（武器职责技能 · 异常）：不花行动；清除一种状态效果，自己得到 1 行动点（可以超过上限）。每场一次
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      const opts = tgt ? recycleStatuses(tgt) : [];
+      const pick = opts.find(o => fl && fl.picks && o.key === fl.picks.status) || opts[0];
+      if (!tgt || !pick) lines.push(`${tgt ? tgt.name + " 身上没有可以清除的状态效果" : "没有选回收的目标"}。`);
+      else if (!wroleSpend(a, "wr_recycle")) lines.push("回收本场已用完。");
+      else {
+        clearOneStatus(tgt, pick.key, lines);
+        lines.push(`回收：清除 ${tgt.name} 身上的${pick.label}。`);
+        grantAllyAp(a, a, WEAPON_ROLE_SKILLS.wr_recycle.ap, lines);
+        if (typeof syncBladeTwin === "function") syncBladeTwin(a);   // 绯秋的两把刀共用一份行动点
+      }
+    } else if (id === "wr_weight") {
+      // 配重（武器职责技能 · 击破）：架势只留 1 点，失去的架势加到下一次造成击破的攻击上（dealTo 用掉）
+      const keep = WEAPON_ROLE_SKILLS.wr_weight.keep;
+      const before = Number(a.def) || 0;
+      const lost = Math.max(0, before - keep);
+      if (!lost) lines.push(`${a.name} 架势只有 ${before} 点，没有可以失去的架势。`);
+      else {
+        a.def = keep;
+        a.resources.weightBreak = lost;
+        lines.push(`配重：${a.name} 架势 ${before} → ${keep}，下一次造成击破的攻击击破 +${lost}。`);
+      }
+    } else if (id === "wr_upright") {
+      // 矗立（武器职责技能 · 护卫）：到这一回合结束（turnEnd 清掉），同区友方挨打时自动协助格挡（dealTo · uprightBlocker），
+      // 不花附赠动作；这段时间里这把武器协助格挡扣的耐久合计不超过 2（performAssistBlock）
+      a.resources.uprightTurn = true;
+      a.resources.uprightDur = 0;
+      lines.push(`矗立：下回合前，${a.name} 自动为同区所有友方协助格挡（不花附赠动作），期间协助格挡的耐久消耗合计不超过 ${WEAPON_ROLE_SKILLS.wr_upright.durCap}。`);
+    } else if (id === "wr_mist") {
+      // 治愈雾气（武器职责技能 · 生存）：所在区域变成治愈场地。每场一次
+      const z = Number(a.zone);
+      const why = mistWhy(a);
+      if (why) lines.push(why);
+      else if (!wroleSpend(a, "wr_mist")) lines.push("治愈雾气本场已用完。");
+      else {
+        const ferr = setZoneField(z, "heal", { by: a.id });
+        lines.push(ferr || `治愈雾气：${z} 区变成治愈场地。`);
+      }
+    } else if (id === "wr_canopy") {
+      // 遮风挡雨（武器职责技能 · 环境手）：所在区域变成隔离区（不受天气影响，原来的场地照旧）。每场一次
+      const z = Number(a.zone);
+      const why = canopyWhy(a);
+      if (why) lines.push(why);
+      else if (!wroleSpend(a, "wr_canopy")) lines.push("遮风挡雨本场已用完。");
+      else {
+        state.fields[z].isolate = true;
+        lines.push(`遮风挡雨：${z} 区变成隔离区，区里不受天气效果影响。`);
+      }
+    } else if (id === "wr_barricade") {
+      // 禁止通行（武器职责技能 · 控场）：一条畅通的间隔变成无限耐久的墙，下回合开始时消失（expireBarricades）。每场一次
+      const fl = state.skillFlow;
+      const key = fl && fl.picks ? String(fl.picks.gap || "") : "";
+      const why = barricadeWhy(key);
+      if (why) lines.push(why + "。");
+      else if (!wroleSpend(a, "wr_barricade")) lines.push("禁止通行本场已用完。");
+      else placeBarricade(key, a, lines);
+    } else if (id === "wr_advantage") {
+      // 创造优势（武器职责技能 · 辅助）：任意一个单位获得优势（状态效果，共振照常共享）。每场两次
+      const fl = state.skillFlow;
+      const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
+      if (!tgt || offField(tgt)) lines.push("没有选获得优势的单位。");
+      else if (!wroleSpend(a, "wr_advantage")) lines.push("创造优势本场已用完。");
+      else {
+        tgt.statuses = tgt.statuses || {};
+        tgt.statuses.advantage = true;
+        popStatus(tgt, "advantage");   // 记下是谁挂的；共振的单位照常共享
+        lines.push(`创造优势：${tgt.name} 获得优势。`);
+      }
     } else if (id === "kolt_aa") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       const bit = (findKit("kolt", state.units) || a).resources.bit || "drill";
