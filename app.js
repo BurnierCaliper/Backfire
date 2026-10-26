@@ -8933,7 +8933,9 @@ function setHiakiStance(u, stance) {
   if (stance !== "draw" && typeof passiveOn === "function" && !passiveOn(u)) { u.resources.stance = "draw"; return; }
   const prev = u.resources.stance || "draw";
   u.resources.stance = stance;
-  // 特盛乱打：之后进入居合时，被乱打过的敌人各被瞬间砍一刀（0.5atk 当前刀的属性，无视距离和障碍），标记去掉
+  // 特盛乱打：之后进入居合时，被乱打过的敌人各被瞬间砍一刀（0.5atk 当前刀的属性，无视距离和障碍），标记去掉。
+  // 砍同区飞行的敌人也不用额外付附赠动作（flyFree，#402）：以前当成近程打飞行，协助格挡刚花掉附赠动作进入居合时付不起，
+  // 被标记的穴鸦一刀都没挨、标记却清掉了；还有附赠动作时每只飞行的敌人各扣 1 个
   if (stance === "iai" && prev !== "iai" && u.kit === "hiaki") {
     const marked = (state.units || []).filter(x => x && !x.isPlayer && !x.dead && x.barrageBy === u.id);
     if (marked.length) {
@@ -8941,7 +8943,7 @@ function setHiakiStance(u, stance) {
       const el = u.resources.blade === "naruto" ? "ice" : "fire";
       marked.forEach(x => {
         x.barrageBy = null;
-        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
+        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true, flyFree: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
       });
       notes.unshift(`特盛乱打：进入居合，被乱打过的 ${marked.length} 个敌人各被瞬间砍一刀。`);
       appendLog(notes.join("\n"));
