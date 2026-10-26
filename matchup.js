@@ -1,5 +1,5 @@
 /* 克制表（战斗中随时可看，跟着当前天气变）：纯数据，不画界面。
- * 规则全部调用 engine.js 的原函数（chartMod 克制表格子、weatherDamagePct 天气按属性的伤害修正），这里不另抄一份数值。
+ * 规则全部调用 engine.js 的原函数（chartMod 克制表格子、meltArmorMod 熔融装甲、weatherDamagePct 天气按属性的伤害修正），这里不另抄一份数值。
  *
  *   matchupChart(weather, opt) → { weather, weatherName, envX, phaseStep, field,
  *     cols: [{ id, name }]（血量层）, rows: [{ id, name, pct, pctBase, pctReason }]（属性）,
@@ -99,7 +99,8 @@ function matchupChart(weather, opt) {
     const unitWhy = [];
     if (onShp) { value = 0; unitWhy.push(MATCHUP_GENERIC_STATE); }
     else if (D) {
-      if (melt && layer === "armor" && el === "physical") { value = 0.5; unitWhy.push("熔融装甲：物理打装甲强制 +50%"); }
+      // 熔融装甲（engine.js · meltArmorMod）：强制 +50%，微光照样反转成 −50%（原因里接着写「微光：克制关系反转」）
+      if (melt && layer === "armor" && el === "physical") { value = meltArmorMod(weather); unitWhy.push(`熔融装甲：物理打装甲强制 ${matchupPctText(MELT_ARMOR_PHYSICAL)}`); }
       // 愿你无恙（mods.js · bpChartCap）：快照里带好上限 weaknessCap；直接传真单位时照原函数算
       const cap = D.weaknessCap != null ? (value > D.weaknessCap ? D.weaknessCap : value) : (typeof bpChartCap === "function" ? bpChartCap(D, value) : value);
       if (cap !== value) { unitWhy.push(`愿你无恙：克制加成最多 ${matchupPctText(cap)}`); value = cap; }

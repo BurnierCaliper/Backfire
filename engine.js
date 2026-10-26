@@ -19,6 +19,8 @@ const CHART = {
   physical:  { flesh: 0,    armor: -0.25, shield: -0.25, sand: 0,     spirit: 0 },
   harmonic:  { flesh: -0.25,armor: -0.25, shield: -0.25, sand: 0.50,  spirit: 0 }
 };
+/** 熔融装甲：物理打装甲的克制修正不看上面的表，强制改成这个值；微光照样反转（见 meltArmorMod） */
+const MELT_ARMOR_PHYSICAL = 0.50;
 
 function uid() {
   return "u" + Math.random().toString(36).slice(2, 9);
@@ -501,6 +503,12 @@ function chartMod(element, layerType, weather, field, acidRainCancelArmor, field
   return v;
 }
 
+/** 熔融装甲：物理打装甲的克制修正。强制 +50%（MELT_ARMOR_PHYSICAL），不看克制表原值，酸雨的装甲减伤失效也不叠加；
+ *  微光照样反转克制表（和 chartMod 一样，能量以外都反转）：+50% → −50%（#387）。resolveAttack 和克制表（matchup.js）共用 */
+function meltArmorMod(weather) {
+  return weather === "glow" ? -MELT_ARMOR_PHYSICAL : MELT_ARMOR_PHYSICAL;
+}
+
 function matchupKind(mod) {
   if (mod > 0.001) return "adv";
   if (mod < -0.001) return "dis";
@@ -879,9 +887,12 @@ function resolveAttack(ctx) {
     // 天气改了克制表的那部分（微光反转克制、酸雨让装甲减伤失效）
     let wSum = onShp || weather === "none" ? 0 : cMod - chartMod(element, layerTypeForChart, "none", t.flying ? null : fieldT, false, envX);
     if (!onShp && meltLive && startLayer && startLayer.type === "armor" && element === "physical") {
-      hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
-      cMod = 0.50;
-      wSum = 0;
+      // 熔融装甲强制 +50%；微光照样反转成 −50%，改掉的这部分算天气的（没有天气时是 +50%）
+      const meltMod = meltArmorMod(weather);
+      hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 ${pctTxt(MELT_ARMOR_PHYSICAL)}` +
+        `${meltMod !== MELT_ARMOR_PHYSICAL ? `，微光反转克制 → ${pctTxt(meltMod)}` : ""}。`);
+      cMod = meltMod;
+      wSum = meltMod - meltArmorMod("none");
     }
     if (!onShp && typeof bpChartCap === "function") {
       const capped = bpChartCap(t, cMod);
@@ -1154,7 +1165,8 @@ function resolveAttack(ctx) {
       if (isAttack && weather === "phase" && Number(ctx.phaseStep) === 0) { br = Math.max(0, br - envX); hAdd(`相位波谷：击破 −${envX}。`); }
       if (isAttack && weather === "phase" && Number(ctx.phaseStep) === 2) { br += envX; hAdd(`相位波峰：击破 +${envX}。`); }
       if (isAttack && t.instant && t.instant.shift) {
-        const meltArmor = !!(meltLive && startLayer && startLayer.type === "armor" && element === "physical");
+        // 熔融装甲加伤（+50%）算受克制；微光把它反转成 −50% 时是被克制的攻击，不加
+        const meltArmor = !!(meltLive && startLayer && startLayer.type === "armor" && element === "physical") && meltArmorMod(weather) > 0;
         if (kindNow === "adv" || meltArmor) {
           br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
         }
