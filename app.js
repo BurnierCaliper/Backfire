@@ -1623,7 +1623,7 @@ function startCombat() {
     (state.units || []).forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "battleStart", undefined, featNotes); });
     if (featNotes.length) appendLog(featNotes.join("\n"));
   }
-  beginRound([]);
+  beginRound([], { opening: true });
   startPlayerPhase();
   if (typeof ratfolkBattleStart === "function") ratfolkBattleStart();   // 下水道狂鼠：记下开战时的血量（暴虐猎手斩杀看「降到」，enemies.js）
   appendLog("战斗开始。回合开始效果已结算。", "sep");
@@ -1689,8 +1689,10 @@ function refreshEnemyEconomy(u, notes) {
   if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员：附赠上限对齐（最少 1 已在扣之前托底）
 }
 
-function beginRound(notes) {
+/** 回合开始。opt.opening：开战时（startCombat）结算的第 1 回合 */
+function beginRound(notes, opt) {
   notes = notes || [];
+  opt = opt || {};
   startLogTurn();
   // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
   state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
@@ -1841,7 +1843,7 @@ function beginRound(notes) {
       }
     }
   });
-  Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes));
+  Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes, !!opt.opening));
   tickRuinGround(notes);
   state.units.forEach(u => {
     u.lostDefThisTurn = 0;
@@ -1957,7 +1959,8 @@ function releaseAcidCharges(notes) {
 }
 
 /* ---------- 场地的回合开始效果（回合开始和 Helumica「环境扫描」共用） ---------- */
-function tickFireField(z, notes) {
+/** opening：开战时结算的第 1 回合（beginRound 的 opt.opening） */
+function tickFireField(z, notes, opening) {
   const f = state.fields[z];
   if (!fieldFireOn(f)) return;
   f.fireOn = true;
@@ -1979,6 +1982,12 @@ function tickFireField(z, notes) {
     if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
     applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
+  // 开局就存在的火场（#385）：开战这一下照常按层数烧，层数不涨（酷暑那 +1 也不加），整个第 1 回合都是开战前的层数，
+  // 第 2 回合开始才照常 +1。以前开战这一下就 +1，开战前布置的 1 层火场，我方第一次行动时已经是 2 层
+  if (opening) {
+    notes.push(`${z} 区火场先结算伤害；开局就存在的火场，开战这一下层数不涨 → ${f.fire}`);
+    return;
+  }
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
   const add = 1 + (heat ? (state.apocalypse ? 2 : 1) : 0);
