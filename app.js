@@ -2538,16 +2538,23 @@ function addStatusDmg(key, amount) {
  *   伤害 / 击破：打在敌人身上的每一击，加上自己行动里引发的连带伤害（感电、共振、余波……）
  *   承伤：落在自己身上的所有伤害，含坚毅生命和持续伤害
  *   击杀：最后一击是谁打的算谁
- *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算） */
+ *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算）
+ *   倒地：陷入濒死的次数（noteKnockdown；力竭 3 被击倒立刻死亡、起身中坚毅生命打光死亡、武器人倒下都不算） */
 function battleStat(u) {
   if (u && u.creditTo) u = unitById(u.creditTo);   // 碎渣机炮这类代打：记在操控的人身上
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   if (u.escort) return null;   // 护送对象（货车 / 委托人）：数据没有参考价值，不记
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
-    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
+    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0, downs: 0 });
   s.name = u.name;
   return s;
+}
+/** 战场数据：倒地一次。设 dying = true 的地方都调它：applyKnockdown（攻击、坠落、高能自爆……）、
+ *  不稳态（rasUnstableHit）、巨人捏碎颅骨（enemies.js · crushSkullDown）；这几处都先挡掉了已经濒死的，不会重复记 */
+function noteKnockdown(u) {
+  const st = battleStat(u);
+  if (st) st.downs = (st.downs || 0) + 1;
 }
 /* ===== 单回合最高爆发：每个我方单位一回合（第 N 回合，含敌人回合里的协助 / 借机）里造成的伤害合计，
  * 记下这一回合用了哪些技能（各打了多少）、命中时吃到哪些增益（几次命中）。
@@ -3500,6 +3507,7 @@ function rasUnstableHit(target, res, notes) {
     notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
   } else if (!target.dying) {
     target.dying = true;
+    noteKnockdown(target);   // 战场数据：倒地次数
     if (typeof clearStunOnDown === "function") clearStunOnDown(target);
     notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
   }
@@ -6864,6 +6872,7 @@ function applyKnockdown(unit, notes, opt) {
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
     if (typeof featReviveCheck === "function" && featReviveCheck(unit, notes)) return null;
     unit.dying = true;
+    noteKnockdown(unit);   // 战场数据：倒地次数
     clearStunOnDown(unit);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
