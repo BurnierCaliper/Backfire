@@ -262,9 +262,9 @@ const ENEMY_INFO = {
   // 第三采矿场：用能量的安保部队（还会有异星生物）
   alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
   meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
-  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币
+  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币；弦蚣是精英，2 枚（#381）
   meteor_spider:    { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 },
-  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 1 },
+  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 2 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·狼" },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·牛" },
@@ -502,7 +502,7 @@ function rollBountyEncounter(preset, opt) {
 /** 悬赏目标的资格：至少占几枚代币（本区域没有这么大的敌人时，退而取本区域里代币最多的） */
 const BOUNTY_TARGET = { minTokens: 2 };
 /** 本区域可以当悬赏目标的精英（不是首领、不是成群的；优先 minTokens 枚代币及以上）。
- *  只从本区域的敌人表里抽：第三采矿场的敌人都只占 1 枚代币，以前因此落到全部区域去抽，
+ *  只从本区域的敌人表里抽：以前第三采矿场的敌人都只占 1 枚代币（#381 陨体弦蚣改成精英以前），因此落到全部区域去抽，
  *  抽到别的区域的目标，随从又和目标不是一个阵营 */
 function bountyCandidates(region) {
   const base = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack; };

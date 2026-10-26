@@ -144,7 +144,7 @@ const ENEMY_DROPS = {
   alarm_bot:        { cm_coil: 0.28, cm_cell: 0.12, cm_scrap: 0.2 },
   meteor_miner:     { cm_cell: 0.15, cm_spirit: 0.08, cm_scrap: 0.27 },
   meteor_spider:    { cm_spirit: 0.18, cm_coil: 0.17 },                 // 两只一组
-  meteor_centipede: { cm_spirit: 0.22, cm_cell: 0.08, cm_coil: 0.2 },
+  meteor_centipede: { cm_spirit: 0.8, cm_cell: 0.3, cm_coil: 0.7 },     // 精英（#381）：原来杂兵的 0.22 / 0.08 / 0.2 照比例放大
   // —— 警卫队（有机体 + 装备） ——
   captain_wolf:   { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },        // 冷凝罐 → 化工残液
   captain_ox:     { cm_chem: 0.65, cm_cell: 0.4, cm_scrap: 0.5 },
@@ -387,11 +387,12 @@ function rollEnemyLoot(u) {
   if (kit === "bandit_boss") return roll(3, 4, 0) * 50 + 50;
   // 主持人手册第十章（摧毁植入体的掉落；破解另计，由主持人给）
   if (kit === "mecha_mg" || kit === "mecha_gl" || kit === "gas_collector") return roll(2, 6, 0) * 100;
-  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard" || kit === "ant_guard" || kit === "ant_hunter" || kit === "sandfish_lead") return roll(1, 6, 0) * 50 + 100;
+  // 陨体弦蚣（#381 改成精英）照蚁型兵种的做法，同警卫队队长
+  if (kit === "captain_wolf" || kit === "captain_ox" || kit === "captain_lizard" || kit === "ant_guard" || kit === "ant_hunter" || kit === "sandfish_lead" || kit === "meteor_centipede") return roll(1, 6, 0) * 50 + 100;
   if (kit === "giant") return roll(3, 6, 0) * 100 + 100;
   if (kit === "outlaw_king") return 0;
   const fixed = {
-    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20, flint_sweeper: 20, alarm_bot: 20, meteor_miner: 35, meteor_spider: 10, meteor_centipede: 15,
+    guard_sword: 20, guard_gun: 20, patrol_car: 30, buoy: 20, dumpdrone: 35, mine_guard: 20, flint_sweeper: 20, alarm_bot: 20, meteor_miner: 35, meteor_spider: 10,
     crow: 15, sandfish_drive: 20, sandfish_ambush: 20, swarm: 200, patrolboat: 200, spreader: 180, watchcrow: 350, dustbody: 120
   };
   return fixed[kit] || 0;

@@ -3,7 +3,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const H = require("./headless");
+const vm = require("node:vm");
 const plain = x => JSON.parse(JSON.stringify(x));
+/** 顶层 const（BOSS_POSTURE_MULT 等）不挂在 window 上，用 vm 取 */
+const get = (c, expr) => vm.runInContext(expr, c);
 
 function field(enemies, opt) {
   opt = opt || {};
@@ -127,18 +130,65 @@ test("陨石开采机：开场蓄能；能量射线带倒流；被我方打死�
 });
 
 /* ---------- 异星生物 ---------- */
-test("数值：陨体衍蛛 = 蜂群的血（全星灵）、枪看守的架势、浮标的 atk，两只一组 1 代币；陨体弦蚣 = 匕首狂徒（全星灵）", () => {
+test("数值：陨体衍蛛 = 蜂群的血（全星灵）、枪看守的架势、浮标的 atk，两只一组 1 代币；陨体弦蚣 = 匕首狂徒（全星灵），架势照精英的规则（10 级起打六折）", () => {
   const c = H.load();
+  const mult = get(c, "BOSS_POSTURE_MULT"), eliteMin = get(c, "ELITE_RULE_MIN_LEVEL");
   [1, 5, 10, 20].forEach(lv => {
     const s = preset(c, "meteor_spider").build(lv, 1), sw = preset(c, "swarm").build(lv, 1), gg = preset(c, "guard_gun").build(lv, 1), bu = preset(c, "buoy").build(lv, 1);
     assert.equal(s.layers.map(l => l.type).join(), "spirit");
     assert.equal(total(s), total(sw)); assert.equal(s.defMax, gg.defMax); assert.equal(s.atk, bu.atk);
     const m = preset(c, "meteor_centipede").build(lv, 1), k = preset(c, "thug_knife").build(lv, 1);
     assert.equal(m.layers.map(l => l.type).join(), "spirit");
-    assert.deepEqual([total(m), m.defMax, m.atk], [total(k), k.defMax, k.atk]);
+    assert.deepEqual([total(m), m.defMax, m.atk], [total(k), lv >= eliteMin ? Math.round(k.defMax * mult) : k.defMax, k.atk], `${lv} 级`);
   });
   assert.deepEqual(plain(c.enemyInfo("meteor_spider")), { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 });
   assert.equal(c.enemyInfo("meteor_centipede").faction, "异星生物");
+});
+
+test("陨体弦蚣是精英（#381）：2 枚代币、级别精英，图鉴写「精英」；一回合 1 行动点 + 1 附赠，10 级起要攒满晕眩标记；打死给精英的经验，跑团掉 1d6×50+100 奎支、单局按精英档", () => {
+  const c = H.load();
+  assert.deepEqual(plain(c.enemyInfo("meteor_centipede")), { faction: "异星生物", regions: ["第三采矿场"], tokens: 2 });
+  assert.equal(c.enemyTokens("meteor_centipede"), 2);
+  assert.equal(c.S.ENEMY_RANK.meteor_centipede, "elite");
+  const e = c.bestiaryEntries().find(x => x.kit === "meteor_centipede");
+  assert.deepEqual([e.rank, e.rankName], ["elite", "精英"]);
+  assert.match(e.rankNote, /晕眩标记/, "图鉴带上精英的说明");
+  assert.deepEqual(plain(c.enemyActBudget({ kit: "meteor_centipede" })), { ap: 1, bonus: 1 });
+  assert.deepEqual([9, 10].map(lv => c.isBossUnit({ kit: "meteor_centipede", level: lv })), [false, true], "10 级起照精英的晕眩标记规则");
+  // 跑团：同警卫队队长（1d6×50+100）；单局：按杂兵 / 精英 / 首领三档
+  for (let i = 0; i < 20; i++) {
+    const n = c.rollEnemyLoot({ kit: "meteor_centipede" });
+    assert.ok(n >= 150 && n <= 400 && n % 50 === 0, "跑团奎支 " + n);
+  }
+  const L = c.S.ROGUE_CONFIG.lootByRank;
+  c.S.state.lootByRank = L;
+  assert.equal(c.rollEnemyLoot({ kit: "meteor_centipede" }), L.elite);
+  c.S.state.lootByRank = null;
+  // 打死给精英的经验（5 级：精英 100，杂兵是 50）
+  const f = field([{ id: "meteor_centipede", lv: 5, zone: 2 }]);
+  const m = f.E("meteor_centipede"), k = f.P("kolt");
+  f.S.weather = "none";   // 微光下死亡会分裂
+  const xp0 = k.xp || 0;
+  f.S.combatPhase = "player";
+  f.c.dealTo(k, m, { atk: 999, mult: 1, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+  f.c.sweepDeadEnemies();
+  assert.ok(m.dead, "打死了");
+  assert.equal((k.xp || 0) - xp0, f.c.xpDrop("elite", 5));
+});
+
+test("陨体弦蚣占 2 枚代币（#381）：第三采矿场的随机遭遇一场最多 2 只，出了它那场就是精英战；第三采矿场的悬赏目标只会是它", () => {
+  const c = H.load();
+  c.Math.random = c.makeRng("CENTI-381");
+  let withIt = 0;
+  for (let i = 0; i < 400; i++) {
+    const spec = c.rollEncounter({ region: "第三采矿场", zoneMode: 2 });
+    const n = spec.enemies.filter(e => e.preset === "meteor_centipede").reduce((a, e) => a + (Number(e.count) || 1), 0);
+    assert.ok(n <= 2, `${spec.tokens} 枚代币的遭遇出了 ${n} 只`);
+    assert.equal(spec.tier, n ? "elite" : "normal", spec.id);
+    if (n) withIt++;
+  }
+  assert.ok(withIt > 50, "抽到过带弦蚣的遭遇：" + withIt);
+  assert.deepEqual(plain(c.bountyCandidates("第三采矿场")), ["meteor_centipede"], "本区域唯一占 2 枚代币的");
 });
 
 test("陨体衍蛛：除自己之外每只活着的衍蛛 atk +25%；协助施加高能", () => {
