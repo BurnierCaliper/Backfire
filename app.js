@@ -2424,7 +2424,17 @@ function resetBattleRecords() {
   state.battleScore = { total: 0, parts: {} };
   state.scoreSeen = {};
   state.battleGains = { xp: 0, kuizhi: 0 };
-  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
+  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）\n
+/** 敌人血量层被摧毁时，把废料累积到场上的柯尔特身上（按层类型） */
+function accumulateScrap(type, amount) {
+  if (!type || !(amount > 0)) return;
+  const kolt = (state.units || []).find(u => u && u.kit === "kolt" && u.isPlayer && !u.dead);
+  if (!kolt) return;
+  kolt.resources = kolt.resources || {};
+  kolt.resources.scrapStore = kolt.resources.scrapStore || {};
+  kolt.resources.scrapStore[type] = (Number(kolt.resources.scrapStore[type]) || 0) + Math.floor(amount);
+}
+
 }
 /** 这场的基准分：把出现过的每个敌人（含中途召唤的）「打空血、打空一次架势、打进一次失衡、击杀」的分加起来，
  *  按第一次见到时的数值算。这样架势高的敌人、血厚的敌人都在同一把尺子上。 */
@@ -4944,7 +4954,7 @@ function stripFocusLayer(target, layerType, lines) {
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
   // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
-  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };
+  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };\n  accumulateScrap(layerType, layerMax);
   noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
@@ -6092,7 +6102,7 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; }
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.scrapStore = r.scrapStore || {}; }
   if (u.kit === "ras") { r.energyPct = 0; r.light = 0; r.unstable = false; }
   if (u.kit === "helu") { r.scanned = false; r.lockLeft = roleLockCap(u); }
   if (u.kit === "torque") r.acidCharge = null;
@@ -6942,7 +6952,7 @@ function dealTo(attacker, target, opt) {
       return !l || (Number(l.current) || 0) <= 0;
     });
     const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
-    if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
+    if (deadLayer) { state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 }; accumulateScrap(deadLayer.type, deadLayer.max || 0); }
   }
   advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);   // 聚焦不看来源，任何伤害都算
   // 不稳态：受到伤害就倒地（濒死）；已经起身（用坚毅生命继续战斗）时再受到伤害才直接死亡
@@ -9433,7 +9443,7 @@ const SKILL_REQUIREMENT = {
     : state.weatherLock ? `天气被「${state.weatherLock}」锁定，无法调转风向` : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
   // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射攒下的记录才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
+  kolt_scrap:     (a) => Object.keys((a.resources && a.resources.scrapStore) || {}).some(k => (Number(a.resources.scrapStore[k]) || 0) > 0) || Object.keys(res(a).rotStore || {}).some(k => (Number(res(a).rotStore[k]) || 0) > 0)
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -11227,7 +11237,6 @@ function runSkillInner(id, optRun) {
       popStatus(t, "chase");
       lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
-      const rec = state.lastBrokenLayer;
       const hp0 = totalHp(a);
       const grant = (type, amt, from) => {
         if (amt <= 0) return;
@@ -11239,14 +11248,24 @@ function runSkillInner(id, optRun) {
           lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
       };
-      // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
-      if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
+      // 累积的废料：按层类型领取，总量不超过生命上限的 50%
+      const store = (a.resources && a.resources.scrapStore) || {};
+      const types = Object.keys(store).filter(t => (Number(store[t]) || 0) > 0);
+      if (!types.length) lines.push("还没有累积的废料。");
       else {
         const cap = Math.floor(baseMaxHp(a) * 0.5);
-        const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
-        grant(rec.type, amt, "废物利用");
-        if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
-        state.lastBrokenLayer = null;   // 这一层已经利用过了：要等下一个被摧毁的层
+        let used = 0;
+        types.forEach(type => {
+          const have = Math.floor(Number(store[type]) || 0);
+          const take = Math.min(have, Math.max(0, cap - used));
+          if (take > 0) {
+            grant(type, take, "废物利用");
+            used += take;
+            store[type] = have - take;
+          }
+        });
+        if (used >= cap) lines.push(`（已达生命上限一半 ${cap}，剩余废料保留）`);
+        if (a.resources) a.resources.scrapStore = store;
       }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};
