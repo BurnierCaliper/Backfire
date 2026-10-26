@@ -6,6 +6,13 @@
   const plain = v => !!v && typeof v === "object" && !Array.isArray(v);
   const has = (o, key) => Object.prototype.hasOwnProperty.call(o, key);
   const present = u => !!u && !u.dead && !u.hidden && !u.fused && !u._removed;
+  function costLabel(c) {
+    c = c || {};
+    const parts = [];
+    if (c.ap) parts.push(c.ap > 1 ? `${c.ap} 行动点` : "行动点");
+    if (c.bonus) parts.push(c.bonus > 1 ? `${c.bonus} 附赠动作` : "附赠动作");
+    return parts.length ? parts.join(" + ") : "不消耗行动";
+  }
   function create(options) {
     const { game, validation, inspect, assertAction, getState } = options || {};
     if (!game || !validation || typeof validation.validateBattle !== "function" || typeof validation.reason !== "function" ||
@@ -54,7 +61,8 @@
             if (Object.keys(request.picks || {}).length || request.target != null || request.item != null || request.dest != null) fail("请先选择技能");
             return emit({ kind: "skill", title: "选择行动", options: skills.map(sk => {
               const reason = validation.reason(actor(), sk.id, session, sender, game);
-              return { value: sk.id, label: sk.name || sk.id, ...(reason ? { disabled: true, reason } : {}) };
+              // cost：房主按这名角色现在的情况算好的消耗（移动 / 道具用附赠、导体移动不耗……）。以前玩家端只按技能 id 查，移动、道具都写成「行动点」
+              return { value: sk.id, label: sk.name || sk.id, cost: costLabel(sk.cost), ...(reason ? { disabled: true, reason } : {}) };
             }) });
           }
           const sk = skills.find(s => s.id === request.skill);
@@ -77,7 +85,7 @@
             return emit({ kind: "zone", key: "dest", title: "选择移动区域", options: zones.map(z => ({ value: z, label: `${z} 区` })) });
           }
           if (sk.id === "__item") {
-            const items = bagList().filter(item => item.combat);
+            const items = bagList(actor()).filter(item => item.combat);
             if (!request.item) {
               if (request.target != null || request.dest != null) fail("请先选择道具");
               return emit({ kind: "choice", key: "item", title: "选择战斗道具", options: items.map(item => ({ value: item.id, label: `${item.name} ×${item.qty}` })) });
@@ -88,6 +96,10 @@
             if (item.target === "ally" && request.target == null) {
               if (request.dest != null) fail("友方道具不接受区域选项");
               return emit({ kind: "unit", key: "target", title: "选择友方", options: state.units.filter(u => present(u) && u.isPlayer && legal(command(u.id, null))).map(optionFor) });
+            }
+            if (item.target === "enemy" && request.target == null) {
+              if (request.dest != null) fail("对敌道具不接受区域选项");
+              return emit({ kind: "unit", key: "target", title: "选择敌人", options: state.units.filter(u => present(u) && !u.isPlayer && legal(command(u.id, null))).map(optionFor) });
             }
             if (item.target === "zone" && request.dest == null) {
               if (request.target != null) fail("区域道具不接受单位目标");

@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const HI = require("../hud-icons.js");
 
 test("徽章：属性状态、通用状态、即时 / 自我效果、挂着的攻击效果都有图标，层数跟着走", () => {
-  const u = { statuses: { burn: 3, shock: true, frostbite: true, shockwave: true, reso: true, unstable: true, weak: true, inspire: true, sturdy: true, hide: true, advantage: true, chase: true, corr: true },
+  const u = { statuses: { burn: 3, shock: true, frostbite: true, shockwave: true, reso: true, unstable: true, weak: true, inspire: true, sturdy: true, hide: true, advantage: true, chase: true, corr: true, high: true },
     highEnergy: 7, instant: { melt: true, sting: true, overload: true, shift: true, spread: true, refract: true, iceNext: true },
     self: "burn", selfBurnStacks: 2, resources: { nextAtkFx: ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract", "unknown"] } };
   const list = HI.unitBadges(u);
@@ -71,6 +71,11 @@ test("角色仪表：11 个角色都有数据和画面，读的是单位身上�
     assert.doesNotThrow(() => JSON.stringify(st));
   }
   assert.equal(HI.gaugeState({ kit: "xia", resources: { fuel: 99 } }).fuel, 5);
+  // 瑞比：收发代理（9 级）解锁后才有无人机图标；放出后亮起，机甲里是激光模式
+  assert.doesNotMatch(HI.gauge(HI.gaugeState({ kit: "ruby", level: 8, resources: { nano: 30 } })), /无人机/);
+  assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 9, resources: { nano: 30 } })), /无人机未放出/);
+  assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 11, resources: { nano: 30, drone: true } })), /无人机 · 每回合 \+10 纳米/);
+  assert.match(HI.gauge(HI.gaugeState({ kit: "ruby", level: 11, resources: { nano: 60, drone: true, mecha: true, overdrive: true } })), /无人机 · 激光 ×3/);
   assert.equal(HI.gaugeState({ kit: "hiaki", resources: { stance: "waki", niuOut: true } }).stance, "guard");
   assert.equal(HI.gaugeState({ kit: "hiaki", resources: { niuOut: true } }).out, "niu");
   assert.equal(HI.gaugeState({ kit: "yuito", resources: { bondId: "a" } }, units).bondName, "灯");
@@ -85,4 +90,52 @@ test("角色仪表：11 个角色都有数据和画面，读的是单位身上�
   assert.equal(HI.gaugeState({ kit: "boomcar" }), null);
   assert.equal(HI.gauge(null), "");
   assert.equal(HI.gauge({ kit: "nobody" }), "");
+});
+
+test("晕眩标记：首领和 10 级起的精英一直挂「晕眩标记 n/2」徽章（0/2 也挂），普通敌人和玩家没有", () => {
+  const H = require("./headless");
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt"], enemies: [{ id: "captain_ox", lv: 10, zone: 1 }, { id: "captain_ox", lv: 5, zone: 1 }, { id: "thug_knife", lv: 10, zone: 1 }], seed: "STM" });
+  c.startCombat();
+  const S = c.S.state;
+  const [elite10, elite5, thug] = S.units.filter(u => !u.isPlayer);
+  globalThis.isBossUnit = c.isBossUnit;
+  try {
+    assert.equal(c.isBossUnit(elite10), true);
+    const b = HI.unitBadges(elite10).find(x => x.key === "stunMark");
+    assert.ok(b, "10 级精英有徽章");
+    assert.equal(b.stack, "0/2");
+    assert.match(b.title, /攒满 2 个才会真正晕眩/);
+    elite10.stunMarks = 1;
+    assert.equal(HI.unitBadges(elite10).find(x => x.key === "stunMark").stack, "1/2");
+    assert.ok(!HI.unitBadges(elite5).some(x => x.key === "stunMark"), "10 级以下的精英没有");
+    assert.ok(!HI.unitBadges(thug).some(x => x.key === "stunMark"), "普通敌人没有");
+    assert.ok(!HI.unitBadges(c.findKit("kolt", S.units)).some(x => x.key === "stunMark"), "玩家没有");
+  } finally { delete globalThis.isBossUnit; }
+  // 联机投影过来的单位：主机给了 stunMax 就照着画
+  assert.equal(HI.unitBadges({ stunMax: 2, stunMarks: 1 })[0].stack, "1/2");
+  // 状态文字「晕眩标记 1/2」已经有图标，卡片上不再重复写字
+  assert.equal(HI.covered("晕眩标记 1/2"), true);
+  assert.match(HI.badge("stunMark", "1/2", "提示"), /title="提示"/);
+});
+
+test("休眠：单位身上有休眠就挂「Zzz」图标，状态文字「休眠」不再重复写", () => {
+  const list = HI.unitBadges({ dormant: true, statuses: {} });
+  assert.deepEqual(list.map(b => b.key), ["dormant"]);
+  assert.match(HI.badge("dormant", ""), /data-fx="dormant"/);
+  assert.equal(HI.covered("休眠"), true);
+  assert.deepEqual(HI.unitBadges({ dormant: false, statuses: {} }), [], "醒了就不挂");
+});
+
+test("下潜：挂下潜徽章，浮上来就不挂", () => {
+  assert.deepEqual(HI.unitBadges({ submerged: true, statuses: {} }).map(b => b.key), ["submerged"]);
+  assert.match(HI.badge("submerged", ""), /data-fx="submerged"/);
+  assert.deepEqual(HI.unitBadges({ submerged: false, statuses: {} }), []);
+});
+
+test("下陷：挂下陷徽章，层数跟着走", () => {
+  const b = HI.unitBadges({ sink: 2, statuses: {} });
+  assert.deepEqual(b.map(x => x.key), ["sink"]);
+  assert.equal(b[0].stack, "2");
+  assert.deepEqual(HI.unitBadges({ sink: 0, statuses: {} }), []);
 });

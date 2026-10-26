@@ -59,8 +59,9 @@ test("协助格挡成功：目标免伤且不扣架势，击破由格挡者承�
 });
 
 test("警卫队队长·牛的自动格挡按它自己的条文：牛扣自己架势（最少留 1），被保护者不扣；反击 1 击破打空照样失衡", () => {
-  const { c, S } = setup(["kolt", "helu"], [{ id: "captain_ox", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
-  const kolt = kit(S, "kolt"), ox = kit(S, "captain_ox"), thug = kit(S, "thug_hammer");
+  // 被保护的是安保的剑看守（狂徒和安保 / 警卫队敌对，牛和巡逻车不替狂徒挡）
+  const { c, S } = setup(["kolt", "helu"], [{ id: "captain_ox", lv: 1, zone: 1 }, { id: "guard_sword", lv: 1, zone: 1 }]);
+  const kolt = kit(S, "kolt"), ox = kit(S, "captain_ox"), thug = kit(S, "guard_sword");
   S.units.forEach(u => { u.zone = 1; });
   kolt.def = 1;
   const oxDef = ox.def, thugDef = thug.def, thugHp = c.totalHp(thug);
@@ -74,8 +75,9 @@ test("警卫队队长·牛的自动格挡按它自己的条文：牛扣自己架
 });
 
 test("安保巡逻车的自动格挡按一般规则：目标免伤、不扣架势，击破由巡逻车承担（最少留 1）", () => {
-  const { c, S } = setup(["kolt", "helu"], [{ id: "patrol_car", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
-  const kolt = kit(S, "kolt"), car = kit(S, "patrol_car"), thug = kit(S, "thug_hammer");
+  // 被保护的是安保的剑看守（狂徒和安保 / 警卫队敌对，牛和巡逻车不替狂徒挡）
+  const { c, S } = setup(["kolt", "helu"], [{ id: "patrol_car", lv: 1, zone: 1 }, { id: "guard_sword", lv: 1, zone: 1 }]);
+  const kolt = kit(S, "kolt"), car = kit(S, "patrol_car"), thug = kit(S, "guard_sword");
   S.units.forEach(u => { u.zone = 1; });
   thug.def = 2;
   const carDef = car.def, thugHp = c.totalHp(thug);
@@ -263,7 +265,7 @@ test("武器人主动收回为武器要和持有者同区（不扣行动点）�
 
 /* ---------- 7. 耐久 0 的武器 ---------- */
 
-test("在场武器人耐久被格挡扣到 0：收回后主人空手，本场唤不出来", () => {
+test("在场武器人耐久被格挡扣到 0：这一场才坏的，收回后照常能用（atk 减半），本场唤不出来", () => {
   const { c, S } = setup(["kolt", "helu"]);
   const kolt = kit(S, "kolt"), helu = kit(S, "helu"), foe = foes(S)[0];
   S.units.forEach(u => { u.zone = 1; });
@@ -279,8 +281,8 @@ test("在场武器人耐久被格挡扣到 0：收回后主人空手，本场唤
   torque.ap = 1;
   act(c, S, torque, null, "torque_return");
   assert.equal(torque.hidden, true);
-  assert.equal(c.isUnarmed(kolt), true, "耐久 0 的武器收回来也只能空手");
-  assert.equal(c.effectiveAtk(kolt, S.units), kolt.personalAtk);
+  assert.equal(c.isUnarmed(kolt), false, "这一场才坏的：照常拿着");
+  assert.equal(c.effectiveAtk(kolt, S.units), kolt.personalAtk + Math.floor(kolt.weaponAtk / 2), "武器 atk 减半");
   assert.equal(c.spawnWeapon(kolt, "torque"), null, "本场唤不出来");
   assert.match(c.weaponSummonWhy(kolt, "torque"), /耐久为 0/);
 });

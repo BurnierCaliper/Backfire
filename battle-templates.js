@@ -6,8 +6,8 @@
  *
  * 模板格式：
  *   { id, name, note, tier: "normal" | "elite" | "boss", board: 2 | 3 | "line4" | "square4" | "cross5",
- *     weather, playerZone,
- *     enemies: [{ preset, level (null = 跟着战斗等级), zone, mechanics?: [首领机制配置] }],
+ *     weather, playerZone, allyFaction（我方与哪个敌人阵营同阵营，"" = 只有自己）,
+ *     enemies: [{ preset, level (null = 跟着战斗等级), zone, mechanics?: [首领机制配置], enriched?: 沙鱼富集与否（true / false，不写 = 开战时随机） }],
  *     fields: { 区号: { 和默认场地不同的字段 } },
  *     gaps: { "1-2": { type, hp (null = 按规则掷), open } },
  *     props: [{ kind, zone, level (null = 跟着战斗等级), faction }],
@@ -23,6 +23,13 @@ const BATTLE_TEMPLATE_TIERS = { normal: "普通", elite: "精英", boss: "首领
 const BATTLE_TEMPLATE_FIELD_KINDS = { "": "无", fireOn: "火场", ice: "冰面", acid: "酸液", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", abyss: "深渊", collapseOn: "坍塌", ruinOn: "损毁地面", isolate: "隔离区" };
 
 function btClone(x) { return JSON.parse(JSON.stringify(x)); }
+/** 可以选来和我方同阵营的敌人阵营（遭遇表里出现过的阵营） */
+function battleTemplateFactions() {
+  if (typeof ENEMY_INFO === "undefined") return [];
+  const out = [];
+  Object.keys(ENEMY_INFO).forEach(k => { const f = ENEMY_INFO[k].faction; if (f && !out.includes(f)) out.push(f); });
+  return out;
+}
 function btInt(v, d, lo, hi) {
   let n = v === null || v === undefined || v === "" ? d : Math.floor(Number(v));
   if (!isFinite(n)) n = d;
@@ -101,9 +108,22 @@ function battleTemplateNormalize(t) {
   const zoneOk = (z, d) => { z = btInt(z, d, 1, maxZ); return zones.includes(z) ? z : d; };
   const presets = btPresetIds();
   const lvOf = v => (v === null || v === undefined || v === "") ? null : btInt(v, 1, 1, 30);
+  // 个体值水平（enemies.js）：−10～10，空着 = 开战时随机
+  const ivOf = v => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v))) ? null : Math.max(-10, Math.min(10, Math.round(Number(v))));
+  const withIv = (row, e) => {
+    const iv = e && e.iv && typeof e.iv === "object" ? { hp: ivOf(e.iv.hp), atk: ivOf(e.iv.atk) } : null;
+    if (iv && (iv.hp != null || iv.atk != null)) row.iv = iv;
+    // 种族（enemies.js）："红皮人" / "类人" / "兽人·牛"；空着 = 开战时随机（固定种族的敌人照固定）
+    const race = e && typeof e.race === "string" && typeof raceParse === "function" && raceParse(e.race) ? e.race.trim() : "";
+    if (race) row.race = race;
+    // 富集与否（沙鱼，desert.js）：编辑器里存 "on" / "off"，存档里是 true / false；别的敌人没有这一项
+    const enr = e && (e.enriched === true || e.enriched === "on") ? true : e && (e.enriched === false || e.enriched === "off") ? false : null;
+    if (enr !== null && typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(row.preset)) row.enriched = enr;
+    return row;
+  };
   const enemies = (Array.isArray(t.enemies) ? t.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
     .slice(0, 30).map(e => {
-      const row = { preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) };
+      const row = withIv({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }, e);
       const m = btMechanics(e.mechanics);
       if (m) row.mechanics = m;
       return row;
@@ -123,6 +143,14 @@ function battleTemplateNormalize(t) {
   const props = (Array.isArray(t.props) ? t.props : []).filter(p => p && BATTLE_TEMPLATE_PROPS.includes(p.kind)).slice(0, 20)
     .map(p => ({ kind: p.kind, zone: zoneOk(p.zone, 1), level: lvOf(p.level), faction: p.faction === "enemy" ? "enemy" : "player" }));
   const defaultPlayer = (btLayout(board) || {}).playerZone || 1;
+  // 援军（chain.js）：第几回合抵达、敌人进哪个区；最多 6 波，每波最多 12 个
+  const waves = (Array.isArray(t.waves) ? t.waves : []).filter(w => w && typeof w === "object").slice(0, 6).map(w => ({
+    turns: btInt(w.turns, 2, 1, 30),
+    enemies: (Array.isArray(w.enemies) ? w.enemies : []).filter(e => e && typeof e.preset === "string" && (!presets || presets.includes(e.preset)))
+      .slice(0, 12).map(e => withIv({ preset: e.preset, level: lvOf(e.level), zone: zoneOk(e.zone, maxZ) }, e))
+  }));
+  // 连续战斗：打完接着打的模板（按 id；最多 9 场）
+  const chain = (Array.isArray(t.chain) ? t.chain : []).filter(id => typeof id === "string" && /^[\w-]{1,40}$/.test(id)).slice(0, 9);
   return {
     id: typeof t.id === "string" && /^[\w-]{1,40}$/.test(t.id) ? t.id : "bt" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     name: String(t.name == null ? "" : t.name).trim().slice(0, 40) || "未命名战场",
@@ -131,7 +159,8 @@ function battleTemplateNormalize(t) {
     board,
     weather: BATTLE_TEMPLATE_WEATHERS.includes(t.weather) ? t.weather : "none",
     playerZone: zoneOk(t.playerZone, defaultPlayer),
-    enemies, fields, gaps, props,
+    allyFaction: battleTemplateFactions().includes(t.allyFaction) ? t.allyFaction : "",
+    enemies, fields, gaps, props, waves, chain,
     drops: btDrops(t.drops),
     updatedAt: Number(t.updatedAt) || Date.now()
   };
@@ -229,6 +258,7 @@ function battleTemplateCapture(name) {
     const preset = u.kit === "ufo_body" ? "ufo_boss" : u.kit;
     if (!preset || (presets && !presets.includes(preset))) return;
     const row = { preset, level: Number(u.level) || 1, zone: Number(u.zone) || 2 };
+    if (u.enrichSet) row.enriched = !!u.enriched;   // 主持人定过富集与否的沙鱼照记；没定的开战时再随机
     const m = btMechanics(u.mechanics);
     if (m) row.mechanics = m;
     enemies.push(row);
@@ -237,7 +267,8 @@ function battleTemplateCapture(name) {
   Object.keys(state.fields || {}).forEach(z => { fields[z] = btClone(state.fields[z]); });
   const gaps = {};
   Object.keys(state.gaps || {}).forEach(k => {
-    const g = state.gaps[k];
+    // 驻波墙（频域造物）是这一轮的临时效果：模板记它暂时取代的那个间隔
+    const g = typeof waveGapBase === "function" ? waveGapBase(state.gaps[k]) : state.gaps[k];
     if (g && g.type !== "open") gaps[k] = { type: g.type, hp: Number(g.maxHp) || Number(g.hp) || null, open: !!g.open };
   });
   const props = (state.props || []).filter(p => p && !p.destroyed && !p.dead && BATTLE_TEMPLATE_PROPS.includes(p.kind))
@@ -247,28 +278,57 @@ function battleTemplateCapture(name) {
     name, board, weather: state.weather || "none", drops: state.battleDrops || null,
     tier: enc && BATTLE_TEMPLATE_TIERS[enc.tier] ? enc.tier : "normal",
     playerZone: btMostCommon(heroes.map(u => Number(u.zone) || 1), (btLayout(board) || {}).playerZone || 1),
+    allyFaction: (state.playerAllies || [])[0] || "",
     enemies, fields, gaps, props
   });
 }
 
 /* ---------- 开战：模板 → 遭遇 ---------- */
-/** 转成 buildEncounter 认的遭遇格式（站位锁定，不再随机打乱） */
-function battleTemplateToEncounter(t) {
+/** 转成 buildEncounter 认的遭遇格式（站位锁定，不再随机打乱）。
+ *  带连续战斗的：后面几场按模板 id 找到，放进 enc.stages（它们自己的「连续战斗」不再往下展开）；掉落加在一起 */
+function battleTemplateToEncounter(t, nested) {
   t = battleTemplateNormalize(t);
+  const enc = btOneEncounter(t);
+  if (nested) return enc;
+  const next = t.chain.map(id => (typeof battleTemplateById === "function" ? battleTemplateById(id) : null)).filter(Boolean);
+  if (next.length) {
+    enc.stages = next.map(x => battleTemplateToEncounter(x, true));
+    const all = [enc.drops].concat(enc.stages.map(s => s.drops)).filter(Boolean);
+    if (all.length) {
+      const items = {};
+      all.forEach(d => (d.items || []).forEach(x => { items[x.id] = (items[x.id] || 0) + x.qty; }));
+      enc.drops = { kuizhi: all.reduce((s, d) => s + (Number(d.kuizhi) || 0), 0), items: Object.keys(items).map(id => ({ id, qty: items[id] })) };
+    }
+    enc.stages.forEach(s => { delete s.drops; delete s.weather; });
+  }
+  return enc;
+}
+/** 「Lv随队」（等级空着）：跑团里开战时按队伍等级 = trpg-tasks.js · trpgPartyLevel()（在队英雄等级平均、四舍五入、至少 1），
+ *  和任务敌人默认等级、手册报酬用的是同一个数。跑团外（单机快速战斗）返回 null，仍跟着开战时选的战斗等级。 */
+function btPartyLevel() {
+  return typeof TRPG !== "undefined" && TRPG && TRPG.active && typeof trpgPartyLevel === "function" ? trpgPartyLevel() : null;
+}
+function btOneEncounter(t) {
+  const party = btPartyLevel();
+  const lvl = v => v != null ? v : party;
   const zones = battleTemplateZones(t.board);
   const enc = {
     id: "tpl:" + t.id, name: t.name, template: t.id, tier: t.tier,
-    zoneMode: zones.length, weather: t.weather, playerZone: t.playerZone,
+    zoneMode: zones.length, weather: t.weather, playerZone: t.playerZone, allyFaction: t.allyFaction || "",
     layout: "custom", layoutLocked: true,
     enemies: t.enemies.map(e => {
       const row = { preset: e.preset, zone: e.zone, count: 1 };
-      if (e.level != null) row.level = e.level;
+      if (lvl(e.level) != null) row.level = lvl(e.level);
+      if (e.iv) row.iv = btClone(e.iv);
+      if (e.race) row.race = e.race;
       if (e.mechanics) row.mechanics = btClone(e.mechanics);
+      if (typeof e.enriched === "boolean") row.enriched = e.enriched;
       return row;
     }),
     fields: btClone(t.fields),
     features: []
   };
+  if (t.waves.length) enc.waves = t.waves.map(w => ({ turns: w.turns, enemies: w.enemies.map(e => Object.assign({ preset: e.preset, zone: e.zone, count: 1 }, lvl(e.level) != null ? { level: lvl(e.level) } : {}, e.iv ? { iv: btClone(e.iv) } : {}, e.race ? { race: e.race } : {}, typeof e.enriched === "boolean" ? { enriched: e.enriched } : {})) }));
   if (t.drops) enc.drops = btClone(t.drops);
   if (typeof t.board === "string") enc.board = t.board;
   Object.keys(t.gaps).forEach(k => {
@@ -279,7 +339,7 @@ function battleTemplateToEncounter(t) {
   });
   t.props.forEach(p => {
     const f = { type: "prop", what: p.kind, zone: p.zone, faction: p.faction };
-    if (p.level != null) f.level = p.level;
+    if (lvl(p.level) != null) f.level = lvl(p.level);
     enc.features.push(f);
   });
   return enc;
@@ -297,13 +357,16 @@ function battleTemplateSummary(t) {
   const bits = [battleTemplateBoardName(t.board)];
   if (t.tier !== "normal") bits.push(BATTLE_TEMPLATE_TIERS[t.tier]);
   if (W[t.weather]) bits.push(W[t.weather]);
-  const foes = t.enemies.map(e => `${btEnemyName(e.preset)} ${e.level != null ? "Lv" + e.level : "Lv随队"}（${e.zone} 区）${e.mechanics ? "·机制" : ""}`);
+  if (t.allyFaction) bits.push(`我方与${t.allyFaction}同阵营`);
+  const foes = t.enemies.map(e => `${e.enriched === true ? "富集" : ""}${btEnemyName(e.preset)} ${e.level != null ? "Lv" + e.level : "Lv随队"}（${e.zone} 区）${e.mechanics ? "·机制" : ""}`);
   bits.push(foes.length ? foes.join("、") : "没有敌人");
   const extra = [];
   const nf = Object.keys(t.fields).length, ng = Object.keys(t.gaps).length;
   if (nf) extra.push(`${nf} 个区有场地`);
   if (ng) extra.push(`${ng} 处间隙`);
   if (t.props.length) extra.push(`${t.props.length} 个配置物`);
+  if (t.waves.length) extra.push(`援军 ${t.waves.length} 波`);
+  if (t.chain.length) extra.push(`连续 ${t.chain.length + 1} 场`);
   if (t.drops) extra.push("有掉落");
   return bits.join(" · ") + (extra.length ? `（${extra.join("、")}）` : "");
 }

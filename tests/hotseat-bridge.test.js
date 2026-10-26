@@ -195,6 +195,19 @@ test("owned opening choices accept only the owner and an exact offered JSON toke
   assert.equal(f.send("p1", cmd).ok, false, "a consumed opening choice cannot be applied twice");
 });
 
+test("owned choice for a unit missing from the order roster (downed) falls back to its assigned owner instead of hanging", async () => {
+  const f = bridge(), [unit] = f.units, { c } = f;
+  // 倒地起不来的单位不在顺序名单里：ownerOf 是 null（以前画面一算就抛错，整局卡死）
+  const ghost = { id: unit.id + "-downed", kit: unit.kit, name: unit.name };
+  const pending = c.HotseatGame.ownedChoice(ghost, "解开保险", [{ label: "手杖", value: "cane" }, { label: "霰弹枪", value: "gun" }]);
+  c.HotseatGame.switchPlayer("p1");
+  const ask = f.view().ask;
+  assert.ok(ask, "画面算得出来");
+  assert.equal(ask.eligible, true, "交给这名角色分配到的人");
+  assert.equal(f.send("p1", { type: "answer", askId: ask.id, helper: ghost.id, extra: { index: 1 } }).ok, true);
+  assert.equal(await pending, "gun");
+});
+
 test("last unfinished unit removal exposes a round transition and schedules the game coordinator", () => {
   const f = bridge(), [, last] = f.units, { c } = f;
   f.begin(); f.flush();
@@ -292,4 +305,45 @@ test("TRPG GM keeps explicit data editing while ordinary players cannot edit oth
   }
   assert.equal(other.atk, 72);
   assert.equal(f.view().order.find(row => row.actor === other.id).locked, false, "GM numeric edits do not invent an action-point spend");
+});
+
+test("battlefield-pick choices (Kolt blade swap): options carry the enemy target, ask is marked field, only the owner sees options", async () => {
+  const f = bridge(), [kolt] = f.units, { c } = f;
+  const foe = c.S.state.units.find(u => !u.isPlayer);
+  const pending = c.HotseatGame.ownedChoice(kolt, "更换刀头", [{ label: "不切换", value: { swap: false } },
+    { label: "切换并打", value: { swap: true, targetId: foe.id } }, { label: "只换刀头", value: { swap: true, targetId: null } }, { label: "幽灵", value: { swap: true, targetId: "no-such-unit" } }]);
+  c.HotseatGame.switchPlayer("p1");
+  const ask = f.view().ask;
+  assert.equal(ask.kind, "choice"); assert.equal(ask.field, true); assert.equal(ask.eligible, true);
+  assert.deepEqual(plain(ask.options.map(o => o.target || null)), [null, foe.id, null, null], "only real units become battlefield targets");
+  c.HotseatGame.switchPlayer("p2");
+  assert.equal(f.view().ask.field, true); assert.equal(f.view().ask.eligible, false); assert.deepEqual(plain(f.view().ask.options), []);
+  c.HotseatGame.switchPlayer("p1");
+  assert.equal(f.send("p1", { type: "answer", askId: ask.id, helper: kolt.id, extra: { index: 1 } }).ok, true);
+  assert.deepEqual(plain(await pending), { swap: true, targetId: foe.id });
+});
+
+test("plain owned choices without unit options stay non-field (opening blade keeps the button card)", () => {
+  const f = bridge(), [kolt] = f.units, { c } = f;
+  c.HotseatGame.ownedChoice(kolt, "初始刀头", [{ label: "电钻", value: "drill" }, { label: "酸液", value: "acid" }]);
+  c.HotseatGame.switchPlayer("p1");
+  assert.equal(f.view().ask.field, false);
+  assert.equal(f.view().ask.options.some(o => "target" in o), false);
+});
+
+test("热座（同一台设备）的协助询问不限时：deadline 为空，过再久也不会放弃", () => {
+  const f = bridge(["ruby", "kolt", "helu"]), [target, helperA, helperB] = f.units, { c } = f;
+  f.begin();
+  const options = [helperA, helperB].map(unit => ({ helper: unit.id, label: unit.name, extra: {} }));
+  const realNow = Date.now;
+  c.HotseatGame.requestAsk("block", "谁来格挡", options, () => [helperA, helperB], { seq: 8, targetId: target.id });
+  try {
+    c.HotseatGame.switchPlayer("p1");
+    const ask = f.view().ask;
+    assert.equal(ask.deadline, null);
+    assert.equal(ask.remainingMs, null);
+    Date.now = () => realNow() + 10 * 60 * 1000;
+    c.tickHotseat();
+    assert.equal(f.view().ask && f.view().ask.id, ask.id, "过了 10 分钟询问仍在等人回答");
+  } finally { Date.now = realNow; }
 });

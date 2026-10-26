@@ -28,6 +28,8 @@
     // 诺拉：刺入（针尖），画在目标卡上
     needle: () => svg(`<path d="M20 4 24 26h-8z" fill="#e9eef2" stroke="#9fb3c2" stroke-width="1"/><path d="M20 26v10" stroke="#9fb3c2" stroke-width="2"/><circle cx="20" cy="37" r="2.4" fill="#e8364f"/>`),
     // 瑞比：纳米能源格 / 银翼
+    // 瑞比：小型无人机（机身 + 四个旋翼；激光模式时机腹射出一道光）
+    drone: (on, laser) => svg(`<path d="M8 14h24" stroke="${on ? "#b9c7d4" : C("off")}" stroke-width="2"/><ellipse cx="8" cy="12" rx="6" ry="1.8" fill="${on ? C("cyan") : C("off")}"/><ellipse cx="32" cy="12" rx="6" ry="1.8" fill="${on ? C("cyan") : C("off")}"/><path d="M8 13v3M32 13v3" stroke="${on ? "#b9c7d4" : C("off")}" stroke-width="2"/><rect x="13" y="15" width="14" height="8" rx="3" fill="${on ? "#d9e7f2" : C("off")}"/><circle cx="20" cy="19" r="2.2" fill="${on ? (laser ? C("red") : C("cyan")) : "#3a332b"}"/>${on && laser ? `<path d="M20 23l-4 13" stroke="${C("red")}" stroke-width="2.4" stroke-linecap="round"/>` : on ? `<path d="M17 26l3 4 3-4" fill="none" stroke="${C("cyan")}" stroke-width="2"/>` : ""}`),
     wing: on => svg(`<path d="M20 30 4 14c6 0 11 2 16 8 5-6 10-8 16-8z" fill="${on ? "#d9e7f2" : C("off")}" stroke="${on ? C("cyan") : "none"}" stroke-width="1.2"/><path d="M8 17l12 9 12-9" stroke="${on ? C("cyan") : "#5a5146"}" stroke-width="1.4" fill="none"/>`),
     // 结人：咖啡豆 / 咖啡杯 / 牵挂
     bean: on => svg(`<ellipse cx="10" cy="13" rx="7" ry="10" transform="rotate(25 10 13)" fill="${on ? "#8a5a3b" : C("off")}"/><path d="M6 5c5 5 3 12 7 17" stroke="${on ? "#3b2416" : "#2a241d"}" stroke-width="1.8" fill="none"/>`, "0 0 20 26"),
@@ -41,6 +43,8 @@
     // 柯尔特：电钻 / 酸液炮 / 过度自信
     drill: on => svg(`<path d="M4 16h14v8H4z" fill="${on ? C("blue") : C("off")}"/><path d="M18 14l16 6-16 6z" fill="${on ? "#c8d6ff" : "#5a5146"}"/><path d="M21 15l2 10M26 17l1.5 6" stroke="#0d0b09" stroke-width="1.4"/><path d="M8 24v6h4" stroke="${on ? C("blue") : C("off")}" stroke-width="2.4" fill="none"/>`),
     acid: on => svg(`<rect x="4" y="15" width="20" height="10" rx="2" fill="${on ? "#7ccf3a" : C("off")}"/><rect x="24" y="17" width="9" height="6" fill="${on ? "#a8f06a" : "#5a5146"}"/><path d="M33 20c3 0 4 4 2 7" stroke="${on ? "#c8ff8a" : "none"}" stroke-width="2" fill="none"/><circle cx="36" cy="31" r="2" fill="${on ? "#c8ff8a" : "none"}"/>`),
+    // 柯尔特：废料（一堆碎铁片 + 螺栓）
+    scrap: on => svg(`<path d="M5 33l5-9 7 3 4-8 6 5 5-4 4 13z" fill="${on ? "#9a8f7f" : C("off")}"/><path d="M12 24l3-7 6 2-2 6z" fill="${on ? "#c9b98a" : "#5a5146"}"/><path d="M24 19l5-6 3 3-4 5z" fill="${on ? "#7ccf3a" : "#4a4238"}"/><circle cx="17" cy="30" r="2" fill="#0d0b09"/><circle cx="28" cy="29" r="1.6" fill="#0d0b09"/>`),
     proud: on => svg(`<path d="M20 4 33 9v10c0 9-6 14-13 17C13 33 7 28 7 19V9z" fill="none" stroke="${on ? C("brass") : C("off")}" stroke-width="2.4"/><path d="M13 22l7-7 7 7M13 28l7-7 7 7" stroke="${on ? C("brass") : C("off")}" stroke-width="2.4" fill="none"/>`),
     // Helumica：频谱 / 环境扫描 / 锁定
     wave: on => svg(`<path d="M2 20h5l3-10 4 20 4-16 4 12 3-6h13" stroke="${on ? C("violet") : C("off")}" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`),
@@ -126,6 +130,8 @@
     heavy: c => `<path d="M15 14a5 5 0 0 1 10 0" fill="none" stroke="${c}" stroke-width="2.4"/><path d="M11 15h18l2 14H9z" fill="${c}"/><path d="M13 22h14" stroke="#15110d" stroke-width="1.6" opacity=".5"/>`,
     store: c => `<rect x="13" y="10" width="14" height="22" rx="2" fill="none" stroke="${c}" stroke-width="2.2"/><rect x="17" y="7" width="6" height="3" fill="${c}"/><rect x="16" y="22" width="8" height="7" fill="${c}"/><path d="M17 19l3-3 3 3" stroke="${c}" stroke-width="1.8" fill="none"/>`,
     doppler: c => `<circle cx="14" cy="20" r="2.6" fill="${c}"/><path d="M19 13q3 7 0 14M23 11q4 9 0 18M28 9q5 11 0 22" stroke="${c}" stroke-width="1.8" fill="none"/><path d="M10 15q-2 5 0 10" stroke="${c}" stroke-width="1.4" fill="none" opacity=".6"/>`,
+    // 狂暴（下水道狂鼠，effects.js · FRENZY）：怒筋（四角的弯钩）
+    frenzy: c => `<path d="M10 16q6 0 6-6M30 16q-6 0-6-6M10 24q6 0 6 6M30 24q-6 0-6 6" stroke="${c}" stroke-width="3.2" fill="none" stroke-linecap="round"/>`,
     // 攻击
     blast: c => `<path d="M17 7l2.5 7 6-4-2 7 7 1-6 4 4 6-7-2-1 7-3-6-5 4 1-7-7-1 6-4-4-6 7 2z" fill="${c}"/>`,
     iceBreak: c => `<g fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-3-5 1-4-4-5M19 21l5-3 2-5 5-2M19 21l5 4 1 5 4 3M19 21l-4 3-1 6-3 3M19 21l-7-1-4 2"/><path d="M17 12l-3 0M25 15l2 2M25 28l-3 1M15 27l-3-2"/></g>`,
@@ -149,9 +155,19 @@
    ["shift", "错位", "physical"], ["diffuse", "扩散", "energy"], ["refract", "折射", "harmonic"]].forEach(([k, n, e]) => add(k, n, "circ", EC[e], G2[k]));
   [["selfBurn", "自焚", "fire"], ["frostShell", "霜结", "ice"], ["splash", "溅射", "acid"], ["conductor", "导体", "electric"],
    ["heavy", "千钧", "physical"], ["store", "蓄能", "energy"], ["doppler", "多普勒", "harmonic"]].forEach(([k, n, e]) => add(k, n, "dia", EC[e], G2[k]));
+  // 狂暴（下水道狂鼠）：不归属任何属性的自我效果，用怒红色
+  add("frenzy", "狂暴", "dia", "#ff5f4a", G2.frenzy);
   [["blast", "爆燃", "fire"], ["iceBreak", "破冰", "ice"], ["strike", "雷击", "electric"], ["etch", "蚀刻", "acid"],
    ["backflow", "倒流", "energy"], ["inertia", "惯性", "physical"], ["diffract", "衍射", "harmonic"],
    ["pierce", "穿刺", ""], ["smash", "猛击", ""], ["weakspot", "弱点特效", ""]].forEach(([k, n, e]) => add(k, n, "arr", e ? EC[e] : NEUTRAL, G2[k]));
+  // 首领 / 10 级起精英的晕眩标记：两颗星（要失衡两次），数字是「已攒 / 要攒」
+  add("stunMark", "晕眩标记", "circ", "#ffb347", c => `<path d="M13 11l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5z" fill="${c}"/><path d="M27 11l1.6 3.3 3.6.5-2.6 2.5.6 3.6-3.2-1.7-3.2 1.7.6-3.6-2.6-2.5 3.6-.5z" fill="${c}"/><ellipse cx="20" cy="28" rx="11" ry="3.6" fill="none" stroke="${c}" stroke-width="1.8"/>`);
+  // 休眠（通用词条）：通用状态的圆角方块，灰蓝色描边，里面是一大两小的「Zzz」
+  // 下潜：沙面上的一道波纹 + 往下的箭头
+  ICONS.submerged = { key: "submerged", name: "下潜", shape: "raw", color: "#d9a35f", raw: () => svg(`<rect x="3" y="3" width="34" height="34" rx="7" fill="#15110d" stroke="#d9a35f" stroke-width="2.4"/><path d="M7 15c3-3 6-3 9 0s6 3 9 0 5-2 8 0" fill="none" stroke="#f0cf9a" stroke-width="2.4" stroke-linecap="round"/><path d="M20 19v12M15 26l5 5 5-5" fill="none" stroke="#d9a35f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`) };
+  // 下陷（流沙）：陷到半身的人形 + 沙面
+  ICONS.sink = { key: "sink", name: "下陷", shape: "raw", color: "#c98a3c", raw: () => svg(`<rect x="3" y="3" width="34" height="34" rx="7" fill="#15110d" stroke="#c98a3c" stroke-width="2.4"/><circle cx="20" cy="12" r="4" fill="#f0cf9a"/><path d="M14 24l2-6h8l2 6" fill="#f0cf9a"/><path d="M6 24c4-2 8-2 14 0s10 2 14 0v9H6z" fill="#c98a3c"/>`) };
+  ICONS.dormant = { key: "dormant", name: "休眠", shape: "raw", color: "#8fb4d9", raw: () => svg(`<rect x="3" y="3" width="34" height="34" rx="7" fill="#15110d" stroke="#8fb4d9" stroke-width="2.4"/><path d="M8 11h9l-9 10h9" fill="none" stroke="#d6e6f5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M19 19h7l-7 8h7" fill="none" stroke="#b3cde6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M27 26h5l-5 6h5" fill="none" stroke="#8fb4d9" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`) };
   // 别人挂上的标记：诺拉的刺入、结人的牵挂
   ICONS.needle = { key: "needle", name: "刺入", shape: "raw", color: "#9fb3c2", raw: () => I.needle() };
   ICONS.bond = { key: "bond", name: "牵挂", shape: "raw", color: "#ff7f9b", raw: () => I.bond(true) };
@@ -189,27 +205,49 @@
   const STATUS_KEY = { burn: "burn", shock: "shock", corr: "corr", frostbite: "frost", shockwave: "quake", high: "high", reso: "reso",
     unstable: "unsteady", chase: "chase", weak: "weak", inspire: "inspire", sturdy: "firm", hide: "hide", advantage: "adv" };
   const INSTANT_KEY = { melt: "melt", sting: "pierceIce", overload: "overload", shift: "shift", spread: "diffuse", refract: "refract" };
-  const SELF_KEY = { burn: "selfBurn", frost: "frostShell", splash: "splash", conductor: "conductor", anchor: "heavy", store: "store", doppler: "doppler" };
+  const SELF_KEY = { burn: "selfBurn", frost: "frostShell", splash: "splash", conductor: "conductor", anchor: "heavy", store: "store", doppler: "doppler", frenzy: "frenzy" };
   const ATK_KEY = { combust: "blast", icebreak: "iceBreak", bolt: "strike", etch: "etch", backflow: "backflow", inertia: "inertia", diffract: "diffract" };
   function unitBadges(u, extra) {
     if (!u) return [];
     const out = [], st = u.statuses || {};
     Object.keys(STATUS_KEY).forEach(k => {
-      if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high || he > 0) out.push({ key: "high", stack: he > 0 ? he : "" }); return; }
+      // 高能只看高能状态；没有高能状态的高能值记在蓄能徽章上（#52）
+      if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high) out.push({ key: "high", stack: he > 0 ? he : "" }); else if (he > 0 && u.self !== "store") out.push({ key: "store", stack: he }); return; }
       const v = st[k];
       if (v) out.push({ key: STATUS_KEY[k], stack: k === "burn" && Number(v) > 0 ? Number(v) : "" });
     });
     const ins = u.instant || {};
     Object.keys(INSTANT_KEY).forEach(k => { if (ins[k]) out.push({ key: INSTANT_KEY[k], stack: "" }); });
-    if (u.self && SELF_KEY[u.self]) out.push({ key: SELF_KEY[u.self], stack: u.self === "burn" && Number(u.selfBurnStacks) > 1 ? Number(u.selfBurnStacks) : "" });
+    if (u.self && SELF_KEY[u.self]) out.push({ key: SELF_KEY[u.self], stack: u.self === "burn" && Number(u.selfBurnStacks) > 1 ? Number(u.selfBurnStacks)
+      : u.self === "store" && !st.high && Number(u.highEnergy) > 0 ? Number(u.highEnergy) : "" });
+    if (u.self === "frenzy") { const t = frenzyTitle(u); if (t) out[out.length - 1].title = t; }
     const hung = (u.resources && Array.isArray(u.resources.nextAtkFx)) ? u.resources.nextAtkFx : [];
     hung.forEach(id => { if (ATK_KEY[id]) out.push({ key: ATK_KEY[id], stack: "" }); });
     (extra || []).forEach(k => { if (ICONS[k] && !out.some(b => b.key === k)) out.push({ key: k, stack: "" }); });
+    if (Number(u.sink) > 0) out.unshift({ key: "sink", stack: String(u.sink), title: `下陷 ${u.sink} 层（流沙）：每回合开始失去生命上限 ${5 * Number(u.sink)}%；2 层起自己走不出去，3 层不能行动、不能协助。不花行动点就慢慢浮出来` });
+    if (u.submerged) out.unshift({ key: "submerged", stack: "", title: "下潜：选不中、范围攻击打不到；只有谐波攻击和塌陷打得到（打到就被迫浮上来 +1 击破）。自己攻击时解除" });
+    if (u.dormant) out.unshift({ key: "dormant", stack: "", title: "休眠：不行动、不协助，被叫醒后才开始行动" });
+    // 首领、10 级起的精英、载具（和车合并的驾驶员，敌我都算）：一直挂着晕眩标记（0/2 也挂），开打前就看得出要失衡两次才会晕眩
+    const max = stunMarkMax(u);
+    if (max > 0) {
+      const n = Math.min(max, Number(u.stunMarks) || 0);
+      out.unshift({ key: "stunMark", stack: `${n}/${max}`, title: `晕眩标记 ${n}/${max}：首领、10 级以上的精英和载具（驾驶员用车的标记）每失衡一次记 1 个标记，攒满 ${max} 个才会真正晕眩（跳过回合）；没攒满时架势立刻恢复` });
+    }
     return out;
+  }
+  /** 狂暴徽章的提示：效果说明读规则（effects.js · frenzyEffectText，数值都在 FRENZY），没加载规则时不写（只显示名字） */
+  function frenzyTitle(u) {
+    try { return typeof root.frenzyEffectText === "function" ? "狂暴：" + root.frenzyEffectText(u) : ""; } catch (e) { return ""; }
+  }
+  /** 这个单位用不用晕眩标记规则：联机投影过来的带 stunMax，本地单位直接问规则（我方只有和载具合并的驾驶员用，vehicle.js） */
+  function stunMarkMax(u) {
+    if (u.stunMax != null) return Number(u.stunMax) || 0;
+    if ((u.isPlayer && !u.vehMerged) || typeof root.isBossUnit !== "function") return 0;
+    try { return root.isBossUnit(u) ? (typeof root.BOSS_STUN_MARKS === "number" ? root.BOSS_STUN_MARKS : 2) : 0; } catch (e) { return 0; }
   }
   /** 状态文字里的一个词有没有对应的图标（「灼烧×3」「高能 5」「自焚×2」都算） */
   function covered(token) {
-    const t = String(token || "").replace(/[×x ]?\d+$/, "").trim();
+    const t = String(token || "").replace(/[×x ]?\d+(\/\d+)?$/, "").trim();
     return !!BY_NAME[t] && t !== "不稳态";
   }
   function keyOf(name) { return BY_NAME[String(name || "").trim()] || null; }
@@ -246,7 +284,10 @@
         try { if (has("noraMood")) mood = root.noraMood(u) === "cruel" ? "cruel" : "gentle"; } catch (e) {}
         return { kit: "nora", mood, pierce, lock: plus(2) };
       }
-      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), mecha: !!r.mecha };
+      // 储备能源（补充能源压缩出来的，#219）没有上限，不夹到 100
+      case "ruby": return { kit: "ruby", nano: Math.max(0, Math.min(100, Number(r.nano) || 0)), reserve: Math.max(0, Number(r.nanoReserve) || 0), mecha: !!r.mecha,
+        // 收发代理（9 级）解锁后才显示无人机图标；放出来之前是暗的
+        showDrone: (Number(u.level) || 1) >= 9, drone: !!r.drone, boost: !!r.overdrive };
       case "yuito": {
         const bond = r.bondId ? units.find(x => x.id === r.bondId && alive(x)) : null;
         return { kit: "yuito", bean: Math.max(0, Number(r.bean) || 0), liquid: Math.max(0, Number(r.liquid) || 0), bond: !!bond, bondName: bond ? String(bond.name || "") : "" };
@@ -258,7 +299,21 @@
         try { duel = has("touDuelVictim") && units.some(x => alive(x) && !x.isPlayer && root.touDuelVictim(x)); } catch (e) {}
         return { kit: "tou", shield: Math.max(0, Math.min(3, Number(r.shield) || 0)), duel, taunt: r.tauntLeft == null ? 2 : Math.max(0, Number(r.tauntLeft) || 0), bare: u.weaponHeld === false };
       }
-      case "kolt": return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full: sumLayers(u, "max") > 0 && sumLayers(u, "current") >= sumLayers(u, "max"), cut: plus(2) ? 45 : 25 };
+      case "kolt": {
+        let scrap = 0;
+        try { if (has("koltScrapTotal")) scrap = Number(root.koltScrapTotal(u)) || 0; } catch (e) {}
+        // 满血减伤亮不亮：和规则结算同一个判断（app.js · koltPrideCut：被动开着、不在起身中、现有血量 ≥ 进入战斗时的上限）；
+        // 规则没载入（单独用这个文件）时照同样的条件比进入战斗时的上限，没记下就比现在的上限。联机玩家的仪表是房主这样算好发过去的
+        let full = false, noPassive = false;
+        try {
+          if (has("koltPrideCut")) full = Number(root.koltPrideCut(u)) > 0;
+          else { const mx = Number(u.prideMaxHp) || sumLayers(u, "max"); full = mx > 0 && !u.upOnShp && sumLayers(u, "current") >= mx; }
+        } catch (e) {}
+        try { noPassive = has("passiveOn") && !root.passiveOn(u); } catch (e) {}
+        // rising：起身中（靠坚毅生命撑着，不减伤）——只是个开关，不带坚毅生命的数
+        return { kit: "kolt", bit: r.bit === "acid" ? "acid" : "drill", full, cut: plus(2) ? 45 : 25, noPassive, rising: !!u.upOnShp,
+          showScrap: (Number(u.level) || 1) >= 2, scrap: Math.max(0, scrap) };
+      }
       case "helu": {
         let focus = 0, need = 0;
         units.forEach(x => { if (!alive(x) || x.isPlayer) return; (x.focuses || []).forEach(f => { const n = (f.seq || []).length; if (n && (!need || (f.step || 0) / n > focus / need)) { focus = Number(f.step) || 0; need = n; } }); });
@@ -283,8 +338,11 @@
     nora: s => ind(I.gentle(s.mood === "gentle"), "温和", "big " + (s.mood === "gentle" ? "glow-mint" : "dim")) + ind(I.cruel(s.mood === "cruel"), "残忍", "big " + (s.mood === "cruel" ? "glow-pink" : "dim")) +
       (s.lock ? ind(svg(`<rect x="10" y="18" width="20" height="15" rx="2" fill="${C("brass")}"/><path d="M14 18v-5a6 6 0 0 1 12 0v5" stroke="${C("brass")}" stroke-width="3" fill="none"/>`), "不再随机") : "") +
       ind(I.needle(), s.pierce ? "刺入" + (s.pierce > 1 ? " ×" + s.pierce : "") : "没有刺入", s.pierce ? "" : "dim"),
-    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span></div>` +
-      ind(I.wing(s.mecha), s.mecha ? "机甲模式 · 每回合 −20" : s.nano >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")),
+    // 纳米不够时自动用储备能源：够不够看「纳米 + 储备」；有储备时在纳米下面写「储备 n」
+    ruby: s => `<div class="ind">${seg(Math.round(s.nano / 10), 10, s.nano + (s.reserve || 0) >= 20 ? C("cyan") : "#d9644f", 8, 26)}<span>纳米 <b class="num">${s.nano}</b>/100</span>${s.reserve > 0 ? `<span>储备 <b class="num">${s.reserve}</b></span>` : ""}</div>` +
+      ind(I.wing(s.mecha), s.mecha ? `机甲模式 · 每回合 −${s.boost ? 40 : 20}` : s.nano + (s.reserve || 0) >= 20 ? "可进入机甲" : "能源不足", "big " + (s.mecha ? "glow-cyan" : "")) +
+      (s.showDrone ? ind(I.drone(s.drone, s.mecha), !s.drone ? "无人机未放出" : s.mecha ? `无人机 · 激光 ×${s.boost ? 3 : 2}` : "无人机 · 每回合 +10 纳米",
+        s.drone ? (s.mecha ? "glow-red" : "glow-cyan") : "dim") : ""),
     yuito: s => `<div class="ind"><div class="pips">${s.bean ? Array.from({ length: Math.min(8, s.bean) }, () => I.bean(true)).join("") : I.bean(false)}</div><span>咖啡豆 ${s.bean}</span></div>` +
       `<div class="ind"><div class="pips">${s.liquid ? Array.from({ length: Math.min(6, s.liquid) }, () => `<span class="cup">${I.cup(true)}</span>`).join("") : `<span class="cup">${I.cup(false)}</span>`}</div><span>咖啡液 ${s.liquid}</span></div>` +
       ind(I.bond(s.bond), s.bond ? "牵挂：" + esc(s.bondName) : "没有牵挂", s.bond ? "glow-pink" : ""),
@@ -300,7 +358,8 @@
       ind(I.duel(s.duel), s.duel ? "决一死战生效" : "决一死战未生效", s.duel ? "glow-red" : "") +
       `<div class="ind"><span class="num">${s.taunt}</span><span>嘲讽剩余</span></div>`,
     kolt: s => ind(I.drill(s.bit === "drill"), "电钻 · 电", "big " + (s.bit === "drill" ? "" : "dim")) + ind(I.acid(s.bit === "acid"), "酸液炮 · 酸", "big " + (s.bit === "acid" ? "" : "dim")) +
-      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : "未满血", s.full ? "glow-amber" : ""),
+      ind(I.proud(s.full), s.full ? `满血减伤 ${s.cut}%` : s.noPassive ? "过度自信已放弃" : s.rising ? "起身中不减伤" : "未满血", s.full ? "glow-amber" : "") +
+      (s.showScrap ? `<div class="ind${s.scrap > 0 ? "" : " dim"}">${I.scrap(s.scrap > 0)}<span>废料 <b class="num">${s.scrap}</b></span></div>` : ""),
     helu: s => ind(I.wave(s.focus > 0), "频谱分析", s.focus > 0 ? "" : "dim") +
       (s.need ? `<div class="ind"><span class="focus">${Array.from({ length: s.need }, (_, i) => `<i class="${i < s.focus ? "on" : ""}"></i>`).join("")}</span><span>聚焦 ${s.focus}/${s.need}</span></div>` : "") +
       ind(I.radar(s.scan), s.scan ? "已扫描" : "未扫描", s.scan ? "glow-mint" : "") +

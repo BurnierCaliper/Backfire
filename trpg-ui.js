@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["bag", "背包"], ["smith", "武器升级"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["clinic", "诊所"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -26,7 +26,88 @@
   function uiCommand(action, data) {
     return Commands.dispatch(Object.assign({ type: "trpg.ui", action, level: Number(($("g-level") || {}).value) || 1 }, data || {}));
   }
-  function ruleCommand(action, data) { return Object.assign({ type: "trpg", action }, data || {}); }
+  // 花钱的操作由谁付（私人钱包，trpg.js · trpgPayWith）：面板上的「由谁付」选单，默认队伍公账
+  let payer = "party";
+  const PAYABLE = ["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "merchantBuy", "modifyHero"];
+  function ruleCommand(action, data) {
+    const c = Object.assign({ type: "trpg", action }, data || {});
+    if (PAYABLE.includes(action) && payer !== "party" && c.payer == null && !c.free) c.payer = payer;
+    return c;
+  }
+  function payerHtml() {
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === payer)) payer = "party";
+    return `<div class="tr-row tr-payer">由谁付 <select data-payer>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === payer ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">买东西、修理、升级、改装、制作、兑换都从这里扣钱。</span></div>`;
+  }
+  /* ---------- 商店 · 买 / 卖页签（shop-sell-ui.js；卖出视图 trpgShopSellFor(id, isGM)，指令 shopSell / shopBuyback 走 OnlineGame.submit） ---------- */
+  function trpgSellView() { try { return typeof trpgShopSellView === "function" ? trpgShopSellView(null) : null; } catch (_) { return null; } }
+  let sellSeller = "party";   // 主持人卖东西 / 回购记在谁名下（「谁卖」选单，默认队伍公账）
+  function sellSellerHtml() {
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === sellSeller)) sellSeller = "party";
+    return `<div class="tr-row tr-payer">谁卖 <select data-ss-seller>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === sellSeller ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">卖得的钱进队伍公账；回购只能由卖的人从他的钱包买回。</span></div>`;
+  }
+  function trpgSellModel(v) {
+    const hs = heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name, purse: trpgPurse(h.kit) }));
+    return ShopSellUI.model(v, { key: "trpg-gm", heroes: hs, actor: sellSeller, canAct: () => true, money: k => trpgPurse(k || "party") });
+  }
+  const sellName = k => k === "party" ? "队伍公账" : ((heroes().find(h => h.kit === k) || {}).name || k);
+  /** 结果提示按 shopSell.last.seq 只弹一次（联机时房主的 submit 可能因为战斗演出排队，回执不可靠） */
+  let gmSellSeen = null;
+  function gmSellToast(v) {
+    const last = v && v.last;
+    if (!v) { gmSellSeen = null; return; }          // 离开商店：忘掉（seq 不会重复）
+    if (gmSellSeen === null) { gmSellSeen = last ? last.seq : 0; return; }   // 刚打开：旧结果不重播
+    if (!last || last.seq <= gmSellSeen) return;
+    gmSellSeen = last.seq;
+    ShopSellUI.toast(ShopSellUI.toastText(last, sellName));
+  }
+  /** 主持人卖 / 买回：联机时走 OnlineGame.submit（和诊所一样，hotseat-game.js · shopSell / shopBuyback）；单机直接 trpg 指令。失败显示原因 */
+  async function trpgSellSubmit(cmd) {
+    const msg = cmd.action === "sellItem" ? { type: "shopSell", kit: cmd.kit, id: cmd.id, qty: cmd.qty, owner: cmd.owner } : { type: "shopBuyback", kit: cmd.kit, token: cmd.token };
+    if (gmSellSeen === null) { const b = (trpgSellView() || {}).last; gmSellSeen = b ? b.seq : 0; }
+    try {
+      if (typeof OnlineGame !== "undefined" && OnlineGame.isHost && OnlineGame.isHost()) {
+        const r = await OnlineGame.submit(msg);
+        if (r && r.ok === false) throw new Error(r.error || r.msg || "没做成");
+      } else {
+        pushUndo();
+        const res = Commands.dispatch(Object.assign({ type: "trpg", action: msg.type }, msg, { type: "trpg" }));
+        if (res && res.msg) { log.push({ stamp: stampNow(), lines: ["💰 " + res.msg] }); saveLog(); }
+        save();
+      }
+      if (window.Sfx) Sfx.ui("coin");
+    } catch (e) { ShopSellUI.toast(ShopSellUI.toastText({ ok: false, msg: e.message || String(e) })); }
+    render();
+  }
+  function tabBuyShop() {
+      const groups = [];
+      HANDBOOK_SHOP.forEach(r => { if (groups.indexOf(r.group) < 0) groups.push(r.group); });
+      return payerHtml() + `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
+        groups.map(g => `<h3>${esc(g)}</h3><div class="shop">${HANDBOOK_SHOP.filter(r => r.group === g).map(r => {
+          const id = r.give.item;
+          const have = r.give.water ? `${ledgerWater()} ml` : `有 ${bagCount(id)}`;
+          const hint = r.note || (id && ITEM_CATALOG[id] ? ITEM_CATALOG[id].hint : "");
+          return `<div class="shop-row"><span class="s-name">${esc(trpgShopName(r))}${hint ? `<small>${esc(hint)}</small>` : ""}</span>
+            <span class="s-have">${have}</span><span class="s-price">${r.price}</span>
+            <input type="number" min="1" value="1" data-qty="${esc(r.key)}" style="width:52px">
+            <button class="g-btn small" data-buy="${esc(r.key)}">买</button>
+            <button class="g-btn small" data-give="${esc(r.key)}">给予</button></div>`;
+        }).join("")}</div>`).join("");
+    }
+  function walletHtml() {
+    const hs = heroes().filter(h => !h.dead);
+    const all = [["party", "队伍公账"]].concat(hs.map(h => [h.kit, h.name]));
+    const sel = (id) => `<select id="${id}">${all.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join("")}</select>`;
+    return `<h3>钱包</h3>
+      <div class="tr-wallets"><span>队伍公账 <b>${trpgPurse("party")}</b></span>${hs.map(h => `<span>${esc(h.name)} <b>${trpgPurse(h.kit)}</b></span>`).join("")}</div>
+      <p class="r-hint">任务的奎支报酬自动平分进各人钱包（个人任务只进那名角色的）；战斗掉落、下面「获得 / 花掉」的钱进出队伍公账。</p>
+      <div class="tr-row">转账 ${sel("tr-pay-from")} → ${sel("tr-pay-to")} <input type="number" id="tr-pay-n" min="1" value="100" style="width:90px"> 奎支
+        <button class="g-btn small" id="tr-pay-go">转过去</button>
+        <button class="g-btn small" id="tr-pay-split" ${trpgPurse("party") ? "" : "disabled"}>把公账平分给大家</button></div>`;
+  }
 
   /* ---------- 存 / 读：每个操作、每场战斗结算都自动写回当前存档空位 ---------- */
   function writeSlotNow() {
@@ -78,7 +159,15 @@
     }
     save();
     render();
+    // 长休结算画面：主持人本机弹（主持人看得到坚毅数值），联机玩家那边由 online-ui.js 弹
+    if (TRPG.lastRest && TRPG.lastRest.id !== shownRest && window.RestReport) { shownRest = TRPG.lastRest.id; RestReport.play(TRPG.lastRest, { gm: true }); }
+    else if (TRPG.camp && window.RestReport && !RestReport.isOpen("camp")) {
+      const plan = TRPG.camp.plan;
+      RestReport.camp(TRPG.camp.status, { host: true, gm: true, force: TRPG.camp.force,
+        onStart: () => act(ruleCommand("longRest", { plan })), onCancel: () => act(ruleCommand("campClose")) });
+    }
   }
+  let shownRest = null;
   /** 按记忆重新摆队伍（从战斗画面回来、换队员时） */
   function rebuild() {
     if (window.GAME && GAME.setupBattle) GAME.setupBattle(level());
@@ -89,42 +178,17 @@
     const ub = $("tr-undo");
     if (ub) { ub.disabled = !undoStack.length; ub.textContent = undoStack.length > 1 ? `撤销（${undoStack.length}）` : "撤销"; }
     $("tr-slot-name").textContent = slot >= 0 ? `存档 ${slot + 1} · ${slotName}` : "";
-    const t = exhaustTier();
-    const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
-    $("tr-clock").innerHTML = `第 <b>${LEDGER.day || 1}</b> 天 <b class="tr-time">${clockText(ck)}</b> ${dayPeriod(ck)} · 距上次长休 <b>${durationText(LEDGER.hours || 0)}</b>` +
-      (t ? ` · <span class="warn">${esc(exhaustText(t))}</span>` : "");
+    $("tr-clock").innerHTML = PartyCards.clockHtml({ day: LEDGER.day, clock: LEDGER.clock, hours: LEDGER.hours });   // party-cards.js：联机玩家画面同一套
     const food = FOOD_ORDER.reduce((s, id) => s + bagCount(id), 0);
-    $("tr-supplies").innerHTML = `<span>奎支 <b>${Number(state.kuizhi) || 0}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
+    const purses = heroes().filter(h => !h.dead).reduce((s, h) => s + trpgPurse(h.kit), 0);
+    $("tr-supplies").innerHTML = `<span title="队伍公账 / 各人钱包合计">公账 <b>${Number(state.kuizhi) || 0}</b> · 钱包 <b>${purses}</b></span><span>水 <b>${ledgerWater()}</b> ml</span><span>食物 <b>${food}</b> 份</span>` +
       `<button class="g-btn small" data-career="1" title="这个存档所有战斗里每个角色的输出占比和团队贡献">整局数据</button>`;
   }
 
-  /** 面板上的攻击力：角色 + 手里的武器（和战斗里一样算） */
-  function heroAtk(h) {
-    try { return typeof effectiveAtk === "function" ? effectiveAtk(h, state.units) : (Number(h.atk) || 0); } catch (e) { return Number(h.atk) || 0; }
-  }
   /* ---------- 左栏：队伍状态（主持人视角，坚毅生命照常显示） ---------- */
   function renderParty() {
-    $("tr-party").innerHTML = heroes().map(h => {
-      const tag = h.dead ? "死亡" : h.dying ? "濒死" : h.upOnShp ? "起身中" : "";
-      const xpNext = typeof xpToNext === "function" ? xpToNext(h.level || 1) : 0;
-      const weapons = (h.linkedKits || []).map(k => {
-        const lv = (h.weaponLevels || {})[k] || 1;
-        const d = weaponDur(k), m = weaponDurMax(k);
-        const bond = typeof weaponBond === "function" ? weaponBond(h, k) : 0;
-        return `<div class="rh-w${d <= 0 ? " broken" : ""}">${esc(weaponName(k))} Lv${lv}${bond ? ` · 羁绊 ${bond}` : ""} · 耐久 ${d}/${m}${d <= 0 ? "（损坏）" : ""}</div>`;
-      }).join("");
-      return `<div class="rhero${h.dead ? " fallen" : h.dying ? " dying" : ""}">
-        <div class="rh-top"><b>${esc(h.name)}</b><span>Lv${h.level || 1}${tag ? " · " + tag : ""}</span><button class="g-btn small rh-sheet" data-sheet="${esc(h.kit)}" title="数值、被动和技能说明">资料</button><button class="g-btn small rh-sheet" data-armory="${esc(h.kit)}" title="武器补正、atk 明细、改装件和客制化">武器</button></div>
-        <div class="rh-row">血量 <span>${totalHpOf(h)}/${totalHpMaxOf(h)}</span></div>
-        <div class="rh-row">攻击力 <span>${heroAtk(h)}</span></div>
-        <div class="rh-row">架势 <span>${Number(h.def) || 0}/${Number(h.defMax != null ? h.defMax : h.def) || 0}</span></div>
-        <div class="rh-row">协助格挡 <span>${typeof blockChance === "function" && blockChance(h) != null ? blockChance(h) + "%" : "—"}</span></div>
-        <div class="rh-row">坚毅 <span>${Number(h.shp) || 0}/${Number(h.shpMax) || 0}</span></div>
-        <div class="rh-row">经验 <span>${Number(h.xp) || 0}/${xpNext || "满"}</span></div>
-        ${Number(h.attrPoints) > 0 ? `<div class="rh-w tr-attn">有 ${h.attrPoints} 点属性点可分配（队伍页）</div>` : ""}
-        ${weapons}
-      </div>`;
-    }).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
+    // party-cards.js：联机玩家的探索画面用同一个渲染器（玩家那份不带坚毅）
+    $("tr-party").innerHTML = heroes().map(h => PartyCards.heroCardHtml(PartyCards.heroDto(h, { gm: true, units: state.units }), { gm: true, buttons: true })).join("") || `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
   }
 
   /* ---------- 各页 ---------- */
@@ -145,6 +209,15 @@
       const attrs = heroes().filter(h => Number(h.attrPoints) > 0).map(h =>
         `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.attrPoints} 点属性点：
           ${Object.keys(ATTR_NAMES).map(k => `<button class="g-btn small" data-attr="${esc(h.kit)}:${k}">${ATTR_NAMES[k]} ${(h.attrs || {})[k] || 0} +1</button>`).join("")}</div>`).join("");
+      // 专长（feats.js）：有专长点的角色，选一项（兼修再选一张涉猎专长）
+      const featRows = typeof featChoicesFor !== "function" ? "" : heroes().filter(h => Number(h.featPoints) > 0).map(h => {
+        const opts = featChoicesFor(h, Math.max(...featPointLevelsOf(h))).map(id => `<option value="${esc(id)}">${esc(featLabel(id))} · ${esc(FEATS[id].text || "")}</option>`).join("");
+        const full = featFullOptions(h).map(id => `<option value="${esc(id)}">${esc(FEATS[id].name)}</option>`).join("");
+        return `<div class="tr-row"><b>${esc(h.name)}</b> 有 ${h.featPoints} 项专长：
+          <select data-feat-pick="${esc(h.kit)}" style="max-width:100%">${opts}</select>
+          ${full ? `<select data-feat-full="${esc(h.kit)}" title="兼修升级哪一张">${full}</select>` : ""}
+          <button class="g-btn small" data-feat-go="${esc(h.kit)}">选定</button></div>`;
+      }).join("");
       return `<h3>队员</h3>
         <p class="r-hint">勾选参加这次跑团的角色。换人会按队伍记忆重新摆队伍，已有角色的等级、血量、物资不变。</p>
         <div class="tr-picks">${picks}</div>
@@ -155,9 +228,10 @@
           <select id="tr-xp-who"><option value="">全员</option>${heroes().map(h => `<option value="${esc(h.kit)}">${esc(h.name)}</option>`).join("")}</select>
           <button class="g-btn" id="tr-xp-go">发放</button>
         </div>
-        <p class="r-hint">升级照手册第三章：4 级、8 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
+        <p class="r-hint">升级照手册第三章：4 级、8 级、19 级各 1 点属性点（8 级那点不能加在曾经加过的同一项上，19 级的可以）；职责技能按角色卡自动解锁；熟练项、专长由主持人记在角色卡上。</p>
         ${attrRequestsHtml()}
         ${attrs ? `<h3>分配属性点</h3>${attrs}` : ""}
+        ${featRows ? `<h3>分配专长</h3><p class="r-hint">7 / 11 / 13 / 16 级各一项，可以选这一级或更低级的。选「兼修」时再选要升成完整版的涉猎专长。</p>${featRows}` : ""}
         <h3>重新开团</h3>
         <button class="g-btn" id="tr-reset">清空这个存档的进度（等级、物资、时间全部归零）</button>
         <p class="r-hint">要同时带别的团，点顶栏「换存档」用另一个空位。</p>`;
@@ -174,6 +248,7 @@
           <select data-food="${esc(h.kit)}">${foods.map(id => `<option value="${id}" ${id === o.foodId ? "selected" : ""}>${esc(ITEM_CATALOG[id].name)}（有 ${bagCount(id)}）</option>`).join("")}</select>
           · 睡 <select data-sleep="${esc(h.kit)}"><option value="">不用睡眠道具</option>${opt.sleeps.map(x => `<option value="${esc(x.id)}" ${x.id === o.sleepId ? "selected" : ""}>${esc(x.name)}（每小时坚毅 +${x.bonus} · 有 ${x.have}）</option>`).join("")}</select>
           ${o.spit ? `· 吐酸改成 <select data-spit="${esc(h.kit)}">${(opt.spitElements || []).map(e => `<option value="${esc(e.id)}" ${e.id === o.spit ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : ""}
+          ${o.ammo != null ? `· 下一场弹序 <select data-ammo="${esc(h.kit)}">${(opt.ammoOrders || []).map(e => `<option value="${esc(e.id)}" ${e.id === o.ammo ? "selected" : ""}>${esc(e.name)}</option>`).join("")}</select>` : ""}
           · 今天还能短休 ${shortRestLeft(h)} 次</div>`;
       }).join("");
       const ck = LEDGER.clock == null ? 480 : LEDGER.clock;
@@ -210,27 +285,20 @@
         <button class="g-btn" id="tr-restore">全员复原（不扣补给、不推进时间）</button>`;
     },
     shop() {
-      const groups = [];
-      HANDBOOK_SHOP.forEach(r => { if (groups.indexOf(r.group) < 0) groups.push(r.group); });
-      return `<p class="r-hint">价格照手册物品表。「买」扣奎支；「给予」是主持人直接给（战利品、奖励），不扣钱。</p>` +
-        groups.map(g => `<h3>${esc(g)}</h3><div class="shop">${HANDBOOK_SHOP.filter(r => r.group === g).map(r => {
-          const id = r.give.item;
-          const have = r.give.water ? `${ledgerWater()} ml` : `有 ${bagCount(id)}`;
-          const hint = r.note || (id && ITEM_CATALOG[id] ? ITEM_CATALOG[id].hint : "");
-          return `<div class="shop-row"><span class="s-name">${esc(trpgShopName(r))}${hint ? `<small>${esc(hint)}</small>` : ""}</span>
-            <span class="s-have">${have}</span><span class="s-price">${r.price}</span>
-            <input type="number" min="1" value="1" data-qty="${esc(r.key)}" style="width:52px">
-            <button class="g-btn small" data-buy="${esc(r.key)}">买</button>
-            <button class="g-btn small" data-give="${esc(r.key)}">给予</button></div>`;
-        }).join("")}</div>`).join("");
+      if (!window.ShopSellUI) return tabBuyShop();
+      const v = trpgSellView();
+      ShopSellUI.sync("trpg-gm", !!v);
+      const sell = ShopSellUI.tabOf("trpg-gm") === "sell";
+      gmSellToast(v);
+      return `<div class="ss-host" data-ss-host="trpg-gm">${ShopSellUI.tabsHtml("trpg-gm", { sellOff: !v })}${sell ? sellSellerHtml() + ShopSellUI.html(trpgSellModel(v)) : tabBuyShop()}</div>`;
     },
     bag() {
       const items = bagList();
       const heal = items.filter(x => x.id === "medkit" || x.id === "clinic");
       const kits = repairPoints();
       const weapons = heroes().flatMap(h => (h.linkedKits || []).map(k => ({ k, name: weaponName(k), d: weaponDur(k), m: weaponDurMax(k) })));
-      return `<h3>奎支与水</h3>
-        <div class="tr-row">奎支 <input type="number" id="tr-kz" value="100" style="width:100px">
+      return walletHtml() + payerHtml() + `<h3>奎支与水</h3>
+        <div class="tr-row">队伍公账 <input type="number" id="tr-kz" value="100" style="width:100px">
           <button class="g-btn small" id="tr-kz-add">＋ 获得</button><button class="g-btn small" id="tr-kz-sub">－ 花掉</button>
           <input type="text" id="tr-kz-why" placeholder="原因（可不填）" style="width:160px"></div>
         <div class="tr-row">水 <input type="number" id="tr-water" value="1000" style="width:100px"> ml
@@ -254,10 +322,10 @@
         if (info.max) return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）Lv${info.lv} · 已满级</div>`;
         const mats = info.mats.map(m => `<span class="${m.have >= m.need ? "" : "bad"}">${esc(m.name)} ${m.have}/${m.need}</span>`).join("、");
         return `<div class="tr-up"><b>${esc(name)}</b>（${esc(h.name)}）Lv${info.lv} → ${info.next}
-          <div class="r-hint">材料：${mats}${info.labor ? ` · 工匠参考费用 ${info.labor} 奎支上下` : ""}</div>
+          <div class="r-hint">材料：${mats}${info.labor ? ` · 工匠参考费用 ${trpgSmithFee(info)} 奎支上下` : ""}</div>
           <div class="tr-row">
             ${info.canSelf ? `<button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:self" ${info.enough ? "" : "disabled"}>在工作站自己升（只耗材料）</button>` : ""}
-            <span>工匠费用 <input type="number" value="${info.labor}" min="0" data-fee="${esc(k)}" style="width:90px"></span>
+            <span>工匠费用 <input type="number" value="${trpgSmithFee(info)}" min="0" data-fee="${esc(k)}" style="width:90px"></span>
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:smith" ${info.enough ? "" : "disabled"}>找工匠升（材料 + 费用）</button>
             <button class="g-btn small" data-up="${esc(h.kit)}:${esc(k)}:gm">主持人直接升（不耗）</button>
           </div></div>`;
@@ -284,7 +352,8 @@
       const give = `<div class="tr-row">随机生成 <button class="g-btn small" data-part-rand="C">C 级 +1</button><button class="g-btn small" data-part-rand="B">B 级 +1</button></div>
         <div class="tr-row">给予改装件 <select id="tr-part-give">${partOpts(p => `<option value="${esc(weaponPartItemId(p))}">${esc(weaponPartLabel(p))} · ${esc(weaponPartText(p))}</option>`)}</select>
           <button class="g-btn small" id="tr-part-give-btn">放进背包 +1</button></div>`;
-      return `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
+      const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-smith-open" ${TRPG.smithOpen ? "checked" : ""}>工匠向联机玩家开放（玩家可以给自己的武器升级：材料 + 参考加工费，费用从这名角色的钱包出）</label></div>`;
+      return openBox + `<p class="r-hint">手册：升级武器需要找到工作站；${U.selfMaxLevel} 级以上无法靠自己升级，要找专门的武器工匠（材料 + 加工费，不同工匠的费用要求不一样，按剧情改费用）。材料在商店「材料」里买，或在背包里给予。</p>${rows}
         <h3>改装槽 <button class="g-btn small" data-armory="${esc((heroes()[0] || {}).kit || "")}">打开武器工坊</button></h3>
         <p class="r-hint">武器等级 + 羁绊到 ${WEAPON_PART_SLOT_LEVELS.join(" 级、")} 级各开放 1 个改装槽（羁绊在「后台」里改，只解锁奖励、不提高数值）。改装件修改武器的属性补正系数；装上从背包拿走，拆下放回背包。</p>
         ${give}${slotRows}
@@ -432,7 +501,9 @@
     return `<div class="tk-route">${t.nodes.map((n, i) => {
       const cls = t.status === "active" ? (i < t.index ? " done" : i === t.index ? " cur" : "") : "";
       const foes = n.template ? `：模板「${n.template.name}」` : n.enemies.length ? `：${n.enemies.map(e => `${presetName(e.id)} Lv${e.lv}`).join("、")}${n.weather !== "none" ? ` · ${WX[n.weather]}` : ""}` : "";
-      return `<span class="tk-node${cls}" title="${esc(n.note || "")}">${i + 1}. ${esc(NODE_T()[n.type])}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}</span>`;
+      const rw = [n.reward && n.reward.xp ? `+${n.reward.xp} 经验` : "", n.reward && n.reward.kuizhi ? `+${n.reward.kuizhi} 奎支` : ""].filter(Boolean).join(" ");
+      const got = t.granted && t.granted.nodes.includes(n.id);
+      return `<span class="tk-node${cls}${n.hidden ? " tk-hid" : ""}" title="${esc(n.note || "")}">${i + 1}. ${n.hidden ? "🔒" : ""}${esc(n.title || NODE_T()[n.type])}${n.title ? ` · ${esc(NODE_T()[n.type])}` : ""}${esc(foes)}${n.note ? ` · ${esc(n.note)}` : ""}${rw ? ` <b class="tk-rw${got ? " got" : ""}">${esc(rw)}${got ? " ✓" : ""}</b>` : ""}</span>`;
     }).join("")}</div>`;
   }
   function taskCardHtml(t) {
@@ -445,19 +516,40 @@
     if (t.status === "posted") btns.push(`<button class="g-btn small" data-tk="accept:${id}">队伍接下任务</button>`, `<button class="g-btn small" data-tk="unpost:${id}">撤回为草稿</button>`);
     if (t.status === "active") {
       if (fight) btns.push(`<button class="g-btn small tk-go" data-tk="fight:${id}">打这一站（${esc(NODE_T()[node.type])}）</button>`);
-      if (node) btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成</button>`);
+      if (node) {
+        const got = t.granted && t.granted.nodes.includes(node.id);
+        const rw = !got && node.reward ? [node.reward.xp ? `每人 +${node.reward.xp} 经验` : "", node.reward.kuizhi ? `+${node.reward.kuizhi} 奎支` : ""].filter(Boolean).join("、") : "";
+        btns.push(`<button class="g-btn small" data-tk="node:${id}">这一站完成${rw ? `（发 ${esc(rw)}）` : ""}</button>`);
+      }
+      if (t.index > 0) btns.push(`<button class="g-btn small" data-tk="back:${id}" title="已经发过的奖励不收回，再推进也不重发">回退一步</button>`);
       btns.push(`<button class="g-btn small" data-tk="complete:${id}">结算任务（发奖励）</button>`, `<button class="g-btn small" data-tk="fail:${id}">判定失败</button>`);
     }
     btns.push(`<button class="g-btn small" data-tk="edit:${id}">编辑</button>`);
+    btns.push(`<button class="g-btn small" data-tk="up:${id}" title="任务日志里往前挪">↑</button><button class="g-btn small" data-tk="down:${id}" title="任务日志里往后挪">↓</button>`);
+    const hiddenNodes = t.nodes.map((n, i) => (n.hidden ? i : -1)).filter(i => i >= 0);
     if (t.status !== "active") btns.push(`<button class="g-btn small" data-tk="del:${id}">删除</button>`);
+    const vis = t.category === "personal" ? `只有操控 ${esc(t.owner ? trpgHeroLabel(t.owner) : "（没选角色）")} 的玩家可见`
+      : t.visibility && t.visibility.mode === "players" ? `仅 ${esc(questPlayerNames(t.visibility.ids))} 可见` : "全队可见";
     return `<div class="tr-up tk-card${t.status === "active" ? " on" : ""}">
-      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}<span class="tk-days">${t.days} 天</span></div>
+      <div class="tk-head"><b>${esc(t.name)}</b><span class="tk-cat${t.category === "main" ? " main" : t.category === "personal" ? " personal" : ""}">${TRPG_TASK_CATEGORY[t.category] || "支线"}</span><span class="tk-kind">${esc(TRPG_TASK_KINDS[t.kind])}</span>${st}${t.days ? `<span class="tk-days">${t.days} 天</span>` : ""}${t.nodes.length ? "" : '<span class="tk-kind">剧情（无路线）</span>'}<span class="tk-vis">${vis}</span></div>
       ${t.goal ? `<p class="tk-goal">${esc(t.goal)}</p>` : ""}
+      ${t.gmNote ? `<p class="r-hint">主持人备注（玩家看不到）：${esc(t.gmNote)}</p>` : ""}
+      ${t.status === "failed" && t.failWhy ? `<p class="r-hint">失败原因：${esc(t.failWhy)}</p>` : ""}
       <div class="r-hint">报酬：${esc(taskRewardText(t))}</div>
       ${t.escort ? `<div class="r-hint">${taskEscortText(t)}</div>` : ""}
       ${taskRoute(t)}
       ${node ? `<div class="r-hint">当前：第 ${t.index + 1} 站 ${esc(NODE_T()[node.type])}${node.note ? " · " + esc(node.note) : ""}</div>` : t.status === "active" ? `<div class="r-hint">路线走完了，可以结算。</div>` : ""}
+      ${hiddenNodes.length && t.status !== "draft" ? `<div class="tr-row"><span class="r-hint">对玩家隐藏中：</span>${hiddenNodes.map(i => `<button class="g-btn small" data-tk="reveal:${id}:${i}">揭示第 ${i + 1} 站</button>`).join("")}</div>` : ""}
       <div class="tr-row">${btns.join("")}</div></div>`;
+  }
+  /** 联机房间里的玩家（不含主持人）：指定谁能看到这个任务 */
+  function questRoster() {
+    const v = window.OnlineGame && OnlineGame.getView ? OnlineGame.getView() : null;
+    return v && v.active ? (v.players || []).filter(p => !p.gm) : [];
+  }
+  function questPlayerNames(ids) {
+    const r = questRoster();
+    return (ids || []).map(id => (r.find(p => p.id === id) || {}).name || "（不在房间的玩家）").join("、") || "没有人";
   }
   /** 编辑表单：data-te="路径" 的输入直接改 taskEdit；data-te-act 增删行 */
   function taskEditorHtml(t) {
@@ -471,22 +563,31 @@
       const tplRow = fight ? `<div class="tr-row">战斗模板 <select data-te-tpl="${i}">${options(tplOpts, n.template ? n.template.id : "")}</select>
           ${n.template ? `<span class="r-hint">${esc(battleTemplateSummary(n.template))}</span>` : ""}</div>` : "";
       const foes = !fight ? "" : n.template ? tplRow : tplRow + `<div class="tk-foes">${n.enemies.map((e, j) => `<div class="tr-row">
-            <select data-te="nodes.${i}.enemies.${j}.id">${options(presets, e.id)}</select>
+            <select data-te="nodes.${i}.enemies.${j}.id" data-te-rerender="1">${options(presets, e.id)}</select>
             等级 ${inp(`nodes.${i}.enemies.${j}.lv`, e.lv, 52, "number")} 区域 <select data-te="nodes.${i}.enemies.${j}.zone">${options([1, 2, 3, 4, 5].map(z => [z, z + " 区"]), e.zone)}</select>
+            ${typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.id) ? `富集 <select data-te="nodes.${i}.enemies.${j}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : ""}
             <button class="g-btn small" data-te-act="delEnemy:${i}:${j}">删</button></div>`).join("")}
           <div class="tr-row"><button class="g-btn small" data-te-act="addEnemy:${i}">＋ 敌人</button>
             天气 <select data-te="nodes.${i}.weather">${options(Object.keys(WX).map(k => [k, WX[k]]), n.weather)}</select>
             战场 <select data-te="nodes.${i}.zoneMode">${options([[2, "两区"], [3, "三区"], ["line4", "四区直排"], ["square4", "四区方形 2×2"], ["cross5", "五区十字"]], n.zoneMode)}</select></div></div>`;
-      return `<div class="tk-enode"><div class="tr-row"><b>第 ${i + 1} 站</b>
+      // 发奖记账按站的 id：编辑里删站、挪站以后「奖励已发」照样跟着那一站（新加的站还没有 id，没发过）
+      const got = !!n.id && t.granted && t.granted.nodes.includes(n.id);
+      if (!n.reward) n.reward = { xp: 0, kuizhi: 0 };
+      const rwRow = `<div class="tr-row">玩家看到的步骤 ${inp(`nodes.${i}.title`, n.title || "", 240)}
+          ${got ? `<span class="r-hint">奖励已发 ✓（+${n.reward.xp} 经验 · +${n.reward.kuizhi} 奎支，改了也不会再发）</span>`
+            : `完成奖励：经验/人 ${inp(`nodes.${i}.reward.xp`, n.reward.xp, 60, "number")} 奎支 ${inp(`nodes.${i}.reward.kuizhi`, n.reward.kuizhi, 80, "number")}`}
+          <label class="tr-pick"><input type="checkbox" data-te-hide="${i}" ${n.hidden ? "checked" : ""}>对玩家隐藏（显示「？？？」）</label></div>`;
+      return `<div class="tk-enode${got ? " tk-got" : ""}"><div class="tr-row"><b>第 ${i + 1} 站</b>
           <select data-te="nodes.${i}.type" data-te-rerender="1">${options(Object.keys(NODE_T()).map(k => [k, NODE_T()[k]]), n.type)}</select>
-          说明 ${inp(`nodes.${i}.note`, n.note, 260)}
+          说明（主持人） ${inp(`nodes.${i}.note`, n.note, 220)}
           <button class="g-btn small" data-te-act="up:${i}">↑</button><button class="g-btn small" data-te-act="down:${i}">↓</button>
-          <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${foes}</div>`;
+          <button class="g-btn small" data-te-act="delNode:${i}">删这一站</button></div>${rwRow}${foes}</div>`;
     }).join("");
     const r = t.reward;
-    const itemOpts = Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]);
-    const partOpts = Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartText(id)}`]);
-    const bpOpts = (typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`]));
+    // 选单第一项是空的：没选东西就不会加进奖励（以前默认选着第一件，看起来像默认会给）
+    const itemOpts = [["", "（选物品）"]].concat(Object.keys(ITEM_CATALOG).filter(id => !ITEM_CATALOG[id].part && !ITEM_CATALOG[id].blueprint).map(id => [id, ITEM_CATALOG[id].name]));
+    const partOpts = [["", "（选改装件）"]].concat(Object.keys(WEAPON_PARTS).map(id => [id, `${weaponPartLabel(id)} ${weaponPartText(id)}`]));
+    const bpOpts = [["", "（选图纸）"]].concat((typeof ROGUE_SMITHS !== "undefined" ? ROGUE_SMITHS : []).flatMap(s => s.blueprints.map(b => [b.id, `${b.name}（${s.name}）`])));
     const list = (arr, kind, label) => arr.map((x, k) => `<span class="tk-chip">${esc(label(x))}<button class="g-btn small" data-te-act="del${kind}:${k}">×</button></span>`).join("");
     const e = t.escort;
     const hbPay = trpgTaskHandbookPay(t.days, trpgPartyLevel());   // 主持人手册第三章的任务报酬，给主持人参考
@@ -498,32 +599,46 @@
     return `<div class="tr-up tk-edit">
       <h4>编辑任务</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 160)} 类型 <select data-te="kind" data-te-rerender="1">${options(Object.keys(TRPG_TASK_KINDS).map(k => [k, TRPG_TASK_KINDS[k]]), t.kind)}</select>
-        天数 ${inp("days", t.days, 52, "number")}</div>
-      <div class="tr-row">目标 <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
-      <h4>奖励</h4>
+        天数 ${inp("days", t.days, 52, "number")} <span class="r-hint">（0 = 不写天数）</span></div>
+      <div class="tr-row">分类 <select data-te="category" data-te-rerender="1">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], t.category || "side")}</select>
+        ${t.category === "personal" ? `属于角色 <select data-te="owner">${options([["", "（选一名角色）"]].concat(trpgHeroes().filter(h => !h.weaponOf).map(h => [h.kit, trpgHeroLabel(h.kit)])), t.owner || "")}</select>
+        <span class="r-hint">只有操控这名角色的玩家看得到（其他玩家连有这条任务都不知道）；经验只给这名角色，奎支和物品照样进队伍。</span></div>` : `
+        可见 <select data-te="visibility.mode" data-te-rerender="1">${options([["party", "全队"], ["players", "指定玩家"]], (t.visibility || {}).mode || "party")}</select>
+        ${(t.visibility || {}).mode === "players" ? (questRoster().length ? questRoster().map(p => `<label class="tr-pick"><input type="checkbox" data-te-vis="${esc(p.id)}" ${(t.visibility.ids || []).includes(p.id) ? "checked" : ""}>${esc(p.name)}</label>`).join("") : '<span class="r-hint">现在没有联机玩家；开房后再勾选。</span>') : ""}</div>`}
+      <div class="tr-row">目标（玩家可见） <textarea data-te="goal" rows="2" style="width:100%">${esc(t.goal)}</textarea></div>
+      <div class="tr-row">主持人备注（只有主持人看得到） ${inp("gmNote", t.gmNote, 420)}</div>
+      <h4>奖励（不填就没有奖励）</h4>
       <div class="tr-row">奎支 ${inp("reward.kuizhi", r.kuizhi, 90, "number")} 每人经验 ${inp("reward.xp", r.xp, 70, "number")}
         ${e ? `完好额外奎支 ${inp("reward.intactKuizhi", r.intactKuizhi, 90, "number")}` : ""}</div>
-      <p class="r-hint">手册参考（${hbPay.name}任务 ${Math.max(1, Number(t.days) || 1)} 天、队伍平均 ${trpgPartyLevel()} 级）：奎支 ${hbPay.range[0]}～${hbPay.range[1]}，每人经验 ${hbPay.xp}；按完成质量和关系上下浮动。</p>
+      <p class="r-hint">手册参考（${hbPay.name}任务 ${Math.max(1, Number(t.days) || 1)} 天、队伍平均 ${trpgPartyLevel()} 级）：奎支 ${hbPay.range[0]}～${hbPay.range[1]}，每人经验 ${hbPay.xp}；按完成质量和关系上下浮动。
+        <button class="g-btn small" data-te-act="handbookPay">按手册填奎支和经验</button></p>
       <div class="tr-row">物品 <select id="te-item">${options(itemOpts)}</select> ×${inp("_qty", 1, 52, "number").replace('data-te="_qty"', 'id="te-qty"')}
         <button class="g-btn small" data-te-act="addItem">＋</button> ${list(r.items, "Item", x => `${(ITEM_CATALOG[x.id] || {}).name}×${x.qty}`)}</div>
       <div class="tr-row">改装件 <select id="te-part">${options(partOpts)}</select><button class="g-btn small" data-te-act="addPart">＋</button>
         <button class="g-btn small" data-te-act="randPart:C">随机 C</button><button class="g-btn small" data-te-act="randPart:B">随机 B</button> ${list(r.parts, "Part", id => weaponPartLabel(id))}</div>
       <div class="tr-row">图纸 <select id="te-bp">${options(bpOpts)}</select><button class="g-btn small" data-te-act="addBp">＋</button> ${list(r.blueprints, "Bp", id => (blueprintSpec(id) || {}).name || id)}</div>
       ${escort}
-      <h4>路线（按顺序走；战斗站预先配置敌人、天气、战场）</h4>
+      <h4>路线（可以不填）</h4>
+      <p class="r-hint">不填路线就是剧情任务：玩家只看到标题、描述和奖励，由你在合适的时候「结算任务」或「判定失败」。要按站推进时再加站（战斗站可以预先配置敌人、天气、战场）。
+        ${t.kind !== "custom" ? `<button class="g-btn small" data-te-act="templateRoute">按「${esc(TRPG_TASK_KINDS[t.kind])}」模板填路线</button>` : ""}</p>
+      ${t.status === "active" ? `<p class="r-hint">任务进行中：删站、插站、挪站时，走过没有、奖励发过没有都跟着那一站。保存后当前站是路线里第一个还没走过的站；走过的站挪到它后面，要再走一次（奖励不重发）。</p>` : ""}
       ${nodes}
       <div class="tr-row"><button class="g-btn small" data-te-act="addNode:battle">＋ 战斗站</button><button class="g-btn small" data-te-act="addNode:rest">＋ 休息点</button><button class="g-btn small" data-te-act="addNode:event">＋ 事件</button></div>
       <div class="tr-row"><button class="g-btn" data-te-act="save">保存</button><button class="g-btn" data-te-act="cancel">取消</button></div>
     </div>`;
   }
+  let newTaskCat = "side";
   PANELS.tasks = function () {
     const list = trpgTasks();
     const order = { active: 0, posted: 1, draft: 2, done: 3, failed: 4 };
-    const cards = list.slice().sort((a, b) => order[a.status] - order[b.status]).map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("");
-    return `<p class="r-hint">主持人在这里发布任务：先建草稿、配置路线（每一站是什么，战斗站的敌人、天气、战场）和奖励，再「发布」给队伍看，队伍「接下」后按站推进。
-        战斗站点「打这一站」会按配置摆好敌人进入战斗，打赢自动走到下一站；护送任务的护送对象会跟着上场，血量跨战斗保留。走完路线后「结算任务」发奖励。</p>
-      <div class="tr-row">新建任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
-      ${cards || '<p class="r-hint">还没有任务。</p>'}`;
+    const group = (cat, title) => {
+      const rows = list.filter(t => (t.category || "side") === cat).sort((a, b) => order[a.status] - order[b.status]);
+      return `<h3 class="tk-sec">${title}</h3>${rows.map(t => taskEdit && taskEdit.id === t.id ? taskEditorHtml(taskEdit) : taskCardHtml(t)).join("") || '<p class="r-hint">暂无。</p>'}`;
+    };
+    return `<p class="r-hint">任务日志：主持人在这里发布主线、支线和个人任务。新任务只有标题和描述，没有路线、没有奖励——要的话在「编辑」里加（奖励不填就没有；路线不填就是剧情任务，由你「结算」或「判定失败」）。再「发布」；队伍「接下」后有路线的按站推进，可以同时进行好几条。
+        联机玩家点「任务日志」就能看到：草稿、只指定给别人的任务、主持人备注、敌人配置、隐藏的站都看不到。每一站的奖励只发一次（回退再推进、改路线都不重发，也不收回）。</p>
+      <div class="tr-row">新建 <select id="tk-cat">${options([["main", "主线"], ["side", "支线"], ["personal", "个人"]], newTaskCat)}</select> 任务：${Object.keys(TRPG_TASK_KINDS).map(k => `<button class="g-btn small" data-tk="new:${k}">${esc(TRPG_TASK_KINDS[k])}</button>`).join("")}</div>
+      ${group("main", "主线任务")}${group("side", "支线任务")}${group("personal", "个人任务（只给那名角色的玩家看）")}`;
   };
   function teSet(path, v) {
     const keys = path.split(".");
@@ -547,18 +662,21 @@
     switch (cmd) {
       case "save": taskEdit = null; act(ruleCommand("taskSave", { task: JSON.parse(JSON.stringify(t)) })); return;
       case "cancel": taskEdit = null; break;
-      case "addNode": t.nodes.push(x === "battle" ? { type: "battle", note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }], weather: "none", zoneMode: 2 } : { type: x, note: "", enemies: [], weather: "none", zoneMode: 2 }); break;
+      case "addNode": t.nodes.push(Object.assign(x === "battle" ? { type: "battle", note: "", enemies: [{ id: "thug_knife", lv, zone: 2 }], weather: "none", zoneMode: 2 } : { type: x, note: "", enemies: [], weather: "none", zoneMode: 2 },
+        { title: "", hidden: false, reward: { xp: 0, kuizhi: 0 } })); break;
       case "delNode": t.nodes.splice(i, 1); break;
       case "up": if (i > 0) t.nodes.splice(i - 1, 0, t.nodes.splice(i, 1)[0]); break;
       case "down": if (i < t.nodes.length - 1) t.nodes.splice(i + 1, 0, t.nodes.splice(i, 1)[0]); break;
       case "addEnemy": t.nodes[i].enemies.push({ id: "thug_knife", lv, zone: 2 }); break;
       case "delEnemy": t.nodes[i].enemies.splice(j, 1); break;
-      case "addItem": t.reward.items.push({ id: $("te-item").value, qty: Math.max(1, Number($("te-qty").value) || 1) }); break;
+      case "addItem": if ($("te-item").value) t.reward.items.push({ id: $("te-item").value, qty: Math.max(1, Number($("te-qty").value) || 1) }); break;
+      case "handbookPay": { const p = trpgTaskHandbookPay(t.days, trpgPartyLevel()); t.reward.kuizhi = p.kuizhi; t.reward.xp = p.xp; if (t.escort) t.reward.intactKuizhi = Math.round(p.kuizhi * ESCORT_RULES.intactBonus); break; }
+      case "templateRoute": { const r = trpgTaskTemplateRoute(t.kind); t.nodes = t.nodes.concat(r.nodes.map(trpgTaskNormalizeNode)); if (!t.days) t.days = r.days; break; }
       case "delItem": t.reward.items.splice(i, 1); break;
-      case "addPart": t.reward.parts.push($("te-part").value); break;
+      case "addPart": if ($("te-part").value) t.reward.parts.push($("te-part").value); break;
       case "randPart": t.reward.parts.push(rollWeaponPart({ [x]: 1 })); break;
       case "delPart": t.reward.parts.splice(i, 1); break;
-      case "addBp": t.reward.blueprints.push($("te-bp").value); break;
+      case "addBp": if ($("te-bp").value) t.reward.blueprints.push($("te-bp").value); break;
       case "delBp": t.reward.blueprints.splice(i, 1); break;
     }
     render();
@@ -567,7 +685,10 @@
     P.querySelectorAll("[data-tk]").forEach(b => {
       b.onclick = () => {
         const [cmd, id] = b.dataset.tk.split(":");
-        if (cmd === "new") return act(ruleCommand("taskCreate", { kind: id }));
+        if (cmd === "new") return act(ruleCommand("taskCreate", { kind: id, category: newTaskCat }));
+        if (cmd === "back") { if (confirm("回退一步？已经发过的奖励不会收回。")) act(ruleCommand("taskRollback", { id })); return; }
+        if (cmd === "reveal") return act(ruleCommand("taskReveal", { id, node: Number(b.dataset.tk.split(":")[2]), hidden: false }));
+        if (cmd === "up" || cmd === "down") return act(ruleCommand("taskMove", { id, dir: cmd === "up" ? -1 : 1 }));
         if (cmd === "edit") { taskEdit = JSON.parse(JSON.stringify(trpgTaskById(id))); return render(); }
         if (cmd === "del") { if (confirm("删除这个任务？")) act(ruleCommand("taskDelete", { id })); return; }
         if (cmd === "post") return act(ruleCommand("taskStatus", { id, status: "posted" }));
@@ -590,7 +711,17 @@
         }
       };
     });
+    const cat = $("tk-cat");
+    if (cat) cat.onchange = () => { newTaskCat = cat.value; };
     if (!taskEdit) return;
+    P.querySelectorAll("[data-te-hide]").forEach(el => { el.onchange = () => { taskEdit.nodes[Number(el.dataset.teHide)].hidden = el.checked; }; });
+    P.querySelectorAll("[data-te-vis]").forEach(el => {
+      el.onchange = () => {
+        const v = taskEdit.visibility = taskEdit.visibility || { mode: "players", ids: [] };
+        v.ids = (v.ids || []).filter(x => x !== el.dataset.teVis);
+        if (el.checked) v.ids.push(el.dataset.teVis);
+      };
+    });
     P.querySelectorAll("[data-te]").forEach(el => {
       const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
       el[ev] = () => { teSet(el.dataset.te, el.value); if (el.dataset.teRerender) render(); };
@@ -640,15 +771,222 @@
         <div class="tr-row">熟练项 <select id="ck-prof">${profOpts}</select> 难度 <select id="ck-diff">${diffOpts}</select>
           说明 <input id="ck-note" value="${esc(checkForm.note)}" placeholder="比如：撬开仓库的锁" style="width:240px"></div>
         <div class="tr-picks">${who}</div>
+        ${online() ? `<div class="tr-row"><label><input type="checkbox" id="ck-secret"${checkForm.secret ? " checked" : ""}> 暗骰（检定和结果只有主持人看得到，可以选敌人等任何单位）</label></div>${checkForm.secret ? `<div class="tr-picks">${(state.units || []).filter(u => !u.isPlayer && !u.dead && !u._removed && !u.weaponOf).map(u => `<label class="tr-pick"><input type="checkbox" data-ck-unit="${esc(u.id)}"${checkForm.units.includes(u.id) ? " checked" : ""}>${esc(u.name)}</label>`).join("")}</div>` : ""}` : ""}
+        ${checkRequestsHtml()}
         <div class="tr-row"><button class="g-btn" id="ck-open">发起检定</button></div>
       </div>
       ${cards || '<p class="r-hint">还没有检定。</p>'}`;
   };
+  /* ---------- 工坊：制作、学配方、积分、拆解（trpg.js · trpgCraft 等）---------- */
+  const craftForm = { kit: "", item: "", diff: "", helper: "" };
+  /* ---------- 诊所：义体改造（trpg.js · trpgModifyHero；联机玩家的申请在上面，主持人同意才改）---------- */
+  const cyberForm = {};   // kit → 正在填的方案（重画时保留）
+  const CY_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
+  PANELS.clinic = function () {
+    const reqs = (TRPG.cyberRequests || []).filter(r => r.status === "pending");
+    const reqHtml = reqs.length ? `<h3>玩家的改造申请</h3>${reqs.map(r => {
+      const pv = trpgCyberPreview(r.kit, r.plan), h = heroes().find(x => x.kit === r.kit);
+      return `<div class="tr-row"><b>${esc(h ? h.name : r.kit)}</b>（${esc(r.byName)} 申请）：${esc(pv.error || pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / "))}
+        · ${pv.cost} 奎支（从 ${esc(h ? h.name : r.kit)} 的钱包出，现有 ${trpgPurse(r.kit)}）
+        <button class="g-btn small r-main" data-cyd="${esc(r.id)}:1" ${pv.error ? "disabled" : ""}>同意</button><button class="g-btn small" data-cyd="${esc(r.id)}:0">拒绝</button></div>`;
+    }).join("")}` : "";
+    const rows = heroes().filter(h => !h.dead).map(h => {
+      const info = trpgCyberInfo(h.kit);
+      const plan = cyberForm[h.kit] || info.current;
+      const pv = trpgCyberPreview(h.kit, plan);
+      const cur = (h.layers || []).map(l => `${LAYER[l.type] || l.type} ${l.current}/${l.max}`).join(" / ");
+      return `<div class="tr-up"><div class="tk-head"><b>${esc(h.name)}</b><span class="tk-kind">改造率 ${Math.round(info.rate * 100)}% · 肉体 ${info.fleshMax}，最多改 ${info.limit} 点</span></div>
+        <div class="r-hint">现在：${esc(cur)}</div>
+        <div class="tr-row" data-cy-box="${esc(h.kit)}">${CY_LAYERS.map(([k, n]) => `${n} <input type="number" min="0" max="${info.limit}" data-cy="${k}" value="${esc(plan[k] || 0)}" style="width:56px">`).join(" ")}
+          <label class="tr-pick"><input type="checkbox" data-cy="spirit" ${plan.spirit ? "checked" : ""}>换成星灵</label></div>
+        <div class="tr-row">${pv.error ? `<span class="warn">${esc(pv.error)}</span>` : `改完：${esc(pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / "))} · ${pv.cost ? `要 ${pv.cost} 奎支` : "方案没有变化"}`}
+          <button class="g-btn small r-main" data-cy-go="${esc(h.kit)}" ${pv.error || !pv.cost ? "disabled" : ""}>改造（由下面选的人付）</button>
+          <button class="g-btn small" data-cy-free="${esc(h.kit)}" ${pv.error || !pv.cost ? "disabled" : ""}>主持人免费改</button></div></div>`;
+    }).join("");
+    return `<p class="r-hint">义体改造规则和单局一样：可改的肉体点数 = 肉体上限 × 改造率；一个角色最多 3 种血量，最内层要留肉体或星灵；每动 1 点肉体 ${ROGUE_CLINIC.cyberPerHp} 奎支（加减都算，换成 / 换回星灵按被换的肉体点数算）。伤势照旧带着，缺的血先从外层扣。</p>
+      <div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-clinic-open" ${TRPG.clinicOpen ? "checked" : ""}>诊所向联机玩家开放（玩家可以给自己的角色申请改造，你同意后才生效）</label></div>
+      ${cyberwareEntry()}${reqHtml}${payerHtml()}${rows}`;
+  };
+  /* 诊所 · 义体（cyberware-ui.js；数据 trpg.js · trpgCyberwarePacket）：主持人看全部角色；联机时走 OnlineGame.submit，钱从那名角色的钱包出 */
+  function cyberwareEntry() {
+    if (!window.CyberwareUI || typeof trpgCyberwarePacket !== "function") return "";
+    return `<div class="tr-row"><button class="g-btn r-main cw-open" id="tr-cyberware">诊所 · 义体</button><span class="r-hint">装 / 拆义体（从那名角色的钱包出${TRPG.clinicOpen ? "" : "；诊所关着时不能装拆"}）</span></div>`;
+  }
+  function cyberwareModel() {
+    return CyberwareUI.localModel({ heroes: heroes().filter(h => !h.dead).map(h => ({ kit: h.kit, name: h.name })),
+      packetOf: kit => trpgCyberwarePacket(kit), previewOf: (kit, id) => { const p = trpgCyberwarePacket(kit); return p && p.previews[id] || null; } });
+  }
+  function openCyberware() {
+    CyberwareUI.open(cyberwareModel, async cmd => {
+      const type = cmd.action === "removeCyberware" ? "cyberwareRemove" : "cyberwareInstall";
+      try {
+        if (typeof OnlineGame !== "undefined" && OnlineGame.isHost && OnlineGame.isHost()) { const r = await OnlineGame.submit({ type, kit: cmd.kit, id: cmd.id }); if (r && r.ok === false) throw new Error(r.error); }
+        else (type === "cyberwareRemove" ? trpgCyberwareRemove : trpgCyberwareInstall)(cmd.kit, cmd.id);
+      } catch (e) { alert(e.message); }
+      render(); CyberwareUI.refresh();
+    });
+  }
+  function bindClinic(P) {
+    const box = (kit) => P.querySelector(`[data-cy-box="${kit}"]`);
+    const planOf = (kit) => { const b = box(kit); const p = { spirit: !!(b.querySelector('[data-cy="spirit"]') || {}).checked }; CY_LAYERS.forEach(([k]) => { p[k] = Math.max(0, Math.floor(Number((b.querySelector(`[data-cy="${k}"]`) || {}).value) || 0)); }); return p; };
+    P.querySelectorAll("[data-cy-box]").forEach(b => { b.onchange = () => { cyberForm[b.dataset.cyBox] = planOf(b.dataset.cyBox); render(); }; });
+    P.querySelectorAll("[data-cy-go]").forEach(b => { b.onclick = () => { const k = b.dataset.cyGo; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k) })); delete cyberForm[k]; }; });
+    P.querySelectorAll("[data-cy-free]").forEach(b => { b.onclick = () => { const k = b.dataset.cyFree; act(ruleCommand("modifyHero", { kit: k, plan: planOf(k), free: true })); delete cyberForm[k]; }; });
+    P.querySelectorAll("[data-cyd]").forEach(b => { b.onclick = () => { const [id, ok] = b.dataset.cyd.split(":"); act(ruleCommand("cyberDecide", { id, ok: ok === "1" })); }; });
+    const cwb = $("tr-cyberware"); if (cwb) cwb.onclick = () => openCyberware();
+    const open = $("tr-clinic-open");
+    if (open) open.onchange = () => act(ruleCommand("clinicOpen", { on: open.checked }));
+  }
+  /* ---------- 商人（trpg-merchants.js）：主持人设置商人、卖什么、打折、积分兑换；开店后联机玩家同步看到 ---------- */
+  let merchantEdit = null;
+  PANELS.merchants = function () {
+    const list = trpgMerchants(), open = trpgMerchantOpenNow();
+    const card = (m) => {
+      const isOpen = open && open.id === m.id;
+      return `<div class="tr-up tk-card${isOpen ? " on" : ""}"><div class="tk-head"><b>${esc(m.name)}</b>
+          ${m.discount ? `<span class="tk-cat main">${esc(trpgDiscountText(m.discount))}</span>` : ""}<span class="tk-kind">${m.rows.length} 件商品</span>
+          <span class="tk-vis">${m.points.on ? `积分兑换 ${m.points.items.length} 种` : "不能积分兑换"}</span>${isOpen ? '<span class="tk-st">营业中（玩家看得到）</span>' : ""}</div>
+        ${m.note ? `<p class="tk-goal">${esc(m.note)}</p>` : ""}
+        <div class="tr-row">${isOpen ? `<button class="g-btn small" data-mc="close:">关店</button>` : `<button class="g-btn small r-main" data-mc="open:${esc(m.id)}">开店（玩家画面同步弹出）</button>`}
+          <button class="g-btn small" data-mc="edit:${esc(m.id)}">编辑</button><button class="g-btn small" data-mc="del:${esc(m.id)}">删除</button></div></div>`;
+    };
+    const front = open ? (() => {
+      const v = trpgMerchantView();
+      return `<h3>「${esc(v.name)}」柜台</h3>${payerHtml()}
+        <div class="shop">${v.rows.map(r => `<div class="shop-row"><span class="s-name">${esc(r.name)}${r.hint ? `<small>${esc(r.hint)}</small>` : ""}</span>
+          <span class="s-have">${r.stock == null ? "不限" : `剩 ${r.stock}`}</span><span class="s-price">${r.price}${r.price !== r.base ? ` <s>${r.base}</s>` : ""}</span>
+          <input type="number" min="1" value="1" data-mq="${esc(r.key)}" style="width:52px">
+          <button class="g-btn small" data-mbuy="${esc(r.key)}" ${r.stock === 0 ? "disabled" : ""}>买</button></div>`).join("") || '<p class="r-hint">这个商人还没有商品。</p>'}</div>
+        ${v.points ? `<p class="r-hint">商店积分 ${v.points.have}：${v.points.rows.map(x => `<button class="g-btn small" data-mredeem="${esc(x.item)}" ${v.points.have < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join(" ") || "（没有选可兑换的道具）"}</p>` : ""}`;
+    })() : "";
+    return `<p class="r-hint">设置商人和他们卖的东西：可以单独改价、限库存、整店打折（和巧手匠人的八折不叠加，取便宜的），也可以决定在这里能不能用商店积分兑换、能换哪些。
+        「开店」后联机玩家的画面会同步弹出这家店，玩家用自己角色的钱包买；同一时间只开一家，「关店」后玩家画面收起。</p>
+      <div class="tr-row">新商人 <input type="text" id="mc-name" placeholder="名字" style="width:140px"><button class="g-btn small" data-mc="new:">新建</button></div>
+      ${front}
+      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}`;
+  };
+  function merchantEditorHtml(m) {
+    const groups = [];
+    HANDBOOK_SHOP.forEach(r => { if (!groups.includes(r.group)) groups.push(r.group); });
+    const rowOf = (key) => m.rows.find(r => r.key === key);
+    const redeemable = EFFECT_ITEMS.filter(x => x.points > 0);
+    return `<div class="tr-up tk-card tk-edit"><h4>编辑商人</h4>
+      <div class="tr-row">名字 <input type="text" data-me="name" value="${esc(m.name)}" style="width:140px">
+        打折 <input type="number" data-me="discount" min="0" max="90" value="${esc(m.discount)}" style="width:56px">%（填 20 = 八折）</div>
+      <div class="tr-row">介绍（玩家看得到） <input type="text" data-me="note" value="${esc(m.note)}" style="width:100%"></div>
+      <h4>卖什么</h4><p class="r-hint">勾上就卖。价格空着照手册价，库存空着不限量。</p>
+      ${groups.map(g => `<details${HANDBOOK_SHOP.some(r => r.group === g && rowOf(r.key)) ? " open" : ""}><summary>${esc(g)}（${HANDBOOK_SHOP.filter(r => r.group === g && rowOf(r.key)).length}）</summary>
+        ${HANDBOOK_SHOP.filter(r => r.group === g).map(r => { const on = rowOf(r.key); return `<div class="tr-row"><label class="tr-pick"><input type="checkbox" data-me-row="${esc(r.key)}" ${on ? "checked" : ""}>${esc(trpgShopName(r))}</label>
+          <span class="r-hint">手册价 ${r.price}</span>${on ? ` 价格 <input type="number" min="0" data-me-price="${esc(r.key)}" value="${on.price == null ? "" : esc(on.price)}" placeholder="${r.price}" style="width:80px">
+          库存 <input type="number" min="0" data-me-stock="${esc(r.key)}" value="${on.stock == null ? "" : esc(on.stock)}" placeholder="不限" style="width:60px">` : ""}</div>`; }).join("")}</details>`).join("")}
+      <h4>积分兑换</h4>
+      <div class="tr-row"><label class="tr-pick"><input type="checkbox" data-me-pon ${m.points.on ? "checked" : ""}>在这家店可以用商店积分兑换</label></div>
+      ${m.points.on ? `<div class="tr-row">${redeemable.map(x => `<label class="tr-pick"><input type="checkbox" data-me-pt="${esc(x.id)}" ${m.points.items.includes(x.id) ? "checked" : ""}>${esc(x.name)}（${x.points}）</label>`).join("")}</div>` : ""}
+      <div class="tr-row"><button class="g-btn r-main" data-me-act="save">保存</button><button class="g-btn" data-me-act="cancel">取消</button></div></div>`;
+  }
+  function bindMerchants(P) {
+    P.querySelectorAll("[data-mc]").forEach(b => {
+      b.onclick = () => {
+        const [cmd, id] = b.dataset.mc.split(":");
+        if (cmd === "new") return act(ruleCommand("merchantCreate", { name: ($("mc-name") || {}).value || "" }));
+        if (cmd === "open") return act(ruleCommand("merchantOpen", { id }));
+        if (cmd === "close") return act(ruleCommand("merchantOpen", { id: null }));
+        if (cmd === "edit") { merchantEdit = JSON.parse(JSON.stringify(trpgMerchantById(id))); return render(); }
+        if (cmd === "del" && confirm("删掉这个商人？")) return act(ruleCommand("merchantDelete", { id }));
+      };
+    });
+    const open = trpgMerchantOpenNow();
+    P.querySelectorAll("[data-mbuy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("merchantBuy", { id: open.id, key: b.dataset.mbuy, qty: Number((P.querySelector(`[data-mq="${b.dataset.mbuy}"]`) || {}).value) || 1 })); }; });
+    P.querySelectorAll("[data-mredeem]").forEach(b => { b.onclick = () => act(ruleCommand("merchantRedeem", { id: open.id, item: b.dataset.mredeem })); });
+    if (!merchantEdit) return;
+    const m = merchantEdit;
+    P.querySelectorAll("[data-me]").forEach(el => { el.oninput = () => { m[el.dataset.me] = el.type === "number" ? Number(el.value) || 0 : el.value; }; });
+    P.querySelectorAll("[data-me-row]").forEach(el => { el.onchange = () => {
+      const key = el.dataset.meRow;
+      if (el.checked) { if (!m.rows.some(r => r.key === key)) m.rows.push({ key, price: null, stock: null }); }
+      else m.rows = m.rows.filter(r => r.key !== key);
+      render();
+    }; });
+    const num = (v) => (v === "" ? null : Math.max(0, Math.floor(Number(v) || 0)));
+    P.querySelectorAll("[data-me-price]").forEach(el => { el.oninput = () => { const r = m.rows.find(x => x.key === el.dataset.mePrice); if (r) r.price = num(el.value); }; });
+    P.querySelectorAll("[data-me-stock]").forEach(el => { el.oninput = () => { const r = m.rows.find(x => x.key === el.dataset.meStock); if (r) r.stock = num(el.value); }; });
+    P.querySelectorAll("[data-me-pon]").forEach(el => { el.onchange = () => { m.points.on = el.checked; render(); }; });
+    P.querySelectorAll("[data-me-pt]").forEach(el => { el.onchange = () => {
+      const id = el.dataset.mePt;
+      m.points.items = el.checked ? m.points.items.concat(id).filter((x, i, a) => a.indexOf(x) === i) : m.points.items.filter(x => x !== id);
+    }; });
+    P.querySelectorAll("[data-me-act]").forEach(b => { b.onclick = () => {
+      if (b.dataset.meAct === "save") { const data = merchantEdit; merchantEdit = null; return act(ruleCommand("merchantSave", { merchant: data })); }
+      merchantEdit = null; render();
+    }; });
+  }
+  PANELS.workshop = function () {
+    const hs = heroes().filter(h => !h.dead);
+    if (!hs.some(h => h.kit === craftForm.kit)) craftForm.kit = (hs[0] || {}).kit || "";
+    const items = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id]);
+    if (!items.some(it => it.id === craftForm.item)) craftForm.item = items[0].id;
+    const pts = trpgPointsInfo();
+    const o = craftForm.kit ? trpgCraftOdds(craftForm.kit, craftForm.item, craftForm.diff, craftForm.helper) : null;
+    const it = craftItem(craftForm.item), rc = CRAFT_RECIPES[craftForm.item];
+    const mats = Object.keys(rc).map(id => `<span class="${bagCount(id) >= rc[id] ? "" : "bad"}">${esc(ITEM_CATALOG[id].name)} ${bagCount(id)}/${rc[id]}</span>`).join("、");
+    const known = trpgKnowsRecipe(craftForm.item);
+    const sel = (attr, list, cur) => `<select ${attr}>${list.map(([v, n]) => `<option value="${esc(v)}"${v === cur ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
+    const diffs = [["", `按配方（${ROGUE_CHECKS.diffs[it.diff].name}）`]].concat(Object.keys(ROGUE_CHECKS.diffs).map(k => [k, ROGUE_CHECKS.diffs[k].name]));
+    const recipeRows = items.map(r => {
+      const k = trpgKnowsRecipe(r.id), easy = CRAFT_RULES.knownDiffs.includes(r.diff);
+      const m = Object.keys(CRAFT_RECIPES[r.id]).map(id => `${ITEM_CATALOG[id].name}×${CRAFT_RECIPES[r.id][id]}`).join(" + ");
+      return `<div class="tr-row"><b>${esc(r.name)}</b> <span class="r-hint">${esc(r.prof)} · ${esc(ROGUE_CHECKS.diffs[r.diff].name)} · ${CRAFT_RULES.hours[r.diff]} 小时 · ${esc(m)}</span>
+        ${easy ? '<span class="r-hint">一开始就会</span>' : `<button class="g-btn small" data-teach="${esc(r.id)}:${k ? 0 : 1}">${k ? "收回配方" : "教会"}</button>`}</div>`;
+    }).join("");
+    const salv = bagList().filter(x => salvageYield(x.id)).map(x => {
+      const y = salvageYield(x.id);
+      return `<div class="tr-row">${esc(x.name)} ×${x.qty} → ${esc(Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、"))}
+        <button class="g-btn small" data-salvage="${esc(x.id)}">拆一件</button></div>`;
+    }).join("");
+    const redeem = EFFECT_ITEMS.filter(x => x.points > 0).map(x =>
+      `<button class="g-btn small" data-redeem="${esc(x.id)}" ${pts.points < x.points ? "disabled" : ""}>${esc(x.name)} · ${x.points} 积分</button>`).join("");
+    const openBox = `<div class="tr-row"><label class="tr-pick"><input type="checkbox" id="tr-workshop-open" ${TRPG.workshopOpen ? "checked" : ""}>工坊向联机玩家开放（玩家可以自己制作已会的配方、拆解背包里的东西；学配方仍由你在下面教会）</label></div>`;
+    return openBox + payerHtml() + `<p class="r-hint">规则见设计文档第 5 节：简单、普通 1 小时，困难 2，极难 3（会推进时间）；失败时非壳体材料丢一半（向上取整），废料、金属留着；有对应熟练项的队友打下手给优势。
+        城里、工匠处的工坊五类都能做；野外休息点只能做投掷罐、弹针、增益 / 减益（主持人按剧情判断）。材料在「商店 · 制作材料（黑市）」里买或给予。</p>
+      <h3>制作</h3>
+      <div class="tr-up">
+        <div class="tr-row">谁做 ${sel('id="wk-kit"', hs.map(h => [h.kit, h.name]), craftForm.kit)}
+          做什么 ${sel('id="wk-item"', items.map(r => [r.id, `${r.name}${trpgKnowsRecipe(r.id) ? "" : "（还不会）"}`]), craftForm.item)}
+          难度 ${sel('id="wk-diff"', diffs, craftForm.diff)}
+          打下手 ${sel('id="wk-helper"', [["", "没人帮"]].concat(hs.filter(h => h.kit !== craftForm.kit && !h.dead).map(h => [h.kit, h.name])), craftForm.helper)}</div>
+        <div class="r-hint">${esc(it.prof)} · 材料：${mats}${o ? ` · ${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][o.level]} · 成功率 ${pct(o.chance)}${o.adv ? " · 优势" : o.dis ? " · 劣势" : ""}${o.reroll ? " · 失败可重掷" : ""} · ${o.hours} 小时` : ""}</div>
+        <div class="tr-row">${known ? `<button class="g-btn" data-craft="roll" ${o && o.base ? "" : "disabled"}>掷骰制作</button>
+          <button class="g-btn small" data-craft="ok">记成功（玩家掷的）</button><button class="g-btn small" data-craft="fail">记失败（玩家掷的）</button>` : '<span class="r-hint">还不会这张配方：在下面教会。</span>'}</div>
+      </div>
+      <h3>商店积分</h3>
+      <div class="tr-row">现有 <b>${pts.points}</b> 积分（在商店每花 ${pts.per} 奎支得 1 分，再花 ${pts.next} 得下一分）
+        <input type="number" id="wk-pts" value="1" style="width:70px"> <button class="g-btn small" id="wk-pts-add">＋</button><button class="g-btn small" id="wk-pts-sub">－</button></div>
+      <div class="tr-row">兑换：${redeem}</div>
+      <h3>配方</h3>${recipeRows}
+      <h3>拆解（不花时间）</h3>${salv || '<p class="r-hint">背包里没有能拆的东西。</p>'}`;
+  };
+  function bindWorkshop(P) {
+    const wo = $("tr-workshop-open"); if (wo) wo.onchange = () => act(ruleCommand("workshopOpen", { on: wo.checked }));
+    const k = $("wk-kit"); if (!k) return;
+    k.onchange = () => { craftForm.kit = k.value; render(); };
+    $("wk-item").onchange = () => { craftForm.item = $("wk-item").value; craftForm.diff = ""; render(); };
+    $("wk-diff").onchange = () => { craftForm.diff = $("wk-diff").value; render(); };
+    $("wk-helper").onchange = () => { craftForm.helper = $("wk-helper").value; render(); };
+    P.querySelectorAll("[data-craft]").forEach(b => { b.onclick = () => act(ruleCommand("craft", { kit: craftForm.kit, item: craftForm.item, diff: craftForm.diff || null, helper: craftForm.helper || null, result: b.dataset.craft })); });
+    P.querySelectorAll("[data-teach]").forEach(b => { b.onclick = () => { const [item, on] = b.dataset.teach.split(":"); act(ruleCommand("teachRecipe", { item, on: on === "1" })); }; });
+    P.querySelectorAll("[data-salvage]").forEach(b => { b.onclick = () => act(ruleCommand("salvage", { item: b.dataset.salvage })); });
+    P.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => act(ruleCommand("redeem", { item: b.dataset.redeem })); });
+    const n = () => Math.abs(Number($("wk-pts").value) || 0);
+    $("wk-pts-add").onclick = () => act(ruleCommand("adjustPoints", { amount: n(), why: "主持人" }));
+    $("wk-pts-sub").onclick = () => act(ruleCommand("adjustPoints", { amount: -n(), why: "主持人" }));
+  }
   /** 联机时走房间（玩家马上看到）；本机热座直接交给热座会话 */
-  async function checkSubmit(cmd) {
+  /** onOk：确认成功后才做的事（比如发起检定后清空说明、取消「暗骰」勾选；失败时表单原样留着，再点一次还是暗骰） */
+  async function checkSubmit(cmd, onOk) {
     const net = window.OnlineGame && OnlineGame.isHost && OnlineGame.isHost();
     const ack = net ? await OnlineGame.submit(cmd) : HotseatGame.submit(cmd);
     if (ack && ack.ok === false) alert(ack.error);
+    else if (onOk) onOk();
     render();
   }
   function bindChecks(P) {
@@ -659,10 +997,16 @@
     P.querySelectorAll("[data-ck-unit]").forEach(el => { el.onchange = () => {
       const id = el.dataset.ckUnit; checkForm.units = checkForm.units.filter(x => x !== id); if (el.checked) checkForm.units.push(id);
     }; });
+    const sec = $("ck-secret"); if (sec) sec.onchange = () => { checkForm.secret = sec.checked; render(); };
+    P.querySelectorAll("[data-ck-req]").forEach(b => { b.onclick = () => {
+      const [decision, requestId] = b.dataset.ckReq.split(":");
+      checkSubmit(decision === "approve" ? { type: "checkDecide", requestId, decision, diff: checkForm.diff } : { type: "checkDecide", requestId, decision });
+    }; });
     $("ck-open").onclick = () => {
-      const ids = heroes().map(h => h.id).filter(id => checkForm.units.includes(id));
+      const pool = online() && checkForm.secret ? (state.units || []).filter(u => !u._removed && !u.weaponOf) : heroes();
+      const ids = pool.map(h => h.id).filter(id => checkForm.units.includes(id));
       if (!ids.length) { alert("至少选一名角色"); return; }
-      if (online()) { checkForm.note = ""; return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value }); }
+      if (online()) return checkSubmit({ type: "checkOpen", prof: checkForm.prof, diff: checkForm.diff, unitIds: ids, note: $("ck-note").value, secret: !!checkForm.secret }, () => { checkForm.note = ""; checkForm.secret = false; });
       const spec = checkPreview(ids); if (!spec) return;
       spec.note = $("ck-note").value; checkForm.note = "";
       localChecks.push(Object.assign(spec, { id: "check-" + Date.now(), status: "open", at: Date.now(), targets: spec.targets.map(t => Object.assign(t, { result: null })) }));
@@ -683,6 +1027,14 @@
       }
       render();
     }; });
+  }
+  /** 玩家主动申请的检定：主持人按上面选的难度同意（房主掷骰）或不同意 */
+  function checkRequestsHtml() {
+    if (!online()) return "";
+    const list = (HotseatGame.getView().checkRequests || []).filter(r => r.status === "pending");
+    if (!list.length) return "";
+    return `<h3>玩家申请的检定</h3>${list.map(r => `<div class="tr-row"><b>${esc(r.unitName)}</b> 想做「${esc(r.prof)}」检定${r.note ? "（" + esc(r.note) + "）" : ""}
+        <button class="g-btn small" data-ck-req="approve:${esc(r.id)}">按所选难度同意并掷骰</button><button class="g-btn small" data-ck-req="reject:${esc(r.id)}">不同意</button></div>`).join("")}`;
   }
   /** 联机时玩家申请的属性点：主持人同意才真正加上 */
   function attrRequestsHtml() {
@@ -738,9 +1090,20 @@
     const zones = battleTemplateZones(t.board);
     const zoneSel = (path, cur) => `<select data-bte="${path}">${options(zones.map(z => [z, z + " 区"]), cur)}</select>`;
     const lvTip = ' placeholder="随队" title="空着 = 跟着开战时的等级"';
+    // 个体值（杂兵、精英）：血量 / ATK 水平 −10～10%，空着 = 开战时随机
+    const ivTip = ' min="-10" max="10" step="1" placeholder="随机" title="个体值水平 −10～10（%），空着 = 开战时随机；首领不波动"';
+    // 富集与否（沙鱼才有）：随机 / 富集 / 普通
+    const enrSel = (path, e) => typeof SAND_FISH_KITS !== "undefined" && SAND_FISH_KITS.includes(e.preset)
+      ? ` 富集 <select data-bte="${path}.enriched">${options([["", "随机"], ["on", "富集"], ["off", "普通"]], e.enriched === true || e.enriched === "on" ? "on" : e.enriched === false || e.enriched === "off" ? "off" : "")}</select>` : "";
+    const ivInp = (path, e) => `<span class="bt-iv">个体值 血量 ${inp(path + ".iv.hp", e.iv ? e.iv.hp : null, 54, "number", ivTip)}% ATK ${inp(path + ".iv.atk", e.iv ? e.iv.atk : null, 54, "number", ivTip)}%</span>`;
+    // 种族（有种族的敌人才有）：空着 = 随机（固定种族的敌人照固定）；类人 = 四个大支里随机
+    const raceList = typeof ENEMY_RACES === "undefined" ? [] : ["人类", "红皮人", "类人"].concat(Object.keys(ENEMY_RACES).filter(r => !["人类", "红皮人"].includes(r)).reduce((a, r) => a.concat([r], (ENEMY_RACES[r].branches || []).map(b => r + "·" + b)), []));
+    const raceSel = (path, e) => typeof ENEMY_INFO !== "undefined" && ENEMY_INFO[e.preset] && (ENEMY_INFO[e.preset].races || ENEMY_INFO[e.preset].race)
+      ? ` 种族 <select data-bte="${path}.race" title="空着 = 随机；固定种族的敌人照固定">${options([["", ENEMY_INFO[e.preset].race ? "固定：" + ENEMY_INFO[e.preset].race : "随机"]].concat(raceList.map(r => [r, r])), e.race || "")}</select>` : "";
     const foes = t.enemies.map((e, j) => `<div class="tr-row">
-        <select data-bte="enemies.${j}.preset">${options(presets, e.preset)}</select>
+        <select data-bte="enemies.${j}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
         等级 ${inp(`enemies.${j}.level`, e.level, 60, "number", lvTip)} 区域 ${zoneSel(`enemies.${j}.zone`, e.zone)}
+        ${ivInp(`enemies.${j}`, e)}${raceSel(`enemies.${j}`, e)}${enrSel(`enemies.${j}`, e)}
         ${e.mechanics ? `<span class="tk-chip">机制：${esc(e.mechanics.map(btMechName).join("、"))}<button class="g-btn small" data-bt-act="clearMech:${j}" title="去掉这个敌人身上的首领机制">×</button></span>` : ""}
         <button class="g-btn small" data-bt-act="delEnemy:${j}">删</button></div>`).join("");
     const fields = zones.map(z => {
@@ -760,6 +1123,17 @@
         区域 ${zoneSel(`props.${j}.zone`, p.zone)} 等级 ${inp(`props.${j}.level`, p.level, 60, "number", lvTip)}
         阵营 <select data-bte="props.${j}.faction">${options([["player", "我方"], ["enemy", "敌方"]], p.faction)}</select>
         <button class="g-btn small" data-bt-act="delProp:${j}">删</button></div>`).join("");
+    // 援军：第几回合抵达，每个敌人进哪个区
+    const waves = (t.waves || []).map((w, j) => `<div class="tk-wave">
+        <div class="tr-row">第 ${j + 1} 波：开战后第 ${inp(`waves.${j}.turns`, w.turns, 50, "number", ' min="1"')} 回合开始时抵达（提前打光场上的敌人就下一回合到）
+          <button class="g-btn small" data-bt-act="delWave:${j}">删这波</button></div>
+        ${(w.enemies || []).map((e, k) => `<div class="tr-row">　<select data-bte="waves.${j}.enemies.${k}.preset" data-bte-rerender="1">${options(presets, e.preset)}</select>
+          等级 ${inp(`waves.${j}.enemies.${k}.level`, e.level, 60, "number", lvTip)} 进入 ${zoneSel(`waves.${j}.enemies.${k}.zone`, e.zone)} ${ivInp(`waves.${j}.enemies.${k}`, e)}${raceSel(`waves.${j}.enemies.${k}`, e)}${enrSel(`waves.${j}.enemies.${k}`, e)}
+          <button class="g-btn small" data-bt-act="delWaveEnemy:${j}-${k}">删</button></div>`).join("")}
+        <div class="tr-row">　<button class="g-btn small" data-bt-act="addWaveEnemy:${j}">＋ 援军敌人</button></div></div>`).join("");
+    const others = (typeof battleTemplateList === "function" ? battleTemplateList() : []).filter(x => x.id !== t.id).map(x => [x.id, x.name]);
+    const chain = (t.chain || []).map((id, j) => `<div class="tr-row">第 ${j + 2} 场：<select data-bte="chain.${j}">${options(others.some(o => o[0] === id) ? others : others.concat([[id, "（模板已删除）"]]), id)}</select>
+        <button class="g-btn small" data-bt-act="delChain:${j}">删</button></div>`).join("");
     return `<div class="tr-up tk-edit">
       <h4>编辑战斗模板</h4>
       <div class="tr-row">名称 ${inp("name", t.name, 180)} 类型 <select data-bte="tier">${options(Object.keys(BATTLE_TEMPLATE_TIERS).map(k => [k, BATTLE_TEMPLATE_TIERS[k]]), t.tier)}</select></div>
@@ -767,12 +1141,20 @@
       <div class="tr-row">战场 <select data-bte="board" data-bte-rerender="1">${options(BT_BOARDS, t.board)}</select>
         天气 <select data-bte="weather">${options(Object.keys(WX).map(k => [k, WX[k]]), t.weather)}</select>
         我方站在 ${zoneSel("playerZone", t.playerZone)}</div>
+      <div class="tr-row">我方阵营 <select data-bte="allyFaction">${options([["", "只有我方"]].concat((typeof battleTemplateFactions === "function" ? battleTemplateFactions() : []).map(f => [f, "和「" + f + "」同阵营"])), t.allyFaction || "")}</select>
+        <span class="r-hint">同阵营的敌人是友军：不打我方、我方也打不到它，它会和与它敌对的阵营（例如安保 ↔ 盗匪、异星生物）互相打；打赢不用打倒友军。敌对的阵营不管站在哪都会互相打。</span></div>
       <h4>敌人</h4>${foes || '<p class="r-hint">还没有敌人。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addEnemy">＋ 敌人</button></div>
       <h4>场地</h4>${fields}
       <h4>间隙</h4>${gaps}
       <h4>配置物</h4>${props || '<p class="r-hint">没有配置物。</p>'}
       <div class="tr-row"><button class="g-btn small" data-bt-act="addProp">＋ 配置物</button></div>
+      <h4>援军</h4>${waves || '<p class="r-hint">没有援军。</p>'}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addWave">＋ 一波援军</button></div>
+      <h4>连续战斗</h4>
+      <p class="r-hint">打完这一场（含援军）不结束，接着去下一个区域打下面的模板：场地、敌人换成那个模板的，天气、角色的血量和状态都不重置，仍算同一场战斗。</p>
+      ${chain || ""}
+      <div class="tr-row"><button class="g-btn small" data-bt-act="addChain" ${others.length ? "" : 'disabled title="先存好别的模板"'}>＋ 接一场</button></div>
       <h4>战斗掉落（打赢才给，直接进背包）</h4>
       <div class="tr-row">奎支 <input type="number" min="0" data-bt-dropkz="1" value="${(t.drops && t.drops.kuizhi) || 0}" style="width:90px">
         物品 <select id="bt-drop-item">${options(Object.keys(ITEM_CATALOG).map(id => [id, ITEM_CATALOG[id].name || id]))}</select>
@@ -799,9 +1181,10 @@
   function btSet(path, v) {
     const keys = path.split(".");
     let o = btEdit;
-    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
+    for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]] || (o[keys[i]] = {});
     const k = keys[keys.length - 1];
     if (k === "level") o[k] = v === "" ? null : Number(v);
+    else if (keys[keys.length - 2] === "iv") o[k] = v === "" || !Number.isFinite(Number(v)) ? null : Math.max(-10, Math.min(10, Math.round(Number(v))));
     else if (k === "zone" || k === "playerZone") o[k] = Number(v);
     else if (k === "board") o[k] = /^\d+$/.test(v) ? Number(v) : v;
     else o[k] = v;
@@ -821,6 +1204,16 @@
       case "clearMech": delete t.enemies[j].mechanics; break;
       case "addProp": t.props.push({ kind: "boom", zone: zones[Math.min(1, zones.length - 1)], level: null, faction: "player" }); break;
       case "delProp": t.props.splice(j, 1); break;
+      case "addWave": t.waves = t.waves || []; t.waves.push({ turns: 2, enemies: [{ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }] }); break;
+      case "delWave": (t.waves || []).splice(j, 1); break;
+      case "addWaveEnemy": if (t.waves && t.waves[j]) t.waves[j].enemies.push({ preset: "thug_knife", level: null, zone: zones[zones.length - 1] }); break;
+      case "delWaveEnemy": { const [a, b] = String(x).split("-").map(Number); if (t.waves && t.waves[a]) t.waves[a].enemies.splice(b, 1); break; }
+      case "addChain": {
+        const first = battleTemplateList().find(o => o.id !== t.id);
+        if (first) { t.chain = t.chain || []; t.chain.push(first.id); }
+        break;
+      }
+      case "delChain": (t.chain || []).splice(j, 1); break;
       case "addDrop": {
         t.drops = t.drops || { kuizhi: 0, items: [] };
         const id = $("bt-drop-item").value, qty = Math.max(1, Number($("bt-drop-qty").value) || 1);
@@ -897,8 +1290,10 @@
     if (tableSub || !window.HotseatGame) return;
     tableSub = true;
     HotseatGame.subscribe(() => {
-      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party"].includes(tab)) return;
-      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests]);
+      if (!HotseatGame.isActive() || !Screens.is("trpg") || !["checks", "party", "merchants", "bag", "shop", "workshop", "clinic"].includes(tab)) return;
+      // 玩家那边的检定、属性点申请、转账、在商人那里买 / 兑换：主持人面板跟着刷新
+      const v = HotseatGame.getView(), key = JSON.stringify([v.checks, v.attrRequests, LEDGER.purse, Number(state.kuizhi) || 0,
+        (LEDGER.merchants || []).map(m => m.rows.map(r => r.stock)), (LEDGER.workshop || {}).points || 0, bagList().map(x => x.id + x.qty), (TRPG.cyberRequests || []).map(r => r.id + r.status)]);
       if (key === tableKey) return;
       tableKey = key;
       const a = document.activeElement;
@@ -912,6 +1307,9 @@
     bindTasks(P);
     bindTemplates(P);
     bindChecks(P);
+    bindWorkshop(P);
+    bindMerchants(P);
+    bindClinic(P);
     bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
     $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
@@ -923,6 +1321,11 @@
     });
     on("tr-xp-go", () => act(ruleCommand("giveXp", { kits: $("tr-xp-who").value ? [$("tr-xp-who").value] : null, amount: $("tr-xp").value })));
     P.querySelectorAll("[data-attr]").forEach(b => { b.onclick = () => { const [k, a] = b.dataset.attr.split(":"); act(ruleCommand("spendAttr", { kit: k, attr: a })); }; });
+    P.querySelectorAll("[data-feat-go]").forEach(b => { b.onclick = () => {
+      const k = b.dataset.featGo;
+      const pick = P.querySelector(`[data-feat-pick="${k}"]`), full = P.querySelector(`[data-feat-full="${k}"]`);
+      if (pick && pick.value) act(ruleCommand("pickFeat", { kit: k, feat: pick.value, full: full ? full.value : null }));
+    }; });
     on("tr-reset", () => {
       if (!confirm(`清空存档「${slotName}」的进度？等级、经验、物资、奎支、时间、探索记录都会归零（名字保留）。`)) return;
       uiCommand("reset");
@@ -943,15 +1346,24 @@
       P.querySelectorAll("[data-sleep]").forEach(s => { sleep[s.dataset.sleep] = s.value; });
       const spit = {};
       P.querySelectorAll("[data-spit]").forEach(s => { spit[s.dataset.spit] = s.value; });
-      return { hours: Number($("tr-long-h").value) || 8, food, sleep, spit, force };
+      const ammo = {};
+      P.querySelectorAll("[data-ammo]").forEach(s => { ammo[s.dataset.ammo] = s.value; });
+      return { hours: Number($("tr-long-h").value) || 8, food, sleep, spit, ammo, force };
     };
-    on("tr-long", () => act(ruleCommand("longRest", { plan: restPlan(false) })));
-    on("tr-long-force", () => act(ruleCommand("longRest", { plan: restPlan(true) })));
+    // 长休先进营地（issue #52）：大家看看状态、聊聊天，主持人点「开始长休」才真的休息
+    on("tr-long", () => act(ruleCommand("campOpen", { plan: restPlan(false) })));
+    on("tr-long-force", () => act(ruleCommand("campOpen", { plan: restPlan(true) })));
     on("tr-restore", () => act(ruleCommand("restore")));
-    // 商店
+    // 商店（买 / 卖页签）
+    P.querySelectorAll("[data-ss-seller]").forEach(sel => { sel.onchange = () => { sellSeller = sel.value; render(); }; });
+    P.querySelectorAll("[data-ss-host]").forEach(h => { h.onclick = e => { if (window.ShopSellUI) ShopSellUI.handle(e, trpgSellSubmit, render); }; });
     const qty = (key) => (P.querySelector(`[data-qty="${key}"]`) || {}).value || 1;
     P.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("buy", { key: b.dataset.buy, qty: qty(b.dataset.buy), free: false })); }; });
     P.querySelectorAll("[data-give]").forEach(b => { b.onclick = () => act(ruleCommand("buy", { key: b.dataset.give, qty: qty(b.dataset.give), free: true })); });
+    // 钱包：由谁付、转账、公账平分
+    P.querySelectorAll("[data-payer]").forEach(s => { s.onchange = () => { payer = s.value; render(); }; });
+    on("tr-pay-go", () => act(ruleCommand("purseTransfer", { from: $("tr-pay-from").value, to: $("tr-pay-to").value, amount: Number($("tr-pay-n").value) || 0 })));
+    on("tr-pay-split", () => act(ruleCommand("purseSplit", {})));
     // 背包
     const why = () => ($("tr-kz-why") || {}).value || "";
     on("tr-kz-add", () => act(ruleCommand("adjustKuizhi", { amount: Math.abs(Number($("tr-kz").value) || 0), why: why() })));
@@ -989,6 +1401,7 @@
       };
     });
     P.querySelectorAll("[data-bp-rm]").forEach(b => { b.onclick = () => { const [owner, kit] = b.dataset.bpRm.split(":"); act(ruleCommand("removeBlueprint", { owner, kit })); }; });
+    const so = $("tr-smith-open"); if (so) so.onchange = () => act(ruleCommand("smithOpen", { on: so.checked }));
     P.querySelectorAll("[data-up]").forEach(b => {
       b.onclick = () => {
         const [owner, kit, mode] = b.dataset.up.split(":");
@@ -1147,6 +1560,9 @@
     // 没结算就回来（放弃这场战斗）：耐久、「长休一次」技能的使用记录等队伍档案也回到开战前（trpg.js · trpgAbandonBattle）；
     // 奎支、物品在下面重新摆队伍时按队伍记忆回滚
     if (state.combatStarted && !GAME.ended) trpgAbandonBattle(GAME.campaign);
+    // 还在半路的演出、敌人回合、等人回答的协助询问 / 分步选择、主持人手动操控敌人都停下作废（game.js · abandonBattle，#322）；
+    // 在这里（指令已经通过检查之后）才停：回不去的时候（房间暂停、不是主持人）战斗照常进行
+    if (GAME.abandonBattle) GAME.abandonBattle();
     TRPG.taskBattle = null;   // 没结算就回来：这场不算任务战斗
     undoStack = [];   // 战斗打完回来：之前的撤销点在战斗之前，撤回去会把整场战斗的结果一起抹掉，所以清空
     // 先切回探索画面再布置下一场：否则布置时战斗画面还在，开战前的大字会弹出来盖在探索画面上
@@ -1157,8 +1573,28 @@
     render();
   }
 
+  /** 离开跑团模式（存好这个团、关掉跑团规则）。战斗没打完时不存：空位里留的是开战前那份（toBattle 开战前存过），
+   *  免得把打到一半的血量、用掉的道具当成团的进度（报告 H1） */
+  function leaveTrpg() {
+    if (!TRPG.active) return false;
+    const midBattle = window.GAME && state.combatStarted && !GAME.ended && Screens.is("battle");
+    if (slot >= 0 && !midBattle) save();
+    TRPG.active = false; TRPG.taskBattle = null; slot = -1; undoStack = [];
+    document.body.classList.remove("trpg");
+    return true;
+  }
+  /** 跑团战斗里点顶栏「标题」：和「回到探索环节」一样先放弃 / 收好这场战斗，再存团、离开跑团模式（报告 H1：以前直接回标题，
+   *  TRPG.active 没清，之后同一页开的单局 / 每日挑战 / 训练场都按跑团规则走，还会写进跑团空位） */
+  function requestTitleFromBattle() {
+    if (window.GAME && GAME.depth > 0) return false;
+    if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。回到标题会放弃这场战斗（不结算，回到开战前的状态），团的进度照常保存。确定吗？")) return false;
+    uiCommand("backFromBattle");
+    uiCommand("title");
+    return true;
+  }
+  /** 战斗顶栏「探索环节」：没打完的先问一句。演出、敌人回合、等人回答询问时也能回去（#322：以前这些时候直接没反应），
+   *  正在跑的战斗流程由 backFromBattle 先停下 */
   function requestBackFromBattle() {
-    if (window.GAME && GAME.depth > 0) return;
     if (state.combatStarted && !GAME.ended && !confirm("战斗还没结束。直接回到探索环节会放弃这场战斗（不结算，回到开战前的状态）。确定吗？")) return;
     return uiCommand("backFromBattle");
   }
@@ -1179,7 +1615,7 @@
     delete(c) { trpgClearSlot(c.index); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     import(c) { if (!trpgValidSlot(c.data)) throw new Error("Invalid TRPG save"); trpgWriteSlot(c.index, c.data); if (c.index === slot) { slot = -1; TRPG.active = false; document.body.classList.remove("trpg"); } renderSlots(); },
     slots: openSlots,
-    title() { if (TRPG.active && slot >= 0) save(); TRPG.active = false; slot = -1; document.body.classList.remove("trpg"); Screens.show("title"); },
+    title() { leaveTrpg(); Screens.show("title"); },
     toBattle,
     backFromBattle,
     clearLog() { log = []; saveLog(); renderLog(); }
@@ -1236,6 +1672,11 @@
       if (!window.Bestiary) return;
       Bestiary.open({ partySize: Math.max(2, Math.min(4, heroes().filter(h => !h.dead).length)), sub: "跑团" });
     };
+    // 规则说明：图鉴的「规则」一本（rulebook.js）；在里面切到敌人图鉴时照样按队伍人数算
+    $("tr-rules").onclick = () => {
+      if (!window.Bestiary) return;
+      Bestiary.open({ mode: "rules", partySize: Math.max(2, Math.min(4, heroes().filter(h => !h.dead).length)), sub: "跑团" });
+    };
     $("tr-map").onclick = () => { if (window.WorldMap) WorldMap.open(mapOptions()); };
     $("tr-title").onclick = () => uiCommand("title");
     $("tr-copy").onclick = (e) => {
@@ -1263,7 +1704,7 @@
       refresh: () => mapOptions()
     };
   }
-  window.TrpgFlow = { mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+  window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
     refresh: render,
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
     restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }

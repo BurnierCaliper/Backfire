@@ -34,7 +34,7 @@
 }
 
 /* ---------- 共用：水泥墙底 ---------- */
-:is(.scr-title, .scr-party, .scr-run, .scr-trpg) {
+:is(.scr-title, .scr-party, .scr-run, .scr-trpg, .ol-skin) {
   background-color: var(--sk-concrete);
   background-image: var(--sk-tags), var(--sk-noise), var(--sk-stains), linear-gradient(180deg, #34302b, #1d1a17 70%);
   background-repeat: no-repeat, repeat, repeat, no-repeat;
@@ -44,13 +44,13 @@
 }
 
 /* 喷漆小节标题：马克笔字压在毛边色块上 */
-:is(.scr-party, .scr-run, .scr-trpg) h2 {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) h2 {
   position: relative; display: inline-block; isolation: isolate;
   margin: 4px 0 12px; padding: 4px 18px 6px 12px;
   font-family: var(--sk-tag); font-weight: 800; font-size: 32px; line-height: 1.1; letter-spacing: .02em;
   color: var(--sk-ink); transform: rotate(-1.2deg);
 }
-:is(.scr-party, .scr-run, .scr-trpg) h2::before {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) h2::before {
   content: ""; position: absolute; inset: -4px -10px -6px -8px; z-index: -1;
   background: var(--hl, var(--sk-hazard)); filter: url(#sk-spray);
   clip-path: polygon(1% 12%, 9% 0, 60% 6%, 99% 0, 97% 55%, 100% 92%, 70% 100%, 30% 94%, 2% 100%, 0 50%);
@@ -60,25 +60,25 @@
 .scr-run h2 .sub {
   font-family: var(--sk-body); font-size: 13px; letter-spacing: 0; color: var(--sk-ink); opacity: .85;
 }
-:is(.scr-party, .scr-run, .scr-trpg) :is(.r-sub, .r-panel > h3) {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) :is(.r-sub, .r-panel > h3) {
   font-family: var(--sk-tag); font-weight: 800; font-size: 24px; letter-spacing: .02em; color: var(--sk-canvas);
   text-shadow: 2px 2px 0 var(--sk-ink);
 }
 
 /* 铁皮面板：粗墨边 + 硬投影 + 噪点 */
-:is(.scr-party, .scr-run, .scr-trpg) :is(.rhero, .task, .hero-pick, .cl-hero, .levelup, details.smith, .run-log li, .tr-slot, .tr-pick, .tr-up, .tr-log) {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) :is(.rhero, .task, .hero-pick, .cl-hero, .levelup, details.smith, .run-log li, .tr-slot, .tr-pick, .tr-up, .tr-log) {
   background-color: var(--sk-steel);
   background-image: var(--sk-noise), linear-gradient(170deg, var(--sk-steel-hi), var(--sk-oil-2) 85%);
   border: 3px solid var(--sk-ink); border-radius: 0;
   box-shadow: 5px 6px 0 rgba(0, 0, 0, .5);
   color: var(--sk-canvas);
 }
-:is(.scr-party, .scr-run, .scr-trpg) :is(.r-hint, .t-meta, .hp-note, .hp-meta, .sp-head p, .cl-head span, .rh-w, .rh-row, .s-have, .shop-row small) {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) :is(.r-hint, .t-meta, .hp-note, .hp-meta, .sp-head p, .cl-head span, .rh-w, .rh-row, .s-have, .shop-row small) {
   color: var(--sk-muted);
 }
 
 /* ---------- 按钮 ---------- */
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn {
   position: relative; isolation: isolate;
   height: auto; min-height: 34px; padding: 5px 14px 6px;
   font-family: var(--sk-name); font-weight: 700; font-size: 15px; color: var(--sk-canvas);
@@ -86,33 +86,33 @@
   border: 3px solid var(--sk-ink); border-radius: 0;
   box-shadow: 3px 4px 0 rgba(0, 0, 0, .55);
 }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn:hover:not(:disabled) { background-color: var(--sk-steel-hi); }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55); }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn:disabled { opacity: .4; }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn small { color: var(--sk-muted); font-family: var(--sk-body); letter-spacing: 0; }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn:hover:not(:disabled) { background-color: var(--sk-steel-hi); }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: 1px 2px 0 rgba(0, 0, 0, .55); }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn:disabled { opacity: .4; }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn small { color: var(--sk-muted); font-family: var(--sk-body); letter-spacing: 0; }
 
 /* 主行动：黄色喷漆块 + 往下淌的漆 */
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main {
   --bg: var(--sk-hazard);
   color: var(--sk-ink); background: transparent; border-color: transparent; box-shadow: none;
   font-family: var(--sk-name); font-weight: 700; font-size: 20px; line-height: 1.05; 
   transform: rotate(-1.2deg);
 }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main::before {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main::before {
   content: ""; position: absolute; inset: -3px; z-index: -1; background: var(--bg); filter: url(#sk-spray);
   clip-path: polygon(3% 6%, 30% 0, 70% 4%, 97% 0, 100% 40%, 96% 100%, 50% 95%, 4% 100%, 0 60%);
   box-shadow: 0 0 0 3px var(--sk-ink);
 }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main::after {
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main::after {
   content: ""; position: absolute; z-index: -1; left: 22%; top: 88%; width: 5px; height: 12px; border-radius: 0 0 4px 4px;
   background: var(--bg); box-shadow: 26px -3px 0 -1px var(--bg), 44px 1px 0 0 var(--bg);
   pointer-events: none;
 }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main small { color: var(--sk-ink); opacity: .8; font-family: var(--sk-body); font-size: 12px; }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main:hover:not(:disabled) { background: transparent; filter: brightness(1.08); }
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.r-main:disabled::after { display: none; }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main small { color: var(--sk-ink); opacity: .8; font-family: var(--sk-body); font-size: 12px; }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main:hover:not(:disabled) { background: transparent; filter: brightness(1.08); }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.r-main:disabled::after { display: none; }
 /* 撤退 / 放弃之类的危险按钮 */
-:is(.scr-party, .scr-run, .scr-trpg) .g-btn.danger { --bg: var(--sk-blood); }
+:is(.scr-party, .scr-run, .scr-trpg, .ol-skin) .g-btn.danger { --bg: var(--sk-blood); }
 
 /* ---------- 标题界面 ---------- */
 .scr-title { font-family: var(--sk-label); }
@@ -135,7 +135,13 @@
   clip-path: polygon(2% 8%, 0 0, 100% 4%, 98% 40%, 100% 100%, 3% 94%, 0 55%);
   box-shadow: 0 2px 3px rgba(0, 0, 0, .4);
 }
-.t-menu { gap: 14px; }
+.t-menu, .t-list, .t-home { gap: 14px; }
+.t-btn.t-big { padding: 20px 20px 22px; }
+.t-btn.t-big b { font-size: 34px; }
+.t-btn.t-big small { font-size: 13.5px; }
+.t-panel-head h2 { font-family: var(--sk-name); font-size: 26px; color: var(--sk-canvas); text-shadow: 2px 2px 0 var(--sk-ink); }
+.t-back { font-family: var(--sk-label); background: var(--sk-steel); border: 2px solid var(--sk-ink); border-radius: 0; color: var(--sk-canvas); box-shadow: 3px 3px 0 rgba(0, 0, 0, .5); }
+.t-back:hover { color: var(--sk-hazard); border-color: var(--sk-ink); }
 .t-btn {
   gap: 2px; padding: 10px 16px 11px;
   background-color: var(--sk-steel);
@@ -318,7 +324,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 
 /* ---------- 手机 ---------- */
 @media (max-width: 820px) {
-  :is(.scr-party, .scr-run, .scr-trpg) h2 { font-size: 26px; }
+  :is(.scr-party, .scr-run, .scr-trpg, .ol-skin) h2 { font-size: 26px; }
   .run-top > b { font-size: 22px; }
   .task:nth-child(n), .hero-pick:nth-child(n), .t-btn:nth-child(n) { transform: none; }
 }
@@ -352,7 +358,35 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .pvtag, .banner { background: rgba(11, 8, 6, .94); border: 2px solid var(--sk-ink); box-shadow: 3px 4px 0 rgba(0, 0, 0, .5); }
 .pvtag .dmg { font-family: var(--sk-stencil); font-weight: 400; }
 .banner { font-family: var(--sk-name); font-weight: 700; font-size: 16px; }
-.phase-card { font-family: var(--sk-tag); font-weight: 800; font-size: 56px; letter-spacing: .2em; }
+/* 回合大字：一条喷漆色带从左边刷进来、停一下、再往右刷走（我方黄、敌方红），底下淌两道漆 */
+.phase-card {
+  margin: 0 auto; width: fit-content; max-width: calc(100% - 32px);
+  padding: 4px 40px 9px 46px;
+  font-family: var(--sk-tag); font-weight: 800; font-size: 50px; letter-spacing: .16em; line-height: 1.1;
+  color: var(--sk-ink); text-shadow: none; isolation: isolate;
+  rotate: -2.5deg;
+  animation: phaseSpray 1.05s cubic-bezier(.2, .8, .3, 1) forwards;
+}
+.phase-card::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: var(--pc, var(--sk-hazard)); filter: url(#sk-spray);
+  clip-path: polygon(1% 14%, 8% 2%, 55% 7%, 99% 0, 97% 52%, 100% 93%, 66% 100%, 28% 93%, 2% 100%, 0 52%);
+}
+.phase-card::after {
+  content: ""; position: absolute; z-index: -1; left: 18%; top: 88%; width: 7px; height: 18px; border-radius: 0 0 4px 4px;
+  background: var(--pc, var(--sk-hazard));
+  box-shadow: 52px -4px 0 -1px var(--pc, var(--sk-hazard)), 132px 3px 0 0 var(--pc, var(--sk-hazard));
+}
+.phase-card.player { --pc: var(--sk-hazard); color: var(--sk-ink); }
+.phase-card.enemy { --pc: var(--sk-blood); color: var(--sk-canvas); }
+@keyframes phaseSpray {
+  0% { opacity: 0; clip-path: inset(-30% 100% -60% 0); translate: -40px 0; }
+  16% { opacity: 1; clip-path: inset(-30% 0 -60% 0); translate: 0 0; }
+  80% { opacity: 1; clip-path: inset(-30% 0 -60% 0); translate: 8px 0; }
+  100% { opacity: 0; clip-path: inset(-30% 0 -60% 100%); translate: 46px 0; }
+}
+@keyframes phaseFade { 0%, 100% { opacity: 0; } 15%, 80% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .phase-card { animation: phaseFade 1s ease-out forwards; } }
 .stamp { font-family: var(--sk-tag); font-weight: 800; }
 .pop { font-family: var(--sk-stencil); font-weight: 400; }
 
@@ -446,6 +480,7 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .grade-badge b { font-family: var(--sk-stencil); font-style: normal; font-weight: 400; }
 
 @media (max-width: 820px) {
+  .phase-card { font-size: 30px; padding: 3px 22px 6px 26px; letter-spacing: .12em; }
   .g-top { background: var(--sk-oil); }
   .g-hud { background: var(--sk-oil); background-image: var(--sk-noise); box-shadow: 0 -6px 18px rgba(0, 0, 0, .45); }
   .g-hud::before { display: none; }
@@ -468,3 +503,24 @@ details.smith .sm-price, details.smith .sm-prog.ready { color: var(--sk-hazard);
 .g-app[data-weather="acid"] .pvbox { background-color: #2b3228; }
 .g-app[data-weather="glow"] .pvbox { background-color: #352830; }
 .g-app[data-weather="phase"] .pvbox { background-color: #2e3236; }
+
+/* ---------- 武器生物化按钮：和结束回合同款的喷漆按钮，放在它左边；颜色跟着角色的主属性 ---------- */
+.hud-summon { display: flex; flex: 0 0 auto; }
+.summonbtn {
+  position: relative; isolation: isolate; width: 118px; min-height: 52px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 6px 8px;
+  background: transparent; border: 0; color: var(--sk-ink); cursor: pointer;
+  font-family: var(--sk-name); font-weight: 700; font-size: 15px; line-height: 1.1;
+}
+.summonbtn[hidden] { display: none; }
+.summonbtn::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; background: var(--el, var(--sk-hazard)); filter: url(#sk-spray);
+  clip-path: polygon(4% 3%, 35% 0, 68% 5%, 96% 1%, 100% 45%, 97% 98%, 55% 94%, 3% 100%, 0 55%);
+}
+.summonbtn.back::before { clip-path: polygon(0 4%, 40% 0, 96% 3%, 100% 52%, 98% 100%, 45% 96%, 4% 99%, 1% 48%); }
+.summonbtn:hover:not([disabled]) { filter: brightness(1.1); }
+.summonbtn.armed { outline: 3px solid var(--sk-ink); outline-offset: -5px; }
+.summonbtn[disabled] { opacity: .4; cursor: default; }
+.summonbtn .sm-ic { width: 26px; height: 26px; display: block; }
+.summonbtn small { font-family: var(--sk-body); font-weight: 400; font-size: 11px; opacity: .75; }
+@media (max-width: 760px) { .summonbtn { width: auto; min-width: 96px; min-height: 46px; font-size: 13px; } }

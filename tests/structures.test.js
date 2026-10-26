@@ -222,37 +222,57 @@ test("评分：伤害 1 分 / 击破 10 分 / 溢出 1.5 分（向下取整）/ 
   assert.equal(st.battleStats[kolt.id].score, st.battleScore.total);
 });
 
-test("评分：评价按幕的分数线——第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +150，C 线以下是 D", () => {
+test("评分：分数线 = 固定线 × 0.65 + 基准分 × 倍数 × 0.35；固定线第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +150", () => {
   const { c, st } = field();
   c.resetBattleRecords();
+  const par = c.scorePar();
+  assert.ok(par > 0);
+  const want = (act, fixed, k) => Math.ceil(((fixed + 150 * (act - 1)) * 0.65 + par * k * 0.35) * (fixed >= 1000 ? 1.15 : 1) / 10 - 1e-9) * 10;   // B 及以上 ×1.15（克制大师）
+  const fixed = { C: [500, 0.7], B: [1000, 2.0], A: [1250, 2.6], S: [1500, 3.2], SS: [1750, 3.8], SSS: [2000, 4.4] };
+  for (const act of [1, 4]) {
+    st.scoreAct = act;
+    const lines = c.battleGrade().lines;
+    for (const g of Object.keys(fixed)) {
+      const v = lines.find(x => x[0] === g)[1];
+      assert.equal(v, want(act, ...fixed[g]), `第 ${act} 幕 ${g}`);
+      assert.equal(v % 10, 0, "分数线是 10 的倍数");
+    }
+  }
   const at = (act, score) => { st.scoreAct = act; st.battleScore.total = score; return c.battleGrade(); };
+  const C1 = want(1, 500, 0.7), S1 = want(1, 1500, 3.2), B2 = want(2, 1000, 2.0);
   assert.equal(at(1, 0).grade, "D");
-  assert.equal(at(1, 499).grade, "D");
-  assert.equal(at(1, 500).grade, "C");
-  assert.equal(at(1, 1000).grade, "B");
-  assert.equal(at(1, 1250).grade, "A");
-  assert.equal(at(1, 1500).grade, "S");
-  assert.equal(at(1, 1750).grade, "SS");
-  assert.equal(at(1, 2000).grade, "SSS");
-  assert.equal(at(1, 1500).xpMult, 2);
-  assert.equal(at(1, 2000).xpMult, 2, "SSS 不提高经验倍率");
-  assert.equal(at(1, 1000).xpMult, 1.2);
-  assert.equal(at(1, 600).xpMult, 1);
-  // 第 4 幕：各线 +450（每幕 +150）
-  assert.equal(at(4, 949).grade, "D");
-  assert.equal(at(4, 950).grade, "C");
-  assert.equal(at(4, 1450).grade, "B");
-  assert.equal(at(4, 1700).grade, "A");
-  assert.equal(at(4, 1950).grade, "S");
-  assert.equal(at(4, 2450).grade, "SSS");
-  const g = at(2, 700);
+  assert.equal(at(1, C1 - 1).grade, "D");
+  assert.equal(at(1, C1).grade, "C");
+  assert.equal(at(1, S1).grade, "S");
+  assert.equal(at(1, S1).xpMult, 2);
+  assert.equal(at(1, want(1, 2000, 4.4)).grade, "SSS");
+  assert.equal(at(1, want(1, 2000, 4.4)).xpMult, 2, "SSS 不提高经验倍率");
+  assert.equal(at(1, want(1, 1000, 2.0)).xpMult, 1.2);
+  const g = at(2, B2 - 1);
   assert.equal(g.grade, "C");
-  assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: 1150 });
+  assert.deepEqual(JSON.parse(JSON.stringify(g.next)), { grade: "B", need: B2 });
+  assert.equal(g.par, par);
+});
+
+test("评分：基准分只算敌人的血量和击杀分，击破、失衡不算（那是额外的漂亮操作）", () => {
+  const { c, st } = field();
+  c.resetBattleRecords();
+  const foes = st.units.filter(u => !u.isPlayer && u.kit !== "ironwall");
+  const hp = foes.reduce((a, u) => a + u.layers.reduce((b, l) => b + l.max, 0), 0);
+  const kill = foes.reduce((a, u) => a + c.S.SCORE_RULES.kill[c.enemyRankOf(u)], 0);
+  assert.equal(c.scorePar(), hp + kill);
+  // 架势再高，基准分也不变
+  c.resetBattleRecords();
+  foes.forEach(u => { u.defMax = 99; });
+  assert.equal(c.scorePar(), hp + kill);
   // 不在单局里（跑团 / 战斗原型）：按敌人等级对应到幕
   st.scoreAct = null;
   st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 10; });
   assert.equal(c.scoreAct(), 3);
+  // 战-L2：同一场里记住见过的最高等级；重新开战（resetBattleRecords）才重算
   st.units.filter(u => !u.isPlayer).forEach(u => { u.level = 2; });
+  assert.equal(c.scoreAct(), 3);
+  c.resetBattleRecords();
   assert.equal(c.scoreAct(), 1);
 });
 
@@ -293,7 +313,7 @@ test("评分：行动打进失衡 +50，协助格挡成功 +30，给其他友方
   ruby.layers.forEach(l => { l.current = Math.max(1, l.current - 5); });
   const r0 = c.totalHp(ruby);
   c.trackHealBy(kolt, () => c.healUnit(ruby, 3));
-  assert.equal(st.battleScore.parts.heal, c.totalHp(ruby) - r0);
+  assert.equal(st.battleScore.parts.heal, Math.floor((c.totalHp(ruby) - r0) * 1.5), "治疗每点 1.5 分");
 });
 
 test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
@@ -309,8 +329,8 @@ test("评分：协助格挡成功 +30（记在格挡的人身上）", () => {
   c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 50 });
   assert.equal(st.battleScore.parts.block, 30);
   assert.equal(st.battleScore.parts.action, 5, "格挡用掉 1 次附赠行动 +5");
-  assert.equal(st.battleScore.parts.blockSave, 5, "挡下的 5 点伤害算格挡减免");
-  assert.equal(st.battleStats[ruby.id].score, 40);
+  assert.equal(st.battleScore.parts.blockSave, 6, "挡下的 5 点伤害 × 1.2 算格挡减免");
+  assert.equal(st.battleStats[ruby.id].score, 41);
 });
 
 test("评分：触发属性克制的一击，伤害 / 击破 / 溢出 / 击杀分 +25%，单独记成「克制加成」", () => {

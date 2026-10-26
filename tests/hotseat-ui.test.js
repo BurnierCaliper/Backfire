@@ -20,6 +20,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function open(t, { mobile = false, mount = true } = {}) {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", error => errors.push(error.message));
@@ -155,9 +156,11 @@ test("D2 UI: 390px order bar offers touch movement, locks spent slots and reques
   assert.equal(await page.locator('[data-drag-actor="c"]').getAttribute("draggable"), "false");
   assert.equal(await page.locator('[data-drag-actor="b"]').getAttribute("draggable"), "false");
   assert.equal(await page.locator('[data-drag-actor="a"]').getAttribute("draggable"), "true");
-  assert.ok(await page.getByRole("button", { name: "夕夏前移", exact: true }).isDisabled());
-  await page.getByRole("button", { name: "夕夏后移", exact: true }).click();
-  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 2 });
+  // 行动阶段只留一个「延后」：挪到本回合最后；前移 / 后移和「空位 · 拖到这里」只在选顺序时出现
+  assert.equal(await page.getByRole("button", { name: "夕夏前移", exact: true }).count(), 0);
+  assert.equal(await page.locator(".hs-tail").count(), 0);
+  await page.getByRole("button", { name: "夕夏延后，移至末尾", exact: true }).click();
+  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 3 });
   await setView(page, { swap: { requestId: "swap-1", from: "a", to: "b", recipient: "p2" } });
   assert.equal(await page.locator('[data-hs="swapYes"]').count(), 0);
   await page.selectOption("#hs-player", "p2");
@@ -175,8 +178,8 @@ test("D2 UI: desktop drag and touch buttons send the same explicit move command"
   await setView(page, { phase: "acting", mode: "coop", currentUnitId: "a", order: [{ actor: "a", owner: "p1" }, { actor: "b", owner: "p2" }], canConfigure: false });
   await page.locator('[data-drag-actor="a"]').dragTo(page.locator('[data-drag-actor="b"]'));
   assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 1 });
-  await page.getByRole("button", { name: "夕夏后移", exact: true }).click();
-  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 1 });
+  await page.getByRole("button", { name: "夕夏延后，移至末尾", exact: true }).click();
+  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 2 });
   assert.deepEqual(o.errors, []);
 });
 
@@ -223,6 +226,7 @@ test("D2 UI: owner's generic choice carries distinct JSON extra and has no assis
 async function realBattle(t, count, mobile = false, mode = "coop") {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1400, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.setDefaultTimeout(10000);
@@ -363,7 +367,8 @@ test("D2 integration: real authority projects assistance only to the owner and c
   });
   assert.ok(await page.isVisible("#hs-reaction"));
   assert.equal(await page.locator('[data-hs="answer"]').count(), 0);
-  assert.match(await page.textContent("#hs-countdown"), /^(19|20) 秒$/);
+  // #186（主人定）：热座的协助询问不限时，不再显示倒计时
+  assert.equal(((await page.textContent("#hs-countdown").catch(() => "")) || "").trim(), "");
   await page.selectOption("#hs-player", "p2");
   assert.equal(await page.locator('[data-hs="answer"]').count(), 1);
   await page.click('[data-hs="answer"]');
@@ -424,6 +429,7 @@ test("D2 integration: switching to a non-host while retreat confirmation is open
 test("D2 integration: a non-GM's winning hit records the TRPG result, saves it and returns to exploration", async t => {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.setDefaultTimeout(10000);
@@ -431,7 +437,7 @@ test("D2 integration: a non-GM's winning hit records the TRPG result, saves it a
   page.on("dialog", dialog => dialog.accept(dialog.type() === "prompt" ? "D2 热座团" : undefined));
   await page.goto(pathToFileURL(path.resolve(__dirname, "..", "game.html")).href + "?hotseat=1");
   await page.click('[data-hs="closeConfig"]');
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-new="0"]');
   await page.evaluate(() => Commands.dispatch({ type: "trpg.ui", action: "party", kits: ["ruby", "helu"], level: 1 }));
   await page.click("#tr-fight");
@@ -473,4 +479,52 @@ test("D2 integration: a non-GM's winning hit records the TRPG result, saves it a
   await page.waitForSelector("#scr-trpg:not([hidden])");
   assert.match(await page.textContent("#tr-log"), /战斗胜利/);
   assert.deepEqual(errors, []);
+});
+
+test("查看战场：选行动顺序 / 回答询问时可以把卡片收起来看战场，底部「回到…」带倒计时；来了新的询问自动回来", async t => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await picking(page);
+  await page.waitForSelector("#hs-panel:not([hidden])");
+  await page.click('#hs-panel [data-hs="peek"]');
+  assert.equal(await page.isVisible("#hs-panel"), false, "卡片收起来，看得到战场");
+  assert.match(await page.textContent("#hs-peek-back"), /回到选择行动顺序/);
+  await page.click("#hs-peek-back");
+  assert.equal(await page.isVisible("#hs-panel"), true);
+  assert.equal(await page.isVisible("#hs-peek-back"), false);
+  // 询问：收起后底部写着还剩几秒
+  const deadline = Date.now() + 20000;
+  await setView(page, { phase: "enemy", ask: { id: "ask-9", kind: "block", title: "敌人攻击红玉", deadline, waitingNames: [], eligible: true, options: [{ helper: "a", label: "红玉格挡" }] } });
+  await page.click('#hs-reaction [data-hs="peek"]');
+  assert.equal(await page.isVisible("#hs-reaction"), false);
+  await page.waitForFunction(() => /回到敌人攻击红玉（还剩 (19|20) 秒）/.test(document.querySelector("#hs-peek-back").textContent));
+  // 新的询问来了：自动回到卡片，免得错过
+  await setView(page, { ask: { id: "ask-10", kind: "block", title: "敌人攻击绯秋", deadline, waitingNames: [], eligible: true, options: [{ helper: "a", label: "红玉格挡" }] } });
+  assert.equal(await page.isVisible("#hs-reaction"), true);
+  assert.equal(await page.isVisible("#hs-peek-back"), false);
+  assert.deepEqual(o.errors, []);
+});
+
+test("战斗中换位：点「换位」再点要去的格子；自己的武器人直接换，队友的格子发互换请求，锁定的格子不能去", async t => {
+  const o = await open(t, { mobile: true }); if (!o) return;
+  const { page } = o;
+  await setView(page, {
+    phase: "acting", mode: "coop", currentUnitId: "a", canConfigure: false,
+    order: [{ actor: "c", name: "红玉", owner: "p1", locked: true, done: true }, { actor: "a", name: "夕夏", owner: "p1", current: true },
+      { actor: "b", name: "绯秋", owner: "p2" }, { actor: "w", name: "柏妮尔", owner: "p1" }]
+  });
+  await page.getByRole("button", { name: "夕夏换位", exact: true }).click();
+  // 锁定的格子没有「换到这里」；武器人那一格是「换到这里」，队友那一格是「请求互换」
+  assert.equal(await page.locator('[data-order-index="0"] [data-hs="move"]').count(), 0);
+  assert.equal((await page.textContent('[data-order-index="3"] [data-hs="move"]')).trim(), "换到这里");
+  assert.equal((await page.textContent('[data-order-index="2"] [data-hs="move"]')).trim(), "请求互换");
+  await page.getByRole("button", { name: "夕夏和柏妮尔互换", exact: true }).click();
+  assert.deepEqual((await calls(page)).at(-1), { type: "orderMove", actor: "a", index: 3 });
+  // 换完回到普通状态；取消也能退出
+  assert.equal(await page.getByRole("button", { name: "夕夏换位", exact: true }).count(), 1);
+  await page.getByRole("button", { name: "夕夏换位", exact: true }).click();
+  await page.click('[data-hs="moveCancel"]');
+  assert.equal(await page.locator('[data-hs="move"]:has-text("换到这里")').count(), 0);
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, "手机宽度不横向溢出");
+  assert.deepEqual(o.errors, []);
 });

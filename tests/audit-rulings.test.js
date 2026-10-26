@@ -115,3 +115,54 @@ test("哔哩哩协助格挡成功：自身不掉架势，把这一击原本伤�
   assert.ok(foeHp - c.totalHp(foe) > 0, "进攻者挨了反伤");
   assert.match(S.logPages.flatMap(p => p.lines).map(l => l.text).join("\n"), /格挡反伤/);
 });
+
+test("临时护盾：施加的护盾并进护盾层、先挨打、不会在没挨打的回合回满；自带护盾照常回满", () => {
+  const { c, S, kit } = field(["chuan", "kolt"]);
+  const ch = kit("chuan");
+  const bili = c.spawnWeapon(ch, "bili");
+  bili.layers = [{ type: "shield", current: 10, max: 10 }, { type: "flesh", current: 50, max: 50, inner: true }];
+  c.addShieldLayer(bili, 5, false);
+  assert.equal(bili.layers.filter(l => l.type === "shield").length, 1, "并在同一个护盾层里，不算额外一层");
+  assert.equal(bili.layers[0].current, 15); assert.equal(bili.layers[0].max, 15);
+  c.applyTypedDot(bili, 8, "physical", [], "测试");
+  const sh = bili.layers[0];
+  assert.equal(sh.tempShield, 0, "临时护盾先扣");
+  assert.equal(sh.max, 10, "上限回到自带的 10");
+  // 下一回合没挨打：自带护盾回满到 10，临时护盾不回来（直接走回合开始的结算，不让敌人插手）
+  const nextRound = () => { S.units.forEach(u => { u.gotHitThisTurn = false; }); c.beginRound([]); };
+  nextRound();
+  assert.equal(bili.layers[0].current, 10);
+  assert.equal(bili.layers[0].max, 10);
+  // 本来没有护盾的单位：施加的护盾整层都是临时的，扣掉的不回，扣光就没了
+  const k = kit("kolt");
+  k.layers = [{ type: "flesh", current: 50, max: 50, inner: true }];
+  c.addShieldLayer(k, 6, false);
+  assert.equal(k.layers[0].type, "shield"); assert.equal(k.layers[0].max, 6);
+  c.applyTypedDot(k, 2, "physical", [], "测试");
+  const left = k.layers[0].current;
+  assert.ok(left < 6);
+  nextRound();
+  assert.equal(k.layers[0].current, left, "没挨打的回合也不回满");
+  c.applyTypedDot(k, 20, "physical", [], "测试");
+  nextRound();
+  assert.ok(!k.layers.some(l => l.type === "shield"), "临时护盾用完，护盾层去掉");
+});
+
+test("恶劣环境 + 末日叠加：天气 / 场地效果 ×4（高压场地伤害 ×1 / ×2 / ×2 / ×4）", () => {
+  const out = [];
+  for (const [apo, harsh] of [[false, false], [true, false], [false, true], [true, true]]) {
+    const { c, S, kit, foe } = field();
+    const k = kit("kolt");
+    k.zone = foe.zone = 1;
+    foe.layers = [{ type: "flesh", current: 999, max: 999 }];
+    c.setZoneField(1, "electric");
+    S.apocalypse = apo; foe.harshEnv = harsh;
+    assert.equal(c.envMult(foe), (apo ? 2 : 1) * (harsh ? 2 : 1));
+    c.S.RNG.install("HV4");
+    const h0 = c.totalHp(foe);
+    c.dealTo(k, foe, { atk: 0, mult: 0, flat: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
+    out.push(h0 - c.totalHp(foe) - 1);   // 减掉那 1 点攻击本身，剩下的是高压场地
+  }
+  assert.ok(out[0] > 0);
+  assert.deepEqual(out, [out[0], out[0] * 2, out[0] * 2, out[0] * 4]);
+});

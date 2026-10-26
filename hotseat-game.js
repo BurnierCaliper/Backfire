@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "skillRoll", "showTitle"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -23,6 +23,33 @@
   function refresh() { notify(); if (root.GAME && document.getElementById("g-party")) GAME.refresh(); }
   function hostOnly(id) { if (id !== gm()) fail("只有房主可以执行此操作"); }
   function canConfigure() { return !choice && !session?.snapshot().ask && (!state.combatStarted || !!(root.GAME && GAME.ended)); }
+  // 单局战斗外查询会把队伍重摆上场（rogue.js · withParty），单位 id 会变，而存档里的分配还是旧 id。
+  // 恢复时只保留还在场上的英雄，其余按职业沿用原来的操控者，否则 setAssignments 报「只能分配英雄角色」、房主恢复失败
+  function restorable(saved) {
+    const out = copy(saved || {}), list = heroes(), ids = new Set(list.map(u => u.id)), assignments = {};
+    for (const [id, owner] of Object.entries(out.assignments || {})) if (ids.has(id)) assignments[id] = owner;
+    const byKit = kitAssignments(); for (const u of list) if (!assignments[u.id] && byKit[u.id]) assignments[u.id] = byKit[u.id];
+    out.assignments = assignments; return out;
+  }
+  // 场上按职业（kit）该归谁：和恢复存档时（restorable）用同一份 ownerByKit，两处结论一致
+  function kitAssignments() {
+    const out = {};
+    for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) out[u.id] = ownerByKit[u.kit];
+    return out;
+  }
+  // 单局战斗外的查询 / 开战会重摆队伍（rogue.js · withParty → BattleSim.setup），单位 id 全换了，
+  // 会话里按 id 记的分配却还是旧的 → 玩家操作自己角色时被判「不是你的角色」。开战布好场后（还没开打）按 kit 重新对齐。
+  // 战斗外不要每次都对齐：发视图本身就会 withParty 重摆，对齐→广播→重摆会无限循环；战斗外的单局操作按 kit 判断，不看这份分配
+  function syncAssignments() {
+    if (!active() || !session) return false;
+    const snap = session.snapshot();
+    if (!["setup", "ended"].includes(snap.phase)) return false;
+    const want = kitAssignments(), held = snap.assignments || {};
+    const keys = o => Object.keys(o).sort().map(k => k + "=" + o[k]).join("|");
+    if (keys(want) === keys(held)) return false;
+    executing++; try { session.setAssignments(want); } finally { executing--; }
+    authority.broadcast(); refresh(); return true;
+  }
   function setupSession() {
     if (authority) authority.close();
     clients = new Map();
@@ -50,9 +77,14 @@
       if (new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !id)) fail("操作者编号必须唯一");
       const assignments = value.assignments || {}, list = heroes();
       if (Object.keys(assignments).some(id => !list.some(u => u.id === id) || !ids.includes(assignments[id]))) fail("角色分配无效");
-      if (network && (value.mode !== "trpg" || value.players.filter(p => p.gm).length !== 1 || value.players.some(p => !p.gm && list.filter(u => assignments[u.id] === p.id).length > 1))) fail("每名在线玩家最多操控一名角色，未分配角色由主持人操作");
+      // #165 的「每名在线玩家最多一名角色」已取消（策划定）：主持人可以把几名角色分给同一名玩家
+      if (network && (value.mode !== "trpg" || value.players.filter(p => p.gm).length !== 1)) fail("在线跑团需要恰好一名主持人");
       if (value.mode === "coop" && (list.length !== ids.length || ids.some(id => list.filter(u => assignments[u.id] === id).length !== 1))) fail("合作模式需要每名操作者恰好一名角色，请先调整队伍");
-      config = copy(value); ownerByKit = {}; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
+      // 不在场的角色（这场战斗没上、被收起来）保留原来的操控者：以前这里整份清空重建，
+      // 有人进 / 出房间时（online-game.js · setupOperators 只按场上英雄重新配置）不在场的角色就被悄悄收回给主持人
+      const prevOwners = ownerByKit, keep = {}, onField = new Set(list.map(u => u.kit)), nextGm = (value.players.find(p => p.gm) || value.players[0]).id;
+      for (const kit of Object.keys(prevOwners || {})) if (!onField.has(kit) && ids.includes(prevOwners[kit]) && prevOwners[kit] !== nextGm) keep[kit] = prevOwners[kit];
+      config = copy(value); ownerByKit = keep; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
       if (!ids.includes(playerId)) playerId = gm();
       setupSession(); configured = true; notice = "";
       state.history = []; GAME.undo = []; GAME.disarm(); refresh();
@@ -66,15 +98,17 @@
       const sameExtra = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
       const labelOf = h => (detail.options || []).find(o => o.helper === h.unitId && sameExtra(o.extra, h.extra)) ||
         (detail.options || []).find(o => o.helper === h.unitId) || { label: h.unitName, sub: "" };
-      base.ask = { id: ask.id, kind: ask.kind, title: detail.title || "协助询问", deadline: ask.deadline,
+      // remainingMs：发出这一包时还剩多少毫秒。联机玩家按收到的时刻用自己的钟算倒计时（deadline 是房主电脑的钟，两边不一定对得上）
+      base.ask = { id: ask.id, kind: ask.kind, title: detail.title || "协助询问", deadline: ask.deadline, remainingMs: Number(ask.deadline) > 0 ? Math.max(0, ask.deadline - Date.now()) : null,
         waitingNames: ask.waiting.map(p => p.operatorName), eligible: ask.eligible, declined: ask.declined,
         options: (detail.options || []).filter(o => ask.options.some(u => u.unitId === o.helper)),
         // 协助攻击举手：打出失衡的人（chooser）看得到谁举了手并从中选人；举手的人看得到自己举的是哪一个
         chooserName: ask.chooserName || null, isChooser: !!ask.isChooser, raised: ask.raised || null,
         hands: ask.chooser ? ask.hands.map(h => { const o = labelOf(h); return { helper: h.unitId, label: o.label, sub: o.sub || "", operatorName: h.operatorName, extra: copy(h.extra || {}) }; }) : [] };
     }
-    if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null,
-      eligible: id === choice.owner, declined: false, waitingNames: [config.players.find(p => p.id === choice.owner).name],
+    // field：有选项对应战场上的单位 → 回答的人在战场上点，不弹整屏卡片
+    if (choice) base.ask = { id: choice.id, kind: "choice", title: choice.title, deadline: null, field: choice.options.some(o => !!o.target),
+      eligible: id === choice.owner, declined: false, waitingNames: [(config.players.find(p => p.id === choice.owner) || {}).name || "主持人"],
       options: id === choice.owner ? choice.options : [] };
     return base;
   }
@@ -87,7 +121,9 @@
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
       ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: r.roll ? (typeof r.roll === "object" ? { tier: r.roll.tier || null } : true) : false, tier: r.roll && r.roll.tier || null, secret: !!r.secret, title: !!r.title })),
-      title: s?.table?.title ? copy(s.table.title) : null, checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []),
+      title: s?.table?.title ? copy(s.table.title) : null, checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []), checkRequests: copy(s?.table?.checkReqs || []),
+      // 跑团地图：主持人在地图上标的队伍位置（玩家只能看，不能改）
+      map: typeof LEDGER !== "undefined" && LEDGER ? { place: LEDGER.place || null, x: LEDGER.placePos ? LEDGER.placePos.x : null, y: LEDGER.placePos ? LEDGER.placePos.y : null } : null,
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
   const getView = () => getViewFor(playerId);
@@ -108,7 +144,9 @@
       return;
     }
     if (cmd.type === "chat" || tableTypes.has(cmd.type)) return;   // 小队聊天、检定、属性点申请不受询问、战斗阶段影响
-    if (choice || session.snapshot().ask) fail("正在等待其他操作者回应");
+    // 主持人放弃这场战斗回到探索：等人回答的询问 / 分步选择由它收回（trpg-ui.js · backFromBattle → abandon），不用等（#322）
+    const leaving = cmd.type === "trpg.ui" && cmd.action === "backFromBattle";
+    if ((choice || session.snapshot().ask) && !leaving) fail("正在等待其他操作者回应");
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {
       if (GAME.depth > 0 && !GAME.tape) fail("正在播放行动，请稍候");
@@ -121,6 +159,8 @@
       return;
     }
     if (cmd.type === "retreat") { hostOnly(id); if (!state.combatStarted || state.combatPhase !== "player" || GAME.ended || !["selecting", "acting"].includes(session.snapshot().phase)) fail("现在不能撤退"); return; }
+    // 联机单局（online-rogue.js）：单局的规则指令和开战 / 结算只由房主的流程执行；玩家的投票、需求、个人购买另走房主校验
+    if (["run", "run.query", "run.session", "battle.setupRogue", "battle.continue", "screen"].includes(cmd.type)) { hostOnly(id); return; }
     if (["battle.panel", "battle.setup", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
       hostOnly(id);
       if (cmd.type === "calc" && ["move", "skill", "skillPick", "skillCancel", "standUp", "blockAnswer", "assistAnswer", "koltSwap", "startCombat", "endTurn", "blade"].includes(cmd.action)) fail("热座战斗动作必须使用当前单位的技能与询问入口");
@@ -143,7 +183,7 @@
   function afterCommand(cmd) {
     executing++;
     try {
-      if (cmd.type === "battle.setup" || cmd.type === "trpg.ui" && !state.combatStarted) {
+      if (cmd.type === "battle.setup" || cmd.type === "battle.setupRogue" || cmd.type === "trpg.ui" && !state.combatStarted) {
         session.reset(); const assignments = {}; for (const u of heroes()) assignments[u.id] = ownerByKit[u.kit] || gm(); session.setAssignments(assignments);
       }
       session.reconcile();
@@ -181,7 +221,7 @@
       const breaker = kind === "assist" && network && job.breakerId ? state.units.find(u => u.id === job.breakerId) : null;
       const breakerKit = breaker && breaker.isPlayer ? (breaker.weaponOf || breaker.kit) : null;
       const chooser = breakerKit ? ownerByKit[breakerKit] || gm() : null;
-      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser,
+      const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser, untimed: !network,
         ...(sameAsk ? { remainingMs: previous.remainingMs } : {}) });
       if (sameAsk) {
         const waiting = new Set(previous.waiting.map(p => p.operatorId));
@@ -192,11 +232,19 @@
     });
   }
   let choiceNo = 0;
+  /** 选项对应战场上的哪个单位（value 是单位 id，或 { targetId }）：联机玩家端可以直接在战场上点它 */
+  function choiceTarget(o) {
+    const v = o && o.value, id = v && typeof v === "object" ? v.targetId : v;
+    return typeof id === "string" && ((typeof state !== "undefined" && state.units) || []).some(u => u.id === id) ? id : null;
+  }
   function ownedChoice(unit, title, options) {
     return new Promise(resolve => {
-      choice = { id: "choice-" + (++choiceNo), title, owner: session.ownerOf(unit.id),
-        options: options.map((o, index) => ({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } })),
-        finish: index => resolve(options[index].value) };
+      // 问的单位倒地 / 不在顺序名单里时 ownerOf 是 null：交给按角色分配的人，再不行交给主持人（以前 owner 是 null，画面一算就出错，整局卡死）
+      const owner = session.ownerOf(unit.id) || ownerByKit[unit.weaponOf || unit.kit] || gm();
+      choice = { id: "choice-" + (++choiceNo), title, owner,
+        options: options.map((o, index) => Object.assign({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } }, choiceTarget(o) ? { target: choiceTarget(o) } : {})),
+        finish: index => resolve(options[index].value),
+        drop: () => resolve(null) };   // 主持人放弃了这场战斗（abandon）：等着的流程收到 null，看到战斗已经放弃就退出
       authority.broadcast(); refresh();
     });
   }
@@ -207,15 +255,17 @@
     if (!K || typeof c.prof !== "string" || !diffs.includes(c.diff) || !Array.isArray(c.unitIds) || !c.unitIds.length) fail("检定需要熟练项、难度和至少一名角色");
     const prof = profName(c.prof);
     if (!PROF_LIST.includes(prof)) fail("没有这个熟练项");
+    // 暗骰检定（secret）：主持人可以给任何在场单位掷（敌人、中立、NPC）；没有角色卡的按没有熟练算
+    const pool = c.secret ? (state.units || []).filter(u => u && !u._removed && !u.weaponOf) : heroes();
     const targets = c.unitIds.map(id => {
-      const u = heroes().find(h => h.id === id); if (!u) fail("没有这名角色");
+      const u = pool.find(h => h.id === id); if (!u) fail("没有这名角色");
       const p = heroProfile(u.kit), level = Math.min(PROF_MAX, Number(((p && p.profs) || {})[prof] || ((p && p.profs) || {})[c.prof]) || 0);
       const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
       const perks = checkPerksFor(u.kit, prof, hp * 2 < max);
       const base = K.chance[level][diffs.indexOf(c.diff)] || 0;
       return { unitId: u.id, name: u.name, base, adv: perks.adv, dis: perks.dis, reroll: perks.reroll, level, perkText: perks.text };
     });
-    return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets };
+    return { prof, diff: c.diff, diffName: K.diffs[c.diff].name, note: typeof c.note === "string" ? c.note : "", targets, secret: !!c.secret };
   }
   /** 按钮掷骰：这名角色这项熟练的等级、种族优劣势、各档成功线（手册成功率表 × 100） */
   function rollSpec(c) {
@@ -239,6 +289,14 @@
     if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
     return u;
   }
+  /** 跑团工匠 / 工坊的消息：必须是跑团模式；玩家只能用自己操控的角色（主持人哪个都行），返回角色 kit */
+  function trpgOwnKit(rawKit, deny) {
+    if (typeof TRPG === "undefined" || !TRPG.active || typeof trpgSmithUpgrade !== "function") fail("只有跑团模式有工匠和工坊");
+    const kit = String(rawKit || "");
+    const own = heroes().find(u => u.kit === kit);
+    if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail(deny);
+    return kit;
+  }
   const orderHandlers = {
     orderPick: c => session.pick(sender, c.actor, c.index), orderConfirm: () => session.confirm(sender),
     orderStart: () => session.forceStart(sender), orderMove: c => session.move(sender, c.actor, c.index),
@@ -248,8 +306,136 @@
     checkClose: c => session.closeCheck(sender, c.checkId),
     attrRequest: c => { const u = attrUnit(c); return session.requestAttr(sender, u.id, c.attr, u.name); },
     attrDecide: c => session.decideAttr(sender, c.requestId, c.decision),
+    // 主动发起检定：玩家提（checkRequest），主持人定难度同意（checkDecide）后房主掷骰
+    checkRequest: c => { const u = heroes().find(h => h.id === c.unitId); if (!u) fail("没有这名角色"); const prof = profName(String(c.prof || "")); if (!PROF_LIST.includes(prof)) fail("没有这个熟练项"); return session.requestCheck(sender, u.id, prof, typeof c.note === "string" ? c.note : "", u.name); },
+    checkDecide: c => {
+      if (c.decision !== "approve") return session.decideCheck(sender, c.requestId, c.decision);
+      const req = (session.snapshot().table.checkReqs || []).find(r => r.id === c.requestId); if (!req) fail("没有这条检定申请");
+      return session.decideCheck(sender, c.requestId, "approve", checkSpec({ prof: req.prof, diff: c.diff, unitIds: [req.unitId], note: req.note }));
+    },
     skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     showTitle: c => session.showTitle(sender, c),
+    // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到
+    // 跑团商人（trpg-merchants.js）：只能在主持人开着的那家店买；钱从自己角色的钱包出（主持人可以替任何人付）
+    shopBuy: c => {
+      if (typeof trpgMerchantBuy !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const open = trpgMerchantOpenNow();
+      if (!open || open.id !== c.merchant) fail("这家店已经关门了");
+      const payer = String(c.payer || "");
+      if (sender !== gm()) {
+        const own = heroes().find(u => u.kit === payer);
+        if (!own || session.ownerOf(own.id) !== sender) fail("只能用自己角色的钱包付钱");
+      }
+      const notes = trpgMerchantBuy(open.id, c.key, c.qty, payer || null);
+      if (!trpgMerchantOk(notes)) fail(notes[0] || "买不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🛒 " + notes.join(" "));
+      return { notes };
+    },
+    // 跑团诊所（trpg.js · trpgCyberRequest）：玩家只能给自己操控的角色申请义体改造，主持人在「诊所」页同意后才生效
+    cyberRequest: c => {
+      if (typeof trpgCyberRequest !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色申请改造");
+      const name = (config.players.find(p => p.id === sender) || {}).name || "";
+      const out = trpgCyberRequest(kit, c.plan, sender, name);
+      if (out.error) fail(out.error);
+      session.chat(sender, `🦾 申请给 ${own.name} 做义体改造（${out.request.cost} 奎支），等主持人同意`);
+      return { request: out.request.id };
+    },
+    // 跑团诊所 · 义体（trpg.js · trpgCyberwareInstall / Remove）：只能给自己操控的角色装 / 拆，钱从这名角色的钱包出；主持人哪个都能动
+    cyberwareInstall: c => {
+      if (typeof trpgCyberwareInstall !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || ""), id = String(c.id || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色装、拆义体");
+      let notes;
+      try { notes = false ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🦾 " + notes.join(" "));
+      return { notes };
+    },
+    cyberwareRemove: c => {
+      if (typeof trpgCyberwareInstall !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有诊所");
+      const kit = String(c.kit || ""), id = String(c.id || "");
+      const own = heroes().find(u => u.kit === kit);
+      if (!own || (sender !== gm() && session.ownerOf(own.id) !== sender)) fail("只能给自己的角色装、拆义体");
+      let notes;
+      try { notes = true ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🦾 " + notes.join(" "));
+      return { notes };
+    },
+    // 跑团工匠 / 工坊（trpg.js · trpgSmithUpgrade / trpgWorkshopCraft / trpgWorkshopSalvage）：主持人开了才能用；只能动自己操控的角色，加工费从这名角色的钱包出；主持人哪个都能动
+    smithUpgrade: c => {
+      const kit = trpgOwnKit(c.kit, "只能给自己的角色升级武器");
+      let notes;
+      try { notes = trpgSmithUpgrade(kit, String(c.weapon || ""), String(c.mode || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🔨 " + notes.join(" "));
+      return { notes };
+    },
+    workshopCraft: c => {
+      const kit = trpgOwnKit(c.kit, "只能让自己的角色制作");
+      let notes;
+      try { notes = trpgWorkshopCraft(kit, String(c.item || ""), c.helper ? String(c.helper) : null); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "⚙ " + notes.join(" "));
+      return { notes };
+    },
+    workshopSalvage: c => {
+      const kit = trpgOwnKit(c.kit, "只能让自己的角色拆解");
+      let notes;
+      try { notes = trpgWorkshopSalvage(kit, String(c.item || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "⚙ " + notes.join(" "));
+      return { notes };
+    },
+    // 跑团卖东西 / 回购（shop-sell.js）：要有开着的店；玩家只能以自己操控的角色卖（钱进队伍公账）、回购（从自己钱包付）；主持人哪个都能
+    shopSell: c => {
+      if (typeof trpgShopSell !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能以自己的角色卖东西"); }
+      let out;
+      try { out = trpgShopSell(kit || null, String(c.id || ""), c.qty, c.owner); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
+    },
+    shopBuyback: c => {
+      if (typeof trpgShopBuyback !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const kit = String(c.kit || "");
+      if (sender !== gm()) { const own = heroes().find(u => u.kit === kit); if (!own || session.ownerOf(own.id) !== sender) fail("只能用自己角色的钱包回购"); }
+      let out;
+      try { out = trpgShopBuyback(kit || null, String(c.token || "")); } catch (e) { fail(e.message); }
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + out.msg);
+      return out;
+    },
+    shopRedeem: c => {
+      if (typeof trpgMerchantRedeem !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有商人");
+      const open = trpgMerchantOpenNow();
+      if (!open || open.id !== c.merchant) fail("这家店已经关门了");
+      const notes = trpgMerchantRedeem(open.id, c.item);
+      if (!trpgMerchantOk(notes)) fail(notes[0] || "换不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "🎟 " + notes.join(" "));
+      return { notes };
+    },
+    purseTransfer: c => {
+      if (typeof trpgPurseTransfer !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有跑团模式有私人钱包");
+      const from = String(c.from || ""), to = String(c.to || "");
+      if (sender !== gm()) {
+        const own = heroes().find(u => u.kit === from);
+        if (!own || session.ownerOf(own.id) !== sender) fail("只能从自己角色的钱包转钱");
+      }
+      const notes = trpgPurseTransfer(from, to, c.amount);
+      if (!/^.+ 转给 /.test(notes[0] || "")) fail(notes[0] || "转不了");
+      if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+      session.chat(sender, "💰 " + notes[0]);
+      return { notes };
+    },
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
   };
   for (const [type, fn] of Object.entries(orderHandlers)) {
@@ -275,7 +461,7 @@
   if (root.addEventListener) root.addEventListener("error", event => {
     if (active() && event.error?.code === "HOTSEAT_REJECT") { notice = event.error.message; notify(); event.preventDefault(); }
   });
-  root.HotseatGame = { getView, getViewFor, configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
+  root.HotseatGame = { getView, getViewFor, syncAssignments, assignments: () => (active() && session ? copy(session.snapshot().assignments || {}) : {}), configure, submit, isActive: active, isRequested: () => enabled && !state.solo, checkSpec, rollSpec,
     enableOnline(value) { network = true; enabled = true; if (!configured) playerId = value.players.find(p => p.gm).id; return configure(value); },
     isNetwork: () => network,
     receiveFrom(id, cmd) { return this.withOperator(id, () => submit(cmd)); },
@@ -283,11 +469,53 @@
     assertActionFrom(id, actor) { return session.assertAction(id, actor); },
     extendAsk(ms) { session?.extendAsk(ms); },
     validateFrom(id, cmd) { return validate(cmd, id); },
+    /** 主持人接管某名玩家的角色（玩家掉线时，战斗中也能用）；之后由主持人在本机替他行动 */
+    takeOver(id) {
+      if (!active()) fail("热座尚未配置");
+      if (id === gm() || !config.players.some(p => p.id === id)) fail("没有这名玩家");
+      session.takeOver(gm(), id);
+      for (const kit of Object.keys(ownerByKit)) if (ownerByKit[kit] === id) ownerByKit[kit] = gm();
+      if (config.assignments) for (const u of Object.keys(config.assignments)) if (config.assignments[u] === id) delete config.assignments[u];
+      if (choice && choice.owner === id) choice.owner = gm();
+      authority.broadcast(); refresh();
+      return { ok: true };
+    },
+    /** 战斗中能不能转交角色：{ ok, reason }（按钮灰掉时把 reason 写在旁边） */
+    transferState() {
+      if (!active()) return { ok: false, reason: "热座尚未配置" };
+      if (choice) return { ok: false, reason: "有分步选择在等人回答，回答完才能转交" };
+      return session.transferState();
+    },
+    /** 主持人把英雄（连同武器人）转交给另一名操作者；toId 为主持人 = 收回。联机一名玩家可以操控几名角色（#165 的限制已取消） */
+    transferHero(heroId, toId) {
+      const gate = this.transferState();
+      if (!gate.ok) fail(gate.reason);
+      const hero = heroes().find(u => u.id === heroId);
+      if (!hero) fail("只能转交英雄角色");
+      if (!config.players.some(p => p.id === toId)) fail("没有这名玩家");
+      session.transfer(gm(), heroId, toId);
+      ownerByKit[hero.kit] = toId;
+      if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }
+      authority.broadcast(); refresh();
+      return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };
+    },
+    /** 主持人放弃这场战斗、回到探索（game.js · abandonBattle，#322）：收回等人回答的协助询问、分步选择——
+     *  等着的流程收到「没人回答」，看到战斗已经放弃就直接退出；行动顺序回到战前（交回探索后 afterCommand 再按角色对齐分配） */
+    abandon() {
+      if (!active()) return false;
+      const pending = choice;
+      choice = null; restoredAsk = null; newRoundSpends = null;
+      executing++;
+      try { session.reset(); } finally { executing--; }
+      if (pending) pending.drop();
+      authority.broadcast(); refresh();
+      return true;
+    },
     checkpoint(now = Date.now()) { if (!active()) return null; const snapshot = session.checkpoint(); return copy({ config, ownerByKit, playerId, session: snapshot,
-      askRemainingMs: snapshot.ask ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
+      askRemainingMs: snapshot.ask && snapshot.ask.deadline != null ? Math.max(0, snapshot.ask.deadline - now) : null, newRoundSpends, choiceNo, openingChoice: !!choice && !state.combatStarted }); },
     restoreOnline(saved) { network = enabled = true; configured = false; config = copy(saved.config); ownerByKit = copy(saved.ownerByKit); playerId = saved.playerId; newRoundSpends = saved.newRoundSpends || null; choiceNo = saved.choiceNo || 0;
       restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
-      setupSession(); configured = true; executing++; try { session.restore(saved.session); } finally { executing--; } authority.broadcast(); refresh(); },
+      setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reason, beginRound, system, requestAsk, ownedChoice,
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,

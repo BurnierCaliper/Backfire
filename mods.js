@@ -62,13 +62,15 @@ function bpUnlocked(kit) {
 
 /** 角色的被动效果是否生效（摩尔玛的 WAM-56 / MR-2165 会放弃角色自身的被动）。
  *  只要角色名下任何一把武器装了这类图纸就放弃，武器人上场时也一样（被动属于角色本人）。
- *  按作者的角色卡，十名角色的两个被动都接上了（放弃时按被动原文整个失效）：
+ *  按作者的角色卡，下面十名角色的两个被动都接上了（放弃时按被动原文整个失效）：
  *    夕夏  启动引擎（引擎启动不了）/ 背水一战          川川  发电站（不积攒电能）/ 磁场护盾
  *    诺拉  冷气注射（没有额外冰伤和刺入）/ 双相冲动    瑞比  纳米科技（不获得纳米）/ 银翼（进不了机甲）
  *    结人  研磨机（豆子转不成咖啡液）/ 思念（没有牵挂）  绯秋  佩刀（鳴門不再 +1 击破）/ 剑术（一直拔刀）
  *    灯    决一死战 / 圣盾荣耀（没有圣盾点）            柯尔特 更换刀头（换不了）/ 过度自信
- *    Helumica 聚焦（聚焦不了）/ 环境监测（只是信息，没有战斗效果）
- *    拉斯缪尔 能量流向（不回收光能）/ 事故幸存（不累积能量，也就不会进不稳态） */
+ *    Helumica 频谱分析（施加不了聚焦）/ 环境监测（只是信息，没有战斗效果）
+ *    拉斯缪尔 能量流向（不回收光能）/ 事故幸存（不累积能量，也就不会进不稳态）
+ *  龙哥（第 11 名）还没接：枪管手杖 / 胶囊弹药是整把武器的玩法，放弃时怎么失效待作者定（IDEAS.md），
+ *  现在装了这类图纸龙哥的被动照常生效。种族特长（吐酸、鳞片……）不算角色被动，谁都不受影响。 */
 function passiveOn(u) {
   if (!u || !bpActive()) return true;
   let hero = u;
@@ -91,6 +93,15 @@ function bpDurMax(base, mod) {
 function bigKillAtk(kit) {
   if (typeof weaponDurBase !== "function") return 0;
   return Math.floor(weaponDurBase(kit) / 2) + 2;
+}
+/** 一个 atk 套上图纸的 atk 加值、比例、大杀器之后是多少（武器页、图纸说明用；bigKill：大杀器加的 atk） */
+function bpAtkAfter(mod, base, bigKill) {
+  mod = mod || {};
+  let a = Number(base) || 0;
+  if (mod.atkPct) a = Math.floor(a * (1 + Number(mod.atkPct)));
+  a += Number(mod.atk) || 0;
+  if (mod.bigKill) a += Number(bigKill) || 0;
+  return Math.max(0, a);
 }
 /** effectiveAtk 用：在基础 atk 上套图纸（atk 加值、比例、大杀器）和同区敌人的「近距离压制」 */
 function bpAtkAdjust(unit, base) {
@@ -196,7 +207,6 @@ function bpAfterAttack(attacker, target, res, flags, notes) {
       target.statuses = target.statuses || {};
       if (key === "burn") target.statuses.burn = (Number(target.statuses.burn) || 0) + 1;
       else target.statuses[key] = true;
-      if (key === "high") target.highApplyTurn = state.turnNo;
       if (typeof popStatus === "function") popStatus(target, key);
       notes.push(`愿你常胜：属性效果绝佳，对 ${target.name} 施加了状态。`);
     }
@@ -295,8 +305,11 @@ function bpLeaveOpportunity(u, mover, notes) {
   const card = kit && typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === kit) : null;
   const element = (card && card.suggest && card.suggest.element) || (u.suggest && u.suggest.element) || "physical";
   notes.push(`借机攻击单元：${u.name} 对离开区域的 ${mover.name} 自动开火。`);
-  dealTo(u, mover, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 6, element, baseBreak: 1,
-    flags: { action: true, opportunity: true, blockResolved: true } });
+  // 在离开的那一区（u 所在的区）结算：那一区的屏障照常挡（app.js · opportunityStrike）
+  const opt = { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 6, element, baseBreak: 1,
+    flags: { action: true, opportunity: true, blockResolved: true } };
+  if (typeof opportunityStrike === "function") opportunityStrike(u, mover, u.zone, opt);
+  else dealTo(u, mover, opt);
 }
 
 /* ---------- 武器页（armory-ui.js）用：把图纸的 mod 换成「实际效果」一行行 ----------
@@ -307,13 +320,7 @@ function bpEffectRows(mod, ctx) {
   const rows = [];
   const sgn = (n) => (n > 0 ? "+" : "−") + Math.abs(n);
   const dice = (d) => `${d[0]}d${d[1]}`;
-  const atkAfter = (b) => {
-    let a = Number(b) || 0;
-    if (mod.atkPct) a = Math.floor(a * (1 + Number(mod.atkPct)));
-    a += Number(mod.atk) || 0;
-    if (mod.bigKill) a += Number(ctx.bigKill) || 0;
-    return Math.max(0, a);
-  };
+  const atkAfter = (b) => bpAtkAfter(mod, b, ctx.bigKill);
   if (mod.atk || mod.atkPct || mod.bigKill) {
     const parts = [];
     if (mod.atkPct) parts.push(`×${Math.round((1 + Number(mod.atkPct)) * 100)}%`);

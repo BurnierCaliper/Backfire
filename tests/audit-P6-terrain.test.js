@@ -63,9 +63,13 @@ test("空隙：没熟练按 50% 掷，失败过不去、行动点照扣；没行
   assert.equal(helu.zone, 2);
 });
 
-test("空隙：敌人没有熟练按 50%；人类失败后重掷 75%；飞行单位直接过，不掷检定", () => {
+test("空隙：敌人没有熟练按 50%；人类失败后重掷 75%（角色和人类种族的敌人）；飞行单位直接过，不掷检定", () => {
   const { c, S } = setup(["ruby", "kolt"], [{ id: "thug_knife", lv: 1, zone: 2 }, { id: "buoy", lv: 1, zone: 2 }]);
-  assert.equal(c.voidCrossOdds(foeOf(S)).chance, 0.5);
+  assert.equal(c.voidCrossOdds(kit(S, "buoy")).chance, 0.5, "没有种族的敌人 50%");
+  c.setEnemyRace(foeOf(S), "红皮人");
+  assert.equal(c.voidCrossOdds(foeOf(S)).chance, 0.5, "红皮人没有迎难直上");
+  c.setEnemyRace(foeOf(S), "人类");
+  assert.equal(c.voidCrossOdds(foeOf(S)).chance, 0.75, "人类种族的敌人：迎难直上，失败重掷");
   assert.equal(c.voidCrossOdds(kit(S, "ruby")).chance, 0.75);
   S.gaps["1-2"] = VOID();
   S.combatPhase = "enemy";

@@ -84,3 +84,52 @@ test("单局：新开一局时整局记录清空", () => {
   c.Rogue.newRun({ party: ["ruby", "kolt"], seed: "CAREER" });
   assert.equal(c.careerData().battles.length, 0);
 });
+
+test("单回合最高爆发：一回合里的伤害合计、各技能打了多少、命中时吃到的增益；之后回合打得少不会覆盖", () => {
+  const { c, st, ruby, kolt, foe } = field();
+  foe.def = 99; foe.defMax = 99;   // 不打失衡，免得协助攻击插进来
+  st.attackerId = kolt.id; st.targetId = foe.id; kolt.ap = 2;
+  c.runSkill("kolt_aa");
+  kolt.statuses.inspire = true;
+  c.runSkill("kolt_aa");
+  const s = st.battleStats[kolt.id];
+  const name = c.skillDisplayName(kolt, "kolt_aa");
+  assert.equal(s.burst.turn, 1);
+  assert.equal(s.burst.dmg, s.dmg, "第 1 回合的伤害全算进去");
+  assert.deepEqual(Object.keys(s.burst.skills), [name]);
+  assert.ok(Object.keys(s.burst.buffs).some(b => /振奋/.test(b)), "振奋记成增益：" + Object.keys(s.burst.buffs).join(" / "));
+  assert.ok(!Object.keys(s.burst.buffs).some(b => /[−-]\d/.test(b)), "减益不算");
+  // 第 2 回合只打一下：比第 1 回合少，最高纪录不变
+  const best = JSON.parse(JSON.stringify(s.burst));
+  st.turnNo = 2; kolt.ap = 1; kolt.statuses.inspire = false;
+  c.runSkill("kolt_aa");
+  assert.equal(s.burstCur.turn, 2);
+  assert.deepEqual(JSON.parse(JSON.stringify(s.burst)), best);
+  // 敌人回合里的协助攻击算这一回合，记在「协助攻击」名下
+  c.burstNote(s, kolt, 1, c.burstLabel({ assist: true }));
+  assert.equal(s.burstCur.skills["协助攻击"], 1);
+});
+
+test("单回合最高爆发：并进整局记录，只留最高的那一回合并写明哪一场；打得少的场次不覆盖", () => {
+  const c = H.load();
+  c.LEDGER.reset();
+  let f = field(c);
+  f.st.battleStats[f.kolt.id] = Object.assign(c.battleStat(f.kolt), { dmg: 50, burst: { turn: 2, dmg: 40, skills: { 电钻: 30, "电钻 · 感电": 10 }, buffs: { "攻击者振奋：ATK +25%": 2 } } });
+  c.settleBattleRewards("win");
+  f = field(c);
+  f.st.battleStats[f.kolt.id] = Object.assign(c.battleStat(f.kolt), { dmg: 20, burst: { turn: 1, dmg: 20, skills: { 电钻: 20 }, buffs: {} } });
+  c.settleBattleRewards("win");
+  let b = c.careerData().kits.kolt.burst;
+  assert.deepEqual([b.dmg, b.turn, b.battleNo], [40, 2, 1]);
+  assert.deepEqual(JSON.parse(JSON.stringify(b.skills)), { 电钻: 30, "电钻 · 感电": 10 });
+  assert.equal(b.buffs["攻击者振奋：ATK +25%"], 2);
+  f = field(c);
+  f.st.battleStats[f.kolt.id] = Object.assign(c.battleStat(f.kolt), { dmg: 90, burst: { turn: 3, dmg: 90, skills: { 酸液炮: 90 }, buffs: {} } });
+  c.settleBattleRewards("win");
+  b = c.careerData().kits.kolt.burst;
+  assert.deepEqual([b.dmg, b.turn, b.battleNo], [90, 3, 3]);
+  // 跟着存档走
+  const saved = JSON.parse(JSON.stringify(c.LEDGER.save()));
+  c.LEDGER.reset(); c.LEDGER.load(saved);
+  assert.equal(c.careerData().kits.kolt.burst.dmg, 90);
+});

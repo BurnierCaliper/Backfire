@@ -76,11 +76,35 @@ test("角色图鉴：11 名角色都有介绍和 1–5 星难度，带完整的�
   const hiaki = heroes.find(h => h.kit === "hiaki");
   assert.match(hiaki.sheet.passives[0].next, /丹生谷提供的以及武器人的协助格挡率/, "被动升级文字");
   assert.equal(hiaki.sheet.weapons.length, 2);
-  assert.ok(hiaki.sheet.skills.later.some(k => k.name === "一闪" && k.minLv === 2), "等级解锁的技能");
+  assert.ok(!hiaki.sheet.skills.now.some(k => k.name === "一闪"), "1 级不展示未解锁技能");
+  assert.equal(hiaki.sheet.skills.later.length, 0);
+  // 图鉴「按等级查看」：all 里列全部技能和解锁等级（默认只显示 1 级，点别的等级再看）
+  const hAll = hiaki.sheet.skills.all;
+  assert.ok(hAll.some(k => k.name === "一闪" && k.minLv === 2), "一闪 2 级解锁");
+  assert.ok(hAll.filter(k => (k.minLv || 1) <= 1).every(k => hiaki.sheet.skills.now.some(n => n.id === k.id)), "1 级的就是当前技能");
+  const kolt = heroes.find(h => h.kit === "kolt");
+  assert.ok(kolt.sheet.skills.all.some(k => k.id === "kolt_cannon" && k.minLv === 9));
+  assert.ok(kolt.sheet.weapons[0].skills.all.some(k => k.id === "torque_divert" && k.minLv === 4), "武器人的技能也按等级列");
   assert.equal(c.codexPlusLevel(1), 5);
   assert.equal(c.codexPlusLevel(2), 10);
   assert.equal(heroes.find(h => h.kit === "tou").stars, 2);
   assert.equal(heroes.find(h => h.kit === "ras").stars, 5);
   // 搜索也能搜到角色（技能名、介绍）
   assert.deepEqual(JSON.parse(JSON.stringify(heroes.filter(h => c.codexMatch(h, "咖啡")).map(h => h.kit))), ["yuito"]);
+});
+
+test("效果图鉴「单位特殊性」：下潜和飞行收在同一类（主人 10/23），写明打不到、谐波 / 塌陷例外（被迫解除 +1 击破）、自己攻击时解除；说明和 effects.js 的规则一致", () => {
+  const c = H.load();
+  const unit = c.codexEffectEntries().filter(e => e.group === "unit").map(e => e.name);
+  assert.ok(unit.includes("飞行") && unit.includes("下潜"), "飞行、下潜都在「单位特殊性」");
+  const dive = c.codexEffectEntries().find(e => e.name === "下潜").lines.join("\n");
+  assert.match(dive, /不能被选为攻击目标/);
+  assert.match(dive, /范围攻击也打不到/);
+  assert.match(dive, /谐波/); assert.match(dive, /塌陷/);
+  assert.match(dive, /被迫解除，并受到 1 击破/);
+  assert.match(dive, /发动攻击时浮上来/);
+  assert.match(c.S.CODEX_EFFECT_GROUPS.find(g => g.id === "unit").note, /下潜/);
+  // 和规则对得上：effects.js 的说明里同样写着谐波、塌陷，被迫解除受 1 击破
+  const fx = require("fs").readFileSync(require("path").join(__dirname, "..", "effects.js"), "utf8");
+  assert.match(fx, /谐波攻击（单体、范围都算）照样打得到；塌陷区域的伤害也打得到。被这两种打到时下潜被迫解除，受到 1 击破/);
 });

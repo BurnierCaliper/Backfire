@@ -8,7 +8,11 @@
   function mount(api) {
     if (mounted) mounted.destroy();
     if (!api || typeof api.getView !== "function" || typeof document === "undefined") return null;
-    let root = null, panel = null, reaction = null, swapBox = null, unsubscribe = null, observer = null;
+    let root = null, panel = null, reaction = null, swapBox = null, peekBack = null, unsubscribe = null, observer = null;
+    // 查看战场：选行动顺序 / 回答询问时先把卡片收起来看战场，底部留一个「回到选择」（报告：选择的时候看不到战场）
+    let peek = false, peekAskId = null;
+    // 战斗中换位：先点自己单位的「换位」，再点要去的格子（自己的单位直接换，别人的发互换请求）；以前只能「延后」到最后
+    let moving = "";
     let view = {}, lastMarkup = {}, draft = null, configOpen = null, chosenActor = "", chatDraft = "", notice = "", pending = false, dragActor = "";
     let destroyed = false;
     const byId = id => document.getElementById(id);
@@ -34,8 +38,9 @@
       panel = document.createElement("section"); panel.id = "hs-panel"; panel.className = "hs-ui hs-overlay"; panel.setAttribute("role", "dialog"); panel.setAttribute("aria-label", "热座分配与行动顺序");
       reaction = document.createElement("section"); reaction.id = "hs-reaction"; reaction.className = "hs-ui hs-overlay"; reaction.setAttribute("role", "dialog"); reaction.setAttribute("aria-label", "协助询问");
       swapBox = document.createElement("section"); swapBox.id = "hs-swap"; swapBox.className = "hs-ui hs-swap"; swapBox.setAttribute("role", "status");
-      document.body.append(panel, reaction, swapBox);
-      for (const node of [root, panel, reaction, swapBox]) {
+      peekBack = document.createElement("button"); peekBack.type = "button"; peekBack.id = "hs-peek-back"; peekBack.className = "hs-ui hs-peek-back"; peekBack.dataset.hs = "unpeek"; peekBack.hidden = true;
+      document.body.append(panel, reaction, swapBox, peekBack);
+      for (const node of [root, panel, reaction, swapBox, peekBack]) {
         node.addEventListener("click", click);
         // The battle's Tab/number/Space shortcuts must not consume form/button keys.
         node.addEventListener("keydown", event => event.stopPropagation());
@@ -102,37 +107,67 @@
       const own = units().filter(u => ownerOf(u) === view.playerId);
       if (!own.some(u => unitId(u) === chosenActor)) chosenActor = own.length ? unitId(own[0]) : "";
       const allPlaced = own.every(u => order().some(slot => slot.actor === unitId(u)));
-      return `<div class="hs-card"><header class="hs-heading"><h2>行动顺序</h2><span class="hs-muted">选择不限时</span></header><p>为自己的每个单位选一个格子，再点「确定」。武器人各占一格。</p>${own.length ? `<label class="hs-unit-picker">正在安排<select id="hs-pick-unit">${own.map(u => option(unitId(u), u.name || unitId(u), chosenActor === unitId(u))).join("")}</select></label>` : '<p class="hs-muted">你目前没有可行动的单位，本场旁观。</p>'}<div class="hs-slots">${order().map((slot, i) => button(`${i + 1} · ${slot.actor ? unitName(slot.actor) : "空位"}`, "pick", `data-index="${i}"`, !chosenActor, slot.actor === chosenActor ? "hs-selected" : "")).join("")}</div><ul class="hs-confirmations">${players().map(p => `<li>${esc(p.name)} <b>${!units().some(u => ownerOf(u) === p.id) ? "旁观" : confirmed(p.id) ? "已确定" : "选择中"}</b></li>`).join("")}</ul><footer class="hs-footer">${button(confirmed(view.playerId) ? "已确定 · 可继续改选" : "确定我的顺序", "confirm", "", !own.length || !allPlaced || confirmed(view.playerId), "hs-primary")}${isHost() ? button("按当前格子开始", "forceStart") : ""}</footer>${chatMarkup()}</div>`;
+      return `<div class="hs-card"><header class="hs-heading"><h2>行动顺序</h2><span class="hs-muted">选择不限时</span>${button("查看战场", "peek")}</header><p>为自己的每个单位选一个格子，再点「确定」。武器人各占一格。</p>${own.length ? `<label class="hs-unit-picker">正在安排<select id="hs-pick-unit">${own.map(u => option(unitId(u), u.name || unitId(u), chosenActor === unitId(u))).join("")}</select></label>` : '<p class="hs-muted">你目前没有可行动的单位，本场旁观。</p>'}<div class="hs-slots">${order().map((slot, i) => button(`${i + 1} · ${slot.actor ? unitName(slot.actor) : "空位"}`, "pick", `data-index="${i}"`, !chosenActor, slot.actor === chosenActor ? "hs-selected" : "")).join("")}</div><ul class="hs-confirmations">${players().map(p => `<li>${esc(p.name)} <b>${!units().some(u => ownerOf(u) === p.id) ? "旁观" : confirmed(p.id) ? "已确定" : "选择中"}</b></li>`).join("")}</ul><footer class="hs-footer">${button(confirmed(view.playerId) ? "已确定 · 可继续改选" : "确定我的顺序", "confirm", "", !own.length || !allPlaced || confirmed(view.playerId), "hs-primary")}${isHost() ? button("按当前格子开始", "forceStart") : ""}</footer>${chatMarkup()}</div>`;
     }
     function renderBar() {
       const labels = { setup: "战前分配", picking: "选择行动顺序", acting: "我方行动", enemy: "敌方行动", ended: "战斗结束" };
-      const operator = view.network ? `<span>${esc(playerName(view.playerId))} · ${isHost() ? "主持人" : "玩家"}</span>` : `<label for="hs-player">当前操作员</label><select id="hs-player">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), p.id === view.playerId)).join("")}</select>`;
-      html(byId("hs-bar"), `<strong class="hs-tag">${view.network ? "联机跑团" : "热座"}</strong>${operator}<span class="hs-phase">${esc(labels[view.phase] || "等待战斗")}</span>${view.network ? "" : button("分配角色", "openConfig", "", !mayConfigure())}`, "bar");
+      // 联机时不在战斗画面（探索 / 大厅）不显示「战前分配」
+      const olScreen = view.network ? window.OnlineGame?.getView().screen : null;
+      const phaseText = olScreen && olScreen !== "battle" && (view.phase === "setup" || !view.phase) ? (olScreen === "lobby" ? "大厅" : olScreen === "ended" ? "遭遇结束" : "探索") : labels[view.phase] || "等待战斗";
+      // 联机单局没有主持人：房主 / 玩家；标签写「联机单局」（房主看 OnlineGame，玩家看收到的包）
+      const rogue = view.network && (window.OnlineGame?.getView().mode === "rogue" || window.OnlineGame?.getView().packet?.mode === "rogue");
+      const operator = view.network ? `<span>${esc(playerName(view.playerId))} · ${isHost() ? (rogue ? "房主" : "主持人") : "玩家"}</span>` : `<label for="hs-player">当前操作员</label><select id="hs-player">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), p.id === view.playerId)).join("")}</select>`;
+      html(byId("hs-bar"), `<strong class="hs-tag">${view.network ? (rogue ? "联机单局" : "联机跑团") : "热座"}</strong>${operator}<span class="hs-phase">${esc(phaseText)}</span>${view.network ? "" : button("分配角色", "openConfig", "", !mayConfigure())}`, "bar");
       const visible = ["picking", "acting", "enemy"].includes(view.phase);
+      if (view.phase !== "acting") moving = "";
       byId("hs-order").hidden = !visible;
       if (!visible) return;
       const current = order().find(slot => slot.current) || order().find(slot => slot.actor === view.currentUnitId);
       const text = view.phase === "acting" && current ? `现在轮到 ${unitName(current.actor)} · ${playerName(ownerOf(current))}` : view.phase === "enemy" ? "敌人行动中" : "为本回合选择行动顺序";
       html(byId("hs-order"), `<div class="hs-turn" role="status">${esc(text)}</div><ol class="hs-strip">${order().map((slot, i) => {
         const movable = canMove(slot), actor = slot.actor || "", status = slot.done ? "已结束" : slot.locked ? "已用点数 · 锁定" : slot.current || actor === view.currentUnitId ? "当前" : "未行动";
-        return `<li data-order-index="${i}" data-drag-actor="${esc(actor)}" draggable="${movable}" class="${slot.current || actor === view.currentUnitId ? "hs-current " : ""}${slotFixed(slot) ? "hs-locked" : ""}${!actor && view.phase !== "picking" ? " hs-vacated" : ""}"><span class="hs-slot-num">${i + 1}</span><div><b>${esc(actor ? unitName(actor) : "空位")}</b><small>${esc(actor ? `${playerName(ownerOf(slot))} · ${status}` : view.phase === "picking" ? "等待选择" : "已挪走")}</small></div>${movable ? `<div class="hs-moves">${button("前移", "move", `data-actor="${esc(actor)}" data-index="${i - 1}" aria-label="${esc(unitName(actor))}前移"`, !legalDestination(i, i - 1))}${button("后移", "move", `data-actor="${esc(actor)}" data-index="${i + 1}" aria-label="${esc(unitName(actor))}后移"`, !legalDestination(i, i + 1))}${view.phase === "acting" ? button("末尾", "move", `data-actor="${esc(actor)}" data-index="${order().length}" aria-label="${esc(unitName(actor))}移至末尾"`) : ""}</div>` : ""}</li>`;
-      }).join("")}${view.phase === "acting" ? `<li class="hs-tail" data-order-index="${order().length}"><span class="hs-slot-num">${order().length + 1}</span><div><b>空位</b><small>拖到这里移至末尾</small></div></li>` : ""}</ol>`, "order");
+        return `<li data-order-index="${i}" data-drag-actor="${esc(actor)}" draggable="${movable}" class="${slot.current || actor === view.currentUnitId ? "hs-current " : ""}${slotFixed(slot) ? "hs-locked" : ""}${!actor && view.phase !== "picking" ? " hs-vacated" : ""}"><span class="hs-slot-num">${i + 1}</span><div><b>${esc(actor ? unitName(actor) : "空位")}</b><small>${esc(actor ? `${playerName(ownerOf(slot))} · ${status}` : view.phase === "picking" ? "等待选择" : "已挪走")}</small></div>${view.phase === "acting" ? actingMoves(slot, i, movable) : movable ? `<div class="hs-moves">${button("前移", "move", `data-actor="${esc(actor)}" data-index="${i - 1}" aria-label="${esc(unitName(actor))}前移"`, !legalDestination(i, i - 1))}${button("后移", "move", `data-actor="${esc(actor)}" data-index="${i + 1}" aria-label="${esc(unitName(actor))}后移"`, !legalDestination(i, i + 1))}</div>` : ""}</li>`;
+      }).join("")}</ol>`, "order");
+    }
+    /** 行动阶段每个格子上的按钮：延后 / 换位；正在换位时，能去的格子显示「换到这里」 */
+    function actingMoves(slot, i, movable) {
+      const actor = slot.actor || "", from = moving ? order().findIndex(s => s.actor === moving) : -1;
+      if (moving && (from < 0 || slotFixed(order()[from]))) moving = "";   // 换位中的单位已经行动（锁定）或不在了：取消
+      if (moving && actor === moving) return `<div class="hs-moves">${button("取消换位", "moveCancel")}</div>`;
+      if (moving && from >= 0 && legalDestination(from, i)) {
+        const other = actor && ownerOf(slot) !== view.playerId && !(view.mode === "trpg" && isHost());
+        return `<div class="hs-moves">${button(other ? "请求互换" : actor ? "换到这里" : "放到这里", "move", `data-actor="${esc(moving)}" data-index="${i}" aria-label="${esc(unitName(moving))}${actor ? "和" + esc(unitName(actor)) + "互换" : "放到第 " + (i + 1) + " 格"}"`, false, "hs-primary")}</div>`;
+      }
+      if (moving || !movable) return "";
+      return `<div class="hs-moves">${button("延后", "move", `data-actor="${esc(actor)}" data-index="${order().length}" aria-label="${esc(unitName(actor))}延后，移至末尾" title="把这个单位挪到本回合最后行动"`)}${button("换位", "moveStart", `data-actor="${esc(actor)}" aria-label="${esc(unitName(actor))}换位" title="和自己的其他单位（武器人）或队友换顺序"`)}</div>`;
     }
     function renderAsk() {
       const ask = view.ask;
       reaction.hidden = !ask;
+      reaction.classList.remove("hs-ask-mini");
       if (!ask) { lastMarkup.ask = ""; return; }
+      // 战场点选的规则询问（柯尔特更换刀头、赫米卡环境扫描……）：
+      // 联机玩家端在战斗提示栏 / 战场上回答，不画整屏卡片；不用回答的人只看到一条小提示，不挡画面
+      if (ask.kind === "choice" && ask.field) {
+        const onlineField = typeof document !== "undefined" && document.body.classList.contains("online-player") && typeof window !== "undefined" && !!window.OnlineBattle;
+        if (ask.eligible && onlineField) { reaction.hidden = true; lastMarkup.ask = ""; return; }
+        if (!ask.eligible) {
+          reaction.classList.add("hs-ask-mini");
+          html(reaction, `<div class="hs-ask-note" role="status">${esc(ask.title || "选择")} · 等待 ${esc((ask.waitingNames || []).join("、") || "玩家")} 在战场上选择</div>`, "ask");
+          return;
+        }
+      }
       const options = ask.eligible && !ask.declined ? ask.options || [] : [];
       const waiting = (ask.waitingNames || []).join("、");
       const choice = ask.kind === "choice", canDecline = ask.allowDecline == null ? !choice : !!ask.allowDecline;
       if (ask.kind === "assist" && ask.chooserName) { renderHandAsk(ask, options); return; }
-      html(reaction, `<div class="hs-card hs-ask-card"><header class="hs-heading"><h2>${esc(ask.title || (choice ? "选择" : ask.kind === "block" ? "协助格挡" : "协助攻击"))}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong></header><p>${esc(ask.declined ? "你已选择不协助，正在等待其他玩家回应。" : options.length ? choice ? "请为自己操作的角色选择。" : "选择自己的单位协助。先回答「我来」的玩家生效。" : `正在等待${waiting || "符合条件的玩家"}回应。`)}</p><div class="hs-ask-options">${options.map((o, index) => `${button(`${choice ? "" : "我来 · "}${o.label || unitName(o.helper)}`, "answer", `data-option="${index}" data-helper="${esc(o.helper)}"`, false, "hs-primary")}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}`).join("")}${options.length && canDecline ? button(ask.cancelLabel || "不协助", "decline") : ""}</div></div>`, "ask");
+      html(reaction, `<div class="hs-card hs-ask-card"><header class="hs-heading"><h2>${esc(ask.title || (choice ? "选择" : ask.kind === "block" ? "协助格挡" : "协助攻击"))}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong>${button("查看战场", "peek")}</header><p>${esc(ask.declined ? "你已选择不协助，正在等待其他玩家回应。" : options.length ? choice ? "请为自己操作的角色选择。" : "选择自己的单位协助。先回答「我来」的玩家生效。" : `正在等待${waiting || "符合条件的玩家"}回应。`)}</p><div class="hs-ask-options">${options.map((o, index) => `${button(`${choice ? "" : "我来 · "}${o.label || unitName(o.helper)}`, "answer", `data-option="${index}" data-helper="${esc(o.helper)}"`, false, "hs-primary")}${o.sub ? `<small>${esc(o.sub)}</small>` : ""}`).join("")}${options.length && canDecline ? button(ask.cancelLabel || "不协助", "decline") : ""}</div></div>`, "ask");
       updateCountdown();
     }
     /** 联机协助攻击：其他人举手，打出失衡的那名玩家从举手的人里选（hotseat.js · answer） */
     function renderHandAsk(ask, options) {
       const hands = ask.hands || [];
-      const head = `<header class="hs-heading"><h2>${esc(ask.title || "协助攻击")}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong></header>`;
+      const head = `<header class="hs-heading"><h2>${esc(ask.title || "协助攻击")}</h2><strong id="hs-countdown" role="timer" aria-label="回应剩余时间"${Number(ask.deadline) > 0 ? "" : " hidden"}></strong>${button("查看战场", "peek")}</header>`;
       let body;
       if (ask.isChooser) {
         body = `<p>${esc(hands.length ? "你打出了失衡：选一名举手的队友来协助攻击（也可以用自己的单位）。" : "你打出了失衡：等队友举手，或用自己的单位协助攻击。到时间没选就由最先举手的人出手。")}</p>
@@ -152,7 +187,25 @@
     }
     function updateCountdown() {
       const node = byId("hs-countdown");
-      if (node && view.ask && Number(view.ask.deadline) > 0) node.textContent = `${Math.max(0, Math.ceil((Number(view.ask.deadline) - Date.now()) / 1000)) || 0} 秒`;
+      const left = view.ask && Number(view.ask.deadline) > 0 ? `${Math.max(0, Math.ceil((Number(view.ask.deadline) - Date.now()) / 1000)) || 0} 秒` : "";
+      if (node && left) node.textContent = left;
+      const pb = peekBack && !peekBack.hidden ? peekBack.querySelector(".hs-peek-left") : null;
+      if (pb) pb.textContent = left ? `（还剩 ${left}）` : "";
+    }
+    /** 查看战场：有卡片（行动顺序 / 询问）开着时才有意义；卡片都关了或者来了新的询问就自动回来 */
+    function renderPeek() {
+      const ask = view.ask, askOpen = !reaction.hidden && !reaction.classList.contains("hs-ask-mini");
+      if (ask && ask.id !== peekAskId) { if (peekAskId != null && ask.eligible) peek = false; peekAskId = ask.id; }
+      if (!ask) peekAskId = null;
+      const open = !panel.hidden || askOpen;
+      if (!open) peek = false;
+      document.body.classList.toggle("hs-peeking", peek);
+      peekBack.hidden = !peek;
+      if (peek) {
+        const what = askOpen ? (ask.title || "询问") : view.phase === "picking" ? "选择行动顺序" : "设置";
+        html(peekBack, `回到${esc(what)}<span class="hs-peek-left"></span>`, "peek");
+        updateCountdown();
+      }
     }
     function renderSwap() {
       const swap = view.swap; swapBox.hidden = !swap;
@@ -164,8 +217,8 @@
       if (destroyed) return;
       view = api.getView() || {};
       if (!view.enabled) {
-        if (root) for (const node of [root, panel, reaction, swapBox]) node.hidden = true;
-        document.body.classList.remove("hotseat-active"); document.body.style.removeProperty("--hs-top-height"); return;
+        if (root) for (const node of [root, panel, reaction, swapBox, peekBack]) node.hidden = true;
+        peek = false; document.body.classList.remove("hotseat-active", "hs-peeking"); document.body.style.removeProperty("--hs-top-height"); return;
       }
       ensure(); root.hidden = false; document.body.classList.add("hotseat-active");
       renderBar();
@@ -173,7 +226,7 @@
       const showConfig = configOpen && mayConfigure(), showPick = view.phase === "picking";
       panel.hidden = !(showConfig || showPick);
       if (!panel.hidden) html(panel, showPick ? pickingMarkup() : setupMarkup(), "panel");
-      renderAsk(); renderSwap();
+      renderAsk(); renderSwap(); renderPeek();
       const n = byId("hs-notice"), message = notice || view.notice || ""; n.textContent = message; n.hidden = !message; reserveSpace();
     }
     async function call(fn, value) {
@@ -197,8 +250,12 @@
         case "disable": if (api.disable) await call(api.disable); break;
         case "pick": await send({ type: "orderPick", actor: chosenActor, index: Number(b.dataset.index) }); break;
         case "confirm": await send({ type: "orderConfirm" }); break;
+        case "peek": peek = true; render(); break;
+        case "unpeek": peek = false; render(); break;
         case "forceStart": await send({ type: "orderStart" }); break;
-        case "move": await send({ type: "orderMove", actor: b.dataset.actor, index: Number(b.dataset.index) }); break;
+        case "move": moving = ""; await send({ type: "orderMove", actor: b.dataset.actor, index: Number(b.dataset.index) }); break;
+        case "moveStart": moving = b.dataset.actor || ""; renderBar(); break;
+        case "moveCancel": moving = ""; renderBar(); break;
         case "swapYes": case "swapNo": if (view.swap) await send({ type: "orderSwapAccept", requestId: view.swap.requestId, accept: b.dataset.hs === "swapYes" }); break;
         case "pickHand": if (view.ask) {
           const hand = (view.ask.hands || [])[Number(b.dataset.hand)];
@@ -235,8 +292,8 @@
     }
     function destroy() {
       destroyed = true; if (unsubscribe) unsubscribe(); if (observer) observer.disconnect(); clearInterval(timer);
-      for (const node of [root, panel, reaction, swapBox]) if (node) node.remove();
-      document.body.classList.remove("hotseat-active"); document.body.style.removeProperty("--hs-top-height"); if (mounted && mounted.destroy === destroy) mounted = null;
+      for (const node of [root, panel, reaction, swapBox, peekBack]) if (node) node.remove();
+      document.body.classList.remove("hotseat-active", "hs-peeking"); document.body.style.removeProperty("--hs-top-height"); if (mounted && mounted.destroy === destroy) mounted = null;
     }
     const timer = setInterval(updateCountdown, 250);
     mounted = { render, destroy };

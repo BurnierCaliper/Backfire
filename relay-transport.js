@@ -35,12 +35,48 @@
     return url.href.replace(/\/$/, "");
   }
   function version(options) { return { protocol: options.protocol == null ? 1 : options.protocol, build: options.build || "backfire-d3" }; }
+  const cancelled = () => Object.assign(new Error("已取消连接"), { cancelled: true });
+  const withTimeout = (fetchImpl, href, init, ms) => {
+    const ctl = typeof AbortController === "function" ? new AbortController() : null;
+    const t = ctl ? setTimeout(() => ctl.abort(), ms) : null; t?.unref?.();
+    return fetchImpl(href, { ...(init || {}), ...(ctl ? { signal: ctl.signal } : {}) }).finally(() => clearTimeout(t));
+  };
+  /** 连接失败时查一查到底是哪里不对：连不上服务 / 这个网页地址没得到许可 / 房间不存在 / 主持人不在。查不出来就用原来的说法 */
+  async function diagnose(url, roomCode, role, fetchImpl, fallback) {
+    if (typeof fetchImpl !== "function") return fallback;
+    try {
+      const r = await withTimeout(fetchImpl, url + "/health", { method: "GET" }, 6000);
+      if (r.status === 403) {
+        const d = await r.json().catch(() => ({}));
+        return `这个网页的地址（${d.origin || (root.location && root.location.origin) || "本地文件"}）没有得到转发服务许可：用 http://localhost 或 127.0.0.1 打开游戏，或者请部署转发服务的人把它加进 ALLOWED_ORIGINS。`;
+      }
+      if (!r.ok) return `转发服务回应异常（HTTP ${r.status}）：确认地址是不是 Backfire 的转发服务。`;
+    } catch (_) {
+      return "连不上转发服务：检查网络，或者转发服务地址有没有填错。";
+    }
+    if (roomCode) {
+      try {
+        const r = await withTimeout(fetchImpl, url + "/rooms/" + roomCode, { method: "GET" }, 6000);
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 404 && d.code === "no_room") return "房间不存在或已过期：检查房间码，或者请主持人重新开房。";
+        if (r.ok && d.ok && d.hostOnline === false && role === "player") return "主持人现在不在线：等主持人回到房间再加入。";
+      } catch (_) { /* 旧版转发服务没有这个接口 */ }
+    }
+    return fallback;
+  }
   async function createHost(options) {
     options = options || {};
-    const url = baseUrl(options.url), v = version(options);
-    const response = await (options.fetch || root.fetch)(url + "/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...v, name: options.name || "主持人" }) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "无法创建房间");
+    const url = baseUrl(options.url), v = version(options), fetchImpl = options.fetch || root.fetch;
+    if (options.signal?.aborted) throw cancelled();
+    let response, data;
+    try {
+      response = await fetchImpl(url + "/rooms", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...v, name: options.name || "主持人" }), ...(options.signal ? { signal: options.signal } : {}) });
+      data = await response.json();
+    } catch (error) {
+      if (options.signal?.aborted) throw cancelled();
+      throw new Error(await diagnose(url, null, "host", fetchImpl, "无法创建房间：连不上转发服务"));
+    }
+    if (!response.ok) throw new Error(data.code === "origin" ? await diagnose(url, null, "host", fetchImpl, data.error) : data.error || "无法创建房间");
     return connect({ ...options, ...v, url, roomCode: data.roomCode, role: "host", token: data.hostToken });
   }
   function join(options) { return connect({ ...options, ...version(options || {}), role: "player", token: options?.resumeToken || options?.token || null }); }
@@ -75,7 +111,14 @@
         const current = new WebSocketImpl(socketUrl); ws = current; joined = false;
         let settled = false;
         const timer = setTimeout(() => { if (!settled) { settled = true; reject(new Error("连接转发服务超时")); current.close(); } }, options.connectTimeout || 10000); timer.unref?.();
-        current.addEventListener("open", () => current.send(JSON.stringify(stamp("join", { role, name: options.name || "玩家", ...(token ? { token } : {}) }))));
+        // 取消连接（连接中的界面上点「取消」）：不再等，关掉这条连接，之后也不自动重连
+        const signal = options.signal;
+        if (signal && !joined) {
+          if (signal.aborted) { settled = true; clearTimeout(timer); disposed = true; reject(cancelled()); current.close(1000, "cancelled"); return; }
+          signal.addEventListener("abort", () => { if (!settled) { settled = true; clearTimeout(timer); disposed = true; reject(cancelled()); try { current.close(1000, "cancelled"); } catch (_) {} } }, { once: true });
+        }
+        // confirm：新版客户端收到 joined 后会回确认（转发服务据此清掉没人确认的幽灵座位）
+        current.addEventListener("open", () => current.send(JSON.stringify(stamp("join", { role, name: options.name || "玩家", confirm: true, ...(token ? { token } : {}) }))));
         current.addEventListener("message", event => {
           if (current !== ws) return;
           if (event.data === "pong") { lastPong = Date.now(); return; }
@@ -87,6 +130,8 @@
               if (data.identity?.role !== role || data.identity?.roomCode !== roomCode) throw new Error("转发身份无效");
               identity = copy(data.identity); token = data.resumeToken || token; joined = true; attempts = 0; lastPong = Date.now();
               clearTimeout(timer); settled = true;
+              // 拿到恢复令牌了：告诉转发服务这个座位有人（旧版转发服务不发 confirmSeat，就不回）
+              if (data.confirmSeat) { try { current.send(JSON.stringify(stamp("confirm", {}))); } catch (_) {} }
               notify({ connected: true, hostOnline: data.hostOnline, paused: data.paused, roster: data.roster, expiresAt: data.expiresAt, reason: null });
               clearInterval(heartbeat); heartbeat = setInterval(() => {
                 if (ws !== current || current.readyState !== 1) return;
@@ -129,7 +174,7 @@
           cancelPending("连接已断开；未确认指令不会自动重发");
           notify({ connected: false, hostOnline: false, paused: true, reason: event.reason || "连接已断开" });
           if (!settled) { settled = true; reject(new Error(event.reason || "加入房间失败")); }
-          if ([1008, 4001, 4002].includes(event.code) || event.reason === "expired") disposed = true;
+          if ([1008, 4001, 4002, 4003].includes(event.code) || event.reason === "expired") disposed = true;
           else reconnectLater();
         });
       }).finally(() => { connecting = null; });
@@ -168,14 +213,22 @@
         } catch (error) { return Promise.reject(error); }
       },
       setReady(ready) { if (role !== "host" || typeof ready !== "boolean") return Promise.reject(new Error("只有主持人可以恢复房间")); const id = "ready_" + (++sequence); return sendFrames([stamp("ready", { id, ready })], id); },
+      /** 主持人释放玩家座位（旧版转发服务不认识这条消息，会回「无效的转发消息」） */
+      releaseSeat(seat) { if (role !== "host" || typeof seat !== "string" || !seat) return Promise.reject(new Error("只有主持人可以释放座位")); const id = "release_" + (++sequence); return sendFrames([stamp("release", { id, seat })], id); },
       onMessage(fn) { if (typeof fn !== "function") throw new TypeError("onMessage requires function"); messages.add(fn); const pending = backlog; backlog = []; backlogBytes = 0; for (const message of pending) { try { fn(copy(message.value), message.from); } catch (_) {} } return () => messages.delete(fn); },
       onStatus(fn) { if (typeof fn !== "function") throw new TypeError("onStatus requires function"); statuses.add(fn); try { fn(copy(status)); } catch (_) {} return () => statuses.delete(fn); },
       close() { disposed = true; clearTimeout(reconnectTimer); clearInterval(heartbeat); cancelPending("连接已关闭"); if (ws) ws.close(1000, "closed"); notify({ connected: false, paused: true }); },
       reconnect() { if (disposed) return Promise.reject(new Error("连接已关闭，请使用保存的令牌恢复")); if (joined) return Promise.resolve(endpoint); clearTimeout(reconnectTimer); reconnectTimer = null; return open(); }
     };
-    return open();
+    // 第一次连接失败：把「无法连接 / 超时 / 加入失败」这类笼统的说法换成查出来的原因
+    return open().catch(async error => {
+      if (error && error.cancelled) throw error;
+      if (error && error.code) throw error;   // 转发服务明确回了原因（昵称占用、主持人离线……）
+      const why = await diagnose(url, roomCode, role, options.fetch || root.fetch, error && error.message);
+      throw Object.assign(new Error(why || "加入房间失败"), { cause: error });
+    });
   }
-  const RelayTransport = { createHost, join, resumeHost, connect, FRAME_MAX, MESSAGE_MAX, validate: strict };
+  const RelayTransport = { createHost, join, resumeHost, connect, diagnose, FRAME_MAX, MESSAGE_MAX, validate: strict };
   root.RelayTransport = RelayTransport;
   if (typeof module !== "undefined" && module.exports) module.exports = RelayTransport;
 })(typeof globalThis !== "undefined" ? globalThis : window);

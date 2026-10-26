@@ -113,11 +113,14 @@ const resumedPlayer = await RelayTransport.join({
 
 作者在 2026-10-04 明确授权“允许，不要触动到任何已有的网站配置”后，已新建 `backfire-relay`，使用既有 Wrangler 登录凭据部署。部署前确认该名称不存在；没有更新其他 Worker、域名、DNS、路由、套餐或账号权限。
 
-- 游戏中填写的服务地址：`https://backfire-relay.richardguu22.workers.dev`
+- 服务地址：`https://backfire-relay.richardguu22.workers.dev`（游戏里已经是默认值，联机面板里不用再填）
 - 健康检查：[GET /health](https://backfire-relay.richardguu22.workers.dev/health)
 - 服务版本：`4d8e54e9-e4b8-427d-aacc-810b417c496b`；浏览器构建：`backfire-d3-v1`。
-- 此服务只做转发，没有托管游戏网页或绑定自定义域名。用同一份游戏文件打开 `game.html`，在「联机开房」或「加入房间」里填写服务地址。
-- 本期允许来源为 `null`（本地文件）、`http://localhost:8080` 和 `http://127.0.0.1:8080`。未使用通配来源；房间权限仍由独立端点令牌决定。将来托管游戏网页时，仅给这个新服务增加实际 HTTPS origin。
+- 此服务只做转发，没有托管游戏网页或绑定自定义域名。用同一份游戏文件打开 `game.html`，在「联机开房」或「加入房间」里直接填昵称和房间码。
+- 允许的网页来源：`ALLOWED_ORIGINS` 里写的（`null` = 双击打开的本地文件），**加上本机任意端口**（`http://localhost:任意端口`、`http://127.0.0.1:任意端口`、`http://[::1]:任意端口`，2026-10-14 起，issue #44）。不想放行本机任意端口时，把变量 `ALLOW_LOCAL_PORTS` 设成 `"0"`。房间权限仍由独立端点令牌决定。将来托管游戏网页时，仅给这个新服务增加实际 HTTPS origin。
+- 被拒绝的来源也会带上 CORS 头和 `code: "origin"`，网页能说出「这个网页地址没有得到许可」，而不是笼统的「连不上」。`GET /rooms/房间码`（不带 WebSocket 升级）只回答房间在不在（`code: "no_room"`）和主持人在不在线，连接失败时网页用它说清楚原因。
+- **幽灵座位**：新座位要在 20 秒内被客户端确认（收到 `joined` 后回 `confirm`；转发服务在 `joined` 里带 `confirmSeat: true` 表示要确认），没确认的座位自动清掉，还没确认就断开的立刻清掉。旧版客户端（加入时不带 `confirm: true`）不受影响。`SEAT_CONFIRM_MS` 可以改等待时间（测试用）。
+- **2026-10-14 的改动（释放座位、幽灵座位、本机任意端口、查房间）需要重新部署这个服务才生效**：先部署转发服务，再发布网页。
 
 ## 独立部署步骤
 

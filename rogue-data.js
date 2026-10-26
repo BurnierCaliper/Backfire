@@ -32,6 +32,7 @@ const ROGUE_CONFIG = {
   actLevels: [[1, 4], [5, 8], [9, 12], [12, 15]],
   extraActLevels: [[16, 20], [21, 25]],
   eliteLevelBonus: 1,             // 精英战比同时期的普通战斗高几级
+  eliteOverCap: 1,                // 精英战的等级最多可以超过本幕「止」几级（以前被本幕上限吞掉，幕末精英和普通战同级）
   // 首领战。首领等级 = 本幕「止」+ bossLevelOffset；bossEscortTokens：随从按代币抽的首领用几枚
   // （亡命之王的随从是手册写死的，不看这个）。
   // 之前首领难是因为亡命之王被误设成一回合三动；改回一动之后，朴素打法验算（首领前约 5–6 级）
@@ -41,15 +42,30 @@ const ROGUE_CONFIG = {
 
   // 各幕所在区域（占位，之后会改）。额外幕依次沿用这张表。
   regions: ["外城区", "沙漠", "巨人城", "天网设施"],
+  // 幕间选择（作者定）：打完一幕的首领，选下一幕去哪。除了上面这张表的区域，第 2–4 幕还可以改去采矿场（第几幕 → 区域）。
+  // 额外幕不选，照表走
+  altRegions: { 2: "第一采矿场", 3: "第二采矿场", 4: "第三采矿场" },
+  // 下水道（作者 10/22，docs/ratfolk.md 第 6 节）：背包里有下水道地图（item），任何一次幕间选择都多一个「下水道」（region）选项，
+  // 额外幕的幕间也算；选了就用掉一张地图，一局只能进一次。下水道地图在单局商店的价格、进货见 ROGUE_SHOP / ROGUE_SHOP_RULES.mapChance
+  sewer: { region: "下水道", item: "map_sewer" },
+  // 每日挑战（#52，rogue.js · dailySeed / dailyParty）：每天一个固定种子，大家打同一局，用来统计专长的选取率
+  //   partySize 随机队伍几人（任何组合都行，方便测极端搭配）；featOffer 专长每次给几个选项；keepRuns 本机最多记几局
+  daily: { partySize: 4, featOffer: 4, keepRuns: 200 },
   // 每个区域的轮换 BOSS 池（占位：目前只接入了 3 个 BOSS，没有 BOSS 的区域从全部 BOSS 里抽）
   bosses: {
     "外城区": ["outlaw_king"],
     "沙漠": ["sand_aggregate"],
     "巨人城": [],
-    "天网设施": ["ufo_boss"]
+    "天网设施": ["ufo_boss"],
+    // 采矿场还没有专属首领：从全部首领里抽
+    "第一采矿场": [],
+    "第二采矿场": [],
+    "第三采矿场": [],
+    // 下水道也还没有首领（docs/ratfolk.md 第 6 节：暂时从全部首领里抽）
+    "下水道": []
   },
 
-  // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）
+  // 休息点不休息、直接离开：省下的时间换成一笔奎支（打零工 / 捡到的东西）。只有模板原有的休息点给；按小时补的（noPay）无报酬（rogue.js · restSkipPay）
   restSkipKuizhi: 250,
 
   // 遭遇战：在任务的休息点长休时可能被偷袭（城里休整不会）
@@ -61,7 +77,10 @@ const ROGUE_CONFIG = {
   hours: {
     travel: 3,          // 占位：每走到下一个节点
     shortRest: 1,       // 手册：短休 1 小时
-    longRest: 8         // 手册：长休 8–12 小时，这里取 8
+    longRest: 8,        // 手册：长休 8–12 小时，这里取 8
+    // 任务路线上任何一段连续不长休最多几小时（rogue.js · spaceRests / huntNext 按它补休息点）。力竭 20 小时起算，留 2 小时余量。
+    // 只算路线上的路程和节点时间：不算短休、撤退多花的时间、首领战后（不长休）带进下一幕的时间
+    restGapMax: 18
   },
 
   // 开局物资（占位）。水以毫升计，食物是手册里的四档
@@ -94,6 +113,9 @@ const ROGUE_CONFIG = {
   lootByRank: { minion: 80, elite: 460, boss: 920 },
   // 个别敌人不按三档、用自己的掉落（成群出现的穴鸦按杂兵给太多）
   lootByKit: { crow: 15 },
+  // 道具掉落（打赢才掉，进背包）：普通战斗 20% 掉一个随机道具，精英战一定掉一个，首领掉两个。
+  // 遭遇战（休息时被偷袭）按普通战斗算。pool 是能掉的道具（战斗里用的消耗品）
+  itemDrops: { battle: 0.2, elite: 1, boss: 2, pool: ["medkit", "clinic", "stim", "steroid", "bomb_e", "bomb_a", "shockbomb"] },
   // 诊所：任务之间回到城里时可以去（节点里也可能遇到，见 ROGUE_NODE_TYPES.clinic）
   campClinic: true,
 
@@ -125,12 +147,14 @@ const ROGUE_BATTLEFIELD = {
     { type: "field", what: "fire",     name: "火场",     weight: 2 },
     { type: "field", what: "acid",     name: "酸液地面", weight: 2 },
     { type: "field", what: "ice",      name: "冻土",     weight: 1, regions: ["外城区", "巨人城"] },
-    { type: "field", what: "electric", name: "高压场地", weight: 2, regions: ["巨人城", "天网设施", "外城区"] },
-    { type: "field", what: "energy",   name: "能量场",   weight: 1, regions: ["天网设施"] },
+    { type: "field", what: "electric", name: "高压场地", weight: 2, regions: ["巨人城", "天网设施", "外城区", "第二采矿场", "第三采矿场"] },
+    { type: "field", what: "energy",   name: "能量场",   weight: 1, regions: ["天网设施", "第三采矿场"] },
     { type: "field", what: "harmonic", name: "干涉场地", weight: 1, minAct: 2 },
     { type: "field", what: "heal",     name: "治愈场地", weight: 1 },
     { type: "field", what: "highland", name: "高地",     weight: 2 },
-    { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠"] },
+    { type: "field", what: "collapseOn", name: "塌陷区域", weight: 2, regions: ["沙漠", "第一采矿场"] },
+    { type: "field", what: "coral",      name: "沙珊瑚台地", weight: 1, regions: ["沙漠"] },   // 自带高地；夜晚 / 沙暴伸出触须抓人（desert.js）
+    { type: "prop",  what: "coral_branch", name: "沙珊瑚枝", weight: 2, regions: ["沙漠"], faction: "neutral" },
     { type: "gap",   what: "bridge",   name: "不稳桥梁", weight: 2 },
     { type: "gap",   what: "wall",     name: "危墙",     weight: 2 }
   ]
@@ -145,7 +169,13 @@ const ROGUE_TASK_WEATHER = {
     "外城区": ["heat", "acid", "thunder", "snow"],
     "沙漠": ["sand", "heat"],
     "巨人城": ["thunder", "acid", "snow", "glow"],
-    "天网设施": ["glow", "phase", "thunder"]
+    "天网设施": ["glow", "phase", "thunder"],
+    // 采矿场（占位）：露天矿坑晒、酸雨；熔岩矿场热；晶矿发光、相位
+    "第一采矿场": ["heat", "acid", "sand"],
+    "第二采矿场": ["heat", "acid"],
+    "第三采矿场": ["glow", "phase", "thunder"],
+    // 下水道：区域环境（天气、场地）待定（docs/ratfolk.md 第 7 节），先不带天气（和遭遇默认的一样，run.js · regionWeather）
+    "下水道": []
   }
 };
 
@@ -231,6 +261,60 @@ const ROGUE_SOLO = {
   role2MaxSkill: 3
 };
 
+/* 长线养成模式（测试用，rogue.js · run.growth）：从 1 级一路养到高级，测专长、改装件、成长曲线。
+ * 和单局共用任务板、节点、工匠、客制化，不同的地方：
+ *   没有主线、期限和首领；敌人等级跟着队伍平均等级走（区域按这个等级落在哪一幕）
+ *   经验照跑团模式：升级所需经验不打折，击杀经验全队平分，打赢每场额外「最高等级 × 20 / 人数」
+ *   任务经验照跑团模式：主持人手册的任务经验表（trpg-tasks.js · TRPG_TASK_PAY），按任务天数和队伍平均等级查，每人全额（rogue.js · taskXp）
+ *   武器升级照跑团模式：要实物材料（商店常备）+ 工匠加工费
+ *   角色不会永久死亡：倒下的战后留 1 点生命；团灭只算任务失败
+ *   完成任务得到赫心融合体，在抽取机里抽（概率见下面 ROGUE_GACHA）：抽到角色时新角色入队（满员进候补），抽到已有的角色 +1 级
+ *   startParty  开局选几名角色            partyMax  同时上场几人（其余在候补，任务板前可以换）
+ *   fusionPerTask 每完成一个任务给几个赫心融合体   drawCost 抽一次要几个
+ *   fusionPerDay  每过一天发几个赫心融合体
+ *   recruitLevel  新抽到的角色从几级开始          maxLevel  抽到重复角色最多升到几级 */
+const ROGUE_GROWTH = {
+  startParty: 2,
+  partyMax: 4,
+  fusionPerTask: 1,
+  fusionPerDay: 1,
+  drawCost: 1,
+  recruitLevel: 1,
+  maxLevel: 20,
+  fusionItem: "heart_fusion"
+};
+/* 长线养成：抽取机概率（每抽一次消耗 1 个赫心融合体）
+ *   share       每抽的大类：hero 角色（原来的抽角色逻辑）/ weapon 武器升级材料 / craft 道具制作材料
+ *               所有角色都满级时，hero 那一份按比例分给 weapon / craft（40:30）
+ *   weaponMats  武器材料各档相对权重 —— 和每日挑战奖励的材料是同一张表（rogue.js · completeGrowthDailyTask）
+ *   craftMats   null = 道具制作材料（items.js · CRAFT_MATERIALS）全部等概率
+ *   light       每次结果的光色（给抽卡界面用）：gold / purple / blue / gray
+ *   kuizhiMode  ⚠ 待定（等作者拍板）："byLight" 按光色给奎支（kuizhiByLight）；"flat" 每抽固定 kuizhiFlat.base + 按光色的 kuizhiFlat.extra
+ *   pity        保底：可用角色（队伍 + 候补，不算永久死亡的）少于 below 人时，出角色的概率改成 hero，剩下的按 share 的 weapon:craft 分；
+ *               取满足条件里 below 最小的一档。十连里每抽重新算人数（rogue.js · drawRates）。所有角色都满级时不看保底（只出材料）
+ *   dailyTaskFusion  每完成 1 个每日挑战给几个赫心融合体；dailyAllFusion 三个全完成额外给几个 */
+const ROGUE_GACHA = {
+  share: { hero: 0.30, weapon: 0.40, craft: 0.30 },
+  pity: [{ below: 2, hero: 1 }, { below: 4, hero: 0.70 }],
+  weaponMats: [
+    { id: "mat_metal",   w: 50 },
+    { id: "mat_alloy",   w: 30 },
+    { id: "mat_polymer", w: 14 },
+    { id: "mat_crystal", w: 4 },
+    { id: "mat_heart",   w: 2 }
+  ],
+  craftMats: null,
+  light: { hero: "gold", craft: "blue", mat_heart: "gold", mat_crystal: "purple", mat_polymer: "blue", mat_alloy: "blue", mat_metal: "gray" },
+  kuizhiMode: "byLight",   // ⚠ PENDING：作者还没定，"byLight" 或 "flat"
+  kuizhiByLight: { gray: 100, blue: 150, purple: 500, gold: 1000 },
+  kuizhiFlat: { base: 100, extra: { gray: 0, blue: 0, purple: 0, gold: 0 } },
+  dailyTaskFusion: 1,
+  dailyAllFusion: 5
+};
+if (typeof ITEM_CATALOG !== "undefined" && !ITEM_CATALOG.heart_fusion) {
+  ITEM_CATALOG.heart_fusion = { name: "赫心融合体", hint: `长线养成：在抽取机里抽一次：${Math.round(ROGUE_GACHA.share.hero * 100)}% 角色（新角色入队，已有的 +1 级）/ ${Math.round(ROGUE_GACHA.share.weapon * 100)}% 武器升级材料 / ${Math.round(ROGUE_GACHA.share.craft * 100)}% 道具制作材料，另附奎支。保底：能用的角色（队伍 + 候补）少于 2 人必出角色，少于 4 人出角色 70%`, goods: true };
+}
+
 /* 诊所（数值占位，按「一人一次改造平均约 3000 奎支」定）
  *   healPerHp   治疗：每恢复 1 点生命的价格（手册简易医疗包 600 奎支约治 8.5 点，约 70 / 点）
  *   cyberPerHp  义体改造：每改动 1 点肉体的价格（加、减都算；换成星灵按被换掉的肉体点数算）
@@ -243,10 +327,11 @@ const ROGUE_CLINIC = {
 /* 支线任务模板（文字与数值都是占位）。报酬和补给是 ROGUE_CONFIG.perHeadBase 人队的量
  *   nodes    节点数范围 [最少, 最多]
  *   mix      中间节点的抽取权重（最后一个节点固定是战斗，elite: true 则是精英战）
- *            休息点不在这里抽：每个任务固定额外插一个（不在第一站、也不在最后一站）
+ *            休息点不在这里抽：每个任务固定额外插一个（不在第一站、也不在最后一站），
+ *            之后再按小时补（ROGUE_CONFIG.hours.restGapMax），所以可能不止一个
  *   days     需要几天
  *   diff     敌人等级额外 +几
- *   reward   完成奖励：奎支、每人经验
+ *   reward   完成奖励：奎支、每人经验（长线养成的经验不看这里，照手册的任务经验表，见 ROGUE_GROWTH）
  *   supply   接任务时委托方提供的补给：水（毫升）、物品 */
 const ROGUE_TASKS = [
   { kind: "clear",  name: "清剿", goal: "清掉盘踞在{region}的一伙敌人", nodes: [2, 3], days: 1, diff: 0,
@@ -271,8 +356,22 @@ const ROGUE_MAIN_TASK = {
 };
 
 /* 商店。价格照手册「常见物价」。give：water 是毫升；item 是背包物品 id（ITEM_CATALOG / 补给物品）。 */
-/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种 */
-const ROGUE_SHOP_RULES = { randomCount: 8 };
+/* 商店：always 的（最便宜的水和食物）每家都有；其余商品每家随机进货 ROGUE_SHOP_RULES.randomCount 种；
+ * 效果道具（items.js · EFFECT_ITEMS，自我效果除外）另外随机进 effectCount 种，不和水、食物、医疗包抢位置；
+ * 地图（map: true 的，下水道地图）每家另外按 mapChance 的概率进一张（占位），也不抢位置；这一局进过下水道以后、长线养成不进 */
+const ROGUE_SHOP_RULES = { randomCount: 8, effectCount: 4, mapChance: 0.2 };
+/* 商店积分（作者定，docs/workshop-design.md 第 6 节）：在商店每花 per 奎支得 1 积分，零头累计到下次；
+ * 积分只能兑换自我效果道具（items.js · EFFECT_ITEMS 里 kind 为 self 的，各自的 points）。这一局内有效。 */
+const ROGUE_SHOP_POINTS = { per: 3000 };
+/* 制作（docs/workshop-design.md 第 5 节；通用规则在 items.js · CRAFT_RULES）
+ *   smithProfs  每位工匠教哪一类熟练项的配方（简单配方一开始就会，其余向对应的工匠学）
+ *   learnPrice  学一张配方的学费（奎支），按难度
+ *   chip        打赢精英 / 首领掉配方芯片的概率：学会一张还不会的配方（优先能做的熟练项） */
+const ROGUE_CRAFT = {
+  smithProfs: { trevor: "机械维修", teresa: "电器维修", zekahr: "数据操作", tima: "巧手", morma: "科技理论", nurhamid: "医疗" },
+  learnPrice: { normal: 800, hard: 1500, extreme: 2500 },
+  chip: { elite: 0.25, boss: 1 }
+};
 const ROGUE_SHOP = [
   { key: "water_500",  name: "瓶装水 500 ml",  price: 600,  give: { water: 500 }, always: true },
   { key: "water_1000", name: "罐装水 1000 ml", price: 1000, give: { water: 1000 } },
@@ -289,8 +388,10 @@ const ROGUE_SHOP = [
   { key: "steroid",      price: 1200, give: { item: "steroid" } },
   { key: "bomb_e",       price: 1000, give: { item: "bomb_e" } },
   { key: "bomb_a",       price: 1000, give: { item: "bomb_a" } },
-  { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } }
-];
+  { key: "shockbomb",    price: 1200, give: { item: "shockbomb" } },
+  { key: "map_sewer",    price: 3000, give: { item: "map_sewer" }, map: true }   // 下水道地图：幕间可以改走下水道（ROGUE_CONFIG.sewer）
+].concat((typeof EFFECT_ITEMS !== "undefined" ? EFFECT_ITEMS : []).filter(it => it.price > 0)
+  .map(it => ({ key: it.id, price: it.price, give: { item: it.id }, effect: true })));
 
 /* 材料（物品表的价格）。单局里升级不收实物材料，按这张表折成奎支。 */
 const ROGUE_MATERIALS = HANDBOOK_MATERIALS;   // 与跑团模式共用（trpg-data.js）
@@ -305,7 +406,7 @@ const ROGUE_SMITH = {
 
 /* 武器工匠（设定照作者给的人物表）。
  *   ROGUE_SMITH_RULES.onBoard        每次回到任务板时随机出现几位不同的工匠（已定：3）
- *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他的客制化里挑一张图纸（已定：5，代替设定里的任务线）
+ *   ROGUE_SMITH_RULES.blueprintAfter 在同一位工匠那里升级满几次，就能从他还没给过的客制化里挑一张图纸；领完计数归零，再满几次领下一张，不重复，都领完不再计数（已定：5，代替设定里的任务线）
  *   ROGUE_SMITH_RULES.installCost    把图纸装到武器上的价格（已定：5000）
  * 每位工匠：
  *   home      所在的地方（单局在这个区域时出现的机会翻倍）       weight  出现的权重（默认 1）
@@ -404,9 +505,9 @@ const ROGUE_PARTS = {
 /* 悬赏任务（rogue.js · huntNext）：路线不预先给出，一站一站往前走。
  *   线索检定 → 其他任意节点 → 线索检定 → …；检定成功 need 次就找到目标；失败 failMax 次也会直接找到目标。
  *   检定失败（或绕过去）之后，下一个线索检定换一个不同的熟练项。
- *   找到后下一站是精英战：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
+ *   找到后下一站是精英战（走过去会超 ROGUE_CONFIG.hours.restGapMax 小时就先插一个休息点）：目标是本区域随机一个精英单位，血量和 atk ×hpMul / atkMul，名字前加【目标】，多占 extraTokens 枚代币。
  *   打赢目标完成任务；从目标那一战撤退 = 目标逃走，任务失败。
- *   other：检定之间那一站的抽取权重（休息点整个任务最多一次） */
+ *   other：检定之间那一站的抽取权重（随机抽到的休息点整个任务最多一次；按小时强制补的休息点另算，补过之后也不再随机抽） */
 const ROGUE_BOUNTY = {
   need: 3, failMax: 5,
   hpMul: 1.5, atkMul: 1.5, extraTokens: 1,
@@ -437,27 +538,32 @@ function blueprintSpec(id) {
 })();
 
 /* 升级时要做的选择（手册第三章「升级时你会得到什么」）。
- * 角色卡上 minLv 的技能（lv2、lv11、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
- *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）
+ * 角色卡上 minLv 的技能（lv2、lv9、lv17 的「一项技能」、效果位技能）到级自动解锁，不在这里。
+ *   attr      可分配的六维属性点；noRepeat：不能加在之前加过的同一项上（lv8）；lv19 那点可以重复
  *   role      职责技能二选一（lv5 副一/主二，lv10 主二/主三，lv15 主三/主四）
  *   prof      一个自选熟练项：新学一项，或把已有的一项升一级（最高三级）
+ *   feat      一项专长（feats.js），7 / 11 / 13 / 16 级
  *   note      系统还没做的奖励：先记在角色身上，等对应系统做好再兑现 */
 const ROGUE_LEVEL_REWARDS = {
   3:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   4:  [{ type: "attr" }],
   5:  [{ type: "role" }],
-  7:  [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
+  7:  [{ type: "note", key: "feat", text: "一项专长" }],
   8:  [{ type: "attr", noRepeat: true }],
-  9:  [{ type: "note", key: "feat", text: "一项专长" }],
   10: [{ type: "role" }],
+  11: [{ type: "note", key: "feat", text: "一项专长" }],
   12: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
   13: [{ type: "note", key: "feat", text: "一项专长" }],
   14: [{ type: "note", key: "lv14", text: "自己回合内可用 1 行动点转化为 1 附赠动作" }],
   15: [{ type: "role" }],
   16: [{ type: "note", key: "feat", text: "一项专长" }],
-  18: [{ type: "prof" }],                      // 一个自选熟练项（已有的再选一次 = 升一级，最高三级）
-  19: [{ type: "note", key: "feat", text: "一项专长" }],
+  18: [{ type: "prof" }, { type: "prof" }],    // 两个自选熟练项
+  19: [{ type: "attr" }],                      // 这一点可以加在之前加过的同一项上
   20: [{ type: "note", key: "ultimate", text: "强力终极技能" }]
 };
+
+/* 专长在哪几级拿（rogue.js · settleOwedFeats 用来给旧存档补欠的专长） */
+const FEAT_LEVELS = Object.keys(ROGUE_LEVEL_REWARDS).map(Number)
+  .filter(L => ROGUE_LEVEL_REWARDS[L].some(r => r.type === "note" && r.key === "feat"));
 
 const ATTR_NAMES = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };

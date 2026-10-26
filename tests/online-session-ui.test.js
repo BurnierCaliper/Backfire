@@ -19,7 +19,7 @@ async function publicScreenshot(t, page, name) {
 }
 async function assertPlayerIsolation(page) {
   const actual = await page.evaluate(() => ({
-    legacy: [...document.body.children].filter(node => !node.matches(".ol-ui, .hs-ui") && getComputedStyle(node).display !== "none").map(node => node.tagName + (node.id ? "#" + node.id : "")),
+    legacy: [...document.body.children].filter(node => !node.matches(".ol-ui, .hs-ui, .unit-tip, .sk-tip, #sk-tip") && getComputedStyle(node).display !== "none").map(node => node.tagName + (node.id ? "#" + node.id : "")),
     documentHeight: document.documentElement.scrollHeight, bodyHeight: document.body.scrollHeight, viewport: innerHeight
   }));
   assert.deepEqual(actual.legacy, [], "a remote player's page must hide every legacy top-level game/GM panel");
@@ -31,21 +31,23 @@ async function assertHostControlsClickable(page, screen, t, label = screen) {
   const sizes = [[1440, 900], [768, 1024], [390, 844], [320, 568], [844, 390], [568, 320]];
   for (const [width, height] of sizes) {
     await page.setViewportSize({ width, height });
-    const tools = page.locator("#ogm-toggle"), room = page.locator('#online-dock [data-online="openRoom"]');
-    await tools.waitFor({ state: "visible" }); await room.waitFor({ state: "visible" });
-    const [toolRect, roomRect] = await Promise.all([tools.boundingBox(), room.boundingBox()]);
-    const context = JSON.stringify({ screen, label, width, height, toolRect, roomRect });
-    for (const rect of [toolRect, roomRect]) assert.ok(rect && rect.x >= 0 && rect.y >= 0 && rect.x + rect.width <= width + 1 && rect.y + rect.height <= height + 1, "both host controls must remain inside the viewport: " + context);
-    const overlapping = Math.max(toolRect.x, roomRect.x) < Math.min(toolRect.x + toolRect.width, roomRect.x + roomRect.width) && Math.max(toolRect.y, roomRect.y) < Math.min(toolRect.y + toolRect.height, roomRect.y + roomRect.height);
-    assert.equal(overlapping, false, "host tools and room controls must not overlap: " + context);
+    // #298：主持人工具、消息与成员都收进了「房间码 · 菜单」按钮打开的暂停页面，原来的两个按钮不在了
+    const menu = page.locator("#ol-menu-open");
+    await menu.waitFor({ state: "visible" });
+    assert.equal(await page.locator('#ogm-toggle, #online-dock [data-online="openRoom"]').count(), 0, "the old host buttons moved into the pause menu");
+    const menuRect = await menu.boundingBox();
+    const context = JSON.stringify({ screen, label, width, height, menuRect });
+    assert.ok(menuRect && menuRect.x >= 0 && menuRect.y >= 0 && menuRect.x + menuRect.width <= width + 1 && menuRect.y + menuRect.height <= height + 1, "the host menu button must remain inside the viewport: " + context);
     // Exercise the browser's normal hit testing on the complete game page.
     // Forced clicks/DOM-dispatched events would hide the original regression.
-    await tools.click({ timeout: 3000 });
+    await menu.click({ timeout: 3000 });
+    await page.locator('#pm-overlay [data-pause-item="gmTools"]').click({ timeout: 3000 });
     await page.locator("#ogm-panel").waitFor({ state: "visible" });
     assert.match(await page.locator("#ogm-panel h2").innerText(), /主持人工具/);
     await page.locator('#ogm-panel [data-action="close"]').click({ timeout: 3000 });
     await page.locator("#ogm-panel").waitFor({ state: "hidden" });
-    await room.click({ timeout: 3000 });
+    await menu.click({ timeout: 3000 });
+    await page.locator('#pm-overlay [data-pause-item="room"]').click({ timeout: 3000 });
     await page.locator("#online-panel").waitFor({ state: "visible" });
     assert.match(await page.locator("#online-panel").innerText(), /房间成员/);
     await page.locator('#online-panel [data-online="close"]').click({ timeout: 3000 });
@@ -85,6 +87,7 @@ async function fixture(t) {
   const pages = [], contexts = [], errors = [], wire = [];
   for (const width of [1440, 1280, 390]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } }); contexts.push(context);
+    await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
     const page = await context.newPage(); pages.push(page);
     page.on("pageerror", error => errors.push(error.message)); page.on("dialog", dialog => dialog.accept());
     page.on("websocket", ws => ws.on("framereceived", frame => { try { wire.push({ page: pages.indexOf(page), data: JSON.parse(frame.payload) }); } catch (_) {} }));
@@ -139,7 +142,10 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   assert.equal((await submit(alice, { type: "gmReply", text: "ALICE_REPLY_D3" })).ok, true);
   await host.waitForFunction(() => OnlineGame.getView().messages.some(m => m.text === "ALICE_REPLY_D3"));
   assert.ok(!(await bob.evaluate(() => JSON.stringify(OnlineGame.getView()))).includes("ALICE_REPLY_D3"));
-  await host.evaluate(() => { OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  // 先长休一次（issue #216）：之后每个玩家包都带着长休结算 rest（4 人约 1 KB），下面 4v3 连击的流量照样要 ≤ 50 KiB
+  await host.evaluate(() => { OnlineGame.start(); trpgLongRest({ hours: 8, force: true }); OnlineGame.touch(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => !!OnlineGame.getView().packet?.rest?.id);
+  await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
   try { await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0, null, { timeout: 20000 }); }
   catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, started: state.combatStarted, combatPhase: state.combatPhase, notice: OnlineGame.getView().notice }))) + " errors=" + JSON.stringify(f.errors)); }
   const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
@@ -172,7 +178,13 @@ test("D3 game sessions: remote ownership, GM/private messages, round actions and
   const attackResult = await alice.evaluate(() => window.attackResult); assert.equal(attackResult?.ok, true, JSON.stringify(attackResult));
   const finalAttackSeq = await alice.evaluate(() => OnlineGame.getView().packet.seq);
   await bob.waitForFunction(seq => OnlineGame.getView().packet?.seq >= seq, finalAttackSeq);
+  // 战场日志写出打了谁、多少伤害（以前只有「瑞比 · 普通攻击」）
+  await bob.waitForFunction(() => (OnlineGame.getView().packet.publicLogs || []).some(r => /普通攻击 → .+：\d+ 伤害/.test(r.text)), null, { timeout: 10000 });
   measureAction(t, "4v3 ruby two-hit attack", f.wire.slice(attackStart));
+  // 长休结算没变：战斗包不再整份带 rest，只带 restUnchanged（玩家端用上一次收到的那份）
+  const attackPackets = logicalPackets(f.wire.slice(attackStart)).filter(row => row.packet.type === "result");
+  assert.ok(attackPackets.every(row => !("rest" in row.packet) && row.packet.restUnchanged === true), "长休过一次以后，战斗包不再重发长休结算");
+  assert.equal(await alice.evaluate(() => typeof OnlineGame.getView().packet.rest?.id), "string", "玩家端照样拿得到这份结算");
   const menu = await alice.evaluate(actor => OnlineGame.actionMenu({ actor, skill: "__move" }), actor);
   assert.equal(menu.type, "actionOptions"); assert.ok(menu.choices.options.length > 0);
   const dest = menu.choices.options[0].value;
@@ -241,7 +253,9 @@ test("D3 game sessions: remote summon, mixed AI/manual round, reactions, victory
   await pageFor(last.owner).evaluate(cmd => { window.roundResult = null; OnlineGame.submit(cmd).then(result => { window.roundResult = result; }); }, { type: "endTurn", actor: last.actor });
   try { await host.waitForFunction(() => OnlineGame.getView().manualPhase && state.combatPhase === "enemy", null, { timeout: 5000 }); }
   catch (error) { throw new Error(error.message + " " + JSON.stringify(await host.evaluate(() => ({ depth: GAME.depth, phase: HotseatGame.getView().phase, ask: HotseatGame.getView().ask, combatPhase: state.combatPhase, manual: GMCommands.snapshot(), notice: OnlineGame.getView().notice, last: JSON.parse(localStorage.getItem("backfire-online-v1")).requests.slice(-1).map(entry => entry[1].response) }))) + " player=" + JSON.stringify(await pageFor(last.owner).evaluate(() => window.roundResult)) + " errors=" + JSON.stringify(f.errors)); }
-  assert.match(await host.locator("#ogm-toggle").innerText(), /敌人待操作/);
+  // 敌人等主持人操作：暂停页面里写「敌人待操作 · 主持人工具」，「菜单」按钮挂提示（#298，以前写在 #ogm-toggle 上）
+  assert.deepEqual(await host.evaluate(() => { const r = PauseMenu.list().find(x => x.id === "gmTools"); return { label: r.label, badge: r.badge }; }), { label: "敌人待操作 · 主持人工具", badge: true });
+  assert.equal(await host.locator("#ol-menu-open .pm-dot").count(), 1);
   await assertHostControlsClickable(host, "battle", t, "manual-enemy");
   const aiActions = await host.evaluate(() => Commands.history().filter(row => row.command.type === "battle.enemyAction").map(row => row.command.actor));
   assert.ok(aiActions.includes(enemyControl.ai), "the unmarked enemy acts through the existing AI before the manual phase");
@@ -476,11 +490,28 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   // 主持人：探索记录栏有「探索 / 小队」频道，也能直接回
   await host.locator('.tr-log [data-host-tab="chat"]').click();
   assert.match(await host.locator(".tr-log .ol-host-chat").innerText(), /我们先去黑市/);
-  await host.fill(".tr-log .ol-host-chat input", "好的路上小心");
+  await host.fill(".tr-log .ol-host-chat textarea", "好的路上小心");
   await host.click(".tr-log .ol-host-chat button[type=submit]");
   try { await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "好的路上小心"), null, { timeout: 5000 }); }
-  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat input").value, chat: HotseatGame.getView().chat })))); }
+  catch (e) { throw new Error("主持人消息没发出去：" + JSON.stringify(await host.evaluate(() => ({ notice: OnlineGame.getView().notice, input: document.querySelector(".tr-log .ol-host-chat textarea").value, chat: HotseatGame.getView().chat })))); }
   await alice.waitForFunction(() => /好的路上小心/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+  // 多行：Shift+Enter 只换行不发送，Enter 发送
+  await alice.click("#ol-side-text");
+  await alice.keyboard.type("第一行"); await alice.keyboard.press("Shift+Enter"); await alice.keyboard.type("第二行");
+  assert.equal(await alice.inputValue("#ol-side-text"), "第一行\n第二行", "Shift+Enter 只换行");
+  await alice.keyboard.press("Enter");
+  await host.waitForFunction(() => HotseatGame.getView().chat.some(m => m.text === "第一行\n第二行"));
+  // 字符画：换行和全角空格原样到对方，不折行，字号缩到聊天栏放得下（主持人探索记录栏最窄）
+  const art = ["　　龍龍龍", "龍".repeat(18), "　爪　　爪"].join("\n");
+  await alice.fill("#ol-side-text", art); await alice.press("#ol-side-text", "Enter");
+  const artShape = (page, sel) => page.waitForFunction(([sel, t]) => {
+    const p = [...document.querySelectorAll(sel)].find(x => x.textContent === t);
+    return p && { art: p.classList.contains("ol-art"), lines: Math.round(p.clientHeight / parseFloat(getComputedStyle(p).lineHeight)), fits: p.scrollWidth <= p.clientWidth };
+  }, [sel, art], { timeout: 5000 }).then(h => h.jsonValue());
+  await bob.click('#online-side [data-side="chat"]');   // Bob 是手机宽度，聊天栏默认收起：点「小队」展开再量
+  assert.deepEqual(await artShape(bob, "#online-side .ol-side-chat p"), { art: true, lines: 3, fits: true });
+  assert.deepEqual(await artShape(host, ".tr-log .ol-host-chat p"), { art: true, lines: 3, fits: true });
+  assert.equal(await alice.inputValue("#ol-side-text"), "", "发出去后清空输入框");
   // 输入法拼字中：别人发消息时，输入框不被换掉，拼到一半的内容还在
   await bob.click("#ol-side-text");
   await bob.evaluate(() => { window.__inp = document.getElementById("ol-side-text"); window.__inp.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__inp.value = "wo m"; });
@@ -490,7 +521,7 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   assert.deepEqual(await bob.evaluate(() => ({ same: document.getElementById("ol-side-text") === window.__inp, value: window.__inp.value, focused: document.activeElement === window.__inp })), { same: true, value: "wo m", focused: true });
   // 房间面板里的私信框：拼字时整个面板不重画
   await bob.evaluate(() => { window.__inp.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true })); window.__inp.value = ""; });
-  await bob.click('#online-dock [data-online="openRoom"]');
+  await bob.click("#ol-menu-open"); await bob.click('#pm-overlay [data-pause-item="room"]');
   await bob.click("#ol-message");
   await bob.evaluate(() => { window.__ta = document.getElementById("ol-message"); window.__ta.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true })); window.__ta.value = "zhu chi"; });
   await host.evaluate(() => OnlineGame.submit({ type: "gm.msg", to: "all", text: "全体注意天快黑了" }));
@@ -516,13 +547,15 @@ test("联机：玩家能看角色资料 / 武器 / 背包；小队聊天全程�
   await alice.waitForSelector("#armory-sheet.show");
   await alice.keyboard.press("Escape").catch(() => {});
   await alice.evaluate(() => document.getElementById("armory-sheet").classList.remove("show"));
-  // 背包：名字、数量、说明
+  // 背包：共用背包浮层（backpack-ui.js），名字、数量、说明
   await alice.click('[data-online="info"][data-info="bag"]');
-  await alice.waitForSelector("#online-bag:not([hidden])");
+  await alice.waitForSelector("#bp-overlay:not([hidden])");
+  await alice.click('#bp-overlay [data-bp-tab="consumable"]');
   await shot(alice, "5-player-bag");
-  const bagText = await alice.locator("#online-bag").innerText();
-  assert.match(bagText, /简易医疗包/); assert.match(bagText, /× 2/); assert.match(bagText, /1d4\+6/);
-  await alice.click('#online-bag [data-bag="close"]');
+  const bagText = await alice.locator("#bp-overlay").innerText();
+  assert.match(bagText, /简易医疗包/); assert.match(bagText, /×\s*2/); assert.match(bagText, /1d4\+6/);
+  await alice.click("#bp-overlay [data-bp-close]");
+  await alice.waitForSelector("#bp-overlay", { state: "hidden" });
   // 战斗中：右侧栏变成「战斗 / 小队」，默认战斗频道，也能切到小队聊天
   await host.evaluate(() => { TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
   await alice.waitForFunction(() => OnlineGame.getView().screen === "battle");
@@ -553,6 +586,8 @@ test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆�
   const shot = async (page, name) => { if (process.env.BACKFIRE_SHOTS) await page.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, name + ".png") }); };
   await host.evaluate(() => { OnlineGame.start(); });
   await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await alice.waitForFunction(() => Array.isArray(OnlineGame.getView().packet?.party) && OnlineGame.getView().packet.party.length > 0);
+  const partyFrom = f.wire.length;
   await host.evaluate(() => battleTemplateSave({ name: "桥头伏击", board: 3, weather: "snow", playerZone: 1,
     enemies: [{ preset: "thug_knife", level: 2, zone: 3 }, { preset: "thug_hammer", level: 2, zone: 2 }],
     fields: { 2: { acid: true } }, gaps: { "2-3": { type: "wall", hp: 30 } }, props: [{ kind: "boom", zone: 2, faction: "enemy" }] }));
@@ -563,6 +598,10 @@ test("联机：主持人用战斗模板开战，玩家一进战斗就看到摆�
   await alice.waitForFunction(() => (OnlineGame.getView().packet?.state?.units || []).filter(u => !u.isPlayer).length === 2);
   const seen = await alice.evaluate(() => { const s = OnlineGame.getView().packet.state; return { zoneMode: s.zoneMode, weather: s.weather, foes: s.units.filter(u => !u.isPlayer).map(u => u.zone).sort(), props: (s.props || []).length, wall: (s.gaps || {})["2-3"]?.type, started: !!s.combatStarted }; });
   assert.deepEqual(seen, { zoneMode: 3, weather: "snow", foes: [2, 3], props: 1, wall: "wall", started: false });
+  // 战斗里的包不带队伍卡（探索时带，见上面）：玩家战斗画面不画它，带上只是白占流量
+  const battlePackets = logicalPackets(f.wire.slice(partyFrom)).filter(r => r.packet.screen === "battle");
+  assert.ok(battlePackets.length > 0);
+  assert.ok(battlePackets.every(r => r.packet.party == null), "战斗包不该带 party");
   await shot(alice, "tpl-2-player-battle"); await shot(host, "tpl-3-host-battle");
   assert.deepEqual(f.errors, []);
 });
@@ -622,6 +661,18 @@ test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家
   assert.ok(!/暗骰/.test(await alice.evaluate(() => JSON.stringify(OnlineGame.getView()))), "玩家收不到暗骰");
   // 检定：主持人在「检定」页发起
   await host.click('#tr-tabs [data-tab="checks"]');
+  // 暗骰检定发起失败：「暗骰」勾选留着（不然再点一次就成了公开检定，结果漏给玩家）；成功后才取消勾选
+  await host.check("#ck-secret");
+  await host.evaluate(() => { const real = OnlineGame.submit; OnlineGame.submit = async () => { OnlineGame.submit = real; return { ok: false, error: "测试：发起失败" }; }; });
+  await host.click("#ck-open");
+  await host.waitForFunction(() => !!document.getElementById("ck-secret"));
+  await host.waitForTimeout(200);
+  assert.equal(await host.evaluate(() => (HotseatGame.getView().checks || []).length), 0, "失败的那次没有建出检定");
+  assert.equal(await host.isChecked("#ck-secret"), true, "发起失败后暗骰仍勾着");
+  await host.click("#ck-open");
+  await host.waitForFunction(() => (HotseatGame.getView().checks || []).some(c => c.secret));
+  await host.waitForFunction(() => document.getElementById("ck-secret") && !document.getElementById("ck-secret").checked);
+  await host.evaluate(() => { for (const c of HotseatGame.getView().checks || []) if (c.status !== "closed") OnlineGame.submit({ type: "checkClose", checkId: c.id }); });
   await host.selectOption("#ck-prof", "侦察");
   await host.selectOption("#ck-diff", "easy");
   await host.fill("#ck-note", "看看门后有什么");
@@ -638,6 +689,14 @@ test("联机：按钮掷 d100 / 主持人暗骰；主持人发起检定、玩家
   await host.evaluate(id => OnlineGame.queueHostEdit(() => { state.units.find(u => u.id === id).attrPoints = 1; }), mine);
   await alice.waitForSelector('#online-stage [data-online="attrRequest"][data-attr="dex"]');
   await alice.click('#online-stage [data-online="attrRequest"][data-attr="dex"]');
+  // 属性点申请区和自己的卡在同一个网格格子里，贴在卡片下面（不是单独占一格排到旁边）
+  const layout = await alice.evaluate(() => {
+    const attr = document.querySelector("#online-stage .ol-party .ol-attr"), cell = attr && attr.closest(".ol-party-cell"), card = cell && cell.querySelector(".rhero.mine");
+    if (!card) return null;
+    const a = attr.getBoundingClientRect(), c = card.getBoundingClientRect();
+    return { parentIsCell: attr.parentElement === cell, cellInGrid: cell.parentElement.classList.contains("ol-party"), below: a.top >= c.bottom - 1, left: Math.abs(a.left - c.left) <= 1 };
+  });
+  assert.deepEqual(layout, { parentIsCell: true, cellInGrid: true, below: true, left: true });
   await alice.waitForFunction(() => /等主持人确认：敏捷 \+1/.test(document.getElementById("online-stage").textContent));
   await shot(alice, "attr-1-player");
   await host.click('#tr-tabs [data-tab="party"]');
@@ -681,6 +740,102 @@ test("联机：模板带的战斗掉落打赢后进背包，玩家结算里看�
   assert.match(rec, /胜利/);
   assert.match(rec, /掉落：300 奎支、简易医疗包×2/);
   await shot(alice, "record-player");
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：编辑器做的模板掉落——房主开战后刷新页面、玩家自己打赢，回到探索后队伍背包和玩家背包里都有；战绩里这场名字还在", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.click('#tr-tabs [data-tab="battles"]');
+  await host.click('[data-bt="new:"]');
+  await host.fill('[data-bte="name"]', "仓库守卫");
+  await host.fill("[data-bt-dropkz]", "300");
+  await host.selectOption("#bt-drop-item", "medkit"); await host.fill("#bt-drop-qty", "2");
+  await host.click('[data-bt-act="addDrop"]'); await host.click('[data-bt-act="save"]');
+  await host.click('[data-bt^="fight:"]');
+  await host.evaluate(aliceId => OnlineGame.assign(Object.fromEntries(HotseatGame.getView().heroes.filter(h => h.name === "绯秋").map(h => [h.id, aliceId]))), f.aliceId);
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  await host.reload(); await host.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
+  await host.evaluate(async () => { GAME.skip = true; GAME.instant = true; await OnlineGame.resume(); });
+  await host.waitForFunction(() => !OnlineGame.isPaused() && state.combatStarted && GAME.depth === 0);
+  const before = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  // 敌人只剩 1 点血、和绯秋同区；绯秋排第一个，由 Alice 自己普通攻击打赢
+  await host.evaluate(() => { state.units.forEach(u => { u.zone = 1; if (!u.isPlayer) { u.layers.forEach(l => { l.current = 0; }); u.layers[u.layers.length - 1].current = 1; u.def = 0; } }); });
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes.slice().sort((a, b) => (b.name === "绯秋") - (a.name === "绯秋")));
+  const pageFor = owner => owner === f.aliceId ? alice : owner === f.bobId ? bob : host;
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(pageFor(hero.owner), { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  await host.waitForFunction(() => HotseatGame.getView().currentUnitId && GAME.depth === 0);
+  const cur = await host.evaluate(() => ({ actor: HotseatGame.getView().currentUnitId, target: state.units.find(u => !u.isPlayer && !u.dead).id }));
+  const menu = await alice.evaluate(c => OnlineGame.actionMenu({ actor: c.actor, skill: "hiaki_aa", target: c.target }), cur);
+  assert.equal(menu.choices.kind, "ready");
+  assert.equal((await submit(alice, menu.choices.command)).ok, true);
+  await host.waitForFunction(() => GAME.ended && GAME.lastOutcome === "win");
+  await host.evaluate(() => TrpgFlow.backFromBattle());
+  await host.waitForFunction(() => Screens.is("trpg"));
+  const back = await host.evaluate(() => ({ kz: Number(state.kuizhi) || 0, med: bagCount("medkit") }));
+  assert.ok(back.kz >= before.kz + 300); assert.equal(back.med, before.med + 2);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const bag = (await alice.evaluate(() => OnlineGame.sheetData())).bag;
+  assert.equal(bag.kuizhi, back.kz); assert.equal(bag.items.find(x => x.id === "medkit").qty, back.med);
+  await alice.click('[data-online="info"][data-info="record"]');
+  await alice.waitForSelector("#online-bag:not([hidden]) .ol-record");
+  const rec = await alice.locator("#online-bag").innerText();
+  assert.match(rec, /仓库守卫/); assert.match(rec, /掉落：300 奎支、简易医疗包×2/);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机跑团：玩家的角色升级只弹在这名玩家的画面上，带新技能说明；主持人操控的角色在主持人本机弹", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kit = await host.evaluate(aliceId => { const h = HotseatGame.getView().heroes.find(x => x.owner === aliceId); const u = state.units.find(x => x.id === h.id); u.xp = xpToNext(u.level) ; tryLevelUp(u); OnlineGame.touch(); return u.kit; }, f.aliceId);
+  await alice.waitForSelector("#online-levelup:not([hidden]) .lvu-card");
+  assert.match(await alice.locator("#online-levelup").innerText(), /升到 \d+ 级/);
+  await new Promise(r => setTimeout(r, 900));
+  assert.equal(await bob.locator("#online-levelup:not([hidden])").count(), 0);
+  assert.equal(await host.locator("#g-levelup:not([hidden])").count(), 0);
+  await alice.click('#online-levelup [data-lvu="ok"]');
+  await host.waitForFunction(() => !LevelUp.unseen().length);
+  // 主持人操控的角色（没分配的）：主持人本机弹
+  await host.evaluate(() => { const own = OnlineGame.getView().identity.id; const h = HotseatGame.getView().heroes.find(x => x.owner === own); const u = state.units.find(x => x.id === h.id); u.xp = xpToNext(u.level); tryLevelUp(u); });
+  await host.waitForSelector("#g-levelup:not([hidden]) .lvu-card");
+  await host.click('#g-levelup [data-lvu="ok"]');
+  assert.ok(kit);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：模板配了援军和连续战斗，玩家画面顶上也有点线点和援军倒计时；打完第一场一起去下一个区域", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); window.__noLevelUpPopup = true; });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.evaluate(() => {
+    const a = battleTemplateSave({ name: "B 区", board: 3, enemies: [{ preset: "thug_knife", level: 1, zone: 3 }] });
+    battleTemplateSave({ name: "A 区", board: 2, enemies: [{ preset: "thug_knife", level: 1, zone: 2 }], waves: [{ turns: 3, enemies: [{ preset: "thug_hammer", level: 1, zone: 2 }] }], chain: [a.id] });
+  });
+  await host.click('#tr-tabs [data-tab="battles"]');
+  const id = await host.evaluate(() => battleTemplateList().find(x => x.name === "A 区").id);
+  await host.click(`[data-bt="fight:${id}"]`);
+  await host.evaluate(() => { GAME.skip = true; GAME.instant = true; GAME.startOrEnd(); });
+  await host.waitForFunction(() => state.combatStarted && GAME.depth === 0);
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "battle" && !!document.querySelector("#online-stage .ol-chain"));
+  const bar = await alice.locator("#online-stage .ol-chain").innerText();
+  assert.match(bar, /第 1 \/ 2 场/); assert.match(bar, /援军 1 个 · 3 回合后抵达 2 区/);
+  assert.equal(await alice.locator("#online-stage .ol-chain .ch-dot").count(), 2);
+  // 场上的敌人打光：援军提前到下一回合
+  for (const uid of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: uid, mode: "kill" })).ok, true);
+  await alice.waitForFunction(() => /下回合抵达/.test(document.querySelector("#online-stage .ol-chain")?.textContent || ""));
+  assert.equal(await host.evaluate(() => GAME.ended), false);
+  // 援军也打掉（直接放上场再击杀），第一场结束：去 B 区
+  await host.evaluate(() => { state.turnNo += 1; Chain.roundStart([]); OnlineGame.touch(); });
+  for (const uid of await host.evaluate(() => state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.id))) assert.equal((await submit(host, { type: "gm.removeUnit", actor: uid, mode: "kill" })).ok, true);
+  await host.waitForFunction(() => state.chain && state.chain.index === 1);
+  await alice.waitForFunction(() => /第 2 \/ 2 场/.test(document.querySelector("#online-stage .ol-chain")?.textContent || "") && OnlineGame.getView().packet.state.zoneMode === 3);
   assert.deepEqual(f.errors, []);
 });
 
@@ -791,4 +946,301 @@ test("联机：选目标时能选的敌人在战场上标编号，同名敌人�
   await host.waitForFunction(({ id, hp }) => { const u = state.units.find(x => x.id === id); return u.dead || u.layers.reduce((s, l) => s + Math.max(0, l.current), 0) < hp; }, { id: target, hp: before.target });
   assert.equal(await hpOf(other), before.other, "没点的那只不挨打");
   assert.deepEqual(errors, []);
+});
+
+test("联机跑团（issue #44）：主持人在大厅换队员——留下的角色还是原来的人操控，新加入的归主持人；玩家画面跟着更新", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, aliceId } = f;
+  const before = await host.evaluate(() => HotseatGame.getView().heroes.map(h => ({ kit: state.units.find(u => u.id === h.id).kit, owner: h.owner })));
+  const keep = before.find(h => h.owner === aliceId);
+  assert.ok(keep, "fixture 给 Alice 分了角色");
+  const choices = await host.evaluate(() => OnlineGame.partyChoices());
+  const extra = choices.find(c => !c.on);
+  assert.ok(extra, "还有没上场的角色可以换上来");
+  const kits = [keep.kit, extra.kit];
+  assert.deepEqual(await host.evaluate(k => OnlineGame.setParty(k), kits), { ok: true });
+  const after = await host.evaluate(() => HotseatGame.getView().heroes.map(h => ({ kit: state.units.find(u => u.id === h.id).kit, owner: h.owner })));
+  const gm = await host.evaluate(() => OnlineGame.getView().identity.id);
+  assert.deepEqual(after.map(h => h.kit).sort(), kits.slice().sort());
+  assert.equal(after.find(h => h.kit === keep.kit).owner, aliceId, "留下的角色还归 Alice");
+  assert.equal(after.find(h => h.kit === extra.kit).owner, gm, "新加入的归主持人");
+  const name = extra.name;
+  await alice.waitForFunction(n => (OnlineGame.getView().heroes || []).some(h => h.name === n), name);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：任务日志——主持人新建主线、配每一站奖励和隐藏站，玩家打开「任务日志」看得到；推进时弹「任务更新」；主持人备注玩家看不到", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await host.click('[data-tab="tasks"]');
+  await host.selectOption("#tk-cat", "main");
+  await host.click('[data-tk="new:custom"]');
+  await host.click('[data-tk^="edit:"]');
+  await host.fill('[data-te="name"]', "锈港的余烬");
+  await host.fill('[data-te="goal"]', "查清码头仓库失火的真相");
+  await host.fill('[data-te="gmNote"]', "长老就是幕后买家");
+  // 新任务没有路线（剧情任务）：这里要按站推进，加三站
+  for (let i = 0; i < 3; i++) await host.click('[data-te-act="addNode:event"]');
+  await host.fill('[data-te="nodes.0.title"]', "在酒馆打听失火传闻");
+  await host.fill('[data-te="nodes.0.reward.xp"]', "50");
+  await host.fill('[data-te="nodes.1.title"]', "潜入 7 号仓库");
+  await host.fill('[data-te="nodes.1.reward.kuizhi"]', "1500");
+  await host.fill('[data-te="nodes.2.title"]', "把账本交给长老");
+  await host.check('[data-te-hide="2"]');
+  await host.click('[data-te-act="save"]');
+  // 草稿：玩家看不到
+  await alice.waitForTimeout(400);
+  assert.equal((await alice.evaluate(() => OnlineGame.getView().packet?.quests || [])).length, 0, "草稿不给玩家");
+  await host.click('[data-tk^="post:"]');
+  await host.click('[data-tk^="accept:"]');
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.quests || []).some(q => q.status === "active"));
+  const q = (await alice.evaluate(() => OnlineGame.getView().packet.quests))[0];
+  assert.equal(q.name, "锈港的余烬");
+  assert.equal(q.category, "main");
+  assert.equal(q.steps[0].title, "在酒馆打听失火传闻");
+  assert.equal(q.steps[0].xp, 50);
+  assert.equal(q.steps[2].hidden, true);
+  const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.quests));
+  assert.ok(!/长老就是幕后买家|把账本交给长老|thug_knife/.test(raw), "玩家拿不到主持人备注、隐藏站、敌人配置：" + raw);
+  // 推进：玩家弹提示
+  await host.click('[data-tk^="node:"]');
+  await alice.waitForSelector("#online-toast:not([hidden])");
+  assert.match(await alice.locator("#online-toast").innerText(), /任务更新：「锈港的余烬」推进到第 2 步 · 每人 \+50 经验/);
+  // 打开任务日志面板
+  await alice.click('[data-online="quests"]');
+  const panel = await alice.locator("#online-bag").innerText();
+  assert.match(panel, /主线任务[\s\S]*锈港的余烬[\s\S]*在酒馆打听失火传闻[\s\S]*已领[\s\S]*潜入 7 号仓库[\s\S]*？？？/);
+  assert.match(panel, /支线任务/);
+  // 面板开着时推进：跟着更新
+  await host.click('[data-tk^="node:"]');
+  await alice.waitForFunction(() => /把账本交给长老/.test(document.getElementById("online-bag").innerText));
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-player.png") });
+    await bob.click('[data-online="quests"]'); await bob.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-player-mobile.png") });
+    await host.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "quest-host.png"), fullPage: true });
+  }
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：个人任务——主持人给 Alice 的角色发个人任务，Alice 看得到、Bob 的包里根本没有", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const aliceKit = await host.evaluate(id => { const h = HotseatGame.getView().heroes.find(x => x.owner === id); return state.units.find(u => u.id === h.id).kit; }, aliceId);
+  await host.click('[data-tab="tasks"]');
+  await host.selectOption("#tk-cat", "personal");
+  await host.click('[data-tk="new:custom"]');
+  await host.click('[data-tk^="edit:"]');
+  await host.fill('[data-te="name"]', "寄回家的信");
+  await host.selectOption('[data-te="owner"]', aliceKit);
+  await host.click('[data-te-act="save"]');
+  await host.click('[data-tk^="post:"]');
+  await alice.waitForFunction(() => (OnlineGame.getView().packet?.quests || []).some(q => q.name === "寄回家的信"));
+  const q = (await alice.evaluate(() => OnlineGame.getView().packet.quests)).find(x => x.name === "寄回家的信");
+  assert.equal(q.category, "personal");
+  assert.equal(q.private, true);
+  await alice.click('[data-online="quests"]');
+  assert.match(await alice.locator("#online-bag").innerText(), /个人任务[\s\S]*寄回家的信[\s\S]*仅你可见/);
+  await bob.waitForTimeout(500);
+  const bobRaw = JSON.stringify(await bob.evaluate(() => OnlineGame.getView().packet?.quests || []));
+  assert.ok(!/寄回家的信/.test(bobRaw), "Bob 收不到别人的个人任务：" + bobRaw);
+  assert.match(await host.locator("#tr-panel, body").first().innerText(), /只有操控 .+ 的玩家可见/);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：跑团私人钱包——玩家看得到自己的余额、看不到队友的，能给队友转钱，不能动别人的钱包", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kitOf = id => host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, id);
+  const aKit = await kitOf(aliceId), bKit = await kitOf(bobId);
+  await host.evaluate(([a, b]) => { LEDGER.purse = { [a]: 1000, [b]: 10 }; OnlineGame.publish ? OnlineGame.publish() : HotseatGame.notify && HotseatGame.notify(); }, [aKit, bKit]);
+  // 主持人随便做一步让包刷新
+  await host.click('[data-tab="bag"]');
+  await host.click("#tr-water-add");
+  await alice.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 1000), aKit);
+  const seen = await alice.evaluate(() => OnlineGame.getView().packet.purse.heroes);
+  assert.ok(seen.every(h => h.mine || h.amount == null), "看不到队友的余额：" + JSON.stringify(seen));
+  await alice.click('[data-online="supplies"]');   // 钱包收在「钱包与商店」弹窗里
+  await alice.waitForSelector(".ol-purse");
+  await alice.selectOption("#ol-purse-to", bKit);
+  await alice.fill("#ol-purse-n", "300");
+  await alice.click('[data-online="purseTransfer"]');
+  await host.waitForFunction(([a, b]) => trpgPurse(a) === 700 && trpgPurse(b) === 310, [aKit, bKit]);
+  await bob.waitForFunction(k => (OnlineGame.getView().packet?.purse?.heroes || []).some(h => h.kit === k && h.amount === 310), bKit);
+  // 不能从别人的钱包转
+  const bad = await alice.evaluate(b => OnlineGame.submit({ type: "purseTransfer", from: b, to: "party", amount: 1 }).then(r => "ok " + JSON.stringify(r), e => e.message), bKit);
+  assert.match(bad, /"ok":false.*只能从自己角色的钱包转钱/);
+  assert.equal(await host.evaluate(b => trpgPurse(b), bKit), 310);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：跑团商人——主持人设置商品和折扣、开店，玩家画面同步弹出，用自己的钱包买；关店后收起", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const kitOf = id => host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, id);
+  const aKit = await kitOf(aliceId), bKit = await kitOf(bobId);
+  await host.evaluate(([a, b]) => { LEDGER.purse = { [a]: 3000, [b]: 0 }; }, [aKit, bKit]);
+  // 主持人：新建商人 → 编辑（名字、八折、卖医疗包、限 1 份）→ 保存 → 开店
+  await host.click('[data-tab="merchants"]');
+  await host.fill("#mc-name", "老周");
+  await host.click('[data-mc="new:"]');
+  await host.click('[data-mc^="edit:"]');
+  await host.fill('[data-me="name"]', "老周杂货");
+  await host.fill('[data-me="discount"]', "20");
+  await host.fill('[data-me="note"]', "码头边的小摊");
+  await host.click('details summary:has-text("医疗与战斗")');
+  await host.check('[data-me-row="medkit"]');
+  await host.fill('[data-me-stock="medkit"]', "1");
+  await host.click('[data-me-act="save"]');
+  await host.click('[data-mc^="open:"]');
+  // 玩家：「钱包与商店」按钮亮起提示，点开就是商店（不再压在舞台上）
+  for (const page of [alice, bob]) { await page.waitForSelector('[data-online="supplies"][data-alert="1"]'); await page.click('[data-online="supplies"]'); await page.waitForSelector(".ol-shop"); }
+  const shopText = await alice.locator(".ol-shop").innerText();
+  assert.match(shopText, /老周杂货[\s\S]*8 折[\s\S]*码头边的小摊[\s\S]*简易医疗包[\s\S]*480 奎支 · 剩 1/);
+  // Alice 用自己的钱包买
+  await alice.click('[data-online="shopBuy"][data-key="medkit"]');
+  await host.waitForFunction(k => trpgPurse(k) === 2520 && bagCount("medkit") === 1, aKit);
+  await bob.waitForFunction(() => /卖完了/.test(document.querySelector(".ol-shop")?.innerText || ""));
+  // 不能用别人的钱包
+  const bad = await bob.evaluate(([m, a]) => OnlineGame.submit({ type: "shopBuy", merchant: m, key: "medkit", qty: 1, payer: a }).then(r => JSON.stringify(r), e => e.message),
+    [await host.evaluate(() => LEDGER.shopOpen), aKit]);
+  assert.match(bad, /"ok":false.*只能用自己角色的钱包付钱/);
+  await host.waitForFunction(() => /剩 0/.test(document.getElementById("tr-panel").innerText), null, { timeout: 5000 });   // 主持人面板跟着刷新
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.locator(".ol-shop").screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "shop-player.png") });
+    await host.locator("#tr-panel").screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "shop-host.png") });
+  }
+  // 关店：玩家画面收起
+  await host.click('[data-mc="close:"]');
+  await alice.waitForFunction(() => !document.querySelector(".ol-shop"));
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：跑团诊所——主持人开放诊所，玩家申请义体改造，主持人同意后生效、从玩家角色的钱包扣钱、跟着存档走", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  for (const page of [alice, bob]) await page.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  const aKit = await host.evaluate(pid => { const h = HotseatGame.getView().heroes.find(x => x.owner === pid); return state.units.find(u => u.id === h.id).kit; }, aliceId);
+  await host.evaluate(a => { LEDGER.purse = { [a]: 5000 }; }, aKit);
+  await host.click('[data-tab="clinic"]');
+  await host.check("#tr-clinic-open");
+  await alice.waitForSelector('[data-online="supplies"][data-alert="1"]');
+  await alice.click('[data-online="supplies"]');
+  await alice.waitForSelector(".ol-trpg-clinic");
+  assert.equal(await bob.evaluate(k => (OnlineGame.getView().packet?.clinic?.heroes || []).some(h => h.kit === k), aKit), false, "Bob 看不到 Alice 角色的诊所信息");
+  await alice.fill(`.ol-trpg-clinic [data-cyber-box="${aKit}"] [data-cy-layer="armor"]`, "2");
+  await alice.click(`.ol-trpg-clinic [data-online="trpgCyber"][data-kit="${aKit}"]`);
+  // 游戏内确认框（8c5cd5c 起不再用浏览器原生 confirm()）
+  await alice.click('[data-confirm="yes"]');
+  await host.waitForSelector("[data-cyd]");
+  assert.match(await host.locator("#tr-panel").innerText(), /玩家的改造申请[\s\S]*400 奎支/);
+  await alice.waitForFunction(() => /等主持人同意/.test(document.querySelector(".ol-trpg-clinic")?.innerText || ""));
+  await host.click('[data-cyd$=":1"]');
+  await host.waitForFunction(k => { const u = state.units.find(x => x.kit === k); return u.cyberPlan && u.cyberPlan.armor === 2 && trpgPurse(k) === 4600; }, aKit);
+  await alice.waitForFunction(() => /已改造/.test(document.querySelector(".ol-trpg-clinic")?.innerText || ""));
+  assert.equal(await host.evaluate(k => GAME.campaign.party.find(p => p.kit === k).cyberPlan.armor, aKit), 2, "存进跑团档案");
+  // 重摆场面（读档 / 换人时走 applyCampaignToField）：血量层照方案重建
+  const rebuilt = await host.evaluate(k => { GAME.setupBattle(1); const u = state.units.find(x => x.kit === k); return u.layers.map(l => l.type); }, aKit);
+  assert.deepEqual(rebuilt, ["armor", "flesh"]);
+  // Bob 不能给 Alice 的角色申请
+  const bad = await bob.evaluate(k => OnlineGame.submit({ type: "cyberRequest", kit: k, plan: { armor: 3 } }).then(r => JSON.stringify(r), e => e.message), aKit);
+  assert.match(bad, /"ok":false.*只能给自己的角色申请改造/);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机跑团：主持人长休，玩家画面也弹结算（不带坚毅）；主持人那边看得到坚毅数值", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  await host.evaluate(() => { OnlineGame.start(); });
+  await alice.waitForFunction(() => OnlineGame.getView().screen === "exploration");
+  await alice.waitForTimeout(300);
+  await host.click('[data-tab="rest"]');
+  await host.click("#tr-long-force");
+  // 营地：主持人和玩家都看到；玩家那边等主持人开始，不显示坚毅
+  await host.waitForSelector("#rest-report .rr-camp");
+  await alice.waitForSelector("#rest-report .rr-camp");
+  const camp = await alice.locator("#rest-report").innerText();
+  assert.match(camp, /营地[\s\S]*等/);
+  assert.doesNotMatch(camp, /坚毅/);
+  assert.equal(await alice.locator('#rest-report [data-rr="start"]').count(), 0, "玩家没有开始按钮");
+  await host.click('#rest-report [data-rr="start"]');
+  await host.click('#rest-report [data-rr="skip"]').catch(() => {});
+  await host.waitForSelector('#rest-report [data-rr="close"]');
+  assert.match(await host.locator("#rest-report").innerText(), /坚毅 .*（仅主持人）/);
+  // 玩家：营地关掉，播日月动画，再弹结算
+  await alice.waitForFunction(() => /长休结束/.test(document.getElementById("rest-report").innerText), null, { timeout: 15000 });
+  const text = await alice.locator("#rest-report").innerText();
+  assert.match(text, /长休结束/);
+  assert.match(text, /「[^」]+」/);
+  assert.doesNotMatch(text, /坚毅/);
+  if (process.env.BACKFIRE_SHOTS) {
+    await alice.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "rest-player.png") });
+    await host.screenshot({ path: path.join(process.env.BACKFIRE_SHOTS, "rest-host.png") });
+  }
+  const raw = JSON.stringify(await alice.evaluate(() => OnlineGame.getView().packet.rest));
+  assert.ok(!/shp/.test(raw), raw);
+  assert.ok(await alice.evaluate(() => OnlineGame.getView().packet.clock && OnlineGame.getView().packet.clock.day >= 1), "游戏时钟发给玩家");
+  // 结算没变（issue #216）：之后的包只带 restUnchanged，玩家端还原成同一份，结算画面不会再弹一次
+  await alice.click('#rest-report [data-rr="close"]');
+  await alice.evaluate(() => { window.restPlays = 0; const play = RestReport.play; RestReport.play = (...args) => { window.restPlays++; return play(...args); }; });
+  const restId = await alice.evaluate(() => OnlineGame.getView().packet.rest.id), seq = await alice.evaluate(() => OnlineGame.getView().packet.seq), from = f.wire.length;
+  await host.evaluate(() => { OnlineGame.touch(); OnlineGame.touch(); });
+  await alice.waitForFunction(s => OnlineGame.getView().packet.seq >= s + 2, seq);
+  const later = logicalPackets(f.wire.slice(from).filter(row => row.page === 1)).filter(row => row.packet.type === "result");
+  assert.ok(later.length >= 2 && later.every(row => !("rest" in row.packet) && row.packet.restUnchanged === true), JSON.stringify(later.map(row => Object.keys(row.packet))));
+  assert.equal(await alice.evaluate(() => OnlineGame.getView().packet.rest.id), restId);
+  assert.equal(await alice.evaluate(() => window.restPlays), 0, "同一份结算不再弹");
+  assert.equal(await alice.locator("#rest-report").isHidden(), true);
+  assert.deepEqual(f.errors, []);
+});
+
+test("联机：玩家点「离开房间」真的离开——刷新后不再自动回房，标题页留「回到房间」按钮，点了能回去", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice } = f;
+  const nav = alice.waitForEvent("load");
+  await alice.evaluate(() => OnlineGame.leave());
+  await nav; await alice.waitForFunction(() => !!window.OnlineGame && !!window.GAME);
+  await alice.waitForFunction(() => /上次的房间/.test(document.querySelector("#t-online").innerText));
+  await alice.click("#t-online");
+  await alice.waitForSelector("#ol-title-resume");
+  await alice.waitForTimeout(1500);   // 给自动回房留时间：不应该发生
+  assert.equal(await alice.evaluate(() => OnlineGame.getView().active), false, "没有被自动拉回房间");
+  await host.waitForFunction(() => OnlineGame.getView().players.some(p => p.name === "Alice" && !p.online));
+  // 想回去还能回去
+  await alice.click("#ol-title-resume");
+  await alice.waitForFunction(() => OnlineGame.getView().active);
+  assert.equal(await alice.evaluate(() => OnlineGame.savedInfo().left), false, "回房后不再标着离开");
+});
+
+test("联机倒计时按玩家自己的钟算：玩家电脑时间和房主差一小时，协助格挡询问照样显示 20 秒左右", { timeout: 120000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const { host, alice, bob, aliceId, bobId } = f;
+  // Alice 的电脑快了一小时
+  await alice.evaluate(() => { const real = Date.now.bind(Date); Date.now = () => real() + 3600000; });
+  await host.evaluate(({ aliceId, bobId }) => {
+    OnlineGame.assign(Object.fromEntries(partyHeroes().filter(u => ["hiaki", "yuito"].includes(u.kit)).map(u => [u.id, u.kit === "hiaki" ? aliceId : bobId])));
+    OnlineGame.start(); TrpgFlow.toBattle(); GAME.skip = true; GAME.instant = true; GAME.startOrEnd();
+  }, { aliceId, bobId });
+  await host.waitForFunction(() => HotseatGame.getView().phase === "picking" && GAME.depth === 0);
+  const heroes = await host.evaluate(() => HotseatGame.getView().heroes);
+  for (const [index, hero] of heroes.entries()) assert.equal((await submit(hero.owner === aliceId ? alice : hero.owner === bobId ? bob : host, { type: "orderPick", actor: hero.id, index })).ok, true);
+  for (const page of [alice, bob, host]) assert.equal((await submit(page, { type: "orderConfirm" })).ok, true);
+  const attack = await host.evaluate(() => ({ type: "gm.forceAttack", input: {
+    dmAtk: state.units.find(u => !u.isPlayer).id, dmTgt: partyHeroes().find(u => u.kit === "ruby").id,
+    dmEle: "physical", dmMult: 0, dmFlat: 1, dmBrk: 0, dmSkipBlock: false
+  } }));
+  await host.evaluate(command => { OnlineGame.submit(command); }, attack);
+  await alice.waitForFunction(() => OnlineGame.getView().packet?.view?.ask?.eligible, null, { timeout: 5000 });
+  const left = await alice.evaluate(() => OnlineGame.getView().packet.view.ask.deadline - Date.now());
+  assert.ok(left > 15000 && left <= 20500, "按本机的钟还剩 " + left);
+  await alice.waitForFunction(() => /^(1\d|20) 秒$/.test(document.querySelector("#hs-countdown")?.textContent || ""));
+  assert.deepEqual(f.errors, []);
 });

@@ -143,11 +143,19 @@
     function cleanTable(t) {
       t = t && typeof t === "object" ? t : {};
       return { seq: Number(t.seq) || 0, title: t.title && typeof t.title.text === "string" ? t.title : null, checks: (Array.isArray(t.checks) ? t.checks : []).filter(c => c && Array.isArray(c.targets)).slice(-TABLE_KEEP),
-        attrs: (Array.isArray(t.attrs) ? t.attrs : []).filter(r => r && Array.isArray(r.attrs)).slice(-TABLE_KEEP) };
+        attrs: (Array.isArray(t.attrs) ? t.attrs : []).filter(r => r && Array.isArray(r.attrs)).slice(-TABLE_KEEP),
+        checkReqs: trimReqs((Array.isArray(t.checkReqs) ? t.checkReqs : []).filter(r => r && typeof r.prof === "string")) };
     }
-    function tableNote(id, text) {
+    /** 检定申请只保留最近 TABLE_KEEP 条，但待处理的一条都不丢（先丢最旧的已处理记录） */
+    function trimReqs(list) {
+      while (list.length > TABLE_KEEP) { const i = list.findIndex(r => r.status !== "pending"); if (i < 0) break; list.splice(i, 1); }
+      return list;
+    }
+    function tableNote(id, text, secret) {
       const op = operator(id);
-      chat.push({ id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.slice(0, 500), at: now(), roll: true });
+      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.slice(0, 500), at: now(), roll: true };
+      if (secret) row.secret = true;   // 暗骰检定：只在房主本机（online-view.js 不发给玩家）
+      chat.push(row);
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
     }
     /** 大字（像 Minecraft 的 /title）：主持人在所有人画面中间打出一行大字，可带一行小字。
@@ -183,19 +191,22 @@
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
     }
-    /** 主持人发起检定。spec：{ prof, diff, diffName, note, targets: [{ unitId, name, base, adv, dis, reroll, level, perkText }] } */
-    function openCheck(id, spec) {
+    /** 主持人发起检定。spec：{ prof, diff, diffName, note, secret?, targets: [{ unitId, name, base, adv, dis, reroll, level, perkText }] }
+     *  secret：暗骰检定（目标可以是任何单位，只有主持人能掷，检定和结果都不发给玩家）。返回快照；新检定是 table.checks 最后一条 */
+    function openCheck(id, spec, quiet) {
       operator(id);
       if (id !== gmId) fail("table_gm", "只有主持人能发起检定");
+      const secret = !!(spec && spec.secret);
       if (!spec || typeof spec.prof !== "string" || !Array.isArray(spec.targets) || !spec.targets.length) fail("table_check", "检定需要熟练项和至少一名角色");
       const check = { id: "check-" + (++table.seq), prof: spec.prof.slice(0, 20), diff: String(spec.diff || ""), diffName: String(spec.diffName || "").slice(0, 10),
         note: String(spec.note || "").slice(0, 200), status: "open", at: now(),
         targets: spec.targets.slice(0, 12).map(t => ({ unitId: String(t.unitId), name: String(t.name || t.unitId).slice(0, 40), base: Number(t.base) || 0,
           adv: !!t.adv, dis: !!t.dis, reroll: !!t.reroll, level: Number(t.level) || 0, perkText: String(t.perkText || "").slice(0, 80), result: null })) };
+      if (secret) check.secret = true;
       table.checks.push(check);
       if (table.checks.length > TABLE_KEEP) table.checks.splice(0, table.checks.length - TABLE_KEEP);
-      tableNote(id, `主持人发起${check.diffName}「${check.prof}」检定：${check.targets.map(t => t.name).join("、")}${check.note ? "（" + check.note + "）" : ""}`);
-      return emit("table");
+      tableNote(id, `${secret ? "暗骰 · " : ""}主持人发起${check.diffName}「${check.prof}」检定：${check.targets.map(t => t.name).join("、")}${check.note ? "（" + check.note + "）" : ""}`, secret);
+      return quiet ? null : emit("table");
     }
     function rollCheckFor(id, checkId, unitId) {
       operator(id);
@@ -206,10 +217,11 @@
       if (t.result) fail("table_check", "已经掷过了");
       const owner = (rowFor(unitId) || {}).operatorId || gmId;
       if (id !== gmId && id !== owner) fail("table_owner", "只能替自己的角色掷骰");
+      if (check.secret && id !== gmId) fail("table_gm", "暗骰检定只有主持人能掷");
       t.result = rollCheck(t, options.random);
       t.result.by = id;
       const shown = t.result.rolls.map(r => r.roll == null ? r.label : `${r.label ? r.label + " " : ""}${r.roll}`).join("，");
-      tableNote(id, `检定 · ${t.name}「${check.prof}」${check.diffName}（成功率 ${Math.round(t.base * 1000) / 10}%）：d100 ${shown} → ${t.result.ok ? (t.result.rolls.some(r => r.ok && r.roll != null && r.roll <= 5) ? "大成功" : "成功") : "失败"}`);
+      tableNote(id, `${check.secret ? "暗骰 · " : ""}检定 · ${t.name}「${check.prof}」${check.diffName}（成功率 ${Math.round(t.base * 1000) / 10}%）：d100 ${shown} → ${t.result.ok ? (t.result.rolls.some(r => r.ok && r.roll != null && r.roll <= 5) ? "大成功" : "成功") : "失败"}`, check.secret);
       if (check.targets.every(x => x.result)) check.status = "done";
       return emit("table");
     }
@@ -220,6 +232,52 @@
       if (!check) fail("table_check", "没有这个检定");
       check.status = check.targets.every(x => x.result) ? "done" : "closed";
       return emit("table");
+    }
+    /** 主动发起检定（照属性点申请）：玩家给自己的角色提一次「我要做某项检定」，主持人定难度同意后由房主掷骰。
+     *  requestCheck(id, unitId, prof, note, name)：只能给自己的角色提；同一角色同时只能有一条待处理 */
+    function requestCheck(id, unitId, prof, note, name) {
+      operator(id);
+      const owner = (rowFor(unitId) || {}).operatorId || gmId;
+      if (id !== owner) fail("table_owner", "只能给自己的角色申请检定");
+      if (typeof prof !== "string" || !prof) fail("table_check", "先选熟练项");
+      if (table.checkReqs.some(r => r.unitId === unitId && r.status === "pending")) fail("table_check", "上一次检定申请还在等主持人");
+      const row = { id: "ckreq-" + (++table.seq), unitId: String(unitId), unitName: String(name || unitId).slice(0, 40), operatorId: id,
+        prof: prof.slice(0, 20), note: String(note || "").slice(0, 200), status: "pending", at: now() };
+      table.checkReqs.push(row);
+      trimReqs(table.checkReqs);
+      tableNote(id, `${row.unitName} 申请「${row.prof}」检定${row.note ? "（" + row.note + "）" : ""}，等主持人定难度`);
+      return emit("table");
+    }
+    /** decision：approve（spec 为房主按角色卡算好的检定，见 openCheck；同意后立刻由房主掷）/ reject / cancel（申请人或主持人撤回） */
+    function decideCheck(id, reqId, decision, spec) {
+      operator(id);
+      const row = table.checkReqs.find(r => r.id === reqId);
+      if (!row || row.status !== "pending") fail("table_check", "这条检定申请已经处理过了");
+      if (decision === "cancel") {
+        if (id !== row.operatorId && id !== gmId) fail("table_owner", "只能撤回自己的申请");
+        row.status = "cancelled"; row.decidedAt = now();
+        tableNote(id, `${row.unitName} 的「${row.prof}」检定申请已${id === row.operatorId ? "撤回" : "被主持人撤回"}`);
+        return emit("table");
+      }
+      if (id !== gmId) fail("table_gm", "只有主持人能处理检定申请");
+      if (decision !== "approve") {
+        row.status = "rejected"; row.decidedAt = now();
+        tableNote(id, `主持人没有同意 ${row.unitName} 的「${row.prof}」检定申请`);
+        return emit("table");
+      }
+      if (!spec || !Array.isArray(spec.targets) || spec.targets.length !== 1 || spec.targets[0].unitId !== row.unitId) fail("table_check", "检定要按申请的角色来");
+      // 建检定和掷骰要么都成，要么都不算：掷骰出错时撤掉刚建的检定和频道记录，申请仍是待处理（不留「已同意 + 检定还开着」的半截状态）
+      const keepChecks = table.checks.slice(), keepChat = chat.slice(), keepSeq = table.seq;
+      try {
+        openCheck(id, Object.assign({}, spec, { secret: false, note: spec.note || row.note }), true);
+        const check = table.checks[table.checks.length - 1];
+        row.status = "approved"; row.decidedAt = now(); row.checkId = check.id;
+        return rollCheckFor(id, check.id, row.unitId);   // 房主权威掷骰，结果写进小队频道、所有人都看得到
+      } catch (e) {
+        table.checks = keepChecks; chat.splice(0, chat.length, ...keepChat); table.seq = keepSeq;
+        row.status = "pending"; delete row.decidedAt; delete row.checkId;
+        throw e;
+      }
     }
     /** 玩家给自己的角色申请属性点（一次一点），主持人确认后才真正加上 */
     function requestAttr(id, unitId, attr, name) {
@@ -293,6 +351,42 @@
         operator(next[id]);
       }
       assignments = next; reconcile(false); return emit("assignments");
+    }
+    /** 主持人接管某个操作者的全部角色（例如玩家掉线）：战斗中也可以；角色和武器人改由主持人操作，顺序格子不变 */
+    function takeOver(id, playerId) {
+      host(id); operator(playerId);
+      if (playerId === gmId) fail("take_over", "不能接管主持人自己的角色");
+      const kits = Object.keys(assignments).filter(heroId => assignments[heroId] === playerId);
+      if (!kits.length) fail("take_over", "这名玩家没有可接管的角色");
+      for (const heroId of kits) delete assignments[heroId];
+      confirmed.delete(playerId);
+      swaps = swaps.filter(s => s.requester !== playerId && s.responder !== playerId);
+      return reconcile(true);
+    }
+    /** 现在能不能转交角色：只在两个单位的回合之间（选顺序阶段，或我方某单位还没动手时）。返回 { ok, reason } */
+    function transferState() {
+      if (ask) return { ok: false, reason: "有协助询问在等人回答，回答完才能转交" };
+      if (phase === "selecting") return { ok: true, reason: "" };
+      if (phase === "acting") {
+        reconcile(false);
+        const row = slots.find(r => r && r.unitId === current());
+        if (row && row.spent) return { ok: false, reason: `${row.unitName} 正在行动，行动完（或结束回合）才能转交` };
+        return { ok: true, reason: "" };
+      }
+      if (phase === "enemy") return { ok: false, reason: "敌人行动中，回到我方回合再转交" };
+      return { ok: false, reason: "现在不在战斗回合里，请用「角色分配」" };
+    }
+    /** 主持人把某个英雄（连同它的武器人）转交给另一名操作者（含收回给主持人）；顺序格子不变 */
+    function transfer(id, heroId, toId) {
+      host(id); operator(toId);
+      const gate = transferState();
+      if (!gate.ok) fail("transfer_blocked", gate.reason);
+      if (!maps().heroes.some(u => u.id === heroId)) fail("not_hero", "只能转交英雄角色");
+      if ((assignments[heroId] || gmId) === toId) fail("transfer_same", "这个角色本来就由这名玩家操作");
+      if (toId === gmId) delete assignments[heroId]; else assignments[heroId] = toId;
+      confirmed.delete(toId);
+      swaps = swaps.filter(s => ![s.actor, s.target].some(u => rowFor(u) && (rowFor(u).stableKey || "").split(":weapon:")[0] === heroId));
+      return reconcile(true);
     }
     function beginRound(number) {
       if (!Number.isInteger(number) || number < 1) fail("round", "回合编号无效");
@@ -411,13 +505,14 @@
       const chooser = spec.chooser && operatorMap.has(spec.chooser) ? spec.chooser : null;
       ask = { id: "ask-" + (++sequence), kind: spec.kind, jobId: spec.jobId == null ? null : spec.jobId,
         targetId: spec.targetId || null, candidates, operators: owners, declined: [], chooser, hands: [],
-        deadline: now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
+        // untimed：同一台设备的热座没有倒计时（和单机一样等人回答），deadline 为 null 表示不限时
+        deadline: spec.untimed ? null : now() + (Number.isFinite(spec.remainingMs) ? Math.max(0, Math.min(20000, spec.remainingMs)) : 20000) };
       closedAsk = null; const result = askSummary();
       if (!candidates.length) closeAsk("unavailable", null, {}, null);
       emit("askOpened"); return clone(result);
     }
     function tick() {
-      if (ask && now() >= ask.deadline) {
+      if (ask && ask.deadline != null && now() >= ask.deadline) {
         // 到时间打出失衡的人还没选：有人举手就由最先举手的那位出手
         const first = (ask.hands || [])[0];
         if (first) { closeAsk("accepted", first.unitId, first.extra, first.operatorId); return emit("askAccepted"); }
@@ -477,7 +572,10 @@
       const op = operator(id);
       // 小队聊天在大厅、探索和战斗中都开放
       if (typeof text !== "string" || !text.trim()) fail("chat_empty", "消息不能为空");
-      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: text.trim().slice(0, 500), at: now() };
+      // 多行消息（比如字符画）保留第一行行首的空格，只去掉开头的空行和末尾空白；单行照旧去掉两头空白
+      const body = text.replace(/\r\n?/g, "\n");
+      const clean = body.includes("\n") ? body.replace(/^\s*\n/, "").trimEnd() : body.trim();
+      const row = { id: "chat-" + (++sequence), operatorId: id, operatorName: op.name, text: clean.slice(0, 500), at: now() };
       chat.push(row);
       if (chat.length > CHAT_KEEP) chat.splice(0, chat.length - CHAT_KEEP);
       return emit("chat");
@@ -520,10 +618,10 @@
     }
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
-      assertAction, finishUnit, markSpent, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
-      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, skillRoll, showTitle,
+      assertAction, finishUnit, markSpent, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
+      openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, requestCheck, decideCheck, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
-      extendAsk(ms) { if (ask && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
+      extendAsk(ms) { if (ask && ask.deadline != null && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },
       onAskClosed(fn) { askClosures.add(fn); return () => askClosures.delete(fn); } };
   }

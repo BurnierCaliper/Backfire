@@ -229,3 +229,33 @@ test("D3 GM: toggling manual control never refills spent budgets and applies to 
   f.send({ type: "gm.setManual", actors: "all", enabled: false });
   assert.equal(f.c.GMCommands.isManual(id), false); assert.equal(f.c.GMCommands.isManual(f.enemy), false);
 });
+
+test("GM 场地：开战后可以把一区设成 / 取消固有场地；固有场地技能改不掉；流沙、沙珊瑚台地也能设", () => {
+  const f = fixture(); f.c.startCombat();
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: true, innate: true } });
+  assert.equal(f.s.fields[1].innate, true);
+  assert.match(String(f.c.fieldChangeWhy(1, "electric")), /固有场地/);
+  f.send({ type: "gm.setField", zone: 1, patch: { innate: false } });
+  assert.equal(f.c.fieldChangeWhy(1, "electric"), null, "取消固有后技能可以改");
+  f.send({ type: "gm.setField", zone: 2, patch: { quicksand: true } }); assert.equal(f.s.fields[2].quicksand, true);
+  f.send({ type: "gm.setField", zone: 2, patch: { coral: true } }); assert.equal(f.s.fields[2].coral, true); assert.equal(f.s.fields[2].quicksand, false);
+  // 清掉主场地：固有一起取消
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: true, innate: true } });
+  f.send({ type: "gm.setField", zone: 1, patch: { acid: false } });
+  assert.equal(f.s.fields[1].innate, false);
+  unchanged(f, { type: "gm.setField", zone: 1, patch: { innate: "yes" } });
+});
+
+test("联机主持人：可以放沙珊瑚枝 / 触须（中立、装甲生命和沙漠遭遇一致），算进 coralInZone，可移除", () => {
+  const f = fixture();
+  const id = f.send({ type: "gm.addProp", kind: "coral_branch", zone: 1, level: 3, faction: "neutral" }).id;
+  const p = f.s.props.find(x => x.id === id);
+  assert.equal(p.name, "沙珊瑚枝"); assert.equal(p.faction, "neutral"); assert.equal(p.maxHp, 30 + 4 * 2);
+  const t = f.send({ type: "gm.addProp", kind: "coral_tentacle", zone: 2, level: 1 }).id;
+  assert.equal(f.s.props.find(x => x.id === t).maxHp, 8);
+  f.send({ type: "gm.editProp", id, patch: { faction: "neutral", zone: 1 } });
+  f.c.startCombat();
+  assert.equal(f.c.coralInZone(1), true, "沙珊瑚枝让这一区算有会抓人的沙珊瑚");
+  f.send({ type: "gm.removeProp", id, mode: "remove" }); assert.equal(f.s.props.some(x => x.id === id), false);
+  unchanged(f, { type: "gm.addProp", kind: "coral_branch", zone: 1, faction: "weird" });
+});

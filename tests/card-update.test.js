@@ -44,7 +44,7 @@ test("腐坏抛射：酸液炮打距离 1 的敌人并腐蚀；腐蚀伤害记�
   const store = kolt.resources.rotStore;
   assert.ok(store && store.armor > 0, JSON.stringify(store));
   const recorded = store.armor;
-  st.lastBrokenLayer = null;
+  kolt.resources.scrapStore = {};   // 只领腐坏抛射的记录
   const layers0 = kolt.layers.filter(l => l.type === "armor").reduce((s, l) => s + l.current, 0);
   skill(c, kolt, "kolt_scrap", null);
   const layers1 = kolt.layers.filter(l => l.type === "armor").reduce((s, l) => s + l.current, 0);
@@ -110,17 +110,17 @@ test("拉斯缪尔协助格挡：成功也只是累积 20% 能量（不再把能
   assert.match(c.SkillText.kitInfo("ras").assistBlock, /无论成功与否都累积 20% 能量/);
 });
 
-test("废物利用：获得上一个被摧毁的敌人血量层等量的血量，最多柯尔特生命上限的 50%", () => {
+test("废物利用：领取累积的敌人血量层废料，一次最多柯尔特生命上限的 50%", () => {
   const { c, st } = field(["kolt", "helu"]);
   const kolt = c.findKit("kolt", st.units);
   kolt.layers = [{ type: "flesh", current: 10, max: 100 }];
-  st.lastBrokenLayer = { type: "flesh", lost: 30, dmg: 7 };
+  kolt.resources.scrapStore = { flesh: 30 };
   skill(c, kolt, "kolt_scrap", null);
-  assert.equal(c.totalHp(kolt), 40, "按那一层的上限 30，不看那一击的伤害");
-  st.lastBrokenLayer = { type: "armor", lost: 200, dmg: 7 };
+  assert.equal(c.totalHp(kolt), 40, "累积了 30：全部领到");
+  kolt.resources.scrapStore = { armor: 200 };
   skill(c, kolt, "kolt_scrap", null);
   const armor = kolt.layers.filter(l => l.type === "armor").reduce((s, l) => s + l.current, 0);
-  assert.equal(armor, 50, "封顶为生命上限 100 的一半");
+  assert.equal(armor, 50, "一次最多生命上限 100 的一半");
 });
 
 test("被摧毁的血量层只认敌人的、只认真正把它打碎的那一击", () => {
@@ -128,32 +128,31 @@ test("被摧毁的血量层只认敌人的、只认真正把它打碎的那一�
   const kolt = c.findKit("kolt", st.units), helu = c.findKit("helu", st.units);
   foe.layers = [{ type: "shield", current: 10, max: 25 }, { type: "flesh", current: 500, max: 500, inner: true }];
   const hit = (a, t, n) => c.dealTo(a, t, { atk: 0, mult: 0, flat: n, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true } });
-  st.lastBrokenLayer = null;
+  const store = () => JSON.stringify(kolt.resources.scrapStore);
+  kolt.resources.scrapStore = {};
   hit(helu, foe, 30);   // 打碎护盾
-  assert.equal(st.lastBrokenLayer.type, "shield");
-  assert.equal(st.lastBrokenLayer.lost, 25, "记的是这一层的上限");
-  st.lastBrokenLayer.mark = 1;
-  hit(helu, foe, 3);    // 之后再打：护盾早就碎了，不再覆盖记录
-  assert.equal(st.lastBrokenLayer.mark, 1);
+  assert.equal(store(), JSON.stringify({ shield: 25 }), "记的是这一层的上限，不看那一击的伤害");
+  hit(helu, foe, 3);    // 之后再打：护盾早就碎了，不再记一次
+  assert.equal(store(), JSON.stringify({ shield: 25 }));
   // 敌人打碎玩家的层不算
   helu.layers = [{ type: "shield", current: 2, max: 9 }, { type: "flesh", current: 50, max: 50, inner: true }];
   hit(foe, helu, 20);
-  assert.equal(st.lastBrokenLayer.mark, 1, "玩家的层被打碎不会成为来源");
-  void kolt;
+  assert.equal(store(), JSON.stringify({ shield: 25 }), "玩家的层被打碎不会成为来源");
+  void st;
 });
 
-test("废物利用：开局没有残骸不能用；用过的那一层不能再利用，要等新的被摧毁的层或腐坏抛射的记录", () => {
+test("废物利用：开局没有废料不能用；领完的废料不能再领，要等新的被摧毁的层或腐坏抛射的记录", () => {
   const { c, st } = field(["kolt", "helu"]);
   const kolt = c.findKit("kolt", st.units);
   kolt.level = 3;
   kolt.layers = [{ type: "flesh", current: 10, max: 100 }];
-  assert.equal(st.lastBrokenLayer, null, "开局没有记录");
+  assert.equal(JSON.stringify(kolt.resources.scrapStore), "{}", "开局没有累积的废料");
   assert.ok(c.skillRequirementError(kolt, "kolt_scrap"), "开局不能用");
-  st.lastBrokenLayer = { type: "flesh", lost: 20, dmg: 5 };
+  kolt.resources.scrapStore = { flesh: 20 };
   assert.equal(c.skillRequirementError(kolt, "kolt_scrap"), null);
   skill(c, kolt, "kolt_scrap", null);
   assert.equal(c.totalHp(kolt), 30);
-  assert.ok(c.skillRequirementError(kolt, "kolt_scrap"), "同一层不能再利用");
+  assert.ok(c.skillRequirementError(kolt, "kolt_scrap"), "领完了：同一层不能再领");
   kolt.resources.rotStore = { flesh: 4 };
   assert.equal(c.skillRequirementError(kolt, "kolt_scrap"), null, "腐坏抛射攒下的记录可以用");
   skill(c, kolt, "kolt_scrap", null);

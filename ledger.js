@@ -81,18 +81,25 @@ const LEDGER = {
   weapons: {},         // 旧档留下的武器人伤势；现在武器人每场开战回满血，不再使用
   shortUsed: {},       // 角色 kit → 今天已用短休次数
   restOnce: {},        // 角色 kit → { 技能 key: 次数 }：「长休一次」的技能，长休才刷新
+  shortOnce: {},       // 角色 kit → { key: 次数 }：「每次短休 N 次」的专长（铁壁、挺身），这个人短休 / 长休时刷新
   career: null,        // 整局战场记录：{ battles: [每场摘要], kits: { kit: 累计数据 } }（careerRecordBattle）
   tasks: [],           // 跑团：主持人发布的任务（trpg-tasks.js）
   place: null,         // 跑团：队伍在角鳞星地图上的位置（world-data.js · WORLD_PLACES 的 id）
   placePos: null,      // 跑团：标记拖到了地图上任意位置时的坐标 { x, y }（百分比）；place 记最近的地点
   spit: {},            // 角色 kit → 吐酸攻击的属性（兽人-蜥蜴种族特长，长休时可以换；没写是酸）
+  ammoOrder: {},       // 胶囊弹药+：龙哥长休排好的下一场开局弹序（"RRBBRB"），用一场就清掉
+  workshop: null,      // 跑团工坊（trpg.js）：{ recipes: 学会的配方, points: 商店积分, carry: 积分零头（奎支）}
+  purse: {},           // 跑团：角色 kit → 私人钱包里的奎支（trpg.js · trpgPurse…）；state.kuizhi 是队伍公账
+  merchants: [],       // 跑团：主持人设置的商人（trpg-merchants.js）
+  shopOpen: null,      // 跑团：现在开着的商人 id（联机玩家同步看到商人界面）
+  lore: [],            // 跑团：角色资料（NPC 条目，lore.js；草稿只有主持人看得到）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, water: ledgerWater()
+      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, purse: this.purse || {}, merchants: this.merchants || [], shopOpen: this.shopOpen || null, lore: this.lore || [], water: ledgerWater()
     }));
   },
   load(s) {
@@ -105,11 +112,21 @@ const LEDGER = {
     this.weapons = s.weapons || {};
     this.shortUsed = s.shortUsed || {};
     this.restOnce = s.restOnce || {};
+    this.shortOnce = s.shortOnce && typeof s.shortOnce === "object" ? s.shortOnce : {};
     this.career = s.career || null;
     this.tasks = Array.isArray(s.tasks) ? s.tasks : [];
     this.place = typeof s.place === "string" ? s.place : null;
     this.placePos = s.placePos && isFinite(Number(s.placePos.x)) && isFinite(Number(s.placePos.y)) ? { x: Number(s.placePos.x), y: Number(s.placePos.y) } : null;
     this.spit = s.spit && typeof s.spit === "object" ? Object.assign({}, s.spit) : {};
+    this.ammoOrder = s.ammoOrder && typeof s.ammoOrder === "object" ? Object.assign({}, s.ammoOrder) : {};
+    this.workshop = s.workshop && typeof s.workshop === "object"
+      ? { recipes: Array.isArray(s.workshop.recipes) ? s.workshop.recipes.slice() : [], points: Number(s.workshop.points) || 0, carry: Number(s.workshop.carry) || 0 } : null;
+    this.merchants = Array.isArray(s.merchants) ? JSON.parse(JSON.stringify(s.merchants)) : [];
+    this.shopOpen = typeof s.shopOpen === "string" && this.merchants.some(m => m && m.id === s.shopOpen) ? s.shopOpen : null;
+    // 角色资料：拷一份（lore.js · loreList 第一次读的时候整理：截长度、补 id）
+    this.lore = Array.isArray(s.lore) ? JSON.parse(JSON.stringify(s.lore)) : [];
+    this.purse = {};
+    if (s.purse && typeof s.purse === "object") Object.keys(s.purse).forEach(k => { const v = Math.floor(Number(s.purse[k]) || 0); if (v > 0) this.purse[k] = v; });
     if (s.water != null) setLedgerWater(s.water);
   },
   reset() { this.load({}); }
@@ -141,6 +158,11 @@ function careerRecordBattle(outcome, grade, extra) {
     row.name = s.name;
     row.weaponOf = s.weaponOf || row.weaponOf || null;
     CAREER_KEYS.forEach(k => { row[k] = (Number(row[k]) || 0) + Math.round(Number(s[k]) || 0); });
+    // 单回合最高爆发（app.js · burstNote）：整局只留最高的那一回合，记下是哪一场
+    if (s.burst && Number(s.burst.dmg) > (row.burst ? Number(row.burst.dmg) || 0 : 0)) {
+      row.burst = { dmg: Math.round(Number(s.burst.dmg) || 0), turn: Number(s.burst.turn) || 1, battleNo: no, battleName: (extra && extra.name) || "",
+        when: typeof ledgerTimeText === "function" ? ledgerTimeText() : "", skills: Object.assign({}, s.burst.skills), buffs: Object.assign({}, s.burst.buffs) };
+    }
     teamDmg += Math.round(Number(s.dmg) || 0);
     if (!mvp || (Number(s.dmg) || 0) > mvp.dmg) mvp = { name: s.name, dmg: Math.round(Number(s.dmg) || 0) };
   });
@@ -174,6 +196,16 @@ function careerRecordBattle(outcome, grade, extra) {
 
 /* ===== 「长休一次」的技能 ===== */
 const REST_ONCE_KEYS = ["rally"];
+/** 「每次短休 N 次」：用掉一次（用完了返回 false）；shortOnceUsed 看用了几次 */
+function shortOnceUsed(kit, key) { return Number(((LEDGER.shortOnce || {})[kit] || {})[key]) || 0; }
+function useShortOnce(kit, key, limit) {
+  LEDGER.shortOnce = LEDGER.shortOnce || {};
+  const row = LEDGER.shortOnce[kit] = LEDGER.shortOnce[kit] || {};
+  const n = Number(row[key]) || 0;
+  if (n >= (limit || 1)) return false;
+  row[key] = n + 1;
+  return true;
+}
 /** 用一次「长休一次」的技能。用完了返回 false */
 function useRestOnce(kit, key, limit) {
   LEDGER.restOnce = LEDGER.restOnce || {};
@@ -261,11 +293,32 @@ function spendDurability(kit, n, reason, notes) {
   if (unit && unit.resources) unit.resources.durability = after;
   if (notes && after !== before) notes.push(`${weaponName(kit)} 耐久 ${before} → ${after}（${reason}）`);
   if (after <= 0 && before > 0) {
-    if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
     const owner = weaponOwner(kit);
     if (owner && typeof spawnPopup === "function") spawnPopup(owner, { kind: "status", text: "武器损坏", element: "physical" });
-    if (owner && heldWeaponKit(owner) === kit) disarmBrokenWeapon(owner, notes);
+    if (inBattleNow()) {
+      // 战斗中才坏掉：这一场还能用（技能照常），只是 atk / 格挡加成减半、不能再唤出武器人；下一场开战前还没修好就完全用不了
+      markWeaponWorn(kit);
+      if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零：这一场 atk 和格挡加成减半、不能再唤出武器人；修好之前，下一场就只能空手（维修工具包或长休）。`);
+    } else {
+      if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
+      if (owner && heldWeaponKit(owner) === kit) disarmBrokenWeapon(owner, notes);
+    }
   }
+}
+/** 正在打仗（开战之后、结算之前） */
+function inBattleNow() {
+  return typeof state !== "undefined" && !!state.combatStarted;
+}
+/** 这把武器本场受损了（武器人倒下 / 耐久归零 / 战斗中修理）：atk、格挡加成减半，不能再唤出武器人 */
+function markWeaponWorn(kit, why) {
+  if (!kit || typeof state === "undefined") return;
+  state.weaponFallen = state.weaponFallen || {};
+  if (!state.weaponFallen[kit]) state.weaponFallen[kit] = why || "worn";
+}
+/** 完全用不了的武器：耐久为 0，而且不是这一场打仗时才坏的（开战前就坏了） */
+function weaponUnusable(kit) {
+  if (!weaponBroken(kit)) return false;
+  return !(inBattleNow() && state.weaponFallen && state.weaponFallen[kit]);
 }
 function restoreDurability(kit, n) {
   const max = weaponDurMax(kit);
@@ -281,7 +334,7 @@ function disarmBrokenWeapon(hero, notes) {
     const r = hero.resources || {};
     const other = r.blade === "niu" ? "naruto" : "niu";
     const otherOut = other === "niu" ? r.niuOut : r.narutoOut;
-    if (!weaponBroken(other) && !otherOut) {
+    if (!weaponUnusable(other) && !otherOut) {
       r.blade = other;
       if (notes) notes.push(`绯秋 改持${weaponName(other)}。`);
       return;
@@ -345,11 +398,11 @@ function ledgerCapture() {
   });
 }
 
-/** 战斗结束：每把武器 −1，被击败的武器人再 −2，然后记下状态 */
+/** 战斗结束：每把武器 −1（死亡角色的武器不扣），被击败的武器人再 −2，然后记下状态 */
 function ledgerAfterBattle(notes) {
   notes = notes || [];
   const heroes = partyHeroes();
-  heroes.forEach(h => (h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
+  heroes.filter(h => !h.dead).forEach(h =>(h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
   (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && u.dead && !u._durCounted).forEach(u => {
     u._durCounted = true;
     spendDurability(u.kit, 2, "武器人被击败", notes);
@@ -375,10 +428,26 @@ function parseClock(text) {
   if (h > 23 || mi > 59) return null;
   return h * 60 + mi;
 }
-/** 时段：深夜 / 清晨 / 上午 / 中午 / 下午 / 傍晚 / 夜晚 */
+/** 时段：深夜 / 清晨 / 上午 / 中午 / 下午 / 傍晚 / 夜晚。深夜到几点、几点起傍晚 / 夜晚和光影同一张表（daylight.js 的 DAY_LIGHT） */
 function dayPeriod(min) {
-  const h = Math.floor((((Number(min) || 0) % 1440) + 1440) % 1440 / 60);
-  return h < 5 ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : h < 18 ? "下午" : h < 20 ? "傍晚" : "夜晚";
+  const m = (((Number(min) || 0) % 1440) + 1440) % 1440, h = Math.floor(m / 60), T = DayLight.DAY_LIGHT;
+  return m < T.day ? "深夜" : h < 8 ? "清晨" : h < 12 ? "上午" : h < 14 ? "中午" : m < T.dusk ? "下午" : m < T.night ? "傍晚" : "夜晚";
+}
+/* 昼夜（沙漠生物等会按昼夜换行为，desert.js）：几点到几点算白天 / 傍晚 / 夜晚在 daylight.js 的 DAY_LIGHT（规则和画面共用一张表）。
+ * 规则上的夜晚 = 傍晚 + 夜晚（18:00–05:00），白天 05:00–18:00 */
+function isNightClock(min) { return DayLight.isNight(min); }
+/** 这个时刻的光影：day 白天 / dusk 傍晚 / night 夜晚（战斗状态的 state.light 默认跟着它，只是画面） */
+function clockLight(min) { return DayLight.lightAt(min); }
+/** 现在的时钟（分钟） */
+function clockNow() {
+  return typeof LEDGER !== "undefined" && LEDGER.clock != null ? Number(LEDGER.clock) : CLOCK_START;
+}
+/** 从现在起过 hours 小时：{ min（当天分钟）, days（跨过几个 0 点）, text, night } */
+function clockAfter(hours, from) {
+  const start = from != null ? Number(from) : clockNow();
+  const total = start + Math.round((Number(hours) || 0) * 60);
+  const min = ((total % 1440) + 1440) % 1440;
+  return { min, days: Math.floor(total / 1440), text: clockText(min), night: isNightClock(min) };
 }
 /** 「3 小时 20 分」 */
 function durationText(hours) {
@@ -453,6 +522,8 @@ function ledgerShortRest(kits, notes) {
     const before = totalHpOf(h);
     healHeroFlesh(h, heal);
     LEDGER.shortUsed[h.kit] = (Number(LEDGER.shortUsed[h.kit]) || 0) + 1;
+    if (LEDGER.shortOnce) delete LEDGER.shortOnce[h.kit];
+    if (typeof cyberwareShortRest === "function") cyberwareShortRest(h);   // 主动义体每次短休 1 次   // 「每次短休 N 次」的专长刷新
     notes.push(`${h.name} 短休恢复 ${totalHpOf(h) - before} 点（今日剩 ${shortRestLeft(h)} 次）。`);
     any = true;
   });
@@ -483,17 +554,60 @@ function sleepFor(plan, kit) {
   return s && ITEM_CATALOG[s] && Number(ITEM_CATALOG[s].sleep) > 0 ? s : "";
 }
 
+/** 这次长休每人吃哪种食物（这个角色要吃的几份都吃这一种）：plan.food 里选了的照选的吃，先从库存里扣；
+ *  没选的人在剩下的库存里分（仿照 defaultSleepPlan，以前一律吃背包里最便宜的一种，总量够也报不够，#340）——
+ *  挑缺得最少的分法；缺得一样多时挑最省的（贵的食物用得越少越好）；再一样，前面的人先吃便宜的。
+ *  返回 { kit: 食物 id }（死亡的角色不吃，不在里面） */
+function restFoodPlan(plan) {
+  const chosen = (plan && plan.food) || {};
+  const left = FOOD_ORDER.map(id => bagCount(id));
+  const out = {}, todo = [];
+  partyHeroes().filter(h => !h.dead).forEach(h => {
+    const n = heroRestCost(h).food;
+    if (chosen[h.kit]) {
+      out[h.kit] = chosen[h.kit];
+      const i = FOOD_ORDER.indexOf(chosen[h.kit]);
+      if (i >= 0) left[i] -= n;
+    } else todo.push({ kit: h.kit, n, same: -1 });
+  });
+  // 份数一样的人互换不改变结果：后面的人只试不比前一个同份数的人便宜的食物（每种分法只试一次）
+  todo.forEach((h, i) => { for (let j = i - 1; j >= 0 && h.same < 0; j--) if (todo[j].n === h.n) h.same = j; });
+  const used = FOOD_ORDER.map(() => 0), pick = [];
+  let best = null, bestPick = null;
+  // 比较用：[缺几份, 最贵的用几份, …, 最便宜的用几份]，越小越好
+  const score = () => [used.reduce((s, u, i) => s + Math.max(0, u - left[i]), 0)].concat(used.slice().reverse());
+  const better = (a, b) => { for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+  (function walk(i) {
+    if (i === todo.length) {
+      const s = score();
+      if (!best || better(s, best)) { best = s; bestPick = pick.slice(); }
+      return;
+    }
+    for (let t = todo[i].same >= 0 ? pick[todo[i].same] : 0; t < FOOD_ORDER.length; t++) {
+      pick[i] = t; used[t] += todo[i].n;
+      walk(i + 1);
+      used[t] -= todo[i].n;
+    }
+  })(0);
+  todo.forEach((h, i) => { out[h.kit] = FOOD_ORDER[bestPick[i]]; });
+  return out;
+}
+
 /** 长休计划：plan = { hours, food: { kit: foodId }, sleep: { kit: 睡眠道具 id 或 "" }, force }
- *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配） */
+ *  每个角色单独选吃哪种食物（这个角色要吃的几份都吃这一种）和用哪个睡眠道具（不写就按默认分配：restFoodPlan / defaultSleepPlan） */
 function longRestNeeds(plan) {
   plan = plan || {};
   const heroes = partyHeroes().filter(h => !h.dead);
   let water = 0;
   const food = {}, sleep = {};
+  const eat = plan.free ? {} : restFoodPlan(plan);
+  // plan.free：这次长休不消耗水和食物（单局按小时补的休息点，rogue.js · freeRestHere）；睡眠道具照常
   heroes.forEach(h => {
     const c = heroRestCost(h);
+    const sid0 = sleepFor(plan, h.kit);
+    if (plan.free) { if (sid0) sleep[sid0] = (sleep[sid0] || 0) + 1; return; }
     water += c.water;
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    const fid = eat[h.kit];
     food[fid] = (food[fid] || 0) + c.food;
     const sid = sleepFor(plan, h.kit);
     if (sid) sleep[sid] = (sleep[sid] || 0) + 1;
@@ -508,7 +622,7 @@ function longRestNeeds(plan) {
     const have = bagCount(sid);
     if (have < sleep[sid]) lack.push(`${(ITEM_CATALOG[sid] || {}).name || sid} 只有 ${have} 个，分给了 ${sleep[sid]} 个人`);
   });
-  return { water, food, sleep, lack, ok: lack.length === 0 };
+  return { water, food, sleep, lack, ok: lack.length === 0, free: !!plan.free };
 }
 /* ===== 吐酸（兽人-蜥蜴种族特长）的属性：长休时可以改 ===== */
 const SPIT_ELEMENTS = ["acid", "fire", "ice", "electric", "energy", "physical", "harmonic"];
@@ -519,14 +633,26 @@ function spitElementOf(kit) {
   const e = LEDGER.spit && LEDGER.spit[kit];
   return SPIT_ELEMENTS.indexOf(e) >= 0 ? e : "acid";
 }
+/** 胶囊弹药+：龙哥长休时能不能排下一场的弹序；所有 3 红 3 蓝的排法（"RRRBBB"……共 20 种） */
+function canOrderAmmo(h) { return !!h && h.kit === "longge" && typeof passivePlus === "function" && passivePlus(h, 2); }
+const AMMO_ORDERS = (() => {
+  const out = [];
+  for (let m = 0; m < 64; m++) {
+    const bits = m.toString(2).padStart(6, "0");
+    if ((bits.match(/1/g) || []).length === 3) out.push(bits.replace(/1/g, "R").replace(/0/g, "B"));
+  }
+  return out;
+})();
 /** 长休界面用：每个角色要多少、现在选了什么，以及能选的食物 / 睡眠道具（带库存）。plan 同 longRestNeeds */
 function longRestOptions(plan) {
   plan = plan || {};
+  const eat = restFoodPlan(plan);
   const heroes = partyHeroes().filter(h => !h.dead).map(h => {
     const c = heroRestCost(h);
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
+    const fid = eat[h.kit];
     const spit = canSpit(h.kit) ? ((plan.spit && SPIT_ELEMENTS.indexOf(plan.spit[h.kit]) >= 0) ? plan.spit[h.kit] : spitElementOf(h.kit)) : null;
-    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit), spit };
+    const ammo = canOrderAmmo(h) ? ((plan.ammo && plan.ammo[h.kit] != null) ? plan.ammo[h.kit] : ((LEDGER.ammoOrder || {})[h.kit] || "")) : null;
+    return { kit: h.kit, name: h.name, water: c.water, food: c.food, foodId: fid, sleepId: sleepFor(plan, h.kit), spit, ammo };
   });
   const foods = FOOD_ORDER.filter(id => ITEM_CATALOG[id]).map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), shp: Number(ITEM_CATALOG[id].shp) || 0 }));
   const sleeps = sleepItemIds().map(id => ({ id, name: ITEM_CATALOG[id].name, have: bagCount(id), bonus: Number(ITEM_CATALOG[id].sleep) || 0 }));
@@ -535,11 +661,11 @@ function longRestOptions(plan) {
   const spit = {};
   heroes.forEach(h => { if (h.spit) spit[h.kit] = h.spit; });
   const spitElements = SPIT_ELEMENTS.map(id => ({ id, name: (typeof ELE !== "undefined" && ELE[id]) || id }));
-  return { heroes, foods, sleeps, spitElements, water: ledgerWater(), plan: { food, sleep, spit }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
-}
-/** 默认吃最便宜的、背包里有的食物 */
-function defaultFoodFor() {
-  return FOOD_ORDER.find(id => bagCount(id) > 0) || FOOD_ORDER[0];
+  const ammo = {};
+  heroes.forEach(h => { if (h.ammo != null) ammo[h.kit] = h.ammo; });
+  // 弹序选项：空 = 开局随机；其余是 3 红 3 蓝的排法，按「红红红蓝蓝蓝」这样写
+  const ammoOrders = [{ id: "", name: "开局随机" }].concat(AMMO_ORDERS.map(id => ({ id, name: id.replace(/R/g, "红").replace(/B/g, "蓝") })));
+  return { heroes, foods, sleeps, spitElements, ammoOrders, water: ledgerWater(), plan: { food, sleep, spit, ammo }, need: longRestNeeds(Object.assign({}, plan, { food, sleep })) };
 }
 
 function unitNameOf(kit) {
@@ -549,17 +675,74 @@ function unitNameOf(kit) {
 }
 
 /** 长休。plan.watch：守夜者的 kit（角色或武器人），他这次不恢复 */
+/* ---------- 长休结算画面（issue #52）----------
+ * 休息前后各取一次只读快照，算出每人的变化。坚毅生命的数值只给主持人（shp 字段，联机投影 / 游戏版界面都不显示），
+ * 玩家只看到按比例抽的一句（mood，SHP_MOOD_LINES）。 */
+function restSnapshot() {
+  const heroes = (typeof partyHeroes === "function" ? partyHeroes() : []).filter(h => !(typeof isWeaponUnit === "function" && isWeaponUnit(h)));
+  const sum = (h, k) => (h.layers || []).reduce((n, l) => n + Math.max(0, Number(l[k]) || 0), 0);
+  const foods = FOOD_ORDER.reduce((n, id) => n + (typeof bagCount === "function" ? bagCount(id) : 0), 0);
+  return {
+    day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0, water: ledgerWater(), food: foods,
+    heroes: heroes.map(h => ({
+      kit: h.kit, name: h.name, dead: !!h.dead, dying: !!(h.dying && !h.upOnShp),
+      hp: sum(h, "current"), hpMax: sum(h, "max"), shp: Number(h.shp) || 0, shpMax: Number(h.shpMax) || 0,
+      weapons: (h.linkedKits || []).map(k => ({ kit: k, name: unitNameOf(k), dur: weaponDur(k), max: weaponDurMax(k) }))
+    }))
+  };
+}
+function restReport(b, a, ctx) {
+  ctx = ctx || {};
+  const tier = (hrs) => (typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(hrs) : 0);
+  const rnd = typeof Math.random === "function" ? Math.random : () => 0;
+  return {
+    id: "rest-" + Date.now().toString(36) + Math.floor(rnd() * 1e6).toString(36),
+    ok: !!ctx.ok, hours: ctx.hours || 0, forced: !!ctx.forced,
+    from: { day: b.day, clock: b.clock }, to: { day: a.day, clock: a.clock },
+    water: Math.max(0, b.water - a.water), food: Math.max(0, b.food - a.food),
+    exhaust: [tier(b.hours), tier(a.hours)],
+    watch: ctx.watch ? unitNameOf(ctx.watch) : "", ambush: ctx.ambush || null,
+    heroes: a.heroes.map(h => {
+      const o = b.heroes.find(x => x.kit === h.kit) || h;
+      return {
+        kit: h.kit, name: h.name, dead: h.dead, watch: !!ctx.noRest && ctx.noRest === h.kit,   // 只标真的没恢复的人：荒野向导守夜照常恢复；武器人守夜，主人本人是恢复了的
+        hp: [o.hp, h.hp], hpMax: h.hpMax, shp: [o.shp, h.shp], shpMax: h.shpMax,
+        mood: h.dead ? "" : (typeof shpMoodLine === "function" ? shpMoodLine(h.shp, h.shpMax) : ""),
+        weapons: h.weapons.map(w => { const ow = (o.weapons || []).find(x => x.kit === w.kit) || w; return { name: w.name, dur: [ow.dur, w.dur], max: w.max }; })
+      };
+    })
+  };
+}
+
+/** 营地画面（长休前）：全队状态、补给够不够。坚毅只给一个短词（shpMoodLabel），数值只给主持人（shp 字段，联机投影去掉） */
+function campStatus(plan) {
+  const snap = restSnapshot();
+  const need = longRestNeeds(plan || {});
+  const foodNeed = Object.keys(need.food).reduce((n, id) => n + (Number(need.food[id]) || 0), 0);
+  const tier = typeof exhaustTierFromHours === "function" ? exhaustTierFromHours(snap.hours) : 0;
+  return {
+    day: snap.day, clock: snap.clock, hoursAwake: Math.floor(snap.hours), exhaust: tier,
+    water: { need: need.water, have: snap.water }, food: { need: foodNeed, have: snap.food }, ok: need.ok, lack: need.lack.slice(),
+    heroes: snap.heroes.map(h => ({ kit: h.kit, name: h.name, dead: h.dead, dying: h.dying, hp: h.hp, hpMax: h.hpMax, shp: h.shp, shpMax: h.shpMax,
+      mood: h.dead ? "" : (typeof shpMoodLabel === "function" ? shpMoodLabel(h.shp, h.shpMax) : ""), weapons: h.weapons }))
+  };
+}
+
 function ledgerLongRest(plan, notes) {
   notes = notes || [];
-  plan = plan || {};
+  // 每人吃什么在扣食物之前定下来，扣食物和算食物加成都用这一份（以前扣完再取默认，可能按没吃的那种算加成）
+  plan = Object.assign({}, plan, { food: restFoodPlan(plan) });
   const hours = Math.max(8, Math.min(12, Number(plan.hours) || 8));
   const need = longRestNeeds(plan);
+  const before = restSnapshot();
   if (!need.ok && !plan.force) {
     notes.push(`补给不足，无法长休：${need.lack.join("，")}。只能消磨时间。`);
     ledgerAdvance(hours, notes);
-    return { ok: false, notes };
+    return { ok: false, notes, report: restReport(before, restSnapshot(), { ok: false, hours }) };
   }
-  if (!plan.force) {
+  if (plan.free && !plan.force) {
+    notes.push(`长休 ${hours} 小时，这里不消耗补给（水和食物）。`);
+  } else if (!plan.force) {
     setLedgerWater(ledgerWater() - need.water);
     Object.keys(need.food).forEach(fid => bagAdd(fid, -need.food[fid]));
     notes.push(`长休 ${hours} 小时，消耗 ${need.water} ml 水、` +
@@ -568,8 +751,21 @@ function ledgerLongRest(plan, notes) {
     notes.push(`长休 ${hours} 小时（主持人强制，不扣补给）。`);
   }
   // 守夜：选一名角色或武器人整夜放哨。他不吃长休的恢复，也不刷新短休次数和「长休一次」的技能
-  const watch = plan.watch || null;
+  // 荒野向导（feats.js）：守夜的人照常恢复
+  const watchHero = plan.watch ? partyHeroes().find(x => x.kit === plan.watch) : null;
+  const ranger = !!(watchHero && typeof featHas === "function" && typeof featExploreOk === "function" && featExploreOk() && featHas(watchHero, "ranger"));
+  const watch = ranger ? null : (plan.watch || null);
+  if (ranger) notes.push(`${unitNameOf(plan.watch)} 守夜（荒野向导）：一边放哨一边歇着，长休照常恢复。`);
   if (watch) notes.push(`${unitNameOf(watch)} 守夜：这次长休不恢复，短休次数和「长休一次」的技能也不刷新。`);
+  // 胶囊弹药+：排好下一场开局的 6 发子弹顺序（空 = 随机）
+  Object.keys(plan.ammo || {}).forEach(kit => {
+    const h = partyHeroes().find(x => x.kit === kit);
+    const v = String(plan.ammo[kit] || "");
+    if (!canOrderAmmo(h) || (v && AMMO_ORDERS.indexOf(v) < 0)) return;
+    LEDGER.ammoOrder = LEDGER.ammoOrder || {};
+    if (v) { LEDGER.ammoOrder[kit] = v; notes.push(`${h.name} 排好了下一场的弹序：${v.replace(/R/g, "红").replace(/B/g, "蓝")}。`); }
+    else delete LEDGER.ammoOrder[kit];
+  });
   // 吐酸：长休时可以改变吐酸攻击的属性（守夜的人也能改，这不算恢复）
   Object.keys(plan.spit || {}).forEach(kit => {
     const e = plan.spit[kit];
@@ -580,14 +776,17 @@ function ledgerLongRest(plan, notes) {
     const nm = (k) => (typeof ELE !== "undefined" && ELE[k]) || k;
     notes.push(`${unitNameOf(kit)} 的吐酸攻击属性：${nm(before)} → ${nm(e)}。`);
   });
+  // 义体：每天的坚毅消耗（装着 + 过度安装），最少留 1；长休算一天。先扣再恢复
+  if (typeof cyberwareDayTick === "function") partyHeroes().filter(h => !h.dead && h.cyberware && h.cyberware.length).forEach(h => { cyberwareDayTick(h); if (h.kit !== watch) cyberwareShortRest(h); });
   partyHeroes().filter(h => !h.dead).forEach(h => {
     if (h.kit === watch) { (h.linkedKits || []).forEach(k => { if (k !== watch) restoreDurability(k); }); return; }
     (h.layers || []).forEach(l => { l.current = l.max; });
     h.dying = false;
     h.upOnShp = false;
     h.stunned = false;
-    const fid = (plan.food && plan.food[h.kit]) || defaultFoodFor();
-    const foodBonus = ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
+    const fid = plan.food[h.kit];
+    // 不耗补给的长休（plan.free）没吃食物，也就没有食物的坚毅加成
+    const foodBonus = plan.free && !plan.force ? 0 : ((ITEM_CATALOG[fid] || {}).shp || 0) * heroRestCost(h).food;
     const sid = sleepFor(plan, h.kit);
     const hasBag = !!sid;
     const perHour = 2 + (hasBag ? Number(ITEM_CATALOG[sid].sleep) || 0 : 0);
@@ -604,18 +803,33 @@ function ledgerLongRest(plan, notes) {
   });
   const keepW = watch && LEDGER.weapons && LEDGER.weapons[watch];
   LEDGER.weapons = keepW ? { [watch]: keepW } : {};
-  notes.push(watch ? "除守夜者外，武器耐久回满，武器人伤势痊愈。" : "全部武器耐久回满，武器人伤势痊愈。");
+  // 守夜的是角色时他的武器照样回满；只有武器人守夜，那把武器才不回
+  const watchIsWeapon = !!watch && !!weaponOwner(watch);   // 武器人不在 partyHeroes 里，看它是不是某个角色的武器
+  notes.push(watchIsWeapon ? "除守夜的那把武器外，武器耐久回满，武器人伤势痊愈。" :"全部武器耐久回满，武器人伤势痊愈。");
   LEDGER.hours = 0;
   const keep = (tab) => (watch && tab && tab[watch] != null ? { [watch]: tab[watch] } : {});
   LEDGER.shortUsed = keep(LEDGER.shortUsed);
   LEDGER.restOnce = keep(LEDGER.restOnce);
+  LEDGER.shortOnce = keep(LEDGER.shortOnce);   // 长休也刷新「每次短休 N 次」（守夜的人不刷新）
+  // 伙夫（feats.js）：每个带伙夫的人让坚毅生命最少的一名角色多恢复 2 点
+  if (typeof featPartyCount === "function" && typeof featExploreOk === "function" && featExploreOk()) {
+    const alive = partyHeroes().filter(x => !x.dead && !isWeaponUnit(x));
+    for (let i = featPartyCount(alive, "cook"); i > 0; i--) {
+      const low = alive.filter(x => (Number(x.shp) || 0) < (Number(x.shpMax) || 0) && x.kit !== watch)
+        .sort((a, b) => ((Number(a.shp) || 0) - (Number(b.shp) || 0)))[0];
+      if (!low) break;
+      const before = Number(low.shp) || 0;
+      low.shp = Math.min(Number(low.shpMax) || 0, before + FEAT_CFG.cook);
+      notes.push(typeof shpHidden === "function" && shpHidden() ? `伙夫：${low.name} 吃得好，坚毅生命多恢复了一些。` : `伙夫：${low.name} 吃得好，坚毅生命多恢复 ${low.shp - before} 点。`);
+    }
+  }
   // 时钟照常往前走；过了 0 点才换天（长休本身已经刷新了短休次数）。单局按任务天数记日子，这里不换天
   const days = advanceClock(hours * 60);
   const newDay = days > 0 && !ledgerInRun();
   if (newDay) LEDGER.day += days;
   notes.push(newDay ? `醒来：进入第 ${LEDGER.day} 天，${clockText(LEDGER.clock)}。` : `醒来：${clockText(LEDGER.clock)}。`);
   ledgerCapture();
-  return { ok: true, notes };
+  return { ok: true, notes, report: restReport(before, restSnapshot(), { ok: true, hours, forced: !!plan.force, watch: plan.watch || null, noRest: watch }) };
 }
 
 /** 主持人：全员复原（不扣补给、不推进时间） */
@@ -631,6 +845,7 @@ function ledgerRestoreAll(notes) {
   LEDGER.weapons = {};
   LEDGER.shortUsed = {};
   LEDGER.restOnce = {};
+  LEDGER.shortOnce = {};
   notes.push("主持人：全员血量、坚毅、耐久复原。");
   ledgerCapture();
   return notes;
@@ -663,11 +878,18 @@ function repairPointsText() {
 function ledgerRepair(kit, notes) {
   notes = notes || [];
   if (repairPoints() < 1) { notes.push("没有维修工具包。"); return notes; }
+  // 战斗中倒地的武器人：和「使用道具」一样修好重新站起来（items.js · useRepairKit）
+  if (inBattleNow() && typeof repairTargets === "function") {
+    const row = repairTargets().find(r => r.kit === kit);
+    if (row && row.down) return useRepairKit({ name: "维修" }, null, kit, notes);
+  }
   const before = weaponDur(kit);
   const max = weaponDurMax(kit);
   if (before >= max) { notes.push(`${weaponName(kit)} 耐久已满。`); return notes; }
   const used = spendRepairPoints(max - before);
   restoreDurability(kit, used);
+  // 战斗中修好的武器不会立刻恢复如初：这一场仍按受损算（atk / 格挡加成减半、不能再唤出）
+  if (inBattleNow()) { markWeaponWorn(kit, "repaired"); notes.push(`（战斗中修理：${weaponName(kit)} 这一场仍按受损算，atk 和格挡加成减半、不能再唤出武器人）`); }
   notes.push(`用维修工具包修复 ${weaponName(kit)}：耐久 ${before} → ${weaponDur(kit)}，用掉 ${used} 点维修量（还剩 ${repairPoints()} 点）。`);
   const owner = weaponOwner(kit);
   if (owner && owner.weaponHeld === false && !owner.dead && !weaponOutOnField(kit)) owner.weaponHeld = true;
@@ -682,8 +904,9 @@ function ledgerHealItem(itemId, kit, notes) {
   const h = heroByKit(kit);
   if (!h) return notes;
   if (bagCount(itemId) < 1) { notes.push("背包里没有这个物品。"); return notes; }
-  const n = itemId === "clinic" ? 2 : 1;
-  const r = takeDice(n, 4, 6);
+  const r = rollItemHeal(itemId);
+  if (!r) { notes.push("这件道具不能用来治疗。"); return notes; }
+  if (h.dead) { notes.push(`${h.name} 已死亡，不能治疗。`); return notes; }   // 不扣道具
   bagAdd(itemId, -1);
   const before = totalHpOf(h);
   healHeroFlesh(h, r.total);   // 医疗包：和其他治疗一样从内往外补，可以治到外层（作者定）

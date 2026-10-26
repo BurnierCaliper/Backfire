@@ -26,7 +26,7 @@ const BattleSim = (function () {
     state.zoneMode = Number(opt.zoneMode) || 2;
     state.board = null;          // 特殊棋盘：setup 里按 opt.board 换上（普通战斗两区 / 三区直排）
     state.partySize = 2;
-    state.weather = opt.weather || "none";
+    state.weather = opt.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();   // 每场重新定风向（不是沙暴时不起作用）
     state.weatherLock = null;
     state.phaseStep = 0;
@@ -55,6 +55,7 @@ const BattleSim = (function () {
     state.solo = null;           // 单人模式：在 before 里写进来
     state.scoreAct = null;       // 评分按第几幕的分数线：单局在 before 里写进来
     state.ambush = false;        // 遭遇战（长休被偷袭）：第一回合我方没有行动，分数 ×2
+    state.playerAllies = [];     // 和我方同阵营的敌人阵营（跑团战斗模板设的；buildEncounter 里写进来）
   }
 
   /**
@@ -64,6 +65,10 @@ const BattleSim = (function () {
    *   level     敌人等级（enemies 里没写 lv 时用）
    *   seed      给了就装种子随机数，整场可复现
    *   before    布置完、放敌人之前调用（单局层用来盖回跨战斗的血量等）
+   *   region    这场战斗在哪个区域（只是画面；不给就用 encounter 的 region，单局的遭遇带着这一幕的区域）
+   *   scene     区域里的哪个场景（只是画面，world-data.js · BATTLE_SCENES 的 id；和主持人选的一样，这个区域没有的不认；不给就按默认）
+   *   sceneSeed 单局：按这个种子在区域的场景里随机抽一个（rogue.js · battleSpec 给；不动战斗用的随机数）
+   *   light     光影 day / dusk / night（只是画面；不给就跟着时钟）
    */
   function setup(opt) {
     opt = opt || {};
@@ -78,17 +83,28 @@ const BattleSim = (function () {
     if (typeof opt.before === "function") opt.before(state);
     const partyN = syncPartySizeFromField();
     const level = Number(opt.level) || 1;
+    // 个体值（enemies.js）：默认不波动（测试、数值模拟要确定的数字）；单局的战斗（battle.setupRogue）打开
+    const ivOff = typeof ENEMY_IV !== "undefined" && !opt.iv;
+    if (ivOff) ENEMY_IV.off++;
+    try { spawnAll(opt, level, partyN); } finally { if (ivOff) ENEMY_IV.off--; }
+    // 所在区域、场景、光影（只是画面，world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: opt.region != null ? opt.region : opt.encounter && opt.encounter.region,
+      scene: opt.scene, sceneSeed: opt.sceneSeed, light: opt.light });
+    return state;
+  }
+  function spawnAll(opt, level, partyN) {
     if (opt.encounter) {
       const enc = JSON.parse(JSON.stringify(opt.encounter));
       if (typeof applyEncounterLayout === "function") applyEncounterLayout(enc);
       if (enc.playerZone) state.units.forEach(u => { if (u.isPlayer && !u.hidden) u.zone = Number(enc.playerZone); });
       buildEncounter(enc, level, partyN);
+      if (typeof Chain !== "undefined") Chain.init(enc, level, partyN);
     } else {
+      if (typeof Chain !== "undefined") Chain.clear();
       (opt.enemies || []).forEach(row => {
-        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone).forEach(u => state.units.push(u));
+        spawnEnemyGroup(row.id, Number(row.lv) || level, partyN, row.zone, row.iv, row.race).forEach(u => state.units.push(u));
       });
     }
-    return state;
   }
 
   /* ---------- 胜负 ---------- */
@@ -96,7 +112,14 @@ const BattleSim = (function () {
     if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
-    if (!EnemyAI.foes().length) return "player";
+    // 援军 / 连续战斗还没打完：继续（chain.js）
+    if (!EnemyAI.foes().length) {
+      const notes = [];
+      const goOn = typeof Chain !== "undefined" && Chain.onCleared(notes);
+      notes.forEach(t => appendLog(t));
+      if (!goOn) return "player";
+    }
+    if (!EnemyAI.foes().length) return null;
     if (!standing.length) return "enemy";
     return null;
   }
@@ -257,7 +280,7 @@ const BattleSim = (function () {
     for (const id of EnemyAI.actingOrder()) {
       for (let n = 0; n < 5; n++) {
         const u = unitById(id);
-        if (!u || !alive(u) || u.stunned || (u.ap || 0) <= 0) break;
+        if (!u || !(alive(u) || (typeof vehicleRiderActs === "function" && vehicleRiderActs(u))) || u.stunned || (u.ap || 0) <= 0) break;
         const plan = EnemyAI.plan(u);
         if (!plan) break;
         const before = sig(u);

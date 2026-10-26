@@ -152,8 +152,8 @@ test("铁壁也受过载和雷鸣的反伤增益", () => {
 
 /* ---------- Helumica 聚焦 ---------- */
 
-function focusField() {
-  const { c, S } = setup(["chuan", "helu"], [{ id: "bandit_boss", lv: 1, zone: 1 }]);
+function focusField(extra) {
+  const { c, S } = setup(["chuan", "helu"].concat(extra || []), [{ id: "bandit_boss", lv: 1, zone: 1 }]);
   const ch = kit(S, "chuan"), helu = kit(S, "helu"), foe = foesOf(S)[0];
   ready(ch, 1); helu.zone = 2; foe.zone = 1; S.weather = "none";
   foe.def = foe.defMax = 30;
@@ -184,17 +184,19 @@ test("聚焦：Helumica 协助攻击的那一击推进过，就不再「直接�
 });
 
 test("聚焦的层被打碎后清除聚焦：不再抹第二次、不再给 2 击破、不再记成废物利用来源", () => {
-  const { c, S, helu, foe } = focusField();
+  const { c, S, helu, foe } = focusField(["kolt"]);                     // 带上柯尔特：废料记在他身上
+  const kolt = kit(S, "kolt");
   foe.focuses[0].seq = ["acid", "acid"];
   hit(c, helu, foe, { flat: 400 });                                    // 一下打碎装甲层（物理，不推进序列）
   assert.equal(foe.layers.find(l => l.type === "armor").current, 0);
   assert.equal(foe.focuses.length, 0, "聚焦跟着清掉");
-  S.lastBrokenLayer = null;                                            // 被废物利用领走
+  assert.deepEqual(plain(kolt.resources.scrapStore), { armor: 200 }, "打碎的那一层记成废料");
+  kolt.resources.scrapStore = {};                                      // 被废物利用领走
   const def0 = foe.def;
   hit(c, helu, foe, { flat: 5, element: "acid" });
   hit(c, helu, foe, { flat: 5, element: "acid" });
   assert.equal(foe.def, def0, "没有抹层的 2 击破");
-  assert.equal(S.lastBrokenLayer, null, "同一层没有被重新记成来源");
+  assert.deepEqual(plain(kolt.resources.scrapStore), {}, "同一层没有被重新记成来源");
 });
 
 /* ---------- 龙哥 ---------- */
@@ -313,11 +315,11 @@ test("扭矩电钻突进、拉斯缪尔逃离：危墙挡住的终点不列出�
   assert.deepEqual(plain(c.skillFlowSteps("ras_flee", ras, {})[0].zones), [2]);
 });
 
-test("拉斯缪尔：说明和日志写成和实现一致（达到 100%、攻击伤害、倒地）", () => {
+test("拉斯缪尔：说明和日志写成和实现一致（达到 100%、任何来源的伤害、倒地）", () => {
   const { c, S } = setup(["ras", "kolt"]);
   const p = c.SkillText.kitInfo("ras").passives.find(x => x.name === "事故幸存");
   assert.match(p.text, /达到 100%/);
-  assert.match(p.text, /受到攻击伤害就会倒地/);
+  assert.match(p.text, /受到任何来源的伤害（攻击、持续伤害、场地效果、余波……）就会倒地/);
   const ras = kit(S, "ras");
   ras.resources.energyPct = 90;
   c.addRasEnergy(20, "测试");
@@ -545,7 +547,8 @@ test("燕返：耐久 0 的鳴門不能被带出来", () => {
 /* ---------- 灯 / 年糕 ---------- */
 
 test("圣盾对年糕生效（年糕在场时灯必然空手）；免疫或伤害为 0 时不扣圣盾", () => {
-  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  // 两个敌人：同区只有一个时被决一死战拦着，只打得到灯
+  const { c, S } = setup(["tou", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
   const tou = kit(S, "tou"), foe = foesOf(S)[0];
   ready(tou, 1); foe.zone = 1;
   const mochi = c.spawnWeapon(tou, "mochi"); mochi.zone = 1;
@@ -669,14 +672,14 @@ test("引火自焚最多 5 层（酷暑 10 层）", () => {
   assert.equal(x.selfBurnStacks, 5);
 });
 
-test("全速撞击先结算伤害再挂震荡：满架势的目标不多掉 2", () => {
+test("全速撞击先挂震荡再结算这一击（和盾击突进一样）：9/9 → 震荡压到 7/7 → 2 击破 → 5", () => {
   const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 2 }]);
   const x = kit(S, "xia"), foe = foesOf(S)[0];
   ready(x, 1); x.level = 3; x.resources.engine = true;
   foe.zone = 2; fatten(foe, 300); foe.def = foe.defMax = 9;
   cmd(c, { actor: x.id, skill: "xia_ram", target: foe.id, picks: { dest: 2, target: foe.id } });
-  assert.equal(foe.def, 7, "1 + 移动 1 区 = 2 击破，没有多掉");
   assert.equal(foe.defMax, 7, "震荡：上限 −2");
+  assert.equal(foe.def, 5, "先震荡 9 → 7，再吃 1 + 移动 1 区 = 2 击破 → 5");
   assert.ok(foe.statuses.shockwave);
 });
 
@@ -688,4 +691,30 @@ test("处决：对没晕眩的目标在扣点前拦下", () => {
   assert.match(c.skillTargetError(x, "xia_execute", foe) || "", /晕眩/);
   cmd(c, { actor: x.id, skill: "xia_execute", target: foe.id });
   assert.equal(x.ap, 5);
+});
+
+test("狂怒碾压抓住飞行目标：每回合自动碾压不再收「近程打飞行」的附赠行动（以前抓住期间拿不到附赠 → 每回合 0 伤害、永远松不开）", () => {
+  const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const x = kit(S, "xia"), foe = foesOf(S)[0];
+  x.zone = foe.zone = 1; fatten(foe, 300); foe.def = foe.defMax = 30; foe.flying = true;
+  x.resources.crushId = foe.id; x.bonus = 0;
+  c.beginRound([]);
+  assert.ok(c.totalHp(foe) < 300, "抓着的时候照常碾到");
+  assert.equal(x.resources.crushId, foe.id, "没死没失衡，继续抓着");
+});
+
+test("狂怒碾压没碾到（附赠不够打飞行目标）：不会抓住目标；已经抓着却碾不到的也松手，不会卡死", () => {
+  const { c, S } = setup(["xia", "kolt"], [{ id: "thug_knife", lv: 1, zone: 1 }]);
+  const x = kit(S, "xia"), foe = foesOf(S)[0];
+  x.zone = foe.zone = 1; fatten(foe, 300); foe.def = foe.defMax = 30; foe.flying = true;
+  x.bonus = 0;
+  const lines = c.crushOnce(x, foe, false);
+  assert.equal(c.totalHp(foe), 300);
+  assert.ok(!x.resources.crushId, "没碾到就抓不住");
+  assert.match(lines.join("\n"), /没能抓住/);
+  // 付得起附赠：照常抓住
+  x.bonus = 1;
+  c.crushOnce(x, foe, false);
+  assert.ok(c.totalHp(foe) < 300);
+  assert.equal(x.resources.crushId, foe.id);
 });

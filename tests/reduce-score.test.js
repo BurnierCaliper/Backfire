@@ -10,6 +10,7 @@ function field() {
   c.startCombat();
   const st = c.S.state;
   st.units.forEach(u => { u.zone = 1; });
+  c.findKit("tou", st.units).zone = 2;   // 灯不和敌人同区：不然敌人被决一死战拦着，只打得到灯
   st.units.filter(u => u.isPlayer).forEach(u => { u.bonus = 0; u.layers.forEach(l => { l.current = l.max = 300; }); });
   const foe = st.units.find(u => !u.isPlayer);
   st.combatPhase = "enemy";
@@ -41,13 +42,13 @@ test("完全免伤（屹立不倒）也算：整击都是减免", () => {
   assert.equal(st.battleScore.parts.reduce, 18);
 });
 
-test("协助格挡成功：减免的伤害 ×1 记成「格挡减免」分，记在格挡的人身上，不算受击者的减伤", () => {
+test("协助格挡成功：减免的伤害 ×1.2（向下取整）记成「格挡减免」分，记在格挡的人身上，不算受击者的减伤", () => {
   const { c, st, foe, ruby, kolt } = field();
   kolt.layers = [{ type: "flesh", current: 300, max: 300 }];
   ruby.bonus = 1;
   c.dealTo(foe, kolt, hitOpt(8, { blockResolved: false }));
   c.finishBlock(ruby.id, { roll: 1, ok: true, chance: 60 });
-  assert.equal(st.battleScore.parts.blockSave, 8);
+  assert.equal(st.battleScore.parts.blockSave, 9, "8 × 1.2 = 9.6 → 9");
   assert.equal(st.battleStats[ruby.id].avoided, 8);
   assert.equal(st.battleScore.parts.reduce || 0, 0);
 });
@@ -59,7 +60,7 @@ test("空手格挡成功：少挨的那一半算格挡减免，不重复算成�
   kolt.bonus = 1; kolt.weaponHeld = false;
   c.dealTo(foe, ruby, hitOpt(10, { blockResolved: false }));
   c.finishBlock(kolt.id, { roll: 1, ok: true, chance: 60 });
-  assert.equal(st.battleScore.parts.blockSave, 5);
+  assert.equal(st.battleScore.parts.blockSave, 6, "少挨 5 点 × 1.2 = 6");
   assert.equal(st.battleScore.parts.reduce || 0, 0);
 });
 
@@ -68,11 +69,11 @@ test("柯尔特废物利用：给自己回的血 / 加的层也算治疗，计�
   kolt.level = 3; kolt.ap = 3;
   st.combatPhase = "player";
   kolt.layers = [{ type: "flesh", current: 100, max: 300 }];
-  st.lastBrokenLayer = { type: "flesh", lost: 10, dmg: 5 };
+  kolt.resources.scrapStore = { flesh: 10 };
   c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
   assert.equal(st.battleStats[kolt.id].heal, 10);
-  assert.equal(st.battleScore.parts.heal, 10);
-  st.lastBrokenLayer = { type: "armor", lost: 8, dmg: 4 };
+  assert.equal(st.battleScore.parts.heal, 15, "治疗每点 1.5 分");
+  kolt.resources.scrapStore = { armor: 8 };
   kolt.ap = 3;
   c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
   assert.equal(st.battleStats[kolt.id].heal, 18);

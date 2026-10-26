@@ -18,7 +18,8 @@ const RouteMap = (() => {
     let s = (h >>> 0) % 233280;
     return () => (s = (s * 9301 + 49297) % 233280) / 233280;
   }
-  let rnd = Math.random;
+  const fxRand = () => (typeof fxRandom === "function" ? fxRandom() : Math.random());   // 画面效果的随机数：不动战斗用的种子随机数（run.js · fxRandom）
+  let rnd = fxRand;
   const rr = (a, b) => a + rnd() * (b - a);
 
   /* ---------- 图标（和 art/style-guide.html 同一套线稿） ---------- */
@@ -248,6 +249,15 @@ const RouteMap = (() => {
       const label = (m.labels && m.labels[type]) || type;
       s += holoNode(type, x, y, state, i, label);
     }));
+    // 每一列大约几点到（rogue.js · routeEta）：太阳 / 月亮 + 时刻，昼夜会改变敌人的行为
+    (m.eta || []).forEach((e, c) => {
+      if (!e || c >= cols.length) return;
+      const x = colX(c), y = H - 12;
+      const icon = e.night
+        ? `<path class="rm-eta-ic" d="M${x - 22} ${y - 9} a6 6 0 1 0 6 8 a4.6 4.6 0 1 1 -6 -8 z"/>`
+        : `<circle class="rm-eta-ic" cx="${x - 20}" cy="${y - 4}" r="4"/>`;
+      s += `<g class="rm-eta ${e.night ? "night" : "day"}">${icon}<text x="${x - 12}" y="${y}">约 ${e.text}${e.days ? ` +${e.days}天` : ""}</text></g>`;
+    });
     return `<div class="route-map" data-region="${m.region || ""}">
       <div class="rm-title">${m.region || ""}<small>${bg.en}</small></div>
       <div class="rm-scroll"><svg class="rm-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${m.title || "路线图"}">${s}</svg></div>

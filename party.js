@@ -252,7 +252,7 @@ function livePartyCards() {
     },
     {
       kit: "chuan",
-      enName: "Chuan",
+      enName: "Harley",
       name: "川川",
       level: 1,
       zone: 1,
@@ -536,7 +536,7 @@ function livePartyCards() {
  * 数据照作者给的角色资料：瑞比 / 结人 / 绯秋 / 灯（实况组测试）、夕夏 / 川川 / 诺拉（武器商），
  * 柯尔特 / Helumica / 拉斯缪尔（角色卡表格）。熟练项已经算进了本职、种族自带和两项业余。
  *   柯尔特：表格里追踪只填了 1；士兵本职的追踪 + 兽人·狼自带的追踪叠成 2（同灯的算法）。
- *   Helumica：表格里只有 4 项（电工本职两项 + 猫自带侦察 + 欺瞒），少一项业余，先空着。 */
+ *   Helumica：电工本职两项 + 猫自带侦察 + 业余欺瞒、躲藏（躲藏是作者补的，表格里漏了）。 */
 const PROFICIENCIES = {
   "行动类": ["运动", "攀爬", "躲藏", "盗窃", "巧手", "载具驾驶", "求生"],
   "知识类": ["历史", "科技理论"],
@@ -562,7 +562,7 @@ const HERO_PROFILES = {
   chuan: { race: "犬类人-犬", job: "电工",   profs: { "追踪": 1, "电器维修": 1, "评估": 1, "求生": 1, "聆听": 1 } },
   nora:  { race: "猫类人-猫", job: "档案员", profs: { "历史": 1, "聆听": 1, "医疗": 1, "说服": 1, "侦察": 1 } },
   kolt:  { race: "兽人-狼",   job: "士兵",   profs: { "运动": 1, "追踪": 2, "机械维修": 1, "电器维修": 1 } },
-  helu:  { race: "猫类人-猫", job: "电工",   profs: { "电器维修": 1, "评估": 1, "侦察": 1, "欺瞒": 1 } },
+  helu:  { race: "猫类人-猫", job: "电工",   profs: { "电器维修": 1, "评估": 1, "侦察": 1, "欺瞒": 1, "躲藏": 1 } },
   ras:   { race: "人类",      job: "科学家", profs: { "科技理论": 1, "数据操作": 1, "运动": 1, "电器维修": 1 } },
   // 龙哥：角色卡表格（典当行本职评估 / 盗窃，业余医疗 + 评估再一次 → 评估 2）
   longge: { race: "兽人-蜥蜴", job: "典当行", profs: { "评估": 2, "盗窃": 1, "医疗": 1 } }
@@ -576,7 +576,7 @@ function heroProfile(kit) { return HERO_PROFILES[kit] || null; }
  *   softFail  检定失败往往不会撞上最严重的后果（鼠 · 环境适应）：受伤减半 */
 const RACE_CHECK_PERKS = {
   "人类":      { reroll: true, text: "迎难直上：失败后重掷一次" },
-  "猫类人-猫": { adv: ["侦察", "躲藏"], text: "夜视：潜行 / 侦察类检定优势" },
+  "猫类人-猫": { adv: ["侦察", "躲藏"], text: "夜视：侦察 / 躲藏类检定优势" },
   "鼠类人-鼠": { softFail: true, text: "环境适应：检定失败受伤减半" },
   "鼠类人-兔": { adv: ["调查类"], text: "听觉敏锐：调查类检定优势" },
   "牛类人-牛": { lowHpDis: true, text: "血量低于一半时检定劣势" },
@@ -594,10 +594,27 @@ function checkPerksFor(kit, prof, hpLow) {
 }
 
 function skillCost(id) {
+  if (id === "sand_pull") return { bonus: 1 };
+  if (/^veh_/.test(String(id)) && typeof vehicleSkillCost === "function") return vehicleSkillCost(id);   // 载具：上车 / 拉人 1 行动点，下车不花，冲撞 1 附赠（vehicle.js）
+  // 人器一心（feats.js）：唤出武器人只花附赠（每场一次），武器人变回武器不花行动点
+  const featAdj = typeof featCostAdjust === "function" ? featCostAdjust(id) : null;
+  if (featAdj) return featAdj;
+  // 专长动作：按专长里写的消耗（默认 1 行动点）
+  const featCost = typeof featSkillCost === "function" ? featSkillCost(id) : null;
+  if (featCost) return featCost;
+  // 义体（cyberware.js）：按义体表里写的消耗（默认 1 行动点）
+  const cwCost = typeof cyberwareSkillCost === "function" ? cyberwareSkillCost(id) : null;
+  if (cwCost) return cwCost;
   // 不稳超导：拉斯缪尔已经处于不稳态时免费释放
   if (id === "ras_super") {
     const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
     if (r && r.resources && r.resources.unstable) return {};
+  }
+  // 汲取：汲取生效时再用一次不耗行动点（结束汲取）
+  if (id === "edc_siphon") {
+    const r = typeof state !== "undefined" && typeof findKit === "function" ? findKit("ras", state.units) : null;
+    if (r && r.resources && r.resources.siphon) return {};
+    return { ap: 1 };
   }
   if (id === "yuito_inspire") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
@@ -607,7 +624,9 @@ function skillCost(id) {
   // 不倒战意 15 级：选「全部友方」时改用行动点
   if (id === "role_sturdy") {
     const fl = typeof state !== "undefined" ? state.skillFlow : null;
-    if (fl && fl.id === "role_sturdy" && fl.picks && fl.picks.mode === "all") return { ap: 1 };
+    // 兼修·鼓劲（feats.js · rouse）是 feat_rouse 调用 role_sturdy，分步的 id 是 feat_rouse，选全部友方同样改收行动点
+    const isSturdy = fl && (fl.id === "role_sturdy" || (typeof featDelegateBaseOf === "function" && featDelegateBaseOf(fl.id) === "role_sturdy"));
+    if (isSturdy && fl.picks && fl.picks.mode === "all") return { ap: 1 };
     return { bonus: 1 };
   }
   const map = {
@@ -666,12 +685,19 @@ function skillCost(id) {
     kolt_assist: {}, kolt_summon: { ap: 1, bonus: 1 }, kolt_scrap: { ap: 1 }, kolt_rot: { ap: 1 }, kolt_mod: { ap: 1 },
     torque_boost: { ap: 1 }, torque_swap: { ap: 1 }, torque_strip: { ap: 1 }, torque_return: { ap: 1 },
     helu_aa: { ap: 1 }, helu_wave: { ap: 1 }, helu_storm: { ap: 1 }, helu_scan: { ap: 1 }, helu_assist: {},
+    helu_rule: { ap: 1 }, helu_forge: { ap: 1 },   // 卡面特别写出来的技能都花行动点（作者 10/23）
     helu_summon: { ap: 1, bonus: 1 },
     ecmo_bite: { ap: 1 }, ecmo_focus: { ap: 1 }, ecmo_boom: { ap: 1 }, ecmo_return: { ap: 1 },
     ras_aa: { ap: 1 }, ras_dump: { ap: 1 }, ras_flee: { ap: 1 }, ras_super: { ap: 1 }, ras_rampage: { ap: 1 }, ras_assist: {},
     ras_summon: { ap: 1, bonus: 1 },
     edc_drain: { ap: 1 }, edc_shock: { ap: 1 }, edc_flash: { ap: 1 }, edc_return: { ap: 1 },
     longge_aa: { ap: 1 }, longge_chill: { ap: 1 }, longge_spit: { bonus: 1 }, longge_assist: {}, longge_safety: { ap: 1 },
+    longge_heat: { ap: 1 }, longge_drink: { ap: 1 }, longge_shuffle: { ap: 1 }, longge_reload: { ap: 1 },
+    xiaoxiao_burst: { ap: 1 },
+    kolt_cannon: { ap: 1 }, torque_divert: { ap: 1 }, ecmo_probe: { ap: 1 }, ras_torrent: { ap: 1 },
+    ruby_algo: { ap: 1 }, ruby_relay: { ap: 1 }, wing_relay: { ap: 1 }, mint_repair: { ap: 1 }, wing_boost: {},
+    yuito_cold: { ap: 1 }, yuito_duet: { ap: 1 }, latte_claw: { ap: 1 }, hiaki_barrage: { ap: 1 }, hiaki_powder: { ap: 1 },
+    niu_standby: { ap: 1 }, naruto_frost: { ap: 1 }, tou_bash: { ap: 1 }, tou_accuse: { ap: 1 }, mochi_bite: { ap: 1 },
     longge_summon: { ap: 1, bonus: 1 },
     xiaoxiao_punch: { ap: 1 }, xiaoxiao_heal: { ap: 1 }, xiaoxiao_combo: { ap: 1 }, xiaoxiao_return: { ap: 1 }
   };
@@ -726,6 +752,13 @@ function weaponOwnerUnit(u) {
 }
 /** 手里那把武器的格挡加成；空手、武器人已分出去 → 0 */
 function heldWeaponBlockBonus(unit) {
+  const v = heldWeaponBlockBonusRaw(unit);
+  if (!v || !unit || unit.weaponOf || typeof weaponHalved !== "function") return v;
+  // 倒下过一次（取回后）的武器：格挡加成减半
+  const kit = unit.kit === "hiaki" ? ((unit.resources || {}).blade || "niu") : (unit.linkedKits || [])[0];
+  return kit && weaponHalved(kit) ? Math.floor(v / 2) : v;
+}
+function heldWeaponBlockBonusRaw(unit) {
   if (!unit || !unit.kit) return 0;
   if (WEAPON_BLOCK_BONUS[unit.kit] != null && (unit.weaponOf || !unit.attrs)) return weaponBlockBonusOf(unit.kit, weaponOwnerUnit(unit));   // 武器人自己
   if (isUnarmed(unit)) return 0;
@@ -755,10 +788,12 @@ function blockStatusBonus(unit) {
 /** 不封顶的协助格挡率（空手 + 武器 + 状态）：最终格挡率在 app.js · finalBlockChance 里加完各项修正再封顶 */
 function blockChanceRaw(unit) {
   if (!unit || !unit.kit) return null;
-  if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit];
+  // 敌人的种族敏捷修正（enemies.js · setEnemyRace）：只加给本来就会格挡的敌人
+  const race = Number(unit.raceBlock) || 0;
+  if (FIXED_BLOCK[unit.kit] != null) return FIXED_BLOCK[unit.kit] + race;
   if (!unit.isPlayer && !unit.weaponOf) return null;
   if (!unit.attrs && WEAPON_BLOCK_BONUS[unit.kit] == null) return null;
-  return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit);
+  return bareBlockChance(unit) + heldWeaponBlockBonus(unit) + blockStatusBonus(unit) + race;
 }
 /** 协助格挡率（资料面板等显示用），最多 100% */
 function blockChance(unit) {
@@ -774,6 +809,8 @@ function blockBreakdown(unit) {
 
 function skillList(unit) {
   if (!unit || !unit.kit) return [];
+  // 坐在车上的人只能用车的武器（vehicle.js）
+  if (unit.vehId && typeof vehicleSkillList === "function") return vehicleSkillList(unit);
   const mecha = !!(unit.resources && unit.resources.mecha);
   const held = unit.weaponHeld !== false && !weaponIsOut(unit);
   const list = [];
@@ -789,10 +826,14 @@ function skillList(unit) {
       add({ id: "ruby_summon", name: "唤出明特", hint: "武器生物化（需同区收回）" });
       add({ id: "ruby_surge", name: "电流激荡", hint: "距离1 · 1atk 电 1击破 · 打到护盾 +10纳米", minLv: 2 });
       add({ id: "ruby_short", name: "短路", hint: "距离1以内 · 施加感电", minLv: 3 });
+      add({ id: "ruby_algo", name: "算法改变", hint: "任意距离 · 施加扩散 · 此回合它每次受伤瑞比 +5 纳米", minLv: 6 });
+      add({ id: "ruby_relay", name: "收发代理", hint: "放出小型无人机：每回合 +10 纳米，不限时间（机甲时改为激光）", minLv: 9 });
     } else {
       add({ id: "wing_aa", name: "银翼·普通攻击", hint: "距离1以内 · 1atk+1d4 能量 1击破 · 同区其他 0.3atk" });
       add({ id: "wing_steal", name: "银翼·电力夺取", hint: "同区每个敌人 0.5atk 电 · 每人 +10纳米" });
       add({ id: "wing_surge", name: "银翼·电流激荡", hint: "距离1-2 · 1atk 电 1击破 · 打到护盾 +20纳米", minLv: 2 });
+      add({ id: "wing_boost", name: "银翼·机体强化", hint: "不耗行动 · 每回合纳米多耗 20 · atk +20% · 普攻溅射倍率 +0.1 · 无人机攻击次数 +1", minLv: 4 });
+      add({ id: "wing_relay", name: "银翼·收发代理", hint: "无人机每回合结束激光：高能敌人（没有就血最少的）两次 0.2atk+1d12 能量 · 耗 10 纳米", minLv: 9 });
       add({ id: "ruby_unmecha", name: "解除机甲", hint: "立刻分开瑞比与明特" });
     }
   }
@@ -801,14 +842,17 @@ function skillList(unit) {
       add({ id: "mint_mecha", name: "机甲模式", hint: "不耗行动 · 需与瑞比同区且纳米足够" });
       add({ id: "mint_steal", name: "电力夺取", hint: "距离1以内 · 1atk 电击 · +20纳米" });
       add({ id: "mint_banish", name: "驱逐", hint: "同区两次 0.5atk 电 · 共 1 击破 · 推开 1 格", minLv: 2 });
+      add({ id: "mint_repair", name: "机体修复", hint: "耗 20 纳米 · 自身恢复 50% 生命上限 · +1 架势", minLv: 4 });
       add({ id: "mint_return", name: "收回为武器", hint: "需与瑞比同区" });
     }
   }
   if (unit.kit === "yuito") {
     add({ id: "yuito_aa", name: "普通攻击", hint: "距离1 · 1atk 冰 +1击破 · 豆→液" });
-    add({ id: "yuito_amer", name: "冰美式", hint: `消耗 1 咖啡液 · 治疗 2d${typeof leveledSides === "function" ? leveledSides(unit.level || 1, 4) : 4} 或 清场 0.75atk 冰 +1击破` });
+    add({ id: "yuito_amer", name: "冰美式", hint: "消耗 1 咖啡液 · 治疗同伴 +1 架势 或 清场 0.75atk 冰 +1击破" });
     add({ id: "yuito_espresso", name: "意式浓缩", hint: "消耗 1 咖啡液 · 友方行动点+1 或 1atk 酸 +2击破", minLv: 2 });
     add({ id: "yuito_extract", name: "酸萃", hint: `消耗 1 咖啡液 · 区域变酸液 · 友方 ${typeof addedDiceByLevel === "function" ? addedDiceByLevel(unit.level || 1) : 1}d4 治疗 / 敌人同样骰数的酸`, minLv: 3 });
+    add({ id: "yuito_cold", name: "冷萃", hint: "消耗 1 咖啡液 · 距离≤1 的区变冻土 · 敌人 0.5atk 冰 +1击破 / 友方 +1 架势", minLv: 6 });
+    add({ id: "yuito_duet", name: "双重奏", hint: "消耗 2 咖啡液 · 任意友方恢复 等级×1d6 · 溢出的治疗变成 atk，下回合开始失去", minLv: 9 });
     add({ id: "yuito_summon", name: "唤出拿铁", hint: "武器生物化" });
   }
   if (unit.kit === "nora") {
@@ -819,7 +863,7 @@ function skillList(unit) {
     add({ id: "nora_soothe", name: "安抚", hint: "附赠 · 安抚维塔斯，切换为温和", minLv: 2, bare: true });
     add({ id: "nora_indwell", name: "留置针", hint: "对刺入目标施加刺骨与 1 冻伤", minLv: 3 });
     add({ id: "nora_pressure", name: "压力升高", hint: "下回合开始必定转为残忍 · 下一击带衍射", minLv: 6 });
-    add({ id: "nora_sonic", name: "声波震击", hint: "同区全体 0.5atk 谐波 +1击破 · 刺入目标额外再吃一次", minLv: 11 });
+    add({ id: "nora_sonic", name: "声波震击", hint: "同区全体 0.5atk 谐波 +1击破 · 刺入目标额外再吃一次", minLv: 9 });
   }
   if (unit.kit === "vitas") {
     add({ id: "vitas_infuse", name: "加压灌输", hint: "对刺入目标 · 温和 2d4+2 治疗并 +1 架势／残忍 1atk 冰 +1击破与两次冻伤" });
@@ -831,7 +875,8 @@ function skillList(unit) {
   if (unit.kit === "latte") {
     add({ id: "latte_puff", name: "毛球攻击", hint: "距离1 · atk 酸 +1击破 · 豆→液" });
     add({ id: "latte_ice", name: "制冰机", hint: "天气变为雪天" });
-    add({ id: "latte_love", name: "爱意", hint: "移到友方同区 · 2d4 生命 +1 架势 · 牵挂", minLv: 2 });
+    add({ id: "latte_love", name: "爱意", hint: "移到友方同区 · 2d4 生命 +1 架势 · 牵挂（已有牵挂则拿铁也恢复同量）· 每五级骰面升级", minLv: 2 });
+    add({ id: "latte_claw", name: "猫爪挥打", hint: "同区 · 1atk 酸 +1击破 · 击退 1 · +1 咖啡豆（打出失衡再 +1）", minLv: 4 });
     add({ id: "latte_return", name: "收回为武器", hint: "需与结人同区" });
   }
   if (unit.kit === "hiaki") {
@@ -840,22 +885,28 @@ function skillList(unit) {
     add({ id: "hiaki_summon", name: "分出当前刀", hint: "武器生物化其中一把，另一把仍可持用" });
     add({ id: "hiaki_flash", name: "一闪", hint: "仅居合 · 同区全体 1atk +1击破 · 进入拔刀", minLv: 2 });
     add({ id: "hiaki_pot", name: "热锅", hint: "仅丹生谷 · 同区施加熔融", minLv: 3 });
+    add({ id: "hiaki_barrage", name: "特盛乱打", hint: "仅胁构 · 同区每个敌人 1 击破并标记 · 进入拔刀 · 下次进入居合时被标记的各挨 0.5atk（无视距离和障碍）", minLv: 6 });
+    add({ id: "hiaki_powder", name: "粉落汤气", hint: "仅居合 · 下回合之前格挡成功不切刀势，并用另一把刀反击 1atk（鳴門 +1 击破）", minLv: 9 });
   }
   if (unit.kit === "niu") {
     add({ id: "niu_slash", name: "斩炎", hint: "同区 · 1atk 火 +1击破 · 灼烧 · 变回武器" });
     add({ id: "niu_tsubame", name: "燕返", hint: "距离1 · 1atk 火 +1击破 · 收回并换持丹生谷，鳴門出场", minLv: 2 });
+    add({ id: "niu_standby", name: "待命", hint: "下一次协助格挡必定成功 · 成功则变回武器，绯秋换丹生谷居合", minLv: 4 });
     add({ id: "niu_return", name: "变回武器", hint: "需与绯秋同区" });
   }
   if (unit.kit === "naruto") {
     add({ id: "naruto_wind", name: "寒风", hint: "距离1 · 1atk 冰 +1击破 · 冻伤 · 变回武器" });
     add({ id: "naruto_fly", name: "燕飞", hint: "同区 0.5atk 冰 +1击破 · 然后移动 1 格", minLv: 2 });
+    add({ id: "naruto_frost", name: "霜取", hint: "同区 · 3 冰击破 · 打出失衡则收回，绯秋换鳴門胁构", minLv: 4 });
     add({ id: "naruto_return", name: "变回武器", hint: "需与绯秋同区" });
   }
   if (unit.kit === "tou") {
     add({ id: "tou_aa", name: "普通攻击", hint: "同区 · 1atk 物理 +1击破 · 可在技能里耗圣盾打邻区" });
-    add({ id: "tou_start", name: "圣战起始", hint: "移动≤1 · 同区施加错位 · 可耗圣盾带一人" });
+    add({ id: "tou_start", name: "圣战起始", hint: "移动≤1（可耗圣盾带一人同行）→ 同区施加错位" });
     add({ id: "tou_sonic", name: "声波切割", hint: "同区目标 1atk 谐波、距离1 目标 0.5atk 谐波，可只选其一 · 耗 1 圣盾", minLv: 2 });
     add({ id: "tou_ultra", name: "超音波", hint: "同区施加折射", minLv: 3 });
+    add({ id: "tou_bash", name: "盾击突进", hint: "移动≤1 · 同区敌人先震荡再 1atk 物理 · 可耗圣盾再盾突：1 击破 + 不稳", minLv: 6 });
+    add({ id: "tou_accuse", name: "赤诚控诉", hint: "距离1以内 · 1atk 谐波 · 嘲讽 · 圣盾 +2 · 决一死战中的敌人再虚弱", minLv: 9 });
     add({ id: "tou_summon", name: "唤出年糕", hint: "武器生物化" });
     /* 圣盾延射程已并入普通攻击的分步选择 */
   }
@@ -863,6 +914,7 @@ function skillList(unit) {
     add({ id: "mochi_pounce", name: "猛扑", hint: "跃向距离1敌人，或带走同区敌人 · atk+1d4 物理 +1击破" });
     add({ id: "mochi_roar", name: "吼叫", hint: "同区 atk+1d4 谐波 +1击破 · 强制换区" });
     add({ id: "mochi_boom", name: "音爆", hint: "同区每个敌人 0.5atk 谐波 +1击破 · 可再耗圣盾一次", minLv: 2 });
+    add({ id: "mochi_bite", name: "紧咬不放", hint: "同区 · 1atk 物理 +1击破 · 嘲讽 · 无法移动", minLv: 4 });
     add({ id: "mochi_return", name: "收回为武器", hint: "需与灯同区" });
   }
   if (unit.kit === "xia") {
@@ -870,9 +922,9 @@ function skillList(unit) {
     if ((unit.resources || {}).engine && typeof passivePlus === "function" && passivePlus(unit, 1)) add({ id: "xia_engine", name: "加油", hint: "获得 2 燃油 · 不会导致引擎熄火" });
     else add({ id: "xia_engine", name: "拉响引擎", hint: "发动引擎" });
     add({ id: "xia_execute", name: "处决", hint: "引擎+目标晕眩 · 1d8+1.5atk 火焰 · 穿刺", minLv: 2 });
-    add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · atk物理+震荡 · 每移1格+1击破", minLv: 3 });
+    add({ id: "xia_ram", name: "全速撞击", hint: "引擎 · 移动≤2 · 先震荡再 atk物理 · 每移1格+1击破", minLv: 3 });
     add({ id: "xia_selfburn", name: "引火烧身", hint: "需引擎 · 进入自焚，可选立刻移动 1 距离", minLv: 6, bare: true });
-    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 1.5atk 物理 +3击破 · 未死未失衡则抓住敌人，每回合自动重复", minLv: 11 });
+    add({ id: "xia_crush", name: "狂怒碾压", hint: "同区 · 需引擎 · 0.75atk 物理 +2击破 · 抓住后每回合自动 1.5atk+1d8 +3击破", minLv: 9 });
     add({ id: "xia_summon", name: "唤出柏妮尔", hint: "武器生物化" });
   }
   if (unit.kit === "berniel") {
@@ -884,11 +936,11 @@ function skillList(unit) {
   }
   if (unit.kit === "chuan") {
     add({ id: "chuan_aa", name: "普通攻击", hint: "近距离 · 两次 atk/2+1d4 电击 共1击破 · 耗1电能变三次共2击破" });
-    add({ id: "chuan_whip", name: "电击鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
+    add({ id: "chuan_whip", name: "电能鞭", hint: "距离1以内 · atk/2 能量 1击破 · +1电能 · 可耗1电能把自己拉到敌人区" });
     add({ id: "chuan_wall", name: "铁壁", hint: "耗1电能 · 同区挡伤盾 atk+1d6 装甲 · 电能≥3可多耗1加 atk 护盾", minLv: 2 });
-    add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +1电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
+    add({ id: "chuan_over", name: "电站超频", hint: "任意单位（可对自己）过载 · +2电能；已有≥3电能则改为 atk/2 护盾", minLv: 3 });
     add({ id: "chuan_pulse", name: "高能脉冲", hint: "对自身施加蓄能", minLv: 6 });
-    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 击穿血量层或摧毁配置物返还1电能", minLv: 11 });
+    add({ id: "chuan_blade", name: "巨刃划空", hint: "1距离以内 · 耗3电能 · 2atk 电击 +2击破 · 对配置物伤害翻倍 · 敌人躲在屏障后改砍屏障 · 危墙 / 桥梁固定 −10 耐久 · 击穿血量层或摧毁配置物返还1电能", minLv: 9 });
     add({ id: "chuan_summon", name: "唤出哔哩哩", hint: "武器生物化" });
   }
   // 被动升级后才有的技能
@@ -896,7 +948,7 @@ function skillList(unit) {
     add({ id: "chuan_reclaim", name: "回收护盾", hint: "附赠 · 清除一名友方的护盾，得到 2 电能，并触发磁场护盾" });
   }
   if (unit.kit === "ruby" && !(unit.resources && unit.resources.mecha) && typeof passivePlus === "function" && passivePlus(unit, 1)) {
-    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 获得 10 点纳米能源", bare: true });
+    add({ id: "ruby_refuel", name: "补充能源", hint: "附赠 · 纳米 +10，或把全部纳米压缩成储备能源（没有上限，纳米不够时自动用）", bare: true });
   }
   if (unit.kit === "bili") {
     add({ id: "bili_beam", name: "电光束", hint: "任意距离 · 1atk 电击 · 感电" });
@@ -907,19 +959,23 @@ function skillList(unit) {
   }
   if (unit.kit === "kolt") {
     const bit = (unit.resources && unit.resources.bit) || "drill";
-    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 三次 0.4atk 电 · 共2击破" });
+    add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 0.3/0.3/0.4atk 三次电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
-    add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
+    add({ id: "kolt_scrap", name: "废物利用", hint: "领取被摧毁的敌人血量层累积的废料，获得对应血量（每次最多生命上限50%，没领完的留着）· 另领腐坏抛射的记录", minLv: 2 });
     add({ id: "kolt_rot", name: "腐坏抛射", hint: "需酸液炮 · 距离1 · 施加腐蚀（不造成伤害，仍会嘲讽）· 腐蚀伤害记给下一次废物利用", minLv: 3 });
-    add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载", minLv: 6 });
+    add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载 · 废料达到上限时，可再耗等量废料让我方目标 +1 行动点（可超上限）", minLv: 6 });
+    add({ id: "kolt_cannon", name: "碎渣重炮", hint: bit === "acid"
+      ? "耗全部废料 · 距离1-2 · 越墙迫击炮：废料量的酸 +2击破，同区其他敌人 1/3 溅射 · 主目标掉血超过上限 25% 再 +2击破"
+      : "耗全部废料 · 选距离1以内一个区域 · 废料分成每颗（扭矩atk/3+1d10）电击的子弹，随机打该区敌人 · 每2颗1击破", minLv: 9 });
     add({ id: "kolt_summon", name: "唤出扭矩", hint: "武器生物化" });
   }
   if (unit.kit === "torque") {
     const bit = koltBit();
-    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力，下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
+    add({ id: "torque_boost", name: "强化输出", hint: bit === "acid" ? "任意区域蓄力（越墙），下回合开始对该区酸液AOE" : "移动1后选一名敌人 · 1d4+1 次 0.5atk 电 · 共2击破" });
     add({ id: "torque_swap", name: "拆装部件", hint: "更换刀头，再打对应距离 1atk +1击破，强制收回" });
-    add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方", minLv: 2 });
+    add({ id: "torque_strip", name: "拆卸模式", hint: "需电钻 · 同区 2击破，外层血量转给同区友方，或变成废料（不受上限）", minLv: 2 });
+    add({ id: "torque_divert", name: "转移注意", hint: "全场被嘲讽的单位改打扭矩 · 自保：受伤 −25%、架势不低于1 · 下回合开始变回武器，失去的装甲记为废料", minLv: 4 });
     add({ id: "torque_return", name: "收回为武器", hint: "需与柯尔特同区" });
   }
   if (unit.kit === "helu") {
@@ -927,41 +983,52 @@ function skillList(unit) {
     add({ id: "helu_wave", name: "驻波", hint: "进入相位；已扫描战场则可推进相位阶段" });
     add({ id: "helu_storm", name: "大气干扰", hint: "进入沙暴；已环境扫描过则可在沙暴中调转风向", minLv: 3 });
     add({ id: "helu_scan", name: "环境扫描", hint: "选一区：扫描出配置物，或远程引爆 / 操控配置物、震动危墙桥梁、激发场地", minLv: 2 });
+    add({ id: "helu_rule", name: "规则干涉", hint: "1距离以内一区变成干涉场 · 已扫描战场且取代了别的场地：同区自选任意单位（敌我都行）+1 附赠动作，可超上限", minLv: 6 });
+    add({ id: "helu_forge", name: "频域造物", hint: "需扫描过战场 · 任意间隙创造驻波墙（不挡移动，暂时取代危墙 / 门 / 桥 / 空隙）· 选一种属性：降幅（穿过的伤害减半、无击破，穿过者不稳+虚弱）/ 增幅（+25%，穿过者坚挺+振奋）· 聚焦穿过推进一步 · 这一整轮结束时消失", minLv: 9 });
     add({ id: "helu_summon", name: "唤出 Ecmo", hint: "武器生物化" });
   }
   if (unit.kit === "ecmo") {
     add({ id: "ecmo_bite", name: "叮咬", hint: "同区 · 1atk 物理 +1击破 · 造成失衡返还行动点" });
     add({ id: "ecmo_focus", name: "相控阵探头", hint: "任意敌人的任意血量层施加聚焦" });
     add({ id: "ecmo_boom", name: "音爆", hint: "同区全体 0.5atk 谐波 · 触发配置物 · 聚焦层打两次", minLv: 2 });
+    add({ id: "ecmo_probe", name: "探测模式", hint: "移动不耗附赠 · 每回合开始扫描所在区 · 变回武器时触发经过的每个区的一个配置物", minLv: 4 });
     add({ id: "ecmo_return", name: "收回为武器", hint: "需与 Helumica 同区" });
   }
   if (unit.kit === "ras") {
     add({ id: "ras_aa", name: "普通攻击", hint: "远距离 · 两次 0.5atk 能量 共1击破 · 累积20%能量" });
     add({ id: "ras_dump", name: "泄能", hint: "任意距离 · 施加高能 · 转化20%能量为光能" });
-    add({ id: "ras_flee", name: "逃离", hint: "移动1 · +20%能量 · 原区一名敌人 1atk 电 · 不触发借机攻击。不稳则移动不限", minLv: 2 });
+    add({ id: "ras_flee", name: "逃离", hint: "移动1 → +20%能量 → 原区一名敌人 1atk 电（远距离）· 不触发借机攻击。不稳则移动不限", minLv: 2 });
     add({ id: "ras_super", name: "不稳超导", hint: "20%能量转光能 · 自身导体 · 不稳态下免费", minLv: 3 });
     add({ id: "ras_rampage", name: "失控暴走", hint: "+40%能量 · 因此进入不稳态则同区变能量场；已在不稳态则全场变能量场", minLv: 6 });
+    add({ id: "ras_torrent", name: "狂瀑", hint: "任意距离 · 选高能状态的敌人 · 能量直接累积到 100%，每 20% 打 0.2atk 能量、自己失去 10% 血量", minLv: 9 });
     add({ id: "ras_summon", name: "唤出 EDC30k", hint: "武器生物化" });
   }
   if (unit.kit === "edc") {
     add({ id: "edc_drain", name: "引流", hint: "需与拉斯缪尔同区 · 累积能量全转光能 · 不稳+25%" });
     add({ id: "edc_shock", name: "电流冲击", hint: "距离1 · 1atk 电 +1击破 · 有光能则再打等量电击" });
-    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 能量 +1击破", minLv: 2 });
+    add({ id: "edc_flash", name: "爆闪", hint: "释放全部光能 · 同区每名敌人 光能/2 电击 +1击破", minLv: 2 });
+    add({ id: "edc_siphon", name: "汲取", hint: "拉斯缪尔每回合结束自动把 20% 累积能量转光能 · 变回武器 · 生效中再用：不耗行动点并结束汲取", minLv: 4 });
     add({ id: "edc_return", name: "收回为武器", hint: "需与拉斯缪尔同区" });
   }
   if (unit.kit === "longge") {
     const r = unit.resources || {};
     const gun = !!r.trigger && (r.ammo || []).length > 0;
-    add({ id: "longge_aa", name: "普通攻击", hint: gun ? "手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：远距离 1.5atk 子弹属性 +1击破（耗 1 弹）" : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
+    const near = typeof passivePlus === "function" && passivePlus(unit, 1);   // 枪管手杖+：霰弹枪普攻也能打近距离
+    add({ id: "longge_aa", name: "普通攻击", hint: gun ? `手杖：近距离 1atk 冰 +1击破 · 窥探1 / 霰弹枪：${near ? "近 / 远距离" : "远距离"} 1.5atk 子弹属性 +1击破（耗 1 弹）${near ? " · 近距离火弹溅射同区其他敌人 0.75atk" : ""}` : "手杖 · 近距离 · 1atk 冰 +1击破 · 窥探1（扳机解锁后可用霰弹枪）" });
     add({ id: "longge_chill", name: "冷气穿刺", hint: gun ? "手杖：近距离施加刺骨 / 霰弹枪：远距离特殊射击（蓝弹刺骨并治疗该区友方，红弹 0.5atk 火）" : "手杖 · 近距离 · 施加刺骨" });
     add({ id: "longge_spit", name: "吐酸", hint: "附赠 · 近距离 · 角色本身 atk 的酸液伤害 · 每场一次（兽人-蜥蜴种族特长）", bare: true });
     add({ id: "longge_safety", name: "解开保险", hint: "解锁扳机 · 查看最后一发子弹，可以把它移到最前面", minLv: 2 });
+    add({ id: "longge_heat", name: "热能轰击", hint: gun ? "手杖：近距离施加熔融 / 霰弹枪：近距离特殊射击（红弹：同区敌人熔融、同区友方治疗；蓝弹：同区友方各 1 冰击破）" : "手杖 · 近距离 · 施加熔融", minLv: 3 });
+    add({ id: "longge_drink", name: "饮弹", hint: "枪口对准自己 · 耗 1 弹 · 蓝弹：霜结并按蓝弹治疗自己 / 红弹：自己受 1atk 火，返还行动点", minLv: 6 });
+    add({ id: "longge_shuffle", name: "洗牌", hint: "把剩下的子弹重新随机排列 · 连续 2 红：随机敌人 1atk 火（3 红再一次） · 连续 2 蓝：治疗血量最低的队友（3 蓝再一次） · 都没有就窥探 1 · 子弹数量没变过不能连续洗", minLv: 9 });
+    if (typeof passivePlus === "function" && passivePlus(unit, 2)) add({ id: "longge_reload", name: "完全换弹", hint: "子弹打光时 · 重新装上随机的 6 发（胶囊弹药+）" });
     add({ id: "longge_summon", name: "唤出小朋友", hint: "武器生物化" });
   }
   if (unit.kit === "xiaoxiao") {
     add({ id: "xiaoxiao_punch", name: "直冲拳", hint: "耗 1 弹 · 近距离 · 1atk 子弹属性 +2击破" });
     add({ id: "xiaoxiao_heal", name: "治疗支援", hint: "耗 1 弹 · 同区友方按子弹颜色治疗 · 然后收回武器" });
     add({ id: "xiaoxiao_combo", name: "连续拳", hint: "耗 3 弹 · 近距离 · 全红升龙拳 3atk 火 +3击破 / 全蓝撼地拳 2atk 冰 +5击破 / 混合每发红 0.75atk 火、蓝 0.5atk 冰 +1击破", minLv: 2 });
+    add({ id: "xiaoxiao_burst", name: "爆发治疗", hint: "耗 3 弹 · 接下来 3 发不同色则白扣行动点 · 同区友方：全红回满生命 / 全蓝获得 2×（龙哥等级 + 5）临时护盾", minLv: 4 });
     add({ id: "xiaoxiao_return", name: "收回为武器", hint: "需与龙哥同区" });
   }
   if (isUnarmed(unit)) {
@@ -971,6 +1038,18 @@ function skillList(unit) {
     const def = roleSkillDef(rs.role, rs.n, unit);
     if (def && !list.some(s => s.id === def.id)) add(def);   // 第二副职责可能和角色自带的技能重复
   });
+  // 武器人倒下后：主人走到它倒下的区，花 1 行动点取回（本场不能再唤出，武器 atk / 格挡加成减半）
+  if (typeof fallenWeapons === "function" && fallenWeapons(unit).length) {
+    add({ id: "weapon_retrieve", name: "取回武器", hint: "同区 · 取回倒下的武器人 · 本场不能再唤出，武器 atk 和格挡加成减半", bare: true });
+  }
+  // 流沙（app.js · QUICKSAND）：把陷住的同伴拉出来
+  if (typeof sandPullTargets === "function" && sandPullTargets(unit).length) {
+    add({ id: "sand_pull", name: "拉出流沙", hint: "附赠 · 距离1以内 · 一名陷在流沙里的友方下陷清零（在相邻区就拉到自己这一区）", bare: true });
+  }
+  // 专长带的战斗动作（feats.js）
+  if (typeof featSkills === "function") featSkills(unit).forEach(add);
+  // 装着的义体（cyberware.js）：长在身上，空手也能用
+  if (typeof cyberwareSkills === "function") cyberwareSkills(unit).forEach(add);
   // 单人模式：支援（呼叫伙伴的协助攻击）
   if (typeof soloSupportSkill === "function") {
     const sup = soloSupportSkill(unit);
@@ -1069,15 +1148,26 @@ function effectiveAtk(unit, units) {
   // 更换刀头+：酸液炮模式下柯尔特 atk +5；思念+：被牵挂且回合内未受伤累积的 atk 加成
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
+  if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
+  if (typeof frenzyAtkBonus === "function") base += frenzyAtkBonus(unit);   // 狂暴（effects.js · FRENZY）：ATK + 等级
+  if (unit.race && typeof raceAtkAdjust === "function") base += raceAtkAdjust(unit, units);   // 种族被动·独狼（enemies.js）
+  if (unit.resources && unit.resources.mecha && unit.resources.overdrive) base *= 1.2;   // 银翼·机体强化
+  // 陨体衍蛛：除自己之外，场上每有一只活着的陨体衍蛛，atk +25%
+  if (unit.kit === "meteor_spider") {
+    const n = (units || []).filter(u => u && u !== unit && u.kit === "meteor_spider" && !u.dead && !u.hidden && !u._removed).length;
+    if (n > 0) base = Math.round(base * (1 + 0.25 * n));
+  }
   const tier = typeof exhaustTierOf === "function" ? exhaustTierOf(unit) : 0;
   return tier >= 2 ? Math.max(0, base - 3) : base;
 }
 
 function baseEffectiveAtk(unit, units) {
   if (!unit) return 0;
+  // 倒下过一次（取回后）的武器：武器提供的 atk 减半（本场有效）
+  const half = (kit, v) => (typeof weaponHalved === "function" && weaponHalved(kit)) ? Math.floor((Number(v) || 0) / 2) : (Number(v) || 0);
   if (unit.resources && unit.resources.mecha) {
     const mint = units.find(u => u.kit === "mint");
-    return (unit.personalAtk || 0) + ((mint && mint.personalAtk) || unit.weaponAtk || 8);
+    return (unit.personalAtk || 0) + half("mint", (mint && mint.personalAtk) || unit.weaponAtk || 8);
   }
   if (unit.kit === "hiaki") {
     const blade = (unit.resources && unit.resources.blade) || "niu";
@@ -1086,16 +1176,16 @@ function baseEffectiveAtk(unit, units) {
     const wAtk = typeof computeWeaponAtk === "function"
       ? computeWeaponAtk(blade, unit.attrs, lv, weaponPartsOf(unit, blade))
       : (blade === "niu" ? 7 : 6);
-    return (unit.personalAtk || 0) + (out ? 0 : wAtk);
+    return (unit.personalAtk || 0) + (out ? 0 : half(blade, wAtk));
   }
   if (unit.weaponHeld === false) return unit.personalAtk || 0;
-  return (unit.personalAtk || 0) + (unit.weaponAtk || 0);
+  return (unit.personalAtk || 0) + half((unit.linkedKits || [])[0], unit.weaponAtk || 0);
 }
 
 function resourceText(unit) {
   if (!unit || !unit.kit) return "";
   const r = unit.resources || {};
-  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${r.mecha ? " · 机甲中" : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
+  if (unit.kit === "ruby") return `纳米 ${r.nano || 0}/100${Number(r.nanoReserve) > 0 ? " · 储备 " + r.nanoReserve : ""}${r.mecha ? " · 机甲中" : ""}${r.overdrive ? " · 机体强化" : ""}${r.drone ? (r.mecha ? " · 无人机（激光）" : " · 无人机") : ""}${r.preparedActive ? " · 准备生效" : (r.preparedPending || r.prepared) ? " · 已准备" : ""}`;
   if (unit.kit === "mint") return `耐久 ${r.durability != null ? r.durability : "—"}`;
   if (unit.kit === "yuito") {
     const bond = r.bondName ? ` · 牵挂 ${r.bondName}` : " · 无牵挂";
@@ -1121,6 +1211,11 @@ function resourceText(unit) {
     const mood = typeof noraMood === "function" ? (noraMood(n) === "cruel" ? "残忍" : "温和") : "";
     const pin = typeof piercedTarget === "function" ? piercedTarget(n) : null;
     return `${mood} · ${pin ? "刺入 " + pin.name : "无刺入"} · 耐久 ${r.durability != null ? r.durability : "—"}`;
+  }
+  if (unit.kit === "kolt") {
+    const bit = r.bit === "acid" ? "酸液炮" : "电钻";
+    const scrap = (unit.level || 1) >= 2 && typeof koltScrapTotal === "function" ? ` · 废料 ${koltScrapTotal(unit)}` : "";
+    return bit + scrap;
   }
   if (unit.kit === "longge") return `扳机${r.trigger ? "解锁" : "锁定"} · ${typeof longgeAmmoText === "function" ? longgeAmmoText(unit) : ""}${r.spitUsed ? " · 已吐酸" : ""}`;
   if (unit.kit === "xiaoxiao") {

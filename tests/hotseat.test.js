@@ -274,6 +274,15 @@ test("只有战前/探索可重分配；小队聊天全程开放；快照不能�
   s.endBattle(); s.setAssignments({}); s.reset(); assert.equal(s.snapshot().phase, "setup");
 });
 
+test("小队聊天：多行消息（字符画）保留换行和第一行行首的全角空格，只去掉开头的空行和末尾空白", () => {
+  const s = fixture().s;
+  s.chat("a", "\r\n　\r\n　　龍龍\r\n龍奶奶龍　\n\n");
+  assert.equal(s.snapshot().chat.at(-1).text, "　　龍龍\n龍奶奶龍");
+  s.chat("a", "　单行照旧去掉两头空白　");
+  assert.equal(s.snapshot().chat.at(-1).text, "单行照旧去掉两头空白");
+  assert.throws(() => s.chat("a", "\n　\n"), /不能为空/);
+});
+
 test("LocalTransport同步先到先得，身份绑定连接，所有收件人获得独立JSON副本", () => {
   const hub = LocalTransport.createHub({ hostId: "authority" }), a = hub.connect("a"), b = hub.connect("b");
   const received = [];
@@ -426,4 +435,50 @@ test("大字：只有主持人能发，最长 40 字、停留 2–15 秒；小�
   const view = V.projectView({ title: t2, chat: s.snapshot().chat }, { recipientId: "a" });
   assert.deepEqual(JSON.parse(JSON.stringify(view.title)), { text: "他们来了", sub: "", seconds: 4, at: t2.at, id: t2.id, tone: "plain" });
   assert.equal(view.chat.at(-1).title, true);
+});
+
+test("战斗中（行动阶段）当前角色可以直接和自己的武器人换位，不用请求；和队友换要对方同意", () => {
+  const units = [hero("h", "hiaki"), hero("g", "ruby"), { ...hero("w1", "niu"), weaponOf: "hiaki" }];
+  const { s } = fixture({ units, assignments: { h: "a", g: "b" } });
+  s.beginRound(1); s.pick("a", "h", 0); s.pick("b", "g", 1); s.pick("a", "w1", 2); s.confirm("a"); s.confirm("b");
+  assert.equal(s.snapshot().phase, "acting"); assert.equal(s.snapshot().currentUnitId, "h");
+  assert.equal(s.move("a", "h", 2).status, "moved");
+  assert.deepEqual(s.snapshot().slots.map(x => x && x.unitId), ["w1", "g", "h"]);
+  assert.equal(s.snapshot().currentUnitId, "w1", "武器人换到前面就先轮到它");
+  assert.equal(s.move("a", "w1", 1).status, "pending", "和队友换要对方同意");
+});
+
+test("转交角色（#165）：选顺序阶段可转，武器人跟着转，顺序格子不变；转给主持人 = 收回", () => {
+  const f = fixture({ units: [hero("ruby", "ruby"), hero("hiaki", "hiaki"), { ...hero("niu", "niu"), weaponOf: "hiaki" }] }), s = f.s;
+  s.beginRound(1); s.pick("b", "hiaki", 0); s.pick("b", "niu", 1); s.pick("a", "ruby", 2); s.confirm("b");
+  assert.deepEqual(s.snapshot().confirmed, ["b"]);
+  assert.deepEqual(s.transferState(), { ok: true, reason: "" });
+  s.transfer("gm", "hiaki", "gm");
+  assert.deepEqual(s.snapshot().roster.filter(r => r.unitId !== "ruby").map(r => [r.unitId, r.operatorId]), [["hiaki", "gm"], ["niu", "gm"]]);
+  assert.deepEqual(s.snapshot().slots.map(r => r && r.unitId), ["hiaki", "niu", "ruby"]);
+  assert.throws(() => s.pick("b", "hiaki", 0), /不是你的/);
+  s.transfer("gm", "hiaki", "a");
+  assert.equal(s.snapshot().roster.find(r => r.unitId === "niu").operatorId, "a");
+  assert.throws(() => s.transfer("a", "hiaki", "b"), /只有房主/);
+  assert.throws(() => s.transfer("gm", "hiaki", "a"), /本来就/);
+  assert.throws(() => s.transfer("gm", "niu", "b"), /只能转交英雄/);
+});
+
+test("转交角色（#165）：行动做到一半、协助询问没回答、敌人行动中都拒绝并写明原因；两个单位之间可以转", () => {
+  const f = fixture(), s = f.s; force(f);
+  assert.equal(s.transferState().ok, true);
+  s.markSpent([{ unitId: s.snapshot().currentUnitId, ap: 1 }]);
+  assert.match(s.transferState().reason, /正在行动/);
+  assert.throws(() => s.transfer("gm", "xia", "a"), /正在行动/);
+  const first = s.snapshot().currentUnitId, owner = s.snapshot().roster.find(r => r.unitId === first).operatorId;
+  s.finishUnit(owner, first);
+  assert.equal(s.transferState().ok, true);
+  s.transfer("gm", "xia", "a"); assert.equal(s.snapshot().roster.find(r => r.unitId === "xia").operatorId, "a");
+  const ask = s.openAsk({ kind: "assist", candidates: ["xia"] });
+  assert.match(s.transferState().reason, /协助询问/);
+  assert.throws(() => s.transfer("gm", "xia", "b"), /协助询问/);
+  s.answer("a", ask.id, { unitId: null });
+  for (let guard = 0; s.snapshot().currentUnitId && guard < 5; guard++) { const id = s.snapshot().currentUnitId; s.finishUnit(s.snapshot().roster.find(r => r.unitId === id).operatorId, id); }
+  assert.equal(s.snapshot().phase, "enemy");
+  assert.match(s.transferState().reason, /敌人行动/);
 });

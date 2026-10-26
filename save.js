@@ -14,8 +14,10 @@
 const SaveStore = (function () {
   "use strict";
 
-  const KEYS = { run: "antlerscale-rogue-run", meta: "antlerscale-rogue-meta" };
-  const CURRENT = { run: 2, meta: 1 };
+  const KEYS = { run: "antlerscale-rogue-run", meta: "antlerscale-rogue-meta", onlineRun: "antlerscale-rogue-online-run", growth: "antlerscale-rogue-growth" };
+  const CURRENT = { run: 2, meta: 1, onlineRun: 2, growth: 1 };
+  // 联机单局（房主一端）存在另一格，不覆盖单机进行中的那一局
+  let runKind = "run";
   // MIGRATE.run[n] = (第 n 版的 data) => 第 n+1 版的 data
   const MIGRATE = {
     run: {
@@ -67,6 +69,7 @@ const SaveStore = (function () {
   /** 升级完的存档内容像不像样（JSON 合法但结构坏了的，比如 data 不是对象、队伍不是数组，也算坏档） */
   const SHAPE = {
     run: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.party == null || Array.isArray(d.party)),
+    growth: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.party == null || Array.isArray(d.party)),
     meta: (d) => !!d && typeof d === "object" && !Array.isArray(d) && (d.stats == null || typeof d.stats === "object")
   };
 
@@ -103,6 +106,7 @@ const SaveStore = (function () {
   /** 存档此刻的情况（不改动存档）："none" 没有 / "ok" 能读 / "newer" 更新版本的游戏存的，这一版读不了 /
    *  "broken" 坏档（已另存 .broken）。开新局前用它提醒会覆盖：以前更新版本的存档读成「没有存档」，直接被覆盖 */
   function status(kind) {
+    if (kind === "run") kind = runKind;
     const ls = storage();
     const raw = ls && KEYS[kind] ? ls.getItem(KEYS[kind]) : null;
     if (!raw) return "none";
@@ -192,7 +196,10 @@ const SaveStore = (function () {
     KEYS, CURRENT, MIGRATE, PARTY_MIN, PARTY_MAX,
     read, write, clear, has, status,
     newRun, newMeta, killHero, weaponsOf,
-    saveRun: (d) => write("run", d), loadRun: () => read("run"), clearRun: () => clear("run"),
+    saveRun: (d) => write(runKind, d), loadRun: () => read(runKind), clearRun: () => clear(runKind),
+    // 长线养成独立存档：不和普通单局共用槽位
+    saveGrowth: (d) => write("growth", d), loadGrowth: () => read("growth"), clearGrowth: () => clear("growth"),
+    useOnlineRunSlot(on) { runKind = on ? "onlineRun" : "run"; },
     saveMeta: (d) => write("meta", d), loadMeta: () => read("meta") || newMeta(),
     clone
   };

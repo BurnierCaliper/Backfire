@@ -170,7 +170,9 @@ test("跑团任务：打战斗站按配置摆敌人，护送对象上场；赢�
   cmd(c, { action: "taskNodeDone", id: t.id });
   const done = cmd(c, { action: "taskComplete", id: t.id });
   assert.equal(t.status, "done");
-  assert.equal(c.S.state.kuizhi, 1500, done.join("\n"));
+  // 报酬 1000 + 完好送达 500 平分进各人钱包（跑团私人钱包），不进公账
+  const purses = c.partyHeroes().reduce((sum, h) => sum + c.trpgPurse(h.kit), 0);
+  assert.equal(purses, 1500, done.join("\n"));
   assert.equal(c.bagCount("medkit"), 1);
   assert.equal(c.bagCount("part_b_int_con"), 1);
   assert.equal(c.bagCount("bp_trevor_bigkill"), 1);
@@ -181,6 +183,8 @@ test("跑团任务：护送对象被摧毁 → 任务失败；任务跟着存档
   const c = trpg();
   cmd(c, { action: "taskCreate", kind: "escort" });
   const t = c.trpgTasks()[0];
+  // 新任务没有路线（剧情任务）：像主持人一样「按模板填路线」
+  cmd(c, { action: "taskSave", task: Object.assign(plain(t), { nodes: plain(c.trpgTaskTemplateRoute("escort").nodes) }) });
   cmd(c, { action: "taskStatus", id: t.id, status: "posted" });
   cmd(c, { action: "taskAccept", id: t.id });
   const cfg = c.trpgTaskPrepareBattle(t.id);
@@ -207,4 +211,32 @@ test("跑团任务：长休时护送的人物回满，货车不会", () => {
   const notes = [];
   c.trpgTaskRestEscort(notes);
   assert.equal(t.escort.cur, null);
+});
+
+test("护送对象的浮窗 / 联机投影：写「护送对象」和它自己的说明，不写成武器人", () => {
+  const c = field("vip");
+  const e = c.fieldEscort();
+  globalThis.ESCORT_KINDS = c.ESCORT_KINDS || { vip: { note: "敌人回合前会躲开有敌人的区域，能用手枪还击" } };
+  try {
+    const T = require("../unit-tip.js");
+    const d = T.describe({ kind: "escort", kit: e.kit, escort: e.escort });
+    assert.equal(d.kicker, "护送对象");
+    assert.match(d.text, /躲开有敌人的区域/);
+    assert.match(d.text, /护送失败/);
+    assert.doesNotMatch(JSON.stringify(d), /武器人/);
+  } finally { delete globalThis.ESCORT_KINDS; }
+  // 联机投影带上 escort（玩家那边据此画「护送对象」）
+  const OV = require("../online-view.js");
+  assert.equal(OV.projectUnit(e).escort, "vip");
+});
+
+test("护送对象不进战场数据：挨打、反击都不记，战场数据表里也不列", () => {
+  const c = field("vip");
+  c.startCombat();
+  const e = c.fieldEscort(), thug = c.S.state.units.find(u => u.kit === "thug_knife");
+  assert.equal(c.battleStat(e), null);
+  e.zone = thug.zone;
+  c.dealTo(thug, e, { atk: 3, mult: 1, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+  assert.ok(!(c.S.state.battleStats || {})[e.id], "护送对象没有战场数据");
+  assert.ok(c.battleStat(c.findKit("kolt", c.S.state.units)), "角色照常记");
 });

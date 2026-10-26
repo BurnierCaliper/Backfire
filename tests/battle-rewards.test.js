@@ -15,10 +15,13 @@ function field() {
   return { c, st, heroes };
 }
 
-for (const [score, grade, bonus] of [[499, "D", 0], [500, "C", 0], [1000, "B", 20], [1250, "A", 50], [1500, "S", 101], [1750, "SS", 101], [2000, "SSS", 101]]) {
+/** 这场某个评价的分数线（固定线 × 0.65 + 基准分 × 倍数 × 0.35）；"D" 给 C 线 − 1 */
+const lineOf = (c, g) => { const L = c.battleGrade().lines; return g === "D" ? L.find(x => x[0] === "C")[1] - 1 : L.find(x => x[0] === g)[1]; };
+for (const [grade, bonus] of [["D", 0], ["C", 0], ["B", 20], ["A", 50], ["S", 101], ["SS", 101], ["SSS", 101]]) {
   test(`共享奖励：现有 ${grade} 评价与 101 点战斗经验的倍率、向下取整保持不变`, () => {
     const { c, st, heroes } = field();
     c.grantXpToPlayers(101);
+    const score = lineOf(c, grade);
     st.battleScore.total = score;
     const reward = c.settleBattleRewards("win");
     assert.equal(reward.grade.grade, grade);
@@ -71,7 +74,8 @@ for (const outcome of ["lose", "retreat"]) {
   test(`共享奖励：${outcome} 不发胜利加分或评级经验，不能重复改判来领取`, () => {
     const { c, st, heroes } = field();
     c.grantXpToPlayers(101);
-    st.battleScore.total = 1750;
+    const ss = lineOf(c, "SS");
+    st.battleScore.total = ss;
     st.battleScore.hurt = false;
     st.turnNo = 1;
     const reward = c.settleBattleRewards(outcome);
@@ -79,7 +83,7 @@ for (const outcome of ["lose", "retreat"]) {
     assert.equal(reward.finishBonus, null);
     assert.equal(reward.xpBonus, 0);
     assert.equal(c.settleBattleRewards("win").outcome, outcome);
-    assert.equal(st.battleScore.total, 1750);
+    assert.equal(st.battleScore.total, ss);
     assert.equal(st.battleGains.xp, 101);
     assert.ok(heroes.every(u => u.xp === 101));
   });
@@ -128,7 +132,33 @@ test("跑团评级经验沿用每人已平分的经验，不二次平分或重�
   const reward = c.settleBattleRewards("win");
   assert.equal(reward.xpBonus, 5);
   assert.equal(st.battleGains.xp, 10);
-  assert.ok(heroes.every(u => u.xp === 10));
+  // 另外每人再拿「队伍最高等级 × 20 / 人数」的战斗奖励经验
+  const top = Math.max(...heroes.map(u => Number(u.level) || 1));
+  const extra = Math.floor(top * 20 / heroes.length);
+  assert.ok(heroes.every(u => u.xp === 10 + extra), heroes.map(u => u.xp).join(","));
+});
+
+test("跑团：打赢每场战斗，每个角色额外获得 队伍最高等级 × 20 / 人数 的经验；输了、撤退和单局模式不给", () => {
+  const { c, st, heroes } = field();
+  c.S.TRPG.active = true;
+  heroes[0].level = 6; heroes[1].level = 3; heroes[2].level = 1;
+  heroes.forEach(u => { u.xp = 0; });
+  const n = heroes.length;
+  const r = c.settleBattleRewards("win");
+  heroes.forEach(u => assert.equal((r.trpgXp.find(x => x.name === u.name) || {}).xp, Math.floor(6 * 20 / n), u.name + " 都按最高的 6 级算"));
+  assert.equal(r.trpgXp.length, 3);
+  // 已结算：再调用不会重复给
+  const again = c.settleBattleRewards("win");
+  assert.equal(again.alreadySettled, true);
+
+  const lose = field();
+  lose.c.S.TRPG.active = true;
+  lose.heroes.forEach(u => { u.xp = 0; });
+  assert.equal(lose.c.settleBattleRewards("lose").trpgXp.length, 0);
+
+  const rogue = field();
+  rogue.heroes.forEach(u => { u.xp = 0; });
+  assert.equal(rogue.c.settleBattleRewards("win").trpgXp.length, 0, "不是跑团模式不给");
 });
 
 function rogueBattle(solo, ambush) {

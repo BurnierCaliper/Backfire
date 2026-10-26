@@ -6,14 +6,33 @@ const TrpgCommands = (() => {
   const handlers = {
     giveXp: c => trpgGiveXp(c.kits, c.amount),
     spendAttr: c => trpgSpendAttr(c.kit, c.attr),
+    pickFeat: c => trpgPickFeat(c.kit, c.feat, c.full),
     passHours: c => trpgPassHours(c.hours),
     passMinutes: c => trpgPassMinutes(c.minutes),
     passUntil: c => trpgPassUntil(c.time),
     shortRest: c => trpgShortRest(c.kits),
     longRest: c => trpgLongRest(c.plan),
+    campOpen: c => trpgCampOpen(c.plan),
+    campClose: () => trpgCampClose(),
     restore: () => ledgerRestoreAll([]),
     buy: c => trpgBuy(c.key, c.qty, c.free),
+    // 卖东西 / 回购（shop-sell.js）：要有开着的商人；卖的钱进队伍公账，回购由卖的人付
+    shopSell: c => trpgShopSell(c.kit, c.id, c.qty, c.owner),
+    shopBuyback: c => trpgShopBuyback(c.kit, c.token),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),
+    purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
+    modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),
+    clinicOpen: c => { TRPG.clinicOpen = !!c.on; return [TRPG.clinicOpen ? "诊所开门了：联机玩家可以申请义体改造。" : "诊所关门了。"]; },
+    smithOpen: c => { TRPG.smithOpen = !!c.on; return [TRPG.smithOpen ? "工匠开门了：联机玩家可以给自己的武器升级（加工费从自己的钱包出）。" : "工匠收摊了。"]; },
+    workshopOpen: c => { TRPG.workshopOpen = !!c.on; return [TRPG.workshopOpen ? "工坊开门了：联机玩家可以制作、拆解。" : "工坊关门了。"]; },
+    cyberDecide: c => trpgCyberDecide(c.id, !!c.ok),
+    merchantCreate: c => trpgMerchantCreate(c.name),
+    merchantSave: c => trpgMerchantSave(c.merchant),
+    merchantDelete: c => trpgMerchantDelete(c.id),
+    merchantOpen: c => trpgMerchantOpen(c.id || null),
+    merchantBuy: c => trpgMerchantBuy(c.id, c.key, c.qty, c.payer),
+    merchantRedeem: c => trpgMerchantRedeem(c.id, c.item),
+    purseSplit: c => { const n = c.amount == null ? trpgPurse("party") : Math.min(trpgPurse("party"), Math.floor(Number(c.amount) || 0)); if (n <= 0) return ["队伍公账没有钱可分。"]; trpgPurseSet("party", trpgPurse("party") - n); return trpgPurseSplit(n, null, "公账分给大家"); },
     adjustWater: c => trpgAdjustWater(c.amount),
     adjustItem: c => trpgAdjustItem(c.item, c.amount),
     heal: c => trpgUseHeal(c.item, c.kit),
@@ -22,12 +41,20 @@ const TrpgCommands = (() => {
     installPart: c => trpgInstallPart(c.owner, c.kit, c.slot, c.part, !!c.free),
     removePart: c => trpgRemovePart(c.owner, c.kit, c.slot),
     randomPart: c => trpgRandomPart(c.grade),
-    taskCreate: c => trpgTaskCreate(c.kind),
+    teachRecipe: c => trpgTeachRecipe(c.item, c.on),
+    adjustPoints: c => trpgAdjustPoints(c.amount, c.why),
+    redeem: c => trpgRedeem(c.item),
+    craft: c => trpgCraft(Array.isArray(c.jobs) ? { jobs: c.jobs } : { kit: c.kit, item: c.item, diff: c.diff, helper: c.helper, result: c.result }),
+    salvage: c => trpgSalvage(c.item),
+    taskCreate: c => trpgTaskCreate(c.kind, c.category),
     taskSave: c => trpgTaskSave(c.task),
     taskDelete: c => trpgTaskDelete(c.id),
     taskStatus: c => trpgTaskSetStatus(c.id, c.status),
     taskAccept: c => trpgTaskAccept(c.id),
     taskNodeDone: c => trpgTaskNodeDone(c.id),
+    taskRollback: c => trpgTaskRollback(c.id),
+    taskReveal: c => trpgTaskReveal(c.id, c.node, !!c.hidden),
+    taskMove: c => trpgTaskMove(c.id, Number(c.dir) || 1),
     taskComplete: c => trpgTaskComplete(c.id),
     taskFail: c => trpgTaskFail(c.id, c.why),
     installBlueprint: c => trpgInstallBlueprint(c.owner, c.kit, c.blueprint, c.fee, !!c.free),
@@ -38,8 +65,11 @@ const TrpgCommands = (() => {
     writeSlot: c => trpgWriteSlot(c.index, c.slot),
     clearSlot: c => trpgClearSlot(c.index)
   };
+  // 花钱的操作可以指定由谁付（payer：角色 kit；不写 / "party" = 队伍公账）
+  const PAYABLE = new Set(["buy", "repair", "upgradeWeapon", "installPart", "installBlueprint", "craft", "redeem", "teachRecipe", "modifyHero"]);
   function execute(c) {
     if (!Object.hasOwn(handlers, c.action)) throw new Error("Unknown TRPG action: " + c.action);
+    if (c.payer && PAYABLE.has(c.action)) return trpgPayWith(c.payer, () => handlers[c.action](c));
     return handlers[c.action](c);
   }
   Commands.register("trpg", execute, { domain: "trpg" });
@@ -77,25 +107,30 @@ const BackstageCommands = (() => {
     const u = unitById(c.actor); if (!u) return;
     switch (c.action) {
       case "set": {
+        const lvBefore = c.field === "level" && typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null, oldLv = u.level || 1;
         u[c.field] = c.field === "level" ? Math.max(1, Number(c.value) || 1)
           : c.field === "zone" ? Math.max(1, Math.min(Number(state.zoneMode) || 3, Number(c.value) || 1))
           : Math.max(0, Number(c.value) || 0);
         if (c.field === "defMax" && (u.def || 0) > u.defMax) u.def = u.defMax;
-        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); }
+        if (c.field === "level") { applyLevelStats(u); if (u.kit === "hiaki") refreshHiakiAtk(u); if (lvBefore && u.level > oldLv) LevelUp.note("level", u, lvBefore); }
         break;
       }
-      case "weaponLevel":
+      case "weaponLevel": {
+        const before = typeof LevelUp !== "undefined" ? LevelUp.snapshot(u) : null;
+        const old = Number((u.weaponLevels || {})[c.kit]) || 1;
         setOwnedWeaponLevel(u, c.kit, c.value);
+        if (before && (Number(u.weaponLevels[c.kit]) || 1) > old) LevelUp.note("weapon", u, before, { weapon: weaponCardName(c.kit) });
         // 跑团：武器升到 / 降到 4 级上下，装着的客制化图纸跟着生效 / 失效（武器页、耐久上限一起重算）
         if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
         appendLog(`${u.name} 的 ${weaponCardName(c.kit)} 设为 ${u.weaponLevels[c.kit]} 级。`);
         break;
+      }
       case "attr": {
         u.attrs = u.attrs || { str: 5, con: 5, dex: 5, wil: 5, int: 5, sta: 5 };
         const next = Math.max(1, Number(c.value) || 1), prev = Number(u.attrs[c.attr]) || 5;
         if (next > prev && (u.attrPoints || 0) > 0) { u.attrPoints--; u.attrs[c.attr] = next; }
         else if (next <= prev) u.attrs[c.attr] = next;
-        else appendLog(`${u.name} 没有可分配属性点。4 级和 8 级各得 1 点。`);
+        else appendLog(`${u.name} 没有可分配属性点。4 级、8 级、19 级各得 1 点。`);
         break;
       }
       case "recalc": applyLevelStats(u); appendLog(`${u.name} 已按规则重算 HP/ATK/DEF/SHP。`); break;
@@ -190,7 +225,7 @@ const CalcCommands = (() => {
       case "status": if (!statuses.includes(c.key)) throw new Error("Unknown status"); if (u) { u.statuses[c.key] = c.value; if (c.key === "shockwave") syncShockwave(u, null); } return;
       case "instant": if (!instants.includes(c.key)) throw new Error("Unknown instant effect"); if (u) u.instant[c.key] = c.value; return;
       case "neutralize": if (u) { snapshot(); const notes = applyNeutralize(u); appendLog(notes.join("\n") || `${u.name} 身上没有可中和的属性状态。`); render(); } return;
-      case "self": if (u) { u.self = c.value; u.selfBurnStacks = u.self === "burn" ? Math.max(1, Number(u.selfBurnStacks) || 1) : 0; renderZones(); } return;
+      case "self": if (u) { u.self = c.value; u.selfBurnStacks = u.self === "burn" ? Math.max(1, Number(u.selfBurnStacks) || 1) : 0; if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, null); renderZones(); } return;
       case "hang": if (!Object.hasOwn(ATKFX, c.key)) throw new Error("Unknown attack effect"); if (u) { u.resources = u.resources || {}; let cur = hungAtkFx(u); if (c.value && !cur.includes(c.key)) cur.push(c.key); if (!c.value) cur = cur.filter(k => k !== c.key); u.resources.nextAtkFx = cur; renderZones(); } return;
       case "unitLayer": if (!u) return; if (c.op === "add") u.layers.push({ type: "flesh", current: 10, max: 10 }); else if (c.op === "remove") u.layers.splice(c.index, 1); else if (c.op === "set" && ["type", "current", "max"].includes(c.field) && u.layers[c.index]) u.layers[c.index][c.field] = c.value; else throw new Error("Unknown layer edit"); if (c.op !== "set") drawLayers(u); renderZones(); return;
       case "removeUnit": if (u) { snapshot(); state.units = state.units.filter(v => v.id !== u.id); ["selectedId", "attackerId", "targetId"].forEach(k => { if (state[k] === u.id) state[k] = null; }); render(); } return;
@@ -233,7 +268,7 @@ const CalcCommands = (() => {
       case "loadLive": return loadLiveParty();
       case "blade": { const h = findKit("hiaki", state.units), want = c.value; if (h && h.resources) { if ((want === "niu" && h.resources.niuOut) || (want === "naruto" && h.resources.narutoOut)) { appendLog(`${want === "niu" ? "丹生谷" : "鳴門"} 已分出，收回前不能切换到这把刀。`); syncBladeSel(); return; } h.resources.blade = want; refreshHiakiAtk(h); render(); } return; }
       case "addProp": { snapshot(); const p = makeProp(c.kind, c.zone, c.level); p.faction = c.faction || "player"; state.props.push(p); appendLog(`在 ${c.zone} 区放置 ${p.name}（${p.faction === "enemy" ? "敌方" : "我方"}）。`); if (c.kind === "battery") syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
-      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
+      case "addPreset": { snapshot(); if (c.id === "ufo_boss") { syncPartySizeFromField(); const pack = spawnUfoBoss(c.level); pack.forEach(v => state.units.push(v)); state.selectedId = state.attackerId = pack[0].id; appendLog(`飞碟触灵登场（Lv${c.level}）：本体在 2 区，机械足甲乙丙在 2 区，丁戊在 1 区。本体不能被通常攻击。`); render(); return; } const p = enemyPresets().find(v => v.id === c.id); if (!p) throw new Error("Unknown enemy preset"); const added = p.build(c.level, syncPartySizeFromField()); if (typeof applyEnemyIV === "function") applyEnemyIV(added, c.iv, c.race); added.zone = enemySpawnZone(); state.units.push(added); state.selectedId = state.targetId = added.id; if (isMechanicalUnit(added)) syncBatteryShields().forEach(s => appendLog(s)); render(); return; }
       case "calculate":
       case "applyAttack":
         if (!c.input || typeof c.input !== "object" || Array.isArray(c.input)) throw new Error("Calculator attack requires explicit input");

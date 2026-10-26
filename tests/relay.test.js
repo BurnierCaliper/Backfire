@@ -148,6 +148,20 @@ test("real Worker WS: per-endpoint frame rate is enforced", async t => {
   await until(() => attacker.received.some(m => m.code === "rate_limit"));
 });
 
+test("real Worker WS: 超限先拒绝这一条（不断线），持续超限才断开", async t => {
+  const { host, server } = await room(t), p = await raw(server.url, host.identity.roomCode);
+  t.after(() => p.socket.close()); host.onMessage(() => {});
+  p.send({ kind: "join", role: "player", name: "Burst" }); await until(() => p.received.some(m => m.kind === "joined"));
+  for (let i = 0; i < 125; i++) p.send({ kind: "data", id: "b_" + i, payload: {} });
+  await until(() => p.received.some(m => m.code === "rate_limit"));
+  const err = p.received.find(m => m.code === "rate_limit");
+  assert.match(err.error, /发送太快/);
+  await pause(150);
+  assert.equal(p.socket.readyState, WebSocket.OPEN, "刚超限不应断线");
+  for (let i = 0; i < 100; i++) p.send({ kind: "data", id: "c_" + i, payload: {} });
+  await until(() => p.socket.readyState === WebSocket.CLOSED, "持续超限应断开");
+});
+
 test("real Worker HTTP: origin, payload and admission limits", async t => {
   const server = await createLocalRelayServer({ origins: ["https://game.example"] }); t.after(() => server.close());
   const request = (body, origin) => fetch(server.url + "/rooms", { method: "POST", headers: { "Content-Type": "application/json", ...(origin ? { Origin: origin } : {}) }, body: JSON.stringify(body) });
@@ -209,4 +223,81 @@ test("native WebSocket automatic reconnect keeps its token and waits for explici
   const received = []; host.onMessage((message, from) => received.push({ message, from }));
   await player.send({ afterAutoReconnect: true }); await until(() => received.length === 1);
   assert.equal(received[0].from, player.identity.id);
+});
+
+test("host releases a player seat: token is dropped, socket closed, nickname and slot reusable", async t => {
+  const server = await createLocalRelayServer();
+  let host, player, again, intruder;
+  t.after(async () => { host?.close(); player?.close(); again?.close(); intruder?.close(); await server.close(); });
+  host = await Relay.createHost({ url: server.url, name: "GM", ...version, autoReconnect: false }); await host.setReady(true);
+  player = await Relay.join({ url: server.url, roomCode: host.identity.roomCode, name: "Alice", ...version, autoReconnect: false });
+  const lost = player.credentials(), seat = player.identity.id;
+  // 玩家不能释放座位
+  await assert.rejects(player.releaseSeat(seat), /只有主持人/);
+  await assert.rejects(host.releaseSeat("p_missing"), /没有这个玩家座位/);
+  await host.releaseSeat(seat);
+  await until(() => !player.status().connected);
+  await until(() => !host.status().roster.some(p => p.id === seat));
+  // 旧令牌失效；同一个昵称可以重新加入，拿到新座位
+  await assert.rejects(Relay.join({ url: server.url, roomCode: lost.roomCode, name: "Alice", ...version, resumeToken: lost.token, autoReconnect: false }), /恢复令牌无效/);
+  again = await Relay.join({ url: server.url, roomCode: host.identity.roomCode, name: "Alice", ...version, autoReconnect: false });
+  assert.notEqual(again.identity.id, seat);
+  await until(() => host.status().roster.some(p => p.id === again.identity.id && p.online));
+});
+
+/* ---------- issue #44：幽灵座位、本机任意端口、连接失败说清楚原因 ---------- */
+test("幽灵座位：拿到 joined 前就断开的新座位立刻清掉；一直不确认的 20 秒（测试里 1.5 秒）后清掉；确认过的保留", async t => {
+  const { server, host } = await room(t, { seatConfirmMs: 1500 });
+  const code = host.identity.roomCode;
+  const names = () => host.status().roster.filter(p => p.role === "player").map(p => p.name).sort();
+  // 1) 加入后马上断开、没回确认
+  const a = await raw(server.url, code);
+  a.send({ kind: "join", role: "player", name: "断线甲", confirm: true });
+  await until(() => a.received.some(m => m.kind === "joined"));
+  assert.equal(a.received.find(m => m.kind === "joined").confirmSeat, true);
+  a.socket.close();
+  await until(() => !names().includes("断线甲"), "断开的待确认座位要清掉");
+  // 2) 连着但一直不确认
+  const b = await raw(server.url, code);
+  b.send({ kind: "join", role: "player", name: "幽灵乙", confirm: true });
+  await until(() => names().includes("幽灵乙"));
+  await until(() => !names().includes("幽灵乙"), "超时没确认的座位要清掉", 8000);
+  // 3) 新版客户端会自动确认：座位保留，昵称可以重新用
+  const c = await Relay.join({ url: server.url, roomCode: code, name: "幽灵乙", ...version, autoReconnect: false });
+  t.after(() => c.close());
+  await pause(2500);
+  assert.ok(names().includes("幽灵乙"), "确认过的座位不清");
+  // 4) 旧版客户端（join 不带 confirm）照旧：座位不会被当成幽灵座位
+  const d = await raw(server.url, code);
+  d.send({ kind: "join", role: "player", name: "旧版丙" });
+  await until(() => d.received.some(m => m.kind === "joined"));
+  assert.equal(d.received.find(m => m.kind === "joined").confirmSeat, undefined);
+  await pause(2500);
+  assert.ok(names().includes("旧版丙"));
+  d.socket.close();
+});
+
+test("本机任意端口的网页都能连；被拒绝的来源读得到原因；查房间在不在", async t => {
+  const server = await createLocalRelayServer({ origins: ["https://game.example"] }); t.after(() => server.close());
+  const post = origin => fetch(server.url + "/rooms", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ ...version, name: "GM" }) });
+  for (const origin of ["http://localhost:5500", "http://127.0.0.1:3000", "http://localhost"]) assert.equal((await post(origin)).status, 200, origin);
+  const denied = await post("https://evil.example");
+  assert.equal(denied.status, 403);
+  assert.equal(denied.headers.get("Access-Control-Allow-Origin"), "https://evil.example", "被拒绝也带 CORS 头，网页才读得到原因");
+  assert.equal((await denied.json()).code, "origin");
+  const created = await (await post("http://localhost:5500")).json();
+  const check = await fetch(server.url + "/rooms/" + created.roomCode);
+  assert.equal(check.status, 200);
+  assert.equal((await check.json()).ok, true);
+  const missing = await fetch(server.url + "/rooms/ABC234");
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).code, "no_room");
+});
+
+test("连接失败时说清楚原因：房间不存在 / 连不上转发服务；连接中可以取消", async t => {
+  const server = await createLocalRelayServer(); t.after(() => server.close());
+  await assert.rejects(Relay.join({ url: server.url, roomCode: "ABC234", name: "路人", ...version, autoReconnect: false }), /房间不存在或已过期/);
+  await assert.rejects(Relay.join({ url: "http://127.0.0.1:9", roomCode: "ABC234", name: "路人", ...version, autoReconnect: false, connectTimeout: 2000 }), /连不上转发服务/);
+  const ctl = new AbortController(); ctl.abort();
+  await assert.rejects(Relay.join({ url: server.url, roomCode: "ABC234", name: "路人", ...version, autoReconnect: false, signal: ctl.signal }), /已取消连接/);
 });

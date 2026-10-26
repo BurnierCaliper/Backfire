@@ -23,21 +23,31 @@ const RogueCommands = (function () {
   const actions = {
     acceptTask: (c, run) => Rogue.acceptTask(run, c.which),
     chooseNode: (c, run) => Rogue.chooseNode(run, c.index),
-    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null, food: c.food, sleep: c.sleep, spit: c.spit }) : Rogue.restAtNode(run, c.mode),
+    restAtNode: (c, run) => c.mode === "long" ? Rogue.restAtNode(run, c.mode, { watch: c.watch || null, food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }) : Rogue.restAtNode(run, c.mode),
     shortRestBeforeNode: (_c, run) => Rogue.shortRestBeforeNode(run),
-    camp: (c, run) => Rogue.camp(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
+    camp: (c, run) => Rogue.camp(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     buy: (c, run) => Rogue.buy(run, c.key, c.qty),
+    redeem: (c, run) => Rogue.redeem(run, c.item),
+    craft: (c, run) => Rogue.craft(run, c.jobs),
+    learnRecipe: (c, run) => Rogue.learnRecipe(run, c.item, c.smith),
+    salvage: (c, run) => Rogue.salvage(run, c.item),
+    setCraftJob: (c, run) => Rogue.setCraftJob(run, c.kit, c.item || null, c.helper || null),
+    craftQueued: (_c, run) => Rogue.craftQueued(run),
     introduceSmith: (c, run) => Rogue.introduceSmith(run, c.smith),
     upgradeWeapon: (c, run) => Rogue.upgradeWeapon(run, c.kit, c.smith),
     claimBlueprint: (c, run) => Rogue.claimBlueprint(run, c.smith, c.blueprint),
     installBlueprint: (c, run) => Rogue.installBlueprint(run, c.blueprint, c.kit, c.smith),
     buyPart: (c, run) => Rogue.buyPart(run, c.smith, c.index),
     sellPart: (c, run) => Rogue.sellPart(run, c.part),
+    sellItem: (c, run) => Rogue.sellItem(run, { kit: c.kit, id: c.id, qty: c.qty, owner: c.owner }),
+    buybackItem: (c, run) => Rogue.buybackItem(run, { kit: c.kit, token: c.token }),
     installPart: (c, run) => Rogue.installPart(run, c.kit, c.slot, c.part, c.smith),
     removePart: (c, run) => Rogue.removePart(run, c.kit, c.slot, c.smith),
     repairWeapon: (c, run) => Rogue.repairWeapon(run, c.kit),
     healHero: (c, run) => Rogue.healHero(run, c.kit),
     modifyHero: (c, run) => Rogue.modifyHero(run, c.kit, c.plan),
+    installCyberware: (c, run) => Rogue.installCyberware(run, c.kit, c.id),
+    removeCyberware: (c, run) => Rogue.removeCyberware(run, c.kit, c.id),
     attemptCheck: (c, run) => {
       const notes = Rogue.attemptCheck(run, c.kit, c.opt);
       const check = run.lastCheck;
@@ -45,11 +55,15 @@ const RogueCommands = (function () {
       return { notes, check: check || null };
     },
     skipCheck: (_c, run) => Rogue.skipCheck(run),
+    parley: (c, run) => Rogue.parley(run, c.kit),
     choose: (c, run) => Rogue.choose(run, c.kit, c.index, c.value),
     leaveNode: (_c, run) => Rogue.leaveNode(run),
-    nextAct: (_c, run) => Rogue.nextAct(run),
+    nextAct: (c, run) => Rogue.nextAct(run, c.region || null),
     afterVictory: (c, run) => Rogue.afterVictory(run, c.goOn),
-    finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome)
+    finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
+    drawHero: (_c, run) => Rogue.drawHero(run).notes,
+    drawMany: (c, run) => { const r = Rogue.drawMany(run, c.n); return { notes: r.notes, results: r.results, kuizhi: r.kuizhi }; },
+    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null)
   };
   const queries = {
     heroView: (c, run) => Rogue.heroView(run, hero(run, c.kit)),
@@ -58,34 +72,52 @@ const RogueCommands = (function () {
     checkOdds: (c, run) => Rogue.checkOdds(run, c.kit, c.opt),
     cyberInfo: (c, run) => Rogue.cyberInfo(run, c.kit),
     cyberPreview: (c, run) => Rogue.cyberPreview(run, c.kit, c.plan),
+    cyberware: (c, run) => Rogue.cyberwarePacketFor(run, c.kit),
+    cyberwarePreview: (c, run) => Rogue.cyberwarePreviewFor(run, c.kit, c.id),
     healCost: (c, run) => Rogue.healCost(run, c.kit),
     presentSmiths: (_c, run) => Rogue.presentSmiths(run),
     smithInfo: (c, run) => Rogue.smithInfo(run, c.smith),
-    restPlan: (c, run) => Rogue.restPlan(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
-    restOptions: (c, run) => Rogue.restOptions(run, { food: c.food, sleep: c.sleep, spit: c.spit }),
+    restPlan: (c, run) => Rogue.restPlan(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
+    restOptions: (c, run) => Rogue.restOptions(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
     sheetData: (_c, run) => Rogue.sheetData(run),
     armoryData: (_c, run) => Rogue.armoryData(run),
     shopStock: (_c, run) => Rogue.shopStock(run),
+    shopPoints: (_c, run) => Rogue.shopPoints(run),
+    shopSell: (c, run) => Rogue.shopSellView(run, c.kit ? { kits: [c.kit] } : null),
+    interludeOptions: (_c, run) => Rogue.interludeOptions(run),
+    campStatus: (c, run) => Rogue.campStatus(run, { food: c.food, sleep: c.sleep, spit: c.spit, ammo: c.ammo }),
+    craftPlace: (_c, run) => Rogue.craftPlace(run),
+    craftList: (_c, run) => Rogue.craftList(run),
+    craftOdds: (c, run) => Rogue.craftOdds(run, c.kit, c.item, c.helper),
+    learnOptions: (_c, run) => Rogue.learnOptions(run),
+    salvageList: (_c, run) => Rogue.salvageList(),
+    craftQueue: (_c, run) => Rogue.craftQueue(run),
     lowHpWarning: (_c, run) => Rogue.lowHpWarning(run),
     escortInfo: (_c, run) => Rogue.escortInfo(run, run.task),
     partOffers: (c, run) => Rogue.partOffers(run, c.smith),
     partStock: () => Rogue.partStock(),
     canSellParts: (_c, run) => Rogue.canSellParts(run),
     canShortRestBefore: (_c, run) => Rogue.canShortRestBefore(run),
-    watchOptions: (_c, run) => Rogue.watchOptions(run)
+    canShortRestAtNode: (_c, run) => Rogue.canShortRestAtNode(run),
+    watchOptions: (_c, run) => Rogue.watchOptions(run),
+    drawInfo: (_c, run) => Rogue.drawInfo(run),
+    drawRates: (_c, run) => Rogue.drawRates(run)
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },
+    readGrowth() { return typeof SaveStore.loadGrowth === "function" ? SaveStore.loadGrowth() : null; },
     // 存档的情况：none / ok / newer（更新版本的游戏存的，这一版读不了）/ broken。开新局前提醒会覆盖
     savedStatus() { return SaveStore.status("run"); },
+    growthStatus() { return typeof SaveStore.status === "function" ? SaveStore.status("growth") : "none"; },
     prepareParty(c, context) {
       const s = needSession(context);
       s.picked.length = 0;
       s.solo.on = !!c.solo; s.solo.hero = null; s.solo.partners = []; s.solo.role2 = null;
+      if (s.growth) s.growth.on = !c.solo && !!c.growth;
       return { solo: s.solo.on };
     },
     toggleHero(c, context) {
-      const { picked, solo } = needSession(context), k = c.kit;
+      const s = needSession(context), { picked, solo } = s, k = c.kit;
       if (!Rogue.heroPool().some(h => h.kit === k)) throw new Error("没有这个角色");
       if (solo.on) {
         if (solo.hero === k) { solo.hero = null; solo.role2 = null; }
@@ -95,7 +127,7 @@ const RogueCommands = (function () {
       } else {
         const i = picked.indexOf(k);
         if (i >= 0) picked.splice(i, 1);
-        else if (picked.length < SaveStore.PARTY_MAX) picked.push(k);
+        else if (picked.length < (s.growth && s.growth.on ? ROGUE_GROWTH.startParty : SaveStore.PARTY_MAX)) picked.push(k);
       }
       return { picked: picked.slice(), solo: { on: solo.on, hero: solo.hero, partners: solo.partners.slice(), role2: solo.role2 } };
     },
@@ -109,15 +141,26 @@ const RogueCommands = (function () {
       const s = needSession(context);
       const options = { party: c.party.slice(), seed: c.seed };
       if (c.solo) { options.solo = true; options.partners = c.partners.slice(); options.role2 = c.role2; }
+      else if (c.growth) options.growth = true;
+      else if (c.daily) options.daily = true;
       s.run = Rogue.newRun(options);
-      return { seed: s.run.seed, solo: s.run.solo };
+      return { seed: s.run.seed, solo: s.run.solo, growth: !!s.run.growth, daily: !!s.run.daily };
     },
     resume(_c, context) {
-      const s = needSession(context), saved = SaveStore.loadRun();
+      const s = needSession(context);
+      const saved = (_c && _c.growth && typeof SaveStore.loadGrowth === "function") ? SaveStore.loadGrowth() : SaveStore.loadRun();
       if (!saved) return { resumed: false };
       s.run = saved;
       Rogue.enterRunMode(s.run);
       return { resumed: true };
+    },
+    /** 联机单局：房主刷新页面后，从联机存档接回这一局 */
+    adopt(c, context) {
+      const s = needSession(context);
+      if (!c.run || typeof c.run !== "object" || !Array.isArray(c.run.party)) throw new Error("没有可接回的单局");
+      s.run = c.run;
+      Rogue.enterRunMode(s.run);
+      return { adopted: true };
     },
     save(_c, context) {
       const run = needRun(context);
@@ -139,7 +182,8 @@ const RogueCommands = (function () {
       if (run.result && run.result.win) meta.stats.wins += 1;
       meta.stats.deaths += (run.fallen || []).length;
       SaveStore.saveMeta(meta);
-      SaveStore.clearRun();
+      if (run.growth && typeof SaveStore.clearGrowth === "function") SaveStore.clearGrowth();
+      else SaveStore.clearRun();
       return { counted: true };
     },
     startBattle(_c, context) {
@@ -163,7 +207,7 @@ const RogueCommands = (function () {
     if (c.opt != null && (!Number.isInteger(c.opt) || c.opt < 0 || c.opt > 2)) throw new Error("检定选项必须是 0–2");
     if (c.action === "restAtNode" && !["long", "short", "leave"].includes(c.mode)) throw new Error("未知休息方式");
     const restMap = (m) => m == null || (typeof m === "object" && !Array.isArray(m) && Object.keys(m).every(k => typeof m[k] === "string"));
-    if (!restMap(c.food) || !restMap(c.sleep) || !restMap(c.spit)) throw new Error("长休的食物 / 睡眠道具 / 吐酸属性选择格式不对");
+    if (!restMap(c.food) || !restMap(c.sleep) || !restMap(c.spit) || !restMap(c.ammo)) throw new Error("长休的食物 / 睡眠道具 / 吐酸属性 / 弹序选择格式不对");
     if (c.action === "finishBattle" && !["win", "lose", "retreat"].includes(c.outcome)) throw new Error("未知战斗结局");
     if (c.action === "afterVictory" && typeof c.goOn !== "boolean") throw new Error("必须明确是否继续额外幕");
     if (c.action === "newRun" && (!Array.isArray(c.party) || !c.party.every(k => typeof k === "string") || typeof c.seed !== "string" || !c.seed || (c.solo && !Array.isArray(c.partners)))) throw new Error("新局必须包含队伍和明确种子");

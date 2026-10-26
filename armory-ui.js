@@ -61,7 +61,9 @@
     const layers = (w.layers || []).map(l => `${esc(l.name)} ${l.max}`).join(" · ") || "—";
     const cell = (k, v, small) => `<div><span>${k}</span><b>${v}</b>${small ? `<small>${small}</small>` : ""}</div>`;
     return `<div class="ar-stats">
-      ${cell("武器 ATK", w.atk, `角色拿着：${w.personalAtk} + ${w.atk} = ${w.personalAtk + w.atk}`)}
+      ${w.atkFinal != null && w.atkFinal !== w.atk
+        ? cell("武器 ATK（含客制化）", `${w.atk} → ${w.atkFinal}`, `角色拿着：${w.personalAtk} + ${w.atk} = ${w.heldBase}，客制化后 ${w.heldFinal}`)
+        : cell("武器 ATK", w.atk, `角色拿着：${w.personalAtk} + ${w.atk} = ${w.personalAtk + w.atk}`)}
       ${cell("架势", w.def != null ? w.def : "—", "武器人形态")}
       ${cell("耐久", w.durability != null ? `${w.durability}/${w.durMax}` : "—", w.durBase != null && w.durBase !== w.durMax ? `原本上限 ${w.durBase}` : "")}
       ${cell("持握格挡", `+${w.blockBonus}%`, "拿在手里加到协助格挡")}
@@ -146,7 +148,7 @@
     const w = all.find(x => x.kit === cur) || all[0];
     if (w) cur = w.kit;
     box.querySelector("#ar-rack").innerHTML = list.map(h => `<div class="ar-rack-group"><span>${esc(h.name)}</span>
-      ${h.weapons.map(x => `<button class="ar-tag${x.kit === cur ? " on" : ""}${x.broken ? " bad" : ""}" data-ar-kit="${esc(x.kit)}"><b>${esc(x.name)}</b><small>Lv${x.level} · ATK ${x.atk}</small></button>`).join("")}</div>`).join("");
+      ${h.weapons.map(x => `<button class="ar-tag${x.kit === cur ? " on" : ""}${x.broken ? " bad" : ""}" data-ar-kit="${esc(x.kit)}"><b>${esc(x.name)}</b><small>Lv${x.level} · ATK ${x.atkFinal != null ? x.atkFinal : x.atk}</small></button>`).join("")}</div>`).join("");
     const body = box.querySelector("#ar-body");
     body.innerHTML = w ? weaponHtml(w) : '<p class="sheet-empty">队伍里还没有武器。</p>';
     body.scrollTop = 0;

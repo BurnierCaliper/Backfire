@@ -120,13 +120,53 @@
     }
     return 0;
   }
+  // 克制表（packet.matchup）：units[id] 只发和顶层表不同的部分（diffNode），整张表没变就不发（matchupUnchanged）
+  const plain = v => object(v) && !Array.isArray(v);
+  function diffNode(base, value) {
+    const set = {}, sub = {}, unset = [];
+    for (const key of Object.keys(value)) {
+      if (own(base, key) && equal(base[key], value[key])) continue;
+      if (own(base, key) && plain(base[key]) && plain(value[key])) sub[key] = diffNode(base[key], value[key]);
+      else set[key] = value[key];
+    }
+    for (const key of Object.keys(base)) if (!own(value, key)) unset.push(key);
+    const out = {};
+    if (Object.keys(set).length) out.set = set;
+    if (Object.keys(sub).length) out.sub = sub;
+    if (unset.length) out.unset = unset;
+    return out;
+  }
+  function applyNode(base, node) {
+    if (!plain(base) || !plain(node)) fail("invalid matchup diff");
+    const out = clone(base);
+    if (own(node, "unset")) { if (!Array.isArray(node.unset)) fail("invalid matchup diff"); for (const key of node.unset) delete out[key]; }
+    if (own(node, "set")) { if (!plain(node.set)) fail("invalid matchup diff"); for (const key of Object.keys(node.set)) out[key] = clone(node.set[key]); }
+    if (own(node, "sub")) { if (!plain(node.sub)) fail("invalid matchup diff"); for (const key of Object.keys(node.sub)) out[key] = applyNode(own(out, key) ? out[key] : {}, node.sub[key]); }
+    return out;
+  }
+  function packMatchup(m) {
+    if (!plain(m) || !plain(m.units)) return m;
+    const { units, ...top } = m, out = { ...top, unitsDiff: {} };
+    for (const id of Object.keys(units)) out.unitsDiff[id] = plain(units[id]) ? diffNode(top, units[id]) : { value: units[id] };
+    return out;
+  }
+  function unpackMatchup(m) {
+    if (!plain(m) || !own(m, "unitsDiff")) return m;
+    if (own(m, "units") || !plain(m.unitsDiff)) fail("invalid matchup diff");
+    const { unitsDiff, ...top } = m, units = {};
+    for (const id of Object.keys(unitsDiff)) units[id] = own(unitsDiff[id], "value") ? unitsDiff[id].value : applyNode(top, unitsDiff[id]);
+    return { ...top, units };
+  }
   function create() {
     let encoded = {}, decoded = {}, hasEncoded = false, hasDecoded = false;
-    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; }
+    let sentMatchup = null, hasSentMatchup = false, gotMatchup = null, hasGotMatchup = false;
+    let sentRest = null, hasSentRest = false, gotRest = null, hasGotRest = false;
+    let sentLore = null, hasSentLore = false, gotLore = null, hasGotLore = false;
+    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = false; }
     function pack(input) {
       const packet = packetData(input);
       if (!["result", "resync"].includes(packet.type)) return packet;
-      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths")) fail("packet is already packed");
+      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta")) fail("packet is already packed");
       let full = !hasEncoded || packet.type === "resync";
       const lengths = {}, deltas = {}, next = { ...encoded };
       for (const key of histories) if (own(packet, key)) {
@@ -139,8 +179,38 @@
       const result = { ...packet, wireFormat: FORMAT, historyFull: full, historyLengths: lengths };
       for (const key of histories) if (own(packet, key)) result[key] = full ? packet[key] : deltas[key];
       if (own(packet, "tape")) result.tape = packTape(packet.tape);
+      let nextMatchup = sentMatchup, nextHasMatchup = hasSentMatchup;
+      if (own(packet, "matchup")) {
+        const json = JSON.stringify(packet.matchup);
+        if (hasSentMatchup && packet.type !== "resync" && json === sentMatchup) { delete result.matchup; result.matchupUnchanged = true; }
+        else result.matchup = packMatchup(packet.matchup);
+        nextMatchup = json; nextHasMatchup = true;
+      }
+      sentMatchup = nextMatchup; hasSentMatchup = nextHasMatchup;
+      // 长休结算（跑团 packet.rest，issue #216）：长休过一次以后每包都带着同一份，和上一包一样就只带 restUnchanged；
+      // null（还没长休）比这个标记还短，照发；resync 一律整份发
+      if (own(packet, "rest")) {
+        const json = JSON.stringify(packet.rest);
+        if (hasSentRest && packet.type !== "resync" && packet.rest !== null && json === sentRest) { delete result.rest; result.restUnchanged = true; }
+        sentRest = json; hasSentRest = true;
+      }
+      // 角色资料索引（packet.lore，issue #264）：每包都带着同一份，和上一包一样只带 loreUnchanged；
+      // 改了（发布、编辑、撤回）且两份都是列表时只发改了的条目（loreDelta：和演出快照同一套按 id 的差异），比整份短才用。
+      // null（联机单局）、resync 一律整份发
+      let nextLore = sentLore, nextHasLore = hasSentLore;
+      if (own(packet, "lore")) {
+        const lore = packet.lore, base = hasSentLore && packet.type !== "resync" && Array.isArray(lore) && Array.isArray(sentLore) ? sentLore : null;
+        if (base && equal(base, lore)) { delete result.lore; result.loreUnchanged = true; }
+        else if (base) {
+          // 条目 id 不唯一之类做不了差异的（投影后不会出现），照整份发，不让一包资料卡住整个发包
+          let delta = null; try { delta = snapDelta(base, lore); } catch (_) { delta = null; }
+          if (delta && JSON.stringify(delta).length < JSON.stringify(lore).length) { delete result.lore; result.loreDelta = delta; }
+        }
+        nextLore = clone(lore); nextHasLore = true;
+      }
       // Commit only after every field was checked and encoded successfully.
       encoded = full ? Object.fromEntries(histories.filter(key => own(packet, key)).map(key => [key, next[key]])) : next;
+      sentLore = nextLore; hasSentLore = nextHasLore;
       hasEncoded = true; return result;
     }
     function unpack(input) {
@@ -163,8 +233,30 @@
         result[key] = length ? clone(rows.slice(-length)) : []; next[key] = clone(result[key]);
       }
       if (own(packet, "tape")) result.tape = unpackTape(packet.tape);
+      let nextGot = gotMatchup, nextHasGot = hasGotMatchup;
+      if (own(packet, "matchupUnchanged")) {
+        if (packet.matchupUnchanged !== true || own(packet, "matchup") || !packed) fail("invalid matchup metadata");
+        if (!hasGotMatchup || packet.type === "resync") fail("matchup omission requires a baseline");
+        result.matchup = clone(gotMatchup); delete result.matchupUnchanged;
+      } else if (own(packet, "matchup")) { result.matchup = unpackMatchup(packet.matchup); nextGot = clone(result.matchup); nextHasGot = true; }
+      // 长休结算：restUnchanged 用上一次收到的那份还原（玩家端看到的 packet.rest 和整份发时一模一样）
+      let nextRest = gotRest, nextHasRest = hasGotRest;
+      if (own(packet, "restUnchanged")) {
+        if (packet.restUnchanged !== true || own(packet, "rest") || !packed) fail("invalid rest metadata");
+        if (!hasGotRest || packet.type === "resync") fail("rest omission requires a baseline");
+        result.rest = clone(gotRest); delete result.restUnchanged;
+      } else if (own(packet, "rest")) { nextRest = clone(packet.rest); nextHasRest = true; }
+      // 角色资料索引：loreUnchanged 用上一次收到的那份还原，loreDelta 在上一份上按 id 改；玩家端看到的 packet.lore 和整份发时一模一样
+      let nextLore = gotLore, nextHasLore = hasGotLore;
+      if (own(packet, "loreUnchanged") || own(packet, "loreDelta")) {
+        if (!packed || own(packet, "lore") || own(packet, "loreUnchanged") && (packet.loreUnchanged !== true || own(packet, "loreDelta"))) fail("invalid lore metadata");
+        if (!hasGotLore || !Array.isArray(gotLore) || packet.type === "resync") fail("lore omission requires a baseline");
+        result.lore = own(packet, "loreDelta") ? applySnap(gotLore, packet.loreDelta) : clone(gotLore);
+        delete result.loreUnchanged; delete result.loreDelta;
+        nextLore = clone(result.lore);
+      } else if (own(packet, "lore")) { nextLore = clone(packet.lore); nextHasLore = true; }
       delete result.wireFormat; delete result.historyFull; delete result.historyLengths;
-      decoded = next; hasDecoded = true; return result;
+      decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore; return result;
     }
     return { pack, unpack, reset };
   }

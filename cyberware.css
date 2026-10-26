@@ -1,0 +1,42 @@
+/* 诊所 · 义体浮层（cyberware-ui.js）：外框、遮罩、天气 ::before 都用 workshop.css 的 .ovl / .ovl-card / .ws-*；这里只放内容 */
+.cw-rate { padding: 8px 10px; background: var(--sk-oil-2, #1a1511); border: 1px solid var(--sk-edge, #4d4337); margin-bottom: 10px; }
+.cw-rate-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 6px; font-size: 13px; }
+.cw-rate-num { font-family: var(--num); color: var(--sk-muted, #a8977b); }
+.cw-rate-num b { color: var(--sk-hazard, #f2c230); font-size: 18px; }
+.cw-legend { margin-left: auto; color: var(--sk-muted, #a8977b); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.cw-sw { display: inline-block; width: 10px; height: 10px; }
+.cw-sw.cw, .cw-seg.cw { background: var(--sk-mint, #39e6b4); }
+.cw-sw.ly, .cw-seg.ly { background: var(--sk-brass, #c99a46); }
+.cw-track { position: relative; display: flex; height: 14px; background: var(--sk-ink, #0b0806); border: 1px solid var(--sk-edge, #4d4337); }
+.cw-seg { height: 100%; }
+.cw-cap { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1px; background: var(--sk-hazard, #f2c230); box-shadow: 0 0 0 1px #000; }
+.cw-rate.over .cw-seg.cw { background: var(--sk-blood, #d8322a); }
+.cw-burden { margin: 6px 0 0; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.cw-burden.b-strain { color: var(--sk-hazard, #f2c230); }
+.cw-burden.b-heavy { color: #f08a7a; font-weight: 700; }
+.cw-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 6px 10px; margin-bottom: 4px; border: 1px solid var(--sk-edge, #4d4337); background: var(--sk-oil-2, #1a1511); }
+.cw-row.ok, .cw-row.on { border-left: 4px solid var(--sk-mint, #39e6b4); }
+.cw-row.on { grid-template-columns: minmax(0, 1fr) auto; }
+.cw-row.miss { opacity: .6; }
+.cw-row.sel { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; opacity: 1; }
+.cw-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cw-txt small { font-size: 11px; color: var(--sk-muted, #a8977b); }
+.cw-desc { font-size: 12px; }
+.cw-conf { color: var(--sk-hazard, #f2c230) !important; }
+.cw-swap { color: var(--sk-mint, #39e6b4) !important; }   /* 以新换旧：会先拆掉同系列的那件 */
+.cw-rule { margin: 0 0 6px; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.cw-after { font-family: var(--num); color: var(--sk-mint, #39e6b4); }
+.cw-after.over, .cw-heavy-tag { color: #f08a7a; }
+.cw-row .s-price { font-family: var(--num); color: var(--sk-hazard, #f2c230); }
+.cw-row .g-btn small { display: block; font-size: 10px; opacity: .8; }
+.cw-confirm { border: 2px solid var(--sk-mint, #39e6b4); background: var(--sk-oil-2, #1a1511); padding: 10px 12px; margin-bottom: 10px; }
+.cw-confirm.heavy { border-color: var(--sk-blood, #d8322a); background: linear-gradient(90deg, rgba(216, 50, 42, .18), transparent 70%), var(--sk-oil-2, #1a1511); }
+.cw-heavy { margin: 4px 0 8px; padding: 8px 10px; font-size: 18px; font-weight: 700; color: #fff; background: var(--sk-blood, #d8322a); border: 2px solid #000; box-shadow: 3px 3px #000a; }
+.cw-strain { margin: 4px 0 8px; color: var(--sk-hazard, #f2c230); }
+.cw-pv { list-style: none; margin: 0 0 8px; padding: 0; font-size: 13px; }
+.cw-pv b { font-family: var(--num); }
+.cw-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.g-btn.cw-danger { border-color: var(--sk-blood, #d8322a); }
+.cw-none { font-size: 14px; padding: 10px 0; }
+.cw-open { border-color: var(--sk-mint, #39e6b4); }
+.ws-hero .cw-purse { margin-left: 6px; font-family: var(--num); color: var(--sk-hazard, #f2c230); font-size: 11px; }

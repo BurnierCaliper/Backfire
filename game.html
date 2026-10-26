@@ -15,6 +15,21 @@
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
   <link rel="stylesheet" href="hud-icons.css" />
+  <link rel="stylesheet" href="workshop.css" />
+  <link rel="stylesheet" href="backpack.css" />
+  <link rel="stylesheet" href="matchup.css" />
+  <link rel="stylesheet" href="cyberware.css" />
+  <link rel="stylesheet" href="shop-sell.css" />
+  <link rel="stylesheet" href="gacha.css" />
+  <link rel="stylesheet" href="weather-fx.css" />
+  <link rel="stylesheet" href="pause-menu.css" />
+  <!-- 新画面（HD-2D 战场，#261）：战场顶栏的开关开着才用到。样式的类名都是 hd2d- / pl- 开头，关着时一条都套不上；
+       场景和 three.js 打成了一个普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），开了以后 hd2d/hd2d-field.js 才加载，直接双击打开也能用 -->
+  <link rel="stylesheet" href="hd2d/hd2d.css" />
+  <!-- 战斗画面的纸片风界面（#308 联机玩家 online-paper.js、#339 单机 game-paper.js）：开着新画面时 body 上才有 .ol-paper（单机另加 .g-paper），
+       样式都挂在它下面，新画面关着时一条都套不上；单机独有的排版在 game-paper.css -->
+  <link rel="stylesheet" href="online-paper.css" />
+  <link rel="stylesheet" href="game-paper.css" />
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
@@ -31,13 +46,30 @@
   <div class="t-card">
     <h1 class="t-name">Antlerscale<span>Backfire</span></h1>
     <p class="t-sub">角鳞 · 在巨人的阴影下，活到明天</p>
-    <div class="t-menu">
-      <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
-      <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
-      <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
-      <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
-      <button class="t-btn" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
-      <a class="t-btn" href="index.html"><b>跑团版 · 规则计算器</b><small>主持人用的分层结算工具</small></a>
+    <!-- 主菜单：两个大入口 + 图鉴 + 规则说明；点进去是各自的子菜单（Esc / 返回 回到这里） -->
+    <div class="t-home" id="t-home">
+      <button class="t-btn t-big primary" id="t-local" data-view="local"><b>本地玩法</b><small>继续 / 新的一局 / 单人 / 长线养成 / 训练场</small></button>
+      <button class="t-btn t-big" id="t-online" data-view="online"><b>联机玩法</b><small>跑团：主持人开房，朋友用房间码加入</small></button>
+      <button class="t-btn t-big" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
+      <button class="t-btn" id="t-rules"><b>规则说明</b><small>回合、行动点、检定、伤害、武器 ATK、义体改造率……随时可查</small></button>
+    </div>
+    <div class="t-panel" id="t-panel-local" data-view="local" hidden>
+      <div class="t-panel-head"><button class="t-back" data-back="local" title="返回（Esc）">← 返回</button><h2>本地玩法</h2></div>
+      <div class="t-list">
+        <button class="t-btn primary" id="t-continue"><b>继续</b><small id="t-continue-sub"></small></button>
+        <button class="t-btn" id="t-new"><b>新的一局</b><small id="t-new-sub"></small></button>
+        <button class="t-btn" id="t-daily"><b>每日挑战</b><small id="t-daily-sub">今天的固定种子：随机队伍、专长 4 选 1，大家打同一局</small></button>
+        <button class="t-btn" id="t-solo"><b>单人模式</b><small>一名主角 + 三名伙伴支援：每回合 2 行动点，能给自己协助格挡 / 协助攻击</small></button>
+        <button class="t-btn" id="t-growth"><b>长线养成</b><small id="t-growth-sub">独立存档 · 不影响普通单局</small></button>
+        <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
+      </div>
+    </div>
+    <div class="t-panel" id="t-panel-online" data-view="online" hidden>
+      <div class="t-panel-head"><button class="t-back" data-back="online" title="返回（Esc）">← 返回</button><h2>联机玩法</h2></div>
+      <!-- online-ui.js 会把「联机开房」「加入房间」追加到这个 .t-menu 里 -->
+      <div class="t-menu">
+        <button class="t-btn" id="t-sandbox"><b>跑团模式</b><small>主持人用：探索环节买东西、休息、升级；战斗环节自由配遭遇。数值照原手册</small></button>
+      </div>
     </div>
   </div>
 </section>
@@ -65,6 +97,7 @@
     <span class="spacer"></span>
     <button class="g-btn" id="run-map" title="角鳞星地图：看看现在在哪、各幕要去哪">地图</button>
     <button class="g-btn" id="run-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
+    <button class="g-btn" id="run-rules" title="规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……">规则</button>
     <button class="g-btn" id="run-title" title="进度已自动保存">存档并回到标题</button>
   </header>
   <div class="run-main">
@@ -94,6 +127,7 @@
     <button class="g-btn" id="tr-slots" title="换到别的团的存档（当前进度已自动保存）">换存档</button>
     <button class="g-btn" id="tr-map" title="角鳞星地图：看队伍在哪，主持人可以在地图上移动队伍">地图</button>
     <button class="g-btn" id="tr-bestiary" title="图鉴：敌人、配置物和所有效果">图鉴</button>
+    <button class="g-btn" id="tr-rules" title="规则说明：回合、行动点、检定、伤害、武器 ATK、义体改造率……">规则</button>
     <button class="g-btn" id="tr-bs" title="按叙事直接改血量、坚毅、耐久、等级、时间、奎支……">后台</button>
     <button class="g-btn r-main" id="tr-fight" title="切到战斗画面，在那里配置遭遇、开打">进入战斗环节</button>
     <button class="g-btn" id="tr-title">回到标题</button>
@@ -115,7 +149,9 @@
     <span class="g-round" id="g-round">第 1 回合</span>
     <span class="g-phase" id="g-phasel">我方行动</span>
     <button class="g-btn mobile-only" id="g-log-open" title="战斗记录">记录</button>
+    <button class="g-btn" id="g-backpack" title="背包（战斗中只读）">背包</button>
     <span class="g-weather" id="g-weather">天气 常态</span>
+    <span class="g-clock" id="g-clock"></span>
     <label style="font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center">天气
       <select id="g-weather-sel">
         <option value="none">常态</option>
@@ -153,7 +189,8 @@
     <button class="g-btn" id="g-to-explore" title="跑团模式：回到探索环节">探索环节</button>
     <button class="g-btn" id="g-fast" aria-pressed="false" title="快捷键 F">演出 1×</button>
     <button class="g-btn" id="g-sfx" aria-pressed="true" title="攻击音效开关（战斗「后台」里可以试听）">音效 开</button>
-    <a class="g-btn" href="index.html" style="display:flex;align-items:center;text-decoration:none">打开计算器</a>
+    <button class="g-btn" id="g-hd2d-toggle" aria-pressed="false" title="新画面（HD-2D）：战场换成 3D 沙盘（远 / 中 / 近三段镜头、近景双击单位看特写），技能栏、队伍栏换成能收起的新样子（主职责头像、技能的属性和攻击 / 技能角标，操作和快捷键照旧），记录照旧；开关记在这台电脑上。旧战场上往前滚滚轮也能打开，新画面远景时再往后滚回到旧画面（一阵白色云雾）。">新画面 关</button>
+    <a class="g-btn" id="g-calc" href="index.html" style="display:flex;align-items:center;text-decoration:none">打开计算器</a>
   </header>
 
   <main class="g-field" id="g-field">
@@ -167,6 +204,7 @@
     <div class="hud-row">
       <div class="hi-gauge" id="g-gauge" aria-label="角色仪表"></div>
       <div class="skills" id="g-skills"></div>
+      <div class="hud-summon"><button class="summonbtn" id="g-summon" hidden></button></div>
       <div class="hud-side"><button class="endturn" id="g-endturn">结束回合<small>空格</small></button></div>
     </div>
     <div class="hint" id="g-hint"></div>
@@ -185,7 +223,7 @@
 </div>
 
 <button class="g-btn reopen" id="g-reopen">返回结算</button>
-<div class="g-rank" id="g-rank" title="战斗评分：伤害、治疗每点 1 分，击破每点 10 分，打出失衡 +50，协助格挡成功 +30，溢出伤害每点 1.5 分，击杀杂兵 / 精英 / 首领 +20 / +100 / +300，用行动点 +10、用附赠行动 +5，触发属性克制的一击 +25%。胜利时 1 / 2 / 3 回合内打完整场分数 ×2 / ×1.5 / ×1.2（速杀）。评价按幕的分数线：第一幕 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +150，C 线以下为 D。胜利时 S（含 SS / SSS）/ A / B 的战斗经验 ×2 / ×1.5 / ×1.2"><div class="rk-grade">C</div><div class="rk-score">0</div><div class="rk-bar"><i></i></div><div class="rk-next"></div><div class="rk-support"></div><div class="rk-feed"></div></div>
+<div class="g-rank" id="g-rank" title="战斗评分：伤害每点 1 分、治疗 / 护盾每点 1.5 分，击破每点 10 分，打出失衡 +50，协助格挡成功 +30，溢出伤害每点 1.5 分，击杀杂兵 / 精英 / 首领 +20 / +100 / +300，用行动点 +10、用附赠行动 +5，触发属性克制的一击 +25%。胜利时 1 / 2 / 3 回合内打完整场分数 ×2 / ×1.5 / ×1.2（速杀）。克制大师：我方主动发起的攻击里克制或吃到天气增益的占一半及以上，胜利时整场分数再 ×1.5。评价按幕的分数线：第一幕固定线 C 500 / B 1000 / A 1250 / S 1500 / SS 1750 / SSS 2000，之后每幕各 +150，B 及以上的分数线再 ×1.15，C 线以下为 D。胜利时 S（含 SS / SSS）/ A / B 的战斗经验 ×2 / ×1.5 / ×1.2"><div class="rk-grade">C</div><div class="rk-score">0</div><div class="rk-bar"><i></i></div><div class="rk-next"></div><div class="rk-support"></div><div class="rk-feed"></div></div>
 <div class="g-fx" id="g-fx"></div>
 <div class="banner" id="g-banner"></div>
 <div class="choice" id="g-choice" role="dialog"><div class="choice-card"><h3></h3><p></p><div class="opts"></div></div></div>
@@ -292,6 +330,18 @@
         </select>
       </label>
     </div>
+    <div class="sheet-foot row">
+      <label title="这场战斗在哪个区域：默认跟着地图（跑团 = 队伍在地图上的位置，单局 = 这一幕的区域，遭遇 = 遭遇的区域）">所在区域
+        <select id="g-cfg-region"></select>
+      </label>
+      <label title="区域里的哪个地方（采矿场的矿外 / 矿内 / 矿底，沙漠的沙丘 / 沙珊瑚台地）：选项跟着所在区域变；默认是表里第一个（采矿场 = 矿外），沙漠场上有沙珊瑚台地就是台地，单局每场随机">场景
+        <select id="g-cfg-scene"></select>
+      </label>
+      <label title="白天 / 傍晚 / 夜晚：默认跟着游戏时钟">光影
+        <select id="g-cfg-light"></select>
+      </label>
+    </div>
+    <p class="sheet-k" id="g-cfg-look-note">所在区域、场景、光影只是画面（地面、远景、天空、灯光），联机玩家看到的跟着变；不改任何结算：沙漠生物等的白天 / 夜晚照旧跟着时钟走。只管这一场，下一场开战回到跟着地图 / 时钟。</p>
     <p class="sheet-k">场上敌人</p>
     <div id="g-enemy-list" class="sheet-list"></div>
     <div class="sheet-foot row">
@@ -353,7 +403,9 @@
           <option value="外城区">外城区</option>
           <option value="沙漠">沙漠</option>
           <option value="巨人城">巨人城</option>
-          <option value="矿场">矿场</option>
+          <option value="第一采矿场">第一采矿场</option>
+          <option value="第二采矿场">第二采矿场</option>
+          <option value="第三采矿场">第三采矿场</option>
           <option value="天网设施">天网设施</option>
         </select>
       </label>
@@ -388,7 +440,7 @@
 </div>
 <div class="sheet" id="g-stats-sheet">
   <div class="sheet-card stats-card">
-    <div class="sheet-head"><h3>战场数据</h3><button class="g-btn small" id="g-stats-career" data-career="1" title="整局 / 整个跑团存档的累计数据">整局数据</button><button class="g-btn small" id="g-stats-copy">复制</button><button class="g-btn" id="g-stats-close">关闭</button></div>
+    <div class="sheet-head"><h3>战场数据</h3><button class="g-btn small" id="g-stats-career" data-career="1" title="整局 / 整个跑团存档的累计数据">整局数据</button><button class="g-btn small" id="g-stats-merge" title="把角色和自己的武器人并成一行看">合并武器人</button><button class="g-btn small" id="g-stats-copy">复制</button><button class="g-btn" id="g-stats-close">关闭</button></div>
     <div id="g-stats-body"></div>
     <p class="stats-note">伤害 / 击破：打在敌人身上的每一击，加上自己行动里引发的连带伤害（感电、共振、余波……）。输出占比：占全队造成伤害的百分比。协助格挡写「成功 / 发动次数」；格挡规避伤害：协助格挡成功挡下的这一击本来的伤害（未算抗性），空手格挡成功少挨的那一半（得分：每点 1 分）。减伤减免：受击时被天气、血量层抗性、角色能力、减半效果等减免掉的伤害，完全免伤也算（得分：每点 1.5 分）。承伤含坚毅生命和持续伤害。击杀按最后一击算。治疗：自己的行动让其他友方多出来的血量和护盾。撤销会连同数据一起回退。</p>
   </div>
@@ -838,27 +890,40 @@ window.GAME_MODE = true;
 <script src="skill-text.js"></script>
 <script src="props.js"></script>
 <script src="enemies.js"></script>
+<script src="vehicle.js"></script>
+<script src="desert.js"></script>
 <script src="growth.js"></script>
+<script src="feats.js"></script>
 <script src="items.js"></script>
+<script src="inventory.js"></script>
+<script src="shop-sell.js"></script>
+<script src="matchup.js"></script>
+<script src="cyberware.js"></script>
+<script src="daylight.js"></script>
 <script src="ledger.js"></script>
 <script src="commands.js"></script>
 <script src="app.js"></script>
+<script src="levelup.js"></script>
 <script src="escort.js"></script>
 <script src="boss-mechanics.js"></script>
 <script src="world-data.js"></script>
 <script src="world-travel.js"></script>
 <script src="bestiary.js"></script>
 <script src="codex.js"></script>
+<script src="rulebook.js"></script>
 <script src="effects.js"></script>
 <script src="mods.js"></script>
 <script src="ai.js"></script>
 <script src="sim.js"></script>
+<script src="chain.js"></script>
 <script src="save.js"></script>
 <script src="trpg-data.js"></script>
 <script src="trpg.js"></script>
 <script src="rogue-data.js"></script>
 <script src="battle-templates.js"></script>
 <script src="trpg-tasks.js"></script>
+<script src="trpg-merchants.js"></script>
+<script src="lore.js"></script>
 <script src="rogue.js"></script>
 <script src="battle-commands.js"></script>
 <script src="rogue-commands.js"></script>
@@ -870,18 +935,33 @@ window.GAME_MODE = true;
 <script src="sfx-samples.js"></script>
 <script src="sfx.js"></script>
 <script src="hit-fx.js"></script>
+<script src="attack-fx.js"></script>
 <script src="icons.js"></script>
 <script src="hud-icons.js"></script>
+<script src="hud-patch.js"></script>
 <script src="unit-tip.js"></script>
 <script src="unit-card.js"></script>
+<script src="rest-report.js"></script>
 <script src="sheet-ui.js"></script>
 <script src="armory-ui.js"></script>
 <script src="world-map.js"></script>
 <script src="bestiary-ui.js"></script>
+<script src="weather-fx.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
+<!-- 暂停页面（#298）：克制表、主持人工具、消息与成员、大厅等由各自的模块登记进来，所以放在它们前面 -->
+<script src="pause-menu.js"></script>
+<script src="training.js"></script>
 <script src="routemap.js"></script>
+<script src="workshop-data-adapter.js"></script>
+<script src="workshop-ui.js"></script>
+<script src="backpack-ui.js"></script>
+<script src="matchup-ui.js"></script>
+<script src="cyberware-ui.js"></script>
+<script src="shop-sell-ui.js"></script>
+<script src="gacha-ui.js"></script>
 <script src="rogue-ui.js"></script>
+<script src="party-cards.js"></script>
 <script src="trpg-ui.js"></script>
 <script src="hotseat-game.js"></script>
 <script src="hotseat-ui.js"></script>
@@ -890,10 +970,21 @@ window.GAME_MODE = true;
 <script src="online-actions.js"></script>
 <script src="online-wire.js"></script>
 <script src="online-game.js"></script>
+<script src="online-rogue.js"></script>
 <script src="online-legacy.js"></script>
 <script src="online-gm-ui.js"></script>
 <script src="online-battle.js"></script>
+<script src="check-request-ui.js"></script>
+<script src="lore-ui.js"></script>
+<!-- 纸片风界面（#308 / #339）：纸纹、配色、顶栏、吊牌、收据这些共用的组件在 paper-ui.js，联机玩家（online-paper.js）和单机（game-paper.js）各拿自己的配置用 -->
+<script src="paper-ui.js"></script>
+<script src="online-paper.js"></script>
+<script src="game-paper.js"></script>
+<script src="online-sfx.js"></script>
 <script src="online-ui.js"></script>
+<script src="levelup-ui.js"></script>
 <script src="commands-debug.js"></script>
+<!-- 新画面（HD-2D 战场）的开关和接线：关着时只接上按钮，布局 / 场景 / three.js 开了才加载 -->
+<script src="hd2d/hd2d-field.js"></script>
 </body>
 </html>

@@ -22,6 +22,7 @@ test.after(async () => { if (browser) await browser.close(); });
 async function open(t, file = "game.html", debug = false) {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close());
   const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));
@@ -34,7 +35,7 @@ const history = page => page.evaluate(() => Commands.history());
 test("D1 UI: exploration changes use commands and the debug menu exports a JSON file", async t => {
   const o = await open(t, "game.html", true); if (!o) return;
   const { page } = o;
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-new="0"]');
   await page.click('[data-tab="bag"]');
   await page.fill("#tr-kz", "5432");
@@ -58,7 +59,7 @@ test("D1 UI: Rogue party, new run, task and save are data commands", async t => 
   const o = await open(t); if (!o) return;
   const { page } = o;
   assert.equal(await page.locator("#command-debug").count(), 0);
-  await page.click("#t-new");
+  await page.click("#t-local"); await page.click("#t-new");
   await page.click('.hero-pick[data-kit="ruby"]');
   await page.click('.hero-pick[data-kit="yuito"]');
   await page.click("#party-go");
@@ -74,7 +75,7 @@ test("D1 UI: Rogue party, new run, task and save are data commands", async t => 
 test("D1 UI: skill targeting records the resolved data command only after confirmation", async t => {
   const o = await open(t); if (!o) return;
   const { page } = o;
-  await page.click("#t-sandbox");
+  await page.click("#t-online"); await page.click("#t-sandbox");
   await page.click('[data-new="0"]');
   await page.click("#tr-fight");
   await page.keyboard.press("Space");

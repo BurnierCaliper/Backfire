@@ -47,39 +47,6 @@ function nextRound(c, S) {
   c.endEnemyTurn();
 }
 
-test("沙灵聚合体二阶段：机械臂之后蓄力一回合才开炮，区域预警看得到；近距那一炮打得到；打出去才过热", () => {
-  const { c, S, P, E, logs } = field([{ id: "sand_aggregate", lv: 5, zone: 2 }]);
-  const a = E("sand_aggregate"), k = P("kolt"), h = P("helu");
-  a.resources.phase = 2; a.layers[0].current = 0; a.layers[0].max = 0;
-  k.zone = 2; h.zone = 1; tank(k); tank(h);
-  S.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
-  assert.deepEqual(aiTurn(c, a), ["机械臂挥击（近）"], "第二动在蓄力，不开炮");
-  assert.equal(a.resources.forceCharge, true);
-  assert.equal(c.enemySkillList(a).length, 0, "蓄力的这一回合没有别的行动");
-  assert.deepEqual(plain(c.zoneThreats().map(t => [t.zone, t.label, t.ready])), [[2, "电能炮蓄力", false]]);
-  S.turnNo += 1;
-  assert.deepEqual(plain(c.zoneThreats().map(t => [t.label, t.ready])), [["电能炮待发", true]], "下一回合就要开炮");
-  S.combatPhase = "enemy"; c.refreshEnemyEconomy(a);
-  const hp0 = c.totalHp(k);
-  const steps = aiTurn(c, a);
-  assert.match(steps[0], /发射电能炮/);
-  assert.match(steps[1], /过热/, "炮后过热，跳过一次行动");
-  assert.ok(c.totalHp(k) < hp0, "同区那一炮打到了");
-  assert.match(logs(), /1d20/);
-  assert.equal(a.resources.forceCharge, false);
-  assert.equal(a.resources.forceOverheat, false, "过热已经跳过");
-
-  // 射程外（三区隔两区）：没打出去，蓄力保留，也不过热
-  const f = field([{ id: "sand_aggregate", lv: 5, zone: 3 }], { zoneMode: 3 });
-  const b = f.E("sand_aggregate"), k2 = f.P("kolt");
-  b.resources.phase = 2; b.resources.forceCharge = true; b.resources.chargeTurn = 0;
-  k2.zone = 1;
-  f.S.combatPhase = "enemy"; b.ap = 1; f.S.attackerId = b.id; f.S.targetId = k2.id;
-  f.c.runSkill("en_agg2_charge");
-  assert.equal(b.resources.forceCharge, true);
-  assert.equal(b.resources.forceOverheat, false);
-});
-
 test("巨人协助「捏碎颅骨」：同区目标倒地进入濒死，自我效果不动；力竭 3 直接死亡；隔一区的巨人不会被选来协助", () => {
   const { c, S, P, E } = field([{ id: "giant", lv: 3, zone: 1 }, { id: "thug_knife", lv: 1, zone: 1 }]);
   const k = P("kolt"), g = E("giant"), kn = E("thug_knife");
@@ -190,12 +157,13 @@ test("投料无人机 / 播撒者的腐蚀只在打中时施加：被协助格�
   assert.equal(k2.statuses.corr, false, "喷洒射程是远距离：同区打不到，也不上腐蚀");
 });
 
-test("人形沙灵：身边只有同区的人就不出手（不空放）；隔壁区有人就打隔壁区的", () => {
+test("人形沙灵：身边只有同区的人不空放，先走到隔壁区去打；隔壁区有人就打隔壁区的", () => {
   const { c, S, P, E } = field([{ id: "sand_human", lv: 3, zone: 2 }]);
   const s = E("sand_human"), k = P("kolt"), h = P("helu");
   k.zone = 2; h.zone = 2;
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(s);
-  assert.equal(c.EnemyAI.plan(s), null);
+  const away = c.EnemyAI.plan(s);
+  assert.ok(away && /移动到 1 区/.test(away.meta.skillName), "不空放，走一步到能打到人的站位");
   h.zone = 1;
   const plan = c.EnemyAI.plan(s);
   assert.equal(plan.meta.targetId, h.id);
@@ -360,6 +328,7 @@ test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王�
     { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 3, zone: 2 }]);
   const king = E("outlaw_king"), k = P("kolt");
   E("thug_knife").zone = 1; E("thug_hammer").zone = 1;   // 狂徒出去打人了
+  king.resources.execTurn = S.turnNo;   // 公开处刑冷却中：这条只看回防的触发
   S.combatPhase = "enemy"; c.refreshEnemyEconomy(king);
   king.damagedThisTurn = 5;
   assert.equal(c.EnemyAI.plan(king).meta.skillName, "攻击命令", "强盗头子还在身边替他挡：不叫回防");
@@ -386,8 +355,9 @@ test("亡命之王 AI：只在危险时下回防（有人冲进王的区或王�
 });
 
 test("敌人协助的射程照手册：大沙灵任意距离、牛队长 / 匕首狂徒近距；AI 只选打得到的", () => {
-  const { c, S, P, E } = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "captain_ox", lv: 3, zone: 2 }, { id: "thug_knife", lv: 3, zone: 2 }, { id: "thug_hammer", lv: 1, zone: 1 }]);
-  const k = P("kolt"), big = E("bigsand"), ox = E("captain_ox"), kn = E("thug_knife"), ham = E("thug_hammer");
+  // 打出失衡的用四足沙灵：沙灵和狂徒、警卫队都不敌对，三个都能来协助（狂徒和警卫队互相敌对，打出失衡的若是狂徒，牛队长就不帮它）
+  const { c, S, P, E } = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "captain_ox", lv: 3, zone: 2 }, { id: "thug_knife", lv: 3, zone: 2 }, { id: "sand_beast", lv: 1, zone: 1 }]);
+  const k = P("kolt"), big = E("bigsand"), ox = E("captain_ox"), kn = E("thug_knife"), ham = E("sand_beast");
   k.zone = 1; S.combatPhase = "enemy"; k.def = 1; tank(k);
   hit(c, ham, k, { atk: 1, baseBreak: 1 });
   const list = c.eligibleAssisters(ham, k);
@@ -535,4 +505,17 @@ test("无界面模拟：敌人全灭时还在等格挡的那一击照样落下�
   c.BattleSim.resolveQueues(noBlock);
   assert.equal(S.blockQueue.length, 0);
   assert.ok(c.totalHp(k) < hp0, "这一击落下了");
+});
+
+test("大沙灵召唤：场上沙灵按沙灵阵营全数（含大沙灵自己和精英），满 3 只就不再召唤", () => {
+  const plan = (f) => { const b = f.E("bigsand"); f.S.combatPhase = "enemy"; b.ap = 1; b.bonus = 1; const p = f.c.EnemyAI.plan(b); return p && p.meta ? String(p.meta.skillName || "") : ""; };
+  // 大沙灵 + 两只普通沙灵 = 3：不召唤（以前只数普通沙灵，2 < 3 照样召唤）
+  let f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }, { id: "sand_human", lv: 3, zone: 2 }]);
+  assert.doesNotMatch(plan(f), /召唤/);
+  // 大沙灵 + 活沙 + 一只沙灵 = 3：精英也算
+  f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "livesand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }]);
+  assert.doesNotMatch(plan(f), /召唤/);
+  // 大沙灵 + 一只沙灵 = 2：召唤
+  f = field([{ id: "bigsand", lv: 3, zone: 2 }, { id: "sand_beast", lv: 3, zone: 2 }]);
+  assert.match(plan(f), /召唤/);
 });

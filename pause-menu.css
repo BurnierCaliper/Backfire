@@ -1,0 +1,46 @@
+/* 暂停页面（pause-menu.js，#298）：盖住全屏的暗底 + 中间一张钢板卡片，配色走 skin.css 的 --sk-*。
+ * z-index 8800：在所有画面和浮层（.ovl 8500）之上、升级弹窗 / 卖东西（9000）之下。 */
+.pm-overlay { position: fixed; inset: 0; z-index: 8800; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .78); }
+.pm-overlay[hidden] { display: none; }
+.pm-card {
+  position: relative; width: min(420px, 100%); max-height: calc(100dvh - 32px); overflow: auto;
+  background: var(--sk-steel, #2a2520); color: var(--sk-canvas, #ece0c6);
+  border: 2px solid var(--sk-brass, #c99a46); box-shadow: 6px 6px #000a; padding: 16px 18px;
+  font-family: var(--ui, sans-serif);
+}
+.pm-head { margin-bottom: 12px; }
+.pm-head h2 { margin: 0; font: 800 26px/1.2 var(--sk-tag, var(--ui, sans-serif)); letter-spacing: .12em; color: var(--sk-hazard, #f2c230); }
+.pm-note { margin: 6px 0 0; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.pm-list { display: flex; flex-direction: column; gap: 8px; }
+.pm-item {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 48px;
+  padding: 8px 12px; text-align: left; cursor: pointer; font: inherit;
+  color: var(--sk-canvas, #ece0c6); background: var(--sk-steel-hi, #3b342c); border: 2px solid var(--sk-ink, #0b0806); border-radius: 0;
+}
+.pm-item b { font-size: 16px; }
+.pm-item small { font-size: 12px; color: var(--sk-muted, #a8977b); }
+.pm-item:hover, .pm-item:focus-visible { background: var(--sk-edge, #4d4337); border-color: var(--sk-hazard, #f2c230); outline: none; }
+.pm-item .pm-dot { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); }
+.pm-empty { margin: 0; font-size: 13px; color: var(--sk-muted, #a8977b); }
+.pm-foot { display: flex; justify-content: flex-end; margin-top: 14px; }
+.pm-resume {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 6px 16px; cursor: pointer; font: inherit; font-weight: 700;
+  color: var(--sk-ink, #0b0806); background: var(--sk-hazard, #f2c230); border: 2px solid var(--sk-ink, #0b0806); border-radius: 0;
+}
+.pm-resume:focus-visible { outline: 2px solid var(--sk-holo, #3fe0ff); outline-offset: 2px; }
+.pm-resume kbd { font: 700 11px/1 var(--num, sans-serif); padding: 2px 5px; border: 1px solid currentColor; opacity: .7; }
+/* 角上的「菜单」按钮：单机插在顶栏最前面；提示（红点 / 数字）挂在右上角 */
+.pm-open { position: relative; overflow: visible; }
+.pm-badge { position: absolute; z-index: 1; top: -8px; right: -8px; pointer-events: none; }
+.pm-badge:empty { display: none; }
+/* 红点：和联机的 .ol-dot 一个样子（红底白字、白色描边，超过 9 条写 9+） */
+.pm-dot { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border: 2px solid #fff; border-radius: 10px; color: #fff; background: #e0362c; font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; box-shadow: 0 1px 3px #000a; pointer-events: none; }
+.pm-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.pm-dot.pm-pop { animation: pm-pop .36s ease-out; }
+@keyframes pm-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .pm-dot.pm-pop { animation: none; } }
+/* 联机时顶栏里的按钮收起来，用 #online-dock 里的那一个（主持人在任何画面都找得到，不出两个） */
+body.pm-online .pm-open:not(.ol-button) { display: none !important; }
+/* 离开房间 / 离开并保存（联机）：排在最后，和别的项隔开一点，字是红的，免得误点 */
+.pm-item[data-pause-item="leave"] { margin-top: 6px; }
+.pm-item[data-pause-item="leave"] b { color: var(--sk-alert, #ff7a5c); }

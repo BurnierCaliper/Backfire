@@ -10,17 +10,37 @@ const EnemyAI = (function () {
 
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
-  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall"); }
+  function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof playerAllied === "function" && playerAllied(u)) &&
+    !(typeof isNeutralCreature === "function" && isNeutralCreature(u))); }   // 友军、中立生物不算要打的敌人
 
   function hpOf(u) {
     if (u.upOnShp) return Number(u.shp) || 0;
     return (u.layers || []).reduce((a, l) => a + Math.max(0, Number(l.current) || 0), 0);
   }
-  function validPrey() {
-    return players().filter(u => unitAlive(u) && !u.hidden && !(u.dying && !u.upOnShp) &&
+  /** 这个敌人能打的人：我方，以及和它敌对的其他阵营的敌人（异星生物 ↔ 其他阵营） */
+  function validPrey(me) {
+    const pool = me && typeof hostileTo === "function"
+      ? state.units.filter(u => hostileTo(me, u) && unitAlive(u) && u.kit !== "ironwall" && !u.fused)
+      : players();
+    // 下潜中的单位选不中（谐波攻击能打，敌人的 AI 先不专门找它）
+    return pool.filter(u => unitAlive(u) && !u.hidden && !u.submerged && !(u.dying && !u.upOnShp) &&
       !(typeof bpUntargetable === "function" && bpUntargetable(u)));   // 单局图纸：安全的迷彩（武器人形态）
   }
+  // 不按「打单个目标」瞄准的技能：标定区域的榴弹（落点任意），不看危墙
+  const ZONE_PICK = { en_gl: true, en_gl_fire: true, en_ant_shell: true, en_ant_shell_fire: true, en_riot_bottle: true, en_riot_bottle_fire: true };
+  // 不需要目标 / 不是攻击的技能：找站位时不拿它们来算「能不能打到」（触灵精英的清除状态只对自己）
+  const NO_TARGET = { en_agg3_debris: true, en_agg1_rush: true, en_agg1_rush_prep: true, en_king_hold: true, en_king_exec: true, en_bigsand_summon: true, en_bigsand_heal: true, ufo_prime: true,
+    ufo_boom: true, ufo_stomp: true, ufo_sweep: true, ufo_summon: true, en_agg2_overheat: true, en_giant_sand_pulse: true, en_thug_mutiny: true, en_gas_ignite: true, en_hunter_heat: true, en_alarm_zap: true,
+    en_riot_bottle: true, en_riot_bottle_fire: true, en_sewer_cleanse: true };
   function canAimSkill(u, sid, t) {
+    if (!inSkillReach(u, sid, t)) return false;
+    // 下水道清扫机的施加共振只对看得见、还没有共振的敌人用（不是攻击：已经有共振的人不用再上）
+    if (sid === "en_sweeper_reso" && !(typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, t))) return false;
+    // 隔着危墙 / 关着的门打不到（dealTo 会挡下来）：以前照样瞄准，结果每回合白打
+    if (!ZONE_PICK[sid] && typeof lineBlocked === "function" && lineBlocked(u.zone, t.zone)) return false;
+    return true;
+  }
+  function inSkillReach(u, sid, t) {
     if (!u || !t || !unitAlive(t) || t.hidden || t.fused) return false;
     if (t.dying && !t.upOnShp) return false;
     const d = zdist(u.zone, t.zone);
@@ -30,12 +50,12 @@ const EnemyAI = (function () {
     // 之前这里没查它，远距技能被当成 0–1 都能打，于是瞄准同区的人、结果打不到。
     const erg = typeof ENEMY_SKILL_RANGE !== "undefined" && sid ? ENEMY_SKILL_RANGE[sid] : null;
     if (erg === "melee") return d === 0;
-    if (erg === "ranged") return d === 1;
+    if (erg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));
     if (erg === "any") return d <= 1;
     // 射程表里没有的技能按单位卡上的射程判断，和 dealTo 一致（以前一律按 0–1：远距离的人形沙灵瞄准同区的人，每回合空放）
     const rg = u.range || "any";
     if (rg === "melee") return d === 0;
-    if (rg === "ranged") return d === 1;
+    if (rg === "ranged") return d === 1 || (d === 0 && typeof enemyForcedPointBlank === "function" && enemyForcedPointBlank(u, t));   // 被牵制的抵近喷洒（播撒者）
     return d <= 1;
   }
   function retargetLegal(u, sid, preferred, prey, forced) {
@@ -74,6 +94,7 @@ const EnemyAI = (function () {
    *   aim   打谁：
    *         local   同区优先（同区有人就打同区，手册没写明追谁的都用这个）
    *         lowest  血量最低者（手册写明的）
+   *         most    血量最多者（不分远近；暴虐猎手）
    *         nearest 最近的
    *         topAtk  ATK 最高者
    *   near / far  同区、隔区分别用哪个技能。
@@ -87,6 +108,16 @@ const EnemyAI = (function () {
     boomcar:        { dist: 0,    aim: "nearest", special: "boomcar", noBasic: true },
     buoy:           { dist: 0,    aim: "nearest", near: "en_buoy" },
     dumpdrone:      { dist: 1,    aim: "local",   near: "en_dump",           far: "en_dump" },
+    mine_guard:     { dist: 0,    aim: "local",   near: "en_mine_guard" },
+    mine_overseer:  { dist: 0,    aim: "local",   near: "en_overseer" },
+    flint_sweeper:  { dist: 1,    aim: "local",   near: "en_flint",          far: "en_flint" },
+    alarm_bot:      { dist: null, aim: "local",   special: "alarm", fixed: true },
+    meteor_miner:   { dist: 1,    aim: "local",   near: "en_miner_shot",     far: "en_miner_shot" },
+    meteor_spider:  { dist: 0,    aim: "local",   near: "en_spider_bite" },
+    sandfish_lead:  { dist: 0,    aim: "local",   near: "en_fish_lead_hit" },
+    sandfish_drive: { dist: 0,    aim: "local",   near: "en_fish_drive_tail" },
+    sandfish_ambush:{ dist: 0,    aim: "local",   near: "en_fish_ambush_bite" },
+    meteor_centipede: { dist: 1,  aim: "lowest",  near: "en_centi_shot",     far: "en_centi_shot", fixed: true },
     thug_knife:     { dist: 0,    aim: "local",   near: "en_thug_knife" },
     thug_hammer:    { dist: 0,    aim: "local",   near: "en_thug_hammer" },
     crow:           { dist: 0,    aim: "lowest",  near: "en_crow" },
@@ -100,6 +131,25 @@ const EnemyAI = (function () {
     captain_wolf:   { dist: 0,    aim: "local",   near: "en_wolf" },
     captain_ox:     { dist: 0,    aim: "local",   near: "en_ox" },
     captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
+    ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
+    gas_collector:  { dist: 0,    aim: "local",   special: "gas" },
+    // 外城区镇压部队（docs/suppression-force.md）：警棍盾、喷火兵近战主动贴近；步枪、投手远程主动远离；小队长远近皆可
+    riot_baton:     { dist: 0,    aim: "local",   near: "en_riot_baton" },
+    riot_rifle:     { dist: 1,    aim: "local",   near: "en_riot_rifle",     far: "en_riot_rifle" },
+    riot_molotov:   { dist: 1,    aim: "local",   special: "riot_bottle" },
+    riot_flamer:    { dist: 0,    aim: "local",   near: "en_riot_spray" },
+    riot_captain:   { dist: null, aim: "local",   near: "en_riot_pistol",    far: "en_riot_pistol" },
+    // 下水道狂鼠（docs/ratfolk.md）：潜藏者、撕咬者近战主动接近；疫病暴徒接近血量最低的人，场上有腐蚀的敌人就去喷（special）；暴虐猎手接近血量最多的人
+    rat_lurker:     { dist: 0,    aim: "local",   near: "en_rat_lurker_bite" },
+    rat_biter:      { dist: 0,    aim: "local",   near: "en_rat_biter_bite" },
+    rat_plague:     { dist: 0,    aim: "lowest",  near: "en_rat_plague_claw", far: "en_rat_plague_spray", special: "rat_plague" },
+    rat_tyrant:     { dist: 0,    aim: "most",    near: "en_rat_tyrant_bite" },
+    // 下水道维护（docs/sewer-maintenance.md）：清扫机远程、主动远离敌人；还有敌人没有共振就上共振，都有了才谐波射击（special）
+    sewer_sweeper:  { dist: 1,    aim: "local",   special: "sweeper" },
+    // 两个触灵精英：远程、主动远离；身上有负面状态先花附赠清除（aiPlanBase）；清扫员的普通攻击自己挑射程内敌人最多的区（special）
+    sewer_keeper:   { dist: 1,    aim: "local",   near: "en_keeper_shot",    far: "en_keeper_shot" },
+    sewer_cleaner:  { dist: 1,    aim: "local",   special: "cleaner" },
+    ant_hunter:     { dist: 1,    aim: "local",   near: "en_hunter_shot",    far: "en_hunter_shot" },
     bigsand:        { dist: null, aim: "local",   near: "en_bigsand",        special: "bigsand" },
     livesand:       { dist: null, aim: "local",   special: "livesand" },
     giant:          { dist: null, aim: "local",   near: "en_giant_near",     far: "en_giant_far" },
@@ -121,9 +171,82 @@ const EnemyAI = (function () {
     const from = Number(u.zone), goal = Number(to);
     const here = zdist(from, goal);
     const abyss = (z) => !u.flying && state.fields && state.fields[z] && state.fields[z].abyss;
-    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && zdist(z, goal) < here);
+    // 隔着危墙 / 关着的门的区走不过去（doMove 会被拦下、不扣点），不当作前进方向
+    const blocked = (z) => { const g = typeof getGap === "function" ? getGap(from, z) : { type: "open" }; return g.type === "wall" || (g.type === "door" && !g.open); };
+    const opts = adjacentZones(from).map(Number).filter(z => !abyss(z) && !blocked(z) && zdist(z, goal) < here);
     if (!opts.length) return null;
     return opts.sort((a, b) => zdist(a, goal) - zdist(b, goal) || a - b)[0];
+  }
+  /** 这一步移动付不付得起，按 app.js · doMoveInner 实际结算的消耗算：
+   *  离开酸液地面 / 越过空隙（给出 dest 且隔着空隙）扣 1 行动点（荒原行者改扣附赠）；导体 / 探测模式不耗；
+   *  狂暴这回合还有免费移动也不耗（effects.js · frenzyFreeMoveReady）；
+   *  其余杂兵用行动点，精英 / 首领用附赠行动。被禁足 / 霜结不能动。
+   *  lastAp：原地出不了手，精英 / 首领可以把最后 1 行动点花在这一步上（firingStep、aiPlan 的第二次规划） */
+  function canPayMove(u, dest, lastAp) {
+    if (!u || u.noMove || u.self === "frost") return false;
+    if (AI_SPEC[u.kit] && AI_SPEC[u.kit].fixed) return false;   // 不会主动移动（矿场警戒自动机）
+    const wanderer = typeof featHas === "function" && featHas(u, "wanderer");
+    const fromF = (state.fields && state.fields[u.zone]) || {};
+    const overVoid = dest != null && !u.flying && typeof getGap === "function" && getGap(u.zone, dest).type === "void";
+    const leaveAcid = !!fromF.acid && !u.flying;
+    if (wanderer && (overVoid || leaveAcid)) return (u.bonus || 0) >= 1;
+    const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+    // 这两种移动要花行动点：杂兵照常 1 点够；精英 / 首领的计划是「附赠移动 + 行动点出手」，花掉最后 1 点就没法出手了，要留 1 点。
+    // 原地出不了手时（lastAp）留着也没用，1 点就够：以前一律要 2 点，精英每回合只有 1 行动点，站在酸液上整场走不出来
+    const apMove = overVoid || (leaveAcid && !(typeof acidGroundWalker === "function" && acidGroundWalker(u)));
+    if (apMove) return (u.ap || 0) >= (rank === "minion" || lastAp ? 1 : 2);
+    if (u.self === "conductor" || (u.kit === "ecmo" && u.resources && u.resources.probe)) return true;
+    if (typeof frenzyFreeMoveReady === "function" && frenzyFreeMoveReady(u)) return true;   // 狂暴：走这一步不花行动点，杂兵走完还能出手
+    return rank === "minion" ? (u.ap || 0) >= 1 : (u.bonus || 0) >= 1;
+  }
+  /** 能正常走过去的相邻区（不隔危墙 / 关着的门；地面单位不走空隙、不进深渊） */
+  function walkableNeighbors(u) {
+    const from = Number(u.zone);
+    return adjacentZones(from).map(Number).filter(z => {
+      const g = typeof getGap === "function" ? getGap(from, z) : { type: "open" };
+      if (g.type === "wall" || (g.type === "door" && !g.open)) return false;
+      if (g.type === "void" && !u.flying) return false;
+      if (!u.flying && state.fields && state.fields[z] && state.fields[z].abyss) return false;
+      return true;
+    });
+  }
+  /** 找站位：在这里打不到人时，看走一步到哪个相邻区能打到（优先能打到原定目标的，其次能打到的人多的；
+   *  想保持距离的远程单位再优先没有敌人的区）。走一步也打不到、又没有固定射程的单位，就朝目标靠近一步。
+   *  only：强制目标（嘲讽 / 决一死战）时只算那一个人。找不到返回 null */
+  function firingStep(u, spec, prey, target, list, only) {
+    // 只在这里打不到要打的人时才来找站位：不走也出不了手，离开酸液可以花掉最后 1 行动点
+    if (!canPayMove(u, null, true)) return null;
+    // 手册：强盗头子守在亡命之王身边（远处的人用远程手段打），不为了找站位离开王；被挟持的王也不动
+    if (u.kit === "bandit_boss" && !(u.resources && u.resources.mutinied)) {
+      const king = typeof findKit === "function" ? findKit("outlaw_king", state.units) : null;
+      if (king && !king.dead) return null;
+    }
+    if (u.kit === "outlaw_king" && u.resources && u.resources.hostage) return null;
+    const sids = (list || []).map(s => s.id).filter(id => id && !NO_TARGET[id]);
+    if (!sids.length) return null;
+    const pool = only ? [only] : prey;
+    const from = u.zone;
+    let best = null;
+    walkableNeighbors(u).forEach(z => {
+      u.zone = z;
+      let hits = 0, hitsTarget = false;
+      try {
+        pool.forEach(p => {
+          if (sids.some(sid => canAimSkill(u, sid, p))) { hits++; if (p === target) hitsTarget = true; }
+        });
+      } finally { u.zone = from; }
+      if (!hits) return;
+      const quiet = spec && spec.dist === 1 && !preyInZone(prey, z).length ? 1 : 0;
+      const score = (hitsTarget ? 100 : 0) + hits * 10 + quiet;
+      if (!best || score > best.score || (score === best.score && z < best.z)) best = { z, score };
+    });
+    if (best) return best.z;
+    // 一步之内哪里都打不到：没有固定射程的单位（机枪机甲、巨人……）朝目标走一步，别原地干等
+    if (spec && spec.dist == null && target) {
+      const step = stepToward(u, target.zone);
+      if (step != null && walkableNeighbors(u).includes(Number(step))) return step;
+    }
+    return null;
   }
   function preyInZone(list, z) {
     return list.filter(p => Number(p.zone) === Number(z));
@@ -131,6 +254,38 @@ const EnemyAI = (function () {
   function nearestFirst(u, list) {
     return list.slice().sort((a, b) =>
       (zdist(u.zone, a.zone) - zdist(u.zone, b.zone)) || (hpOf(a) - hpOf(b)));
+  }
+
+  function isRiotUnit(u) { return !!u && !u.isPlayer && typeof factionOf === "function" && factionOf(u) === "镇压队"; }
+  /** 镇压小队长活着、在战场上（失衡的也算在场） */
+  function riotCaptainOnField() { return state.units.some(x => x.kit === "riot_captain" && unitAlive(x)); }
+  /** 已经有灼烧（免疫灼烧的自焚者也当作有，免得永远优先挑它） */
+  function alreadyBurning(p) { return (Number(p.statuses && p.statuses.burn) || 0) > 0 || p.self === "burn"; }
+
+  /* ---- 下水道狂鼠（docs/ratfolk.md 第 3 节）---- */
+  const corroded = (p) => !!(p && p.statuses && p.statuses.corr);
+  /** 疫病暴徒活着、在战场上（失衡的也算在场）：潜藏者优先打还没腐蚀的敌人，尽量把所有人都打进腐蚀 */
+  function ratPlagueOnField() { return state.units.some(x => x.kit === "rat_plague" && unitAlive(x)); }
+  /** 疫病暴徒：场上有已经腐蚀的敌人时，用感染喷洒打其中一个，把腐蚀扩散到那一区——挑同区还没腐蚀的敌人最多的；
+   *  一样多的先挑现在就喷得到的（距离 1、不隔墙），再挑血少的。没有腐蚀的敌人返回 null（照常接近血量最低的人） */
+  function plagueSprayPick(u, prey) {
+    const sick = prey.filter(corroded);
+    if (!sick.length) return null;
+    const foes = typeof ratFoesOf === "function" ? ratFoesOf(u) : prey;
+    const fresh = (p) => foes.filter(x => x !== p && Number(x.zone) === Number(p.zone) && !corroded(x)).length;
+    const now = (p) => zdist(u.zone, p.zone) === 1 && !(typeof lineBlocked === "function" && lineBlocked(u.zone, p.zone)) ? 1 : 0;
+    return sick.slice().sort((a, b) => (fresh(b) - fresh(a)) || (now(b) - now(a)) || (hpOf(a) - hpOf(b)))[0];
+  }
+
+  /* ---- 下水道维护（docs/sewer-maintenance.md 第 2 节）---- */
+  /** 下水道清扫机：还有敌人没有共振时，挑一个没有共振的敌人上共振（enemies.js · sweeperResoTargetOk：看得见、还没有共振）——
+   *  先挑现在就够得着的（距离 1、不隔危墙），再挑离得近的，一样近的挑血量多的（手册没写明追谁时倾向于打血量最高的）。
+   *  看得见的敌人都有共振了返回 null（照常挑目标，谐波射击） */
+  function sweeperResoPick(u, prey) {
+    const fresh = prey.filter(p => typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, p));
+    if (!fresh.length) return null;
+    const now = (p) => zdist(u.zone, p.zone) === 1 && !(typeof lineBlocked === "function" && lineBlocked(u.zone, p.zone)) ? 1 : 0;
+    return fresh.slice().sort((a, b) => (now(b) - now(a)) || (zdist(u.zone, a.zone) - zdist(u.zone, b.zone)) || (hpOf(b) - hpOf(a)))[0];
   }
 
   /** 选目标。强制目标（决一死战 / 嘲讽）优先，其次手册写明的追击规则，最后才是同区优先。 */
@@ -156,11 +311,39 @@ const EnemyAI = (function () {
       const f = kingFocusTarget();
       if (f && prey.includes(f)) return { unit: f, forced: true };
     }
+    // 镇压小队长「指挥」：他在场时，镇压队全体优先挑还没有灼烧的敌人，尽量让每个敌人都挂上灼烧
+    if (isRiotUnit(u) && riotCaptainOnField()) {
+      const fresh = prey.filter(p => !alreadyBurning(p));
+      if (fresh.length) prey = fresh;
+    }
+    // 下水道狂鼠：疫病暴徒在场时，潜藏者优先打还没腐蚀的敌人（配合暴徒的扩散和「所有敌人都腐蚀时狂暴」）
+    if (u.kit === "rat_lurker" && ratPlagueOnField()) {
+      const fresh = prey.filter(p => !corroded(p));
+      if (fresh.length) prey = fresh;
+    }
+    // 疫病暴徒：场上有已经腐蚀的敌人时，主动去喷有腐蚀的那个（站位交给 aiDistOverride：保持距离 1）
+    if (u.kit === "rat_plague") {
+      const sp = plagueSprayPick(u, prey);
+      if (sp) return { unit: sp };
+    }
+    // 下水道清扫机：还有敌人没有共振时，目标是要上共振的那个（站位交给 dist 1：太近后撤、太远接近）
+    if (u.kit === "sewer_sweeper" && typeof sweeperAllResonated === "function" && !sweeperAllResonated(u)) {
+      const rp = sweeperResoPick(u, prey);
+      if (rp) return { unit: rp };
+    }
     let aim = spec.aim || "local";
     // 手册：强盗头子在场时，所有狂徒集火血量最低者
     if (/^thug_/.test(u.kit || "") && foes().some(x => x.kit === "bandit_boss")) aim = "lowest";
-    if (aim === "lowest") return { unit: lowest(prey) };
+    if (aim === "lowest") {
+      // 不会移动的远程单位（陨体弦蚣）：在打得到的人里挑血量最低的
+      if (spec.fixed && spec.dist != null) {
+        const reach = prey.filter(p => zdist(u.zone, p.zone) === spec.dist);
+        if (reach.length) return { unit: lowest(reach) };
+      }
+      return { unit: lowest(prey) };
+    }
     if (aim === "nearest") return { unit: nearestFirst(u, prey)[0] };
+    if (aim === "most") return { unit: highest(prey) };
     if (aim === "topAtk") {
       const s = prey.slice().sort((a, b) =>
         (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0));
@@ -186,14 +369,17 @@ const EnemyAI = (function () {
         return kz === from ? null : stepToward(u, kz);
       }
     }
-    if (spec.dist == null || u.noMove) return null;
+    if (spec.dist == null || u.noMove || spec.fixed) return null;   // fixed：不会主动移动
+    if (typeof sinkStuck === "function" && sinkStuck(u)) return null;   // 陷在流沙里走不出去
+    if (u.entangled) return null;   // 被沙珊瑚缠住
     const d = zdist(u.zone, target.zone);
     if (d === spec.dist) return null;
     if (d > spec.dist) {                            // 太远 → 接近一格
       return stepToward(u, target.zone);
     }
     // 太近 → 后撤。手册规定优先退到没有敌人的区，退不掉才留下打。
-    const open = adjacentZones(u.zone).filter(z => !preyInZone(prey, z).length && (u.flying || !(state.fields && state.fields[z] && state.fields[z].abyss)));
+    // 只退到走得通的区（不隔危墙 / 关着的门）
+    const open = walkableNeighbors(u).filter(z => !preyInZone(prey, z).length);
     if (!open.length) return null;
     return open.sort((a, b) => zdist(b, target.zone) - zdist(a, target.zone))[0];
   }
@@ -211,10 +397,50 @@ const EnemyAI = (function () {
       if (has("en_gl_fire")) return "en_gl_fire";
       return has("en_gl") ? "en_gl" : null;
     }
+    if (spec.special === "rat_plague") {
+      // 有腐蚀的敌人：目标就是要喷的那个（aiTargetBase），距离 1 就喷；够不着交给移动（aiDistOverride 把距离改成 1）。
+      // 没有腐蚀的敌人：照常接近血量最低的人，同区撕扯、隔区喷洒（near / far）
+      if (target && corroded(target) && zdist(u.zone, target.zone) === 1 && has("en_rat_plague_spray")) return "en_rat_plague_spray";
+      return null;
+    }
+    if (spec.special === "sweeper") {
+      // 目标还没有共振（aiTargetBase 挑的，或者被牵制的那个人）就上共振；目标已经有共振（看得见的敌人都有了，
+      // 或者被嘲讽 / 决一死战只能冲他去）就谐波射击。够不着交给移动（dist 1）
+      if (target && has("en_sweeper_reso") && typeof sweeperResoTargetOk === "function" && sweeperResoTargetOk(u, target)) return "en_sweeper_reso";
+      return has("en_sweeper_shot") ? "en_sweeper_shot" : null;
+    }
+    if (spec.special === "cleaner") {
+      // 触灵清扫员：远程射程内有看得见的敌人就打敌人最多的那一区（enemies.js · cleanerWaveZone，落点在 aiPicks）；一个都够不着交给移动（dist 1）
+      return has("en_cleaner_wave") && typeof cleanerWaveZone === "function" && cleanerWaveZone(u) != null ? "en_cleaner_wave" : null;
+    }
+    if (spec.special === "riot_bottle") {
+      // 和榴弹一样：标定过、轮到落地就落地，否则标定一个区
+      if (has("en_riot_bottle_fire")) return "en_riot_bottle_fire";
+      return has("en_riot_bottle") ? "en_riot_bottle" : null;
+    }
+    if (spec.special === "alarm") {
+      // 不移动：场上有高能的敌人就电涌，没有就待机
+      return has("en_alarm_zap") && alarmTargets(u).length ? "en_alarm_zap" : null;
+    }
+    if (spec.special === "gas") {
+      // 每回合先移动（够不着目标就先走过去），然后：所在区是火场就喷火；不是火场、能点着就点燃燃气
+      if (!sameZone && canPayMove(u)) return null;
+      if (zoneOnFire(u.zone)) return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;
+      if (gasCanIgnite(u.zone) && has("en_gas_ignite")) return "en_gas_ignite";
+      return sameZone && has("en_gas_spray") ? "en_gas_spray" : null;   // 点不着（固有场地 / 被锁定）：照样喷火
+    }
+    if (spec.special === "ant") {
+      // 大酸液弹待发就发；站在酸液地面上就标定；否则用普通的酸液喷枪（交给 near / far）
+      if (has("en_ant_shell_fire")) return "en_ant_shell_fire";
+      if (has("en_ant_shell") && target && zdist(u.zone, target.zone) <= 1) return "en_ant_shell";
+      return null;
+    }
     if (spec.special === "bigsand") {
+      // 场上的沙灵：沙灵阵营的全都算，大沙灵自己、活沙、尘躯这些精英也算（以前只数四足 / 人形沙灵，
+      // 大沙灵 + 两只精英沙灵时照样召唤）
       const sands = state.units.filter(x =>
-        !x.isPlayer && !x.dead && !x.hidden &&
-        (x.kit === "sand_beast" || x.kit === "sand_human"));
+        !x.isPlayer && !x.dead && !x.hidden && !x._removed && totalHp(x) > 0 &&
+        (typeof factionOf === "function" ? factionOf(x) === "沙灵" : (x.kit === "sand_beast" || x.kit === "sand_human" || x === u)));
       if (sands.length < 3 && has("en_bigsand_summon")) return "en_bigsand_summon";
       if (!preyInZone(prey, u.zone).length && has("en_bigsand_heal")) return "en_bigsand_heal";
       return null;
@@ -227,6 +453,9 @@ const EnemyAI = (function () {
     }
     if (spec.special === "boat") {
       // 电弧扫射打距离 1 的全部敌人，感电是它自带的附加，没有单体攻击
+      // 被牵制而牵制者在同区：抵近扫自己所在的区（enemies.js · en_boat_arc）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced && Number(forced.zone) === Number(u.zone)) return "en_boat_arc";
       return prey.some(p => zdist(u.zone, p.zone) === 1) ? "en_boat_arc" : null;
     }
     if (spec.special === "king") {
@@ -239,9 +468,14 @@ const EnemyAI = (function () {
       const pressed = prey.some(p => Number(p.zone) === Number(u.zone));
       const hurt = (Number(u.damagedThisTurn) || 0) > 0;
       const guarded = thugs.some(x => x !== u && Number(x.zone) === Number(u.zone));
-      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
+      const holdReady = r.holdTurn == null || state.turnNo - Number(r.holdTurn) >= (Number(KING_CFG.hold.cooldown) || 0);
+      // 手下被打倒过：这回合改成回防（之后狂徒们齐射）
+      if (r.crewDown && holdReady && has("en_king_hold")) return "en_king_hold";
+      if (scattered && thugs.length >= 2 && !guarded && (pressed || hurt) && holdReady && has("en_king_hold") && u._aiHoldTurn !== state.turnNo) {
         return "en_king_hold";
       }
+      // 公开处刑：没有挂着的、离上次标记过了冷却就用（标记 → 两回合后落下）
+      if (has("en_king_exec") && typeof kingExecutionReady === "function" && kingExecutionReady(u)) return "en_king_exec";
       if (sameZone && has("en_king_kill")) return "en_king_kill";
       return has("en_king_atk") ? "en_king_atk" : "en_king_kill";
     }
@@ -256,12 +490,13 @@ const EnemyAI = (function () {
     }
     if (spec.special === "aggregate") {
       const ph = r.phase || 1;
-      if (ph === 1) return sameZone ? "en_agg1_melee" : "en_agg1_range";
-      if (ph === 2) {
-        if (has("en_agg2_overheat")) return "en_agg2_overheat";
-        if (has("en_agg2_charge")) return "en_agg2_charge";   // 蓄满一回合：开炮（蓄力的那一回合技能表是空的）
-        return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去
+      if (ph === 1) {
+        // 狂暴连打：预备好了就出手（冲到目标的区）；能预备就先预备，剩下的行动点照常打
+        if (has("en_agg1_rush")) return "en_agg1_rush";
+        if (has("en_agg1_rush_prep")) return "en_agg1_rush_prep";
+        return sameZone ? "en_agg1_melee" : "en_agg1_range";
       }
+      if (ph === 2) return sameZone ? "en_agg2_melee" : null;   // 主动接近，靠移动逻辑走过去（电能炮是死刑机制，回合开始自己落下）
       // 三阶段：每回合必吸引碎片一次 + 攻击一次
       if (u._aiDebrisTurn !== state.turnNo && has("en_agg3_debris")) return "en_agg3_debris";
       if (has("en_agg3_control")) return "en_agg3_control";
@@ -270,8 +505,9 @@ const EnemyAI = (function () {
     return null;
   }
 
-  /** 三阶段的聚合体主动逃离，二阶段主动接近：覆盖表里的 dist */
-  function aiDistOverride(u, spec) {
+  /** 三阶段的聚合体主动逃离，二阶段主动接近；疫病暴徒有腐蚀的敌人可喷时保持距离 1（感染喷洒是远距离）：覆盖表里的 dist */
+  function aiDistOverride(u, spec, prey) {
+    if (u.kit === "rat_plague") return prey && plagueSprayPick(u, prey) ? Object.assign({}, spec, { dist: 1 }) : spec;
     if (u.kit !== "sand_aggregate") return spec;
     const ph = (u.resources && u.resources.phase) || 1;
     if (ph === 2) return Object.assign({}, spec, { dist: 0 });
@@ -281,6 +517,10 @@ const EnemyAI = (function () {
 
   /** 给需要额外选择的技能补上 picks（榴弹落点、激光区域、穿刺的两个目标） */
   function aiPicks(u, sid, target, prey) {
+    if (sid === "en_cleaner_wave") {
+      const z = typeof cleanerWaveZone === "function" ? cleanerWaveZone(u) : null;
+      return z != null ? { dest: z } : null;
+    }
     if (sid === "ufo_sweep") {
       const zones = [];
       for (let z = 1; z <= Number(state.zoneMode); z++) {
@@ -289,9 +529,14 @@ const EnemyAI = (function () {
       zones.sort((a, b) => b.n - a.n);
       return zones.length ? { dest: zones[0].z } : null;
     }
-    if (sid === "en_gl") {
+    if (sid === "en_gl" || sid === "en_ant_shell" || sid === "en_riot_bottle") {
+      // 被决一死战 / 嘲讽牵制：只能选牵制者所在的区（作者定）
+      const forced = typeof enemyForcedTarget === "function" ? enemyForcedTarget(u) : null;
+      if (forced) return { dest: Number(forced.zone) };
+      // 榴弹 / 大酸液弹发射时照样会被危墙 / 关着的门挡住：隔着墙的区不算人数
       const zones = [];
-      for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: preyInZone(prey, z).length });
+      const open = (z) => !(typeof lineBlocked === "function" && lineBlocked(u.zone, z));
+      for (let z = 1; z <= Number(state.zoneMode); z++) zones.push({ z, n: open(z) ? preyInZone(prey, z).length : 0 });
       zones.sort((a, b) => b.n - a.n);
       return zones.length && zones[0].n ? { dest: zones[0].z } : { dest: target ? Number(target.zone) : 1 };
     }
@@ -317,10 +562,12 @@ const EnemyAI = (function () {
     return Math.min(from, next) + "-" + Math.max(from, next);
   }
 
-  /** 手册第十章的行为描述 → 一次行动。 */
-  function aiPlan(u) {
+  /** 手册第十章的行为描述 → 一次行动。
+   *  pass：aiPlan 的第二次规划给 { lastAp: true }（见 canPayMove）；有一步只因为要留 1 行动点出手才没走时记 pass.held */
+  function aiPlanBase(u, pass) {
+    pass = pass || {};
     if (typeof mutinyTick === "function") mutinyTick();
-    const prey = validPrey();
+    const prey = validPrey(u);
     if (!prey.length) return null;
 
     let list = [];
@@ -347,7 +594,17 @@ const EnemyAI = (function () {
       }
     }
 
-    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" });
+    // 下水道维护的触灵精英：身上有负面状态时先花附赠清掉一种（enemies.js · sewerCleanseChoice / sewerCleanse）。
+    // 精英的移动也花附赠：清了这一回合就不再移动（作者没写明，先这样：清除状态优先）
+    if (typeof sewerCleanseChoice === "function" && sewerCleanseChoice(u)) {
+      return {
+        thunk: () => { state.attackerId = u.id; state.targetId = null; runSkill("en_sewer_cleanse"); },
+        meta: { actorId: u.id, targetId: null, skillName: enemyLabel(u, "en_sewer_cleanse"), skillId: "en_sewer_cleanse" },
+        ai: { kind: "cleanse", sid: "en_sewer_cleanse" }
+      };
+    }
+
+    const spec = aiDistOverride(u, AI_SPEC[u.kit] || { dist: 0, aim: "local" }, prey);
     const pick = aiTarget(u, spec, prey);
     let target = pick.unit;
     if (!target) return null;
@@ -360,7 +617,7 @@ const EnemyAI = (function () {
       if (sp && tgt) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = tgt.id; runSkill("use_scrap:" + sp.id); },
-          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮` }
+          meta: { actorId: "prop:" + sp.id, targetId: tgt.id, skillName: `${u.name} 操控碎渣机炮`, skillId: "use_scrap:" + sp.id }
         };
       }
     }
@@ -372,16 +629,17 @@ const EnemyAI = (function () {
       if (sidW) {
         return {
           thunk: () => { state.attackerId = u.id; state.targetId = "gap:" + wallKey; runSkill(sidW); },
-          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）` }
+          meta: { actorId: u.id, targetId: "gap:" + wallKey, skillName: `攻击危墙（${wallKey.replace("-", "–")} 区之间）`, skillId: sidW }
         };
       }
     }
 
-    const move = (dest) => ({
+    const moveBase = (dest) => ({
       thunk: () => { state.attackerId = u.id; doMove(u, dest); },
-      meta: { actorId: u.id, skillName: `移动到 ${dest} 区` }
+      meta: { actorId: u.id, skillName: `移动到 ${dest} 区` },
+      ai: { kind: "move", dest: Number(dest), target }
     });
-    const attack = (sid, picks) => ({
+    const attackBase = (sid, picks) => ({
       thunk: () => {
         state.attackerId = u.id;
         state.targetId = target.id;
@@ -391,26 +649,52 @@ const EnemyAI = (function () {
         if (sid === "en_king_hold") u._aiHoldTurn = state.turnNo;
         if (u.tauntTo === target.id) u.tauntTo = null;
       },
-      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid) }
+      meta: { actorId: u.id, targetId: target.id, skillName: enemyLabel(u, sid), skillId: sid },   // skillId：画面按招式挑攻击演出（attack-fx.js）
+      ai: { kind: "attack", sid, target, picks }
     });
 
-    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人
-    let step = pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0)
+    // 种族附赠（扑灭灼烧、追猎本能、威压、吐酸；enemies.js · raceBonusChoice）：真的要出手 / 移动时，先用一个。
+    // 精英 / 首领的移动也花附赠，所以它们只在不用移动、直接出手时才用，免得抢了移动的附赠；强制目标时不用
+    const withRace = (plan, step) => {
+      const rb = typeof raceBonusChoice === "function" && !pick.forced ? raceBonusChoice(u, prey, step) : null;
+      if (!rb) return plan;
+      return {
+        thunk: () => { state.attackerId = u.id; state.targetId = rb.target ? rb.target.id : null; runSkill(rb.id); },
+        meta: { actorId: u.id, targetId: rb.target ? rb.target.id : null, skillName: enemyLabel(u, rb.id), skillId: rb.id },
+        ai: { kind: "race", sid: rb.id, target: rb.target }
+      };
+    };
+    const move = (dest) => withRace(moveBase(dest), dest);
+    const attack = (sid, picks) => withRace(attackBase(sid, picks), null);
+
+    // 强制目标（嘲讽 / 决一死战）时不后撤，直接想办法打到人；决一死战里根本不能移动
+    const duelLocked = typeof touDuelVictim === "function" && !!touDuelVictim(u);
+    let step = duelLocked || (pick.forced && zdist(u.zone, target.zone) < (spec.dist || 0))
       ? null
       : aiStep(u, target, spec, prey);
     // 空隙：地面单位越过要花 1 行动点并过运动检定（敌人没有熟练，50%）。目标在空隙那边时照样去试
     // （以前过不去，两区制桥塌后近战双方永远碰不到），有一样近、不用越过空隙的路就走那条；后撤不越过空隙，宁可留在原地打
     if (step != null && !u.flying && typeof getGap === "function" && getGap(u.zone, step).type === "void") {
       const near = zdist(step, target.zone);
-      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "bridge" || (g.type === "door" && g.open); };
+      const passable = (z) => { const g = getGap(u.zone, z); return g.type === "open" || g.type === "wave" || g.type === "bridge" || (g.type === "door" && g.open); };   // 驻波墙不挡移动
       const alt = adjacentZones(u.zone).map(Number).find(z => z !== step && passable(z) && zdist(z, target.zone) === near &&
         !(state.fields && state.fields[z] && state.fields[z].abyss));
       if (near >= zdist(u.zone, target.zone)) step = null;
       else if (alt != null) step = alt;
     }
 
+    // 沙漠生物的习性：夜晚 / 沙暴不走进有沙珊瑚的区（desert.js · coralAvoid）
+    if (step != null && typeof coralAvoid === "function" && coralAvoid(u, step)) step = null;
+    // 付不起移动（精英 / 首领没有附赠行动、杂兵没有行动点）就不规划移动，改看付得起的行动（原地能打就打，打不到就不出手）。
+    // 只是为了留 1 行动点出手才没走的（离开酸液 / 越过空隙）记下来：原地出不了手时 aiPlan 再规划一次，这一步花掉最后 1 行动点
+    if (step != null && !canPayMove(u, step, pass.lastAp)) {
+      if (canPayMove(u, step, true)) pass.held = true;
+      step = null;
+    }
     let sid = aiSpecial(u, spec, target, prey, has, list);
-    if (sid && !["en_agg3_debris", "en_king_hold", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_giant_sand_pulse"].includes(sid)) {
+    // 不换目标 / 换招式的：自己找目标的、选区的；清扫机的施加共振（目标已经按「看得见、没有共振」挑好了，
+    // 换成别的招式会去打已经有共振的人、或者往人堆里走）
+    if (sid && !["en_agg3_debris", "en_agg1_rush", "en_agg1_rush_prep", "en_king_hold", "en_king_exec", "en_bigsand_summon", "en_bigsand_heal", "ufo_prime", "ufo_boom", "ufo_stomp", "ufo_sweep", "en_agg2_overheat", "en_gl", "en_gl_fire", "en_ant_shell", "en_ant_shell_fire", "en_riot_bottle", "en_riot_bottle_fire", "en_gas_ignite", "en_alarm_zap", "en_giant_sand_pulse", "en_sweeper_reso", "en_cleaner_wave"].includes(sid)) {
       const rt = retargetLegal(u, sid, target, prey, pick.forced);
       if (rt.target) target = rt.target;
       if (rt.sid) sid = rt.sid;
@@ -418,16 +702,27 @@ const EnemyAI = (function () {
     const inRange = target && zdist(u.zone, target.zone) === (spec.dist == null ? zdist(u.zone, target.zone) : spec.dist);
 
     // 手册：够不着就先移动；special 已经给出可用技能且位置合适时直接用
-    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" ||
+    const noTargetNeeded = sid === "en_agg3_debris" || sid === "en_king_hold" || sid === "en_king_exec" ||
+      sid === "en_agg1_rush" || sid === "en_agg1_rush_prep" ||   // 狂暴连打自己找目标、自己冲过去
       sid === "en_bigsand_summon" || sid === "en_bigsand_heal" || sid === "ufo_prime" ||
       sid === "ufo_boom" || sid === "ufo_stomp" || sid === "ufo_sweep" || sid === "en_agg2_overheat" ||
-      sid === "en_giant_sand_pulse";   // 全域沙暴打所有区域，不用瞄准
-    // 聚合体的电能炮：贴近打 1d20 最好；没有附赠动作走不过去时就隔一区打（1d10），不白白耗着
-    const fireNow = sid === "en_agg2_charge" && zdist(u.zone, target.zone) <= 1 && (u.bonus || 0) < 1;
-    if (sid && (inRange || !step || noTargetNeeded || fireNow)) {
+      sid === "en_giant_sand_pulse" ||   // 全域沙暴打所有区域，不用瞄准
+      sid === "en_riot_bottle_fire" ||   // 燃烧瓶落地打标定好的区，不看现在的目标在哪
+      sid === "en_gas_ignite" ||         // 点燃燃气打自己所在的区
+      sid === "en_alarm_zap";            // 电涌打所有高能的敌人，不用瞄准
+    // 触灵清扫员的范围谐波自己挑区（射程内敌人最多的区，special 已经确认有区可打）：不用移动就直接打，要后撤 / 接近就先走
+    const zoneSelf = sid === "en_cleaner_wave" && step == null;
+    if (sid && (inRange || !step || noTargetNeeded)) {
       // 打不到（射程外、自己又不移动）就不出手，免得每回合空放
-      if (noTargetNeeded || pick.forced || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
-      if (step == null) return null;
+      if (noTargetNeeded || zoneSelf || canAimSkill(u, sid, target)) return attack(sid, aiPicks(u, sid, target, prey));
+      if (step == null) {
+        // 这里打不到：先找一个走一步就能打到的站位；找不到时强制目标照旧硬打，其余不出手
+        // （决一死战不能移动：不找站位，以前每回合都规划移动、被拦下，整场不出手）
+        const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+        if (fs != null) return move(fs);
+        if (pick.forced) return attack(sid, aiPicks(u, sid, target, prey));
+        return null;
+      }
     }
     // 最后一个行动点还够不着时，有远距手段的就先用远距（扬尘体的卷扬）
     const lastAction = (u.ap || 0) <= 1 && (u.bonus || 0) <= 0;
@@ -447,9 +742,78 @@ const EnemyAI = (function () {
     const legal = retargetLegal(u, use, target, prey, pick.forced);
     if (legal.target) target = legal.target;
     if (legal.sid) use = legal.sid;
-    // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区……）：这一步不出手，不空放
-    if (!pick.forced && !canAimSkill(u, use, target)) return null;
+    // 谁都打不到（远距离单位身边只剩同区的人、三区里隔着两区、隔着危墙……）：
+    // 先找一个走一步就能打到的站位；没有就这一步不出手，不空放（强制目标照旧硬打）
+    if (!canAimSkill(u, use, target)) {
+      const fs = duelLocked ? null : firingStep(u, spec, prey, target, list, pick.forced ? target : null);
+      if (fs != null) return move(fs);
+      if (!pick.forced) return null;
+    }
     return attack(use, aiPicks(u, use, target, prey));
+  }
+
+  /* ---------- 沙暴风向：飞行敌人会自己走出逆风、走进顺风 ----------
+   * 回合开始时按所在区的风向结算：飞行单位顺风 +1 行动点、逆风 −1 行动点。
+   * - 本来就要移动：一样能走到 / 一样近的几个区里挑风向好的；
+   * - 精英 / 首领（移动用附赠行动）要出手前：换到风向更好、照样打得到原目标的相邻区再打；
+   * - 这一步没事可做（打不到人）：往风向更好的相邻区挪（杂兵移动要花行动点，只在这时才为风向挪）。 */
+  function windOf(u, z) {
+    if (!u || !u.flying || state.weather !== "sand" || typeof sandWind !== "function") return 0;
+    if (state.fields && state.fields[z] && state.fields[z].isolate) return 0;
+    return sandWind(z, state.zoneMode, state.sandDir);
+  }
+  function windStep(u, keep) {
+    if (!canPayMove(u)) return null;
+    const here = windOf(u, u.zone);
+    const opts = walkableNeighbors(u).filter(z => windOf(u, z) > here && (!keep || keep(z)));
+    if (!opts.length) return null;
+    return opts.sort((a, b) => windOf(u, b) - windOf(u, a) || a - b)[0];
+  }
+  function windMove(u, dest) {
+    return { thunk: () => { state.attackerId = u.id; doMove(u, dest); }, meta: { actorId: u.id, skillName: `移动到 ${dest} 区（${windOf(u, dest) > 0 ? "顺风" : "躲开逆风"}）` }, ai: { kind: "wind", dest } };
+  }
+  function aiPlan(u) {
+    if (u && u.trainingDummy) return null;   // 训练场的木桩：不行动
+    if (u && u.dormant) return null;         // 休眠：不行动，直到被叫醒
+    if (typeof sinkLocked === "function" && sinkLocked(u)) return null;   // 流沙没顶：不能行动
+    if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return null;   // 中立生物不行动
+    // 载具（vehicle.js）：坐在车上的镇压队用车的武器，没上车的会上车、抢车。undefined = 不归载具管，照常决策
+    if (typeof vehicleAiPlan === "function") {
+      const vp = vehicleAiPlan(u);
+      if (vp !== undefined) return vp;
+    }
+    if (typeof sandFishPlan === "function") {   // 沙鱼：捕食、白天的伏咬沙鱼潜伏不动（desert.js）
+      const fp = sandFishPlan(u);
+      if (fp === "wait") return null;
+      if (fp) return fp;
+    }
+    // 精英 / 首领离开酸液地面 / 越过空隙要花行动点，平时留着唯一的行动点出手（canPayMove）；
+    // 为此没走、原地又规划不出任何行动（谁都打不到，或者打得到的不是要打的人）时，再规划一次，最后 1 行动点拿来走这一步
+    const pass = {};
+    const plan = aiPlanBase(u, pass) || (pass.held ? aiPlanBase(u, { lastAp: true }) : null);
+    if (!u || !u.flying || state.weather !== "sand" || u.noMove || u.self === "frost") return plan;
+    if (typeof touDuelVictim === "function" && touDuelVictim(u)) return plan;   // 决一死战中不移动
+    const info = plan && plan.ai;
+    if (!plan) {
+      const z = windStep(u);
+      return z != null ? windMove(u, z) : null;
+    }
+    if (!info) return plan;
+    if (info.kind === "move") {
+      // 换一个一样近（离目标的距离相同）、风向更好的区走
+      const want = info.target ? zdist(info.dest, info.target.zone) : null;
+      const alt = want == null ? null : walkableNeighbors(u).filter(z => z !== info.dest && windOf(u, z) > windOf(u, info.dest) && zdist(z, info.target.zone) === want)
+        .sort((a, b) => windOf(u, b) - windOf(u, a) || a - b)[0];
+      return alt != null ? windMove(u, alt) : plan;
+    }
+    if (info.kind === "attack") {
+      const rank = typeof enemyRankOf === "function" ? enemyRankOf(u) : "minion";
+      if (rank === "minion" || !info.target || info.target.kind) return plan;   // 杂兵移动要花行动点，不为风向放弃出手
+      const from = u.zone;
+      const z = windStep(u, (zz) => { u.zone = zz; try { return canAimSkill(u, info.sid, info.target); } finally { u.zone = from; } });
+      return z != null ? windMove(u, z) : plan;
+    }
+    return plan;
   }
 
   /** 做决定时用「回合 + 单位 + 第几步」派生的固定随机数。
@@ -466,15 +830,30 @@ const EnemyAI = (function () {
    *  以前打不到的也会被选上：先回满架势，再打空。target 不给时取协助队列队首的目标 */
   function aiPickAssister(list, target) {
     const t = target || (state.assistQueue && state.assistQueue[0] ? unitById(state.assistQueue[0].targetId) : null);
-    const ok = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
-    if (!ok.length) return null;
-    return ok.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
+    const reach = (list || []).filter(u => !t || typeof enemyAssistReach !== "function" || enemyAssistReach(u, t));
+    if (!reach.length) return null;
+    // 触灵清扫员（下水道维护）：有别人能协助时它不主动协助，只剩它能协助才出手（enemies.js · sewerAssistPool）
+    const ok = typeof sewerAssistPool === "function" ? sewerAssistPool(reach) : reach;
+    // 暴虐猎手的协助优先权（下水道狂鼠，enemies.js · ratTyrantHasPriority）：其他狂鼠都没狂暴、它又打得到时，一定由它来协助
+    const first = typeof ratTyrantHasPriority === "function" ? ok.filter(u => ratTyrantHasPriority(u)) : [];
+    return (first.length ? first : ok).slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
   }
 
   /** 敌人回合的出手顺序：杂兵 → 精英 → BOSS */
+  /** 发号施令的敌人总是第一个行动：亡命之王的命令要用狂徒们这一回合的行动点（回防筑墙）、
+   *  改狂徒们的目标（攻击命令），排在最后的话狂徒早就把行动点用完了。其余照「杂兵 → 精英 → 首领」 */
+  const COMMANDERS = ["outlaw_king"];
+  /** 敌人回合要行动的单位：敌人 + 我方同阵营的友军（友军打和它敌对的单位，目标由 validPrey 按 hostileTo 选）。
+   *  foes() 照旧不含友军（胜负判定、「还剩几个敌人」用它）；中立生物不行动 */
+  function actors() {
+    return foes().concat(state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" &&
+      typeof playerAllied === "function" && playerAllied(u) && !(typeof isNeutralCreature === "function" && isNeutralCreature(u))),
+      typeof vehicleRiderActors === "function" ? vehicleRiderActors() : []);   // 车里的炮手也要行动
+  }
   function actingOrder() {
     const r = { minion: 0, elite: 1, boss: 2 };
-    return foes().sort((a, b) => (r[enemyRankOf(a)] || 0) - (r[enemyRankOf(b)] || 0)).map(u => u.id);
+    const key = u => (COMMANDERS.includes(u.kit) ? -1 : (r[enemyRankOf(u)] || 0));
+    return actors().sort((a, b) => key(a) - key(b)).map(u => u.id);
   }
 
   return {
@@ -486,6 +865,6 @@ const EnemyAI = (function () {
     target: aiTarget,
     step: aiStep,
     special: aiSpecial,
-    unitAlive, players, foes
+    unitAlive, players, foes, actors
   };
 })();

@@ -2,8 +2,8 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue"];
-  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain"];
+  const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setScene", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
   // Rogue's legacy encounter rows explicitly contain level: undefined when they
@@ -39,6 +39,14 @@
     if (!u) throw new Error("Unknown battle actor: " + id);
     return u;
   }
+  /** 首领机制：挂上时带上主持人填的技能名（去掉首尾空格；空着就不带，用机制原名 BOSS_MECH_DEFAULTS，boss-mechanics.js） */
+  function named(m, c) {
+    const name = typeof c.name === "string" ? c.name.trim() : "";
+    if (name) m.name = name;
+    return m;
+  }
+  /** 这个敌人身上这种机制现在叫什么（填过的技能名 / 机制原名）：去掉之前先记下来写提示 */
+  function mechLabel(u, type) { return mechConfig(bossMechList(u, type)[0] || { type }).name; }
   function validate(cmd) {
     if (types.indexOf(cmd.type) < 0) throw new Error("Unknown battle command: " + cmd.type);
     if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
@@ -46,6 +54,15 @@
     if (cmd.type === "move" && !Number.isFinite(cmd.dest)) throw new Error("dest must be a number");
     if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
     const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
+    // 首领机制的技能名（选填）：字符串，去掉首尾空格后最多 BOSS_MECH_NAME_MAX 个字（boss-mechanics.js）；空着 = 用机制原名。
+    // 联机时玩家收到的要和主持人填的一样：玩家数据的白名单（online-view.js · safeText）会整段丢掉的字样不收
+    const mechName = (c, kind) => {
+      if (c.name == null) return;
+      if (typeof c.name !== "string") throw new Error(kind + " name must be a string");
+      const name = c.name.trim();
+      if (Array.from(name).length > BOSS_MECH_NAME_MAX) throw new Error(kind + " name must be at most " + BOSS_MECH_NAME_MAX + " characters");
+      if (name && root.OnlineView && typeof root.OnlineView.safeText === "function" && root.OnlineView.safeText(name) === null) throw new Error(kind + " name can't be shown to players: " + name);
+    };
     if (cmd.type === "openingChoice" && cmd.mood == null) oneOf(cmd.bit, ["acid", "drill"], "opening bit");
     if (cmd.type === "openingChoice" && cmd.mood != null) oneOf(cmd.mood, ["gentle", "cruel"], "opening mood");
     if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge"], "reaction queue");
@@ -55,6 +72,11 @@
       if (cmd.action === "setGap") oneOf(cmd.kind, ["open", "bridge", "wall", "door", "void"], "gap kind");
       if (["setGap", "gapHp", "rollWall", "toggleDoor"].includes(cmd.action)) oneOf(cmd.key, ["1-2", "2-3"], "gap key");
       if (cmd.action === "setWeather") oneOf(cmd.value, ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"], "weather");
+      // 所在区域 / 场景 / 光影（只是画面）："" = 跟着地图 / 默认 / 跟着时钟；区域只认 world-data.js 的 BATTLE_REGIONS，
+      // 场景只认当前区域的（world-data.js · BATTLE_SCENES），光影只认 daylight.js 的三个值
+      if (cmd.action === "setRegion") oneOf(cmd.value, [""].concat(typeof BATTLE_REGIONS !== "undefined" ? BATTLE_REGIONS : []), "battle region");
+      if (cmd.action === "setScene") oneOf(cmd.value, [""].concat(typeof battleScenes === "function" ? battleScenes(state.region).map(s => s.id) : []), "battle scene");
+      if (cmd.action === "setLight") oneOf(cmd.value, [""].concat(typeof DayLight !== "undefined" ? DayLight.LIGHTS : []), "battle light");
       if (cmd.action === "setZones") oneOf(cmd.value, [2, 3].concat(typeof BOARD_LAYOUTS !== "undefined" ? Object.keys(BOARD_LAYOUTS) : []), "zone count");
       if (cmd.action === "setPartySize") oneOf(cmd.value, [2, 3, 4], "party size");
       if (["setField", "ruinHp", "setHighland", "addProp", "addParty", "addEnemy"].includes(cmd.action)) oneOf(cmd.zone, [1, 2, 3], "zone");
@@ -69,6 +91,7 @@
         oneOf(c.then, ["repeat", "once"], "execution then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("execution turns must be 1-20");
         if (!Array.isArray(c.hits) || !c.hits.length || c.hits.length > 10 || !c.hits.every(h => h && isFinite(Number(h.mult)) && Number(h.mult) > 0 && Number(h.mult) <= 20)) throw new Error("execution hits must be 1-10 multipliers");
+        mechName(c, "execution");
       }
       if (cmd.action === "setShare" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -78,6 +101,7 @@
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("share turns must be 1-20");
         if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 50) throw new Error("share pool multiplier must be 0-50");
         if (c.element != null) oneOf(c.element, ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"], "share element");
+        mechName(c, "share");
       }
       if (cmd.action === "setSpread" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -86,6 +110,7 @@
         oneOf(c.then, ["repeat", "once"], "spread then");
         if (!Number.isInteger(c.turns) || c.turns < 1 || c.turns > 20) throw new Error("spread turns must be 1-20");
         if (!isFinite(Number(c.mult)) || Number(c.mult) <= 0 || Number(c.mult) > 20) throw new Error("spread blast multiplier must be 0-20");
+        mechName(c, "spread");
       }
       if (cmd.action === "setTower" && cmd.cfg != null) {
         const c = cmd.cfg;
@@ -97,6 +122,7 @@
         if (!Number.isInteger(c.need) || c.need < 1 || c.need > 4) throw new Error("tower need must be 1-4");
         if (!isFinite(Number(c.soak)) || Number(c.soak) < 0 || Number(c.soak) > 20) throw new Error("tower soak multiplier must be 0-20");
         if (!isFinite(Number(c.fail)) || Number(c.fail) <= 0 || Number(c.fail) > 50) throw new Error("tower fail multiplier must be 0-50");
+        mechName(c, "tower");
       }
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
@@ -113,7 +139,7 @@
         ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
         : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
       (notes || []).forEach(s => appendLog(s));
-      if (!a.dying && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具，不扣附赠
+      if (!a.dying && !(notes && notes.unused) && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具、道具没用出去（射程不够等），不扣附赠
       return;
     }
     if (cmd.picks && Object.keys(cmd.picks).length) state.skillFlow = { id: cmd.skill, actorId: cmd.actor, picks: Object.assign({}, cmd.picks), index: 99 };
@@ -132,13 +158,13 @@
     state.zoneMode = Number(g.zoneMode) || 2;
     state.board = null;
     state.partySize = 2;
-    state.weather = g.weather || "none";
+    state.weather = g.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();
     state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = [];
     state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
     state.turnNo = 1; state.logPages = [{ turn: 1, lines: [] }]; state.logIndex = 0;
     state.combatPhase = "player"; state.combatStarted = false; state.exhaustTier = 0;
-    state.openingBreaks = null; state.solo = null; state.scoreAct = null; state.ambush = false;
+    state.openingBreaks = null; state.solo = null; state.scoreAct = null; state.ambush = false; state.playerAllies = [];
     state.retreated = false; state.lootByRank = null; state.lootByKit = null;
     resetBattleRecords();
     g.undo = [];
@@ -162,19 +188,26 @@
     if (typeof RUN !== "undefined" && RUN.active) RUN.apply();
     // 战斗掉落：遭遇（战斗模板）里带的；没有就清空，主持人可以在战场配置里再设
     state.battleDrops = enc && enc.drops && typeof normalizeBattleDrops === "function" ? normalizeBattleDrops(enc.drops) : null;
-    if (enc && typeof buildEncounter === "function") buildEncounter(enc, cmd.level, partyN);
+    // 援军、连续战斗（chain.js）
+    if (typeof Chain !== "undefined") Chain.clear();
+    if (enc && typeof buildEncounter === "function") { buildEncounter(enc, cmd.level, partyN); if (typeof Chain !== "undefined") Chain.init(enc, cmd.level, partyN); }
     else {
       const presets = enemyPresets();
       const plan = g.enemyPlan && g.enemyPlan.length ? g.enemyPlan : [{ id: "thug_knife", lv: cmd.level, zone: 2 }, { id: "thug_hammer", lv: cmd.level, zone: 2 }, { id: "bandit_boss", lv: cmd.level, zone: 2 }];
       plan.forEach(row => {
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(row.id, Number(row.lv) || cmd.level, partyN, row.zone, null, row.race) : null;
+        // 任务节点里主持人定的富集与否（沙鱼，desert.js）
+        if (pack && typeof row.enriched === "boolean" && typeof desertSetEnriched === "function") pack.forEach(u => desertSetEnriched(u, row.enriched));
         if (pack && pack.length) { pack.forEach(u => state.units.push(u)); return; }
         const p = presets.find(x => x.id === row.id);
         if (!p || !p.build) return;
         const u = p.build(Number(row.lv) || cmd.level, partyN);
+        if (typeof applyEnemyIV === "function") applyEnemyIV(u, null, row.race);
         u.zone = Math.min(Number(state.zoneMode), Number(row.zone) || Number(state.zoneMode)); state.units.push(u);
       });
     }
+    // 所在区域、光影（只是画面）：遭遇的 region / 跑团队伍在地图上的地点；光影跟着时钟（world-data.js · battleLookStart）
+    if (typeof battleLookStart === "function") battleLookStart({ region: enc && enc.region });
     return { encounter: enc, partySize: partyN, notes };
   }
   function panel(cmd, env) {
@@ -214,7 +247,7 @@
       case "addEnemy": {
         const p = enemyPresets().find(x => x.id === cmd.preset); if (!p) break;
         const partyN = typeof syncPartySizeFromField === "function" ? syncPartySizeFromField() : liveHeroCount();
-        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone) : null;
+        const pack = typeof spawnEnemyGroup === "function" ? spawnEnemyGroup(cmd.preset, cmd.level, partyN, cmd.zone, cmd.iv, cmd.race) : null;
         if (pack && pack.length) pack.forEach(u => state.units.push(u));
         else { const u = p.build(cmd.level, partyN); u.zone = Math.min(cmd.zone, Number(state.zoneMode)); state.units.push(u); if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); }
         g.enemyPlan = (g.enemyPlan || []).concat([{ id: cmd.preset, lv: cmd.level, zone: cmd.zone }]); break;
@@ -234,51 +267,55 @@
       case "toggleDoor": state.gaps[cmd.key].open = !state.gaps[cmd.key].open; break;
       case "addProp": { const p = makeProp(cmd.kind, cmd.zone, cmd.level); p.faction = cmd.faction || "player"; state.props = state.props || []; state.props.push(p); if (cmd.kind === "battery" && typeof syncBatteryShields === "function") syncBatteryShields(); value = p.id; break; }
       case "setExecution": {
-        // 首领机制·死刑（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·死刑（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「死刑」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "execution");
         removeBossMechanics(u, "execution");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "execution", phase: c.phase, turns: c.turns, then: c.then, hits: c.hits.map(h => ({ mult: Number(h.mult), element: h.element || undefined })) });
+          const m = addBossMechanic(u, named({ type: "execution", phase: c.phase, turns: c.turns, then: c.then, hits: c.hits.map(h => ({ mult: Number(h.mult), element: h.element || undefined })) }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「死刑」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「死刑」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：标记后 ${c.turns} 回合、${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，${c.hits.length} 段（× ${c.hits.map(h => h.mult).join(" / ")} atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setShare": {
-        // 首领机制·分担（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·分担（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「分担」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "share");
         removeBossMechanics(u, "share");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "share", phase: c.phase, turns: c.turns, then: c.then, pool: { mult: Number(c.mult) }, element: c.element || null });
+          const m = addBossMechanic(u, named({ type: "share", phase: c.phase, turns: c.turns, then: c.then, pool: { mult: Number(c.mult) }, element: c.element || null }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「分担」：随机标记一人，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，伤害池 ${c.mult} × atk 由他所在区的友方平均分担，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「分担」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：随机标记一人，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，伤害池 ${c.mult} × atk 由他所在区的友方平均分担，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setSpread": {
-        // 首领机制·远离（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·远离（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「远离」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "spread");
         removeBossMechanics(u, "spread");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "spread", phase: c.phase, turns: c.turns, then: c.then, blast: { mult: Number(c.mult) } });
+          const m = addBossMechanic(u, named({ type: "spread", phase: c.phase, turns: c.turns, then: c.then, blast: { mult: Number(c.mult) } }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「远离」：标记我方全员，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时每人在自己的区爆炸一次（每次对同区每个友方 ${c.mult} × atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「远离」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：标记我方全员，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时每人在自己的区爆炸一次（每次对同区每个友方 ${c.mult} × atk），${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "setTower": {
-        // 首领机制·踩塔（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉
+        // 首领机制·踩塔（boss-mechanics.js）：给敌人挂上 / 去掉。cfg = null 去掉；cfg.name 技能名（选填，不填叫「踩塔」）
         const u = actor(cmd.actor);
+        const was = mechLabel(u, "tower");
         removeBossMechanics(u, "tower");
         if (cmd.cfg) {
           const c = cmd.cfg;
-          addBossMechanic(u, { type: "tower", phase: c.phase, turns: c.turns, then: c.then, count: c.count, need: c.need, soak: { mult: Number(c.soak) }, fail: { kind: "raid", mult: Number(c.fail) } });
+          const m = addBossMechanic(u, named({ type: "tower", phase: c.phase, turns: c.turns, then: c.then, count: c.count, need: c.need, soak: { mult: Number(c.soak) }, fail: { kind: "raid", mult: Number(c.fail) } }, c));
           bossMechSync(notes);
-          notes.unshift(`${u.name} 加上「踩塔」：随机标记 ${c.count} 个区，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，每座塔至少 ${c.need} 人踩住（每人挨 ${c.soak} × atk），没人踩则全员各挨 ${c.fail} × atk，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
-        } else notes.push(`${u.name} 去掉了「踩塔」。`);
+          notes.unshift(`${u.name} 加上「${mechConfig(m).name}」：随机标记 ${c.count} 个区，${c.turns} 回合后${c.phase === "player" ? "我方" : "敌人"}回合开始时落下，每座塔至少 ${c.need} 人踩住（每人挨 ${c.soak} × atk），没人踩则全员各挨 ${c.fail} × atk，${c.then === "repeat" ? "落下后重新标记" : "只放一次"}。`);
+        } else notes.push(`${u.name} 去掉了「${was}」。`);
         break;
       }
       case "removeProp": state.props = state.props.filter(x => x.id !== cmd.id); break;
@@ -290,7 +327,11 @@
         panel({ action: "normalizeField" }, env); break;
       }
       case "setPartySize": g.partySize = state.partySize = Number(cmd.value) || 2; break;
-      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      case "setWeather": { const was = state.weather; state.weather = cmd.value || "none"; state.weatherBy = null; if (cmd.persist) g.weather = state.weather; if (state.weather === "sand" && was !== "sand" && typeof rollSandDir === "function") rollSandDir(); break; }
+      // 所在区域 / 场景 / 光影：只是画面的标签，不改结算（规则的白天 / 夜晚照旧跟着时钟）。只管这一场，下一场开战回到跟着地图 / 默认 / 时钟
+      case "setRegion": value = battleLookSet({ region: cmd.value }); break;
+      case "setScene": value = battleLookSet({ scene: cmd.value }); break;
+      case "setLight": value = battleLookSet({ light: cmd.value }); break;
       case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
       case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
       case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;
@@ -341,6 +382,8 @@
       case "battle.panel": return panel(cmd, env);
       case "battle.undo": return env.undo ? env.undo() : false;
       case "battle.continue": return env.continueBattle ? env.continueBattle(cmd.outcome) : false;
+      // 敌人打完：还有援军 / 下一场就不结束（chain.js）
+      case "battle.chain": { const notes = []; const goOn = typeof Chain !== "undefined" ? Chain.onCleared(notes) : false; notes.forEach(t => appendLog(t)); return { continued: goOn, notes }; }
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };

@@ -1,0 +1,50 @@
+# Claude（GitHub 上的协作者）：在 issue / PR 里留言「@claude ……」就会被叫醒，按留言干活，改完开 PR。
+# 用的是仓库 Secret「CLAUDE_CODE_OAUTH_TOKEN」（在自己电脑上运行 claude setup-token 生成，算在自己的 Claude 订阅额度里）。
+# 只响应仓库主人 / 成员 / 协作者的留言，路人 @claude 不会花额度。项目规则见根目录 CLAUDE.md。
+name: Claude
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened]
+# 同一个 issue / PR 同时只跑一个 Claude：后来的排队等前一个跑完，不取消正在跑的
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+  actions: read
+jobs:
+  claude:
+    if: >-
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+      (github.event_name != 'issues' && contains(github.event.comment.body, '@claude') &&
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # 联机转发的测试（tests/relay*.test.js）要 relay/ 下的 miniflare，不装的话 npm test 有十几个失败
+      - name: 装 relay 依赖
+        run: npm ci --prefix relay --no-audit --no-fund
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}   # 让它自己用 gh pr create 开 PR
+          # 最高推理档位 max：Claude Code 只有通过这个环境变量设 max 才会一直生效（--effort max 也一起传）
+          # 见 https://code.claude.com/docs/en/model-config#adjust-effort-level
+          CLAUDE_CODE_EFFORT_LEVEL: max
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # 模型：Claude Opus 5.5（API id claude-opus-5-5，见 https://docs.anthropic.com/en/docs/about-claude/models/overview）
+          claude_args: --model claude-opus-5-5 --effort max --allowedTools "Bash(npm test),Bash(node --test:*),Bash(node tools/playtest.js:*),Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*)"

@@ -32,7 +32,7 @@ test("川川普通攻击改成电击伤害", () => {
   assert.ok(sp.els.length >= 2 && sp.els.every(e => e === "electric"), sp.els.join(","));
 });
 
-test("电击鞭：能量伤害；有电能时可以选择消耗 1 电能把自己拉到敌人那一区", () => {
+test("电能鞭：能量伤害；有电能时可以选择消耗 1 电能把自己拉到敌人那一区", () => {
   const { c, st, foe } = field(null, 2);
   const chuan = c.findKit("chuan", st.units);
   chuan.resources.charge = 2;

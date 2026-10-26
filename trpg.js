@@ -10,7 +10,13 @@
 
 const TRPG = {
   active: false,
-  taskBattle: null   // 正在打的任务战斗 { id, index }（trpg-tasks.js）
+  lastRest: null,    // 最近一次长休的结算（ledger.js · restReport）
+  camp: null,        // 营地（长休前）：{ plan, force, status: ledger.js · campStatus }；联机玩家也看到
+  taskBattle: null,  // 正在打的任务战斗 { id, index }（trpg-tasks.js）
+  clinicOpen: false, // 诊所向联机玩家开放（玩家可以申请义体改造），主持人在「诊所」页开关
+  smithOpen: false,  // 工匠向联机玩家开放（玩家给自己的武器升级，加工费从这名角色的钱包出），主持人在「武器升级」页开关
+  workshopOpen: false, // 工坊向联机玩家开放（玩家给自己制作 / 拆解），主持人在「工坊」页开关
+  cyberRequests: []  // 联机玩家的改造申请：[{ id, kit, plan, by, byName, status: pending / done / denied, note }]
 };
 
 function trpgHeroes() {
@@ -32,12 +38,214 @@ function trpgBuy(key, qty, free) {
   const row = trpgShopRow(key);
   qty = Math.max(1, Math.floor(Number(qty) || 1));
   if (!row) return ["没有这件商品。"];
-  const cost = row.price * qty;
+  const cost = Math.round(row.price * qty * (typeof featHaggleMul === "function" ? featHaggleMul(trpgHeroes(), 1) : 1));   // 巧手匠人：八折
   if (!free && (Number(state.kuizhi) || 0) < cost) return [`奎支不够：${trpgShopName(row)} ×${qty} 要 ${cost}，手里只有 ${Number(state.kuizhi) || 0}。`];
   if (!free) state.kuizhi = (Number(state.kuizhi) || 0) - cost;
   if (row.give.water) setLedgerWater(ledgerWater() + row.give.water * qty);
   if (row.give.item) bagAdd(row.give.item, qty);
-  return [`${free ? "主持人给予" : "买下"} ${trpgShopName(row)} ×${qty}${free ? "" : `，花掉 ${cost} 奎支（剩 ${state.kuizhi}）`}。`];
+  const out = [`${free ? "主持人给予" : "买下"} ${trpgShopName(row)} ×${qty}${free ? "" : `，花掉 ${cost} 奎支（剩 ${state.kuizhi}）`}。`];
+  if (!free) trpgEarnPoints(cost, out);
+  return out;
+}
+
+/* ---------- 工坊（docs/workshop-design.md 第 5–7 节）----------
+ * 配方、商店积分记在队伍账上（LEDGER.workshop），跟着存档空位走。
+ * 制作检定照常由玩家掷：主持人可以让程序掷，也可以直接记下玩家掷出的结果；难度可以改。地点不强制，主持人按剧情判断。 */
+function trpgWorkshop() {
+  if (!LEDGER.workshop) LEDGER.workshop = { recipes: [], points: 0, carry: 0 };
+  return LEDGER.workshop;
+}
+function trpgEarnPoints(spent, out) {
+  const per = typeof ROGUE_SHOP_POINTS !== "undefined" ? Number(ROGUE_SHOP_POINTS.per) || 0 : 0;
+  if (!per || !(spent > 0)) return;
+  const w = trpgWorkshop();
+  const total = w.carry + spent, got = Math.floor(total / per);
+  w.carry = total - got * per;
+  w.points += got;
+  if (got && out) out.push(`商店积分 +${got} → ${w.points}。`);
+}
+function trpgPointsInfo() {
+  const w = trpgWorkshop(), per = typeof ROGUE_SHOP_POINTS !== "undefined" ? Number(ROGUE_SHOP_POINTS.per) || 0 : 0;
+  return { points: w.points, carry: w.carry, per, next: per ? per - w.carry : 0 };
+}
+function trpgAdjustPoints(n, why) {
+  n = Math.floor(Number(n) || 0);
+  if (!n) return [];
+  const w = trpgWorkshop();
+  w.points = Math.max(0, w.points + n);
+  return [`商店积分 ${n > 0 ? "+" : ""}${n}${why ? "（" + why + "）" : ""}，现有 ${w.points}。`];
+}
+function trpgRedeem(itemId) {
+  const it = EFFECT_ITEMS.find(x => x.id === itemId && x.points > 0);
+  if (!it) return ["这件东西不能用积分兑换。"];
+  const w = trpgWorkshop();
+  if (w.points < it.points) return [`积分不够：${it.name} 要 ${it.points}，现有 ${w.points}。`];
+  w.points -= it.points;
+  bagAdd(it.id, 1);
+  return [`用 ${it.points} 积分兑换 ${it.name}（剩 ${w.points} 积分）。`];
+}
+function trpgKnowsRecipe(id) {
+  const it = craftItem(id);
+  return !!it && (CRAFT_RULES.knownDiffs.includes(it.diff) || trpgWorkshop().recipes.includes(id));
+}
+/** 主持人教会 / 收回一张配方 */
+function trpgTeachRecipe(id, on) {
+  const it = craftItem(id);
+  if (!it) return ["没有这个配方。"];
+  const w = trpgWorkshop();
+  w.recipes = w.recipes.filter(x => x !== id);
+  if (on !== false) w.recipes.push(id);
+  return [on !== false ? `学会了${it.name}的配方（${ROGUE_CHECKS.diffs[it.diff].name} · ${it.prof}）。` : `收回${it.name}的配方。`];
+}
+function trpgProfLevel(u, prof) {
+  const p = heroProfile(u.kit), profs = (p && p.profs) || {};
+  let level = Math.min(PROF_MAX, Number(profs[profName(prof)] || profs[prof]) || 0);
+  if (!level && typeof featHas === "function" && featHas(u, "polymath")) level = 1;
+  return level;
+}
+/** 成功率：diff 不给时按配方的难度（主持人可以改）；helper 有对应熟练项就给优势 */
+function trpgCraftOdds(kit, itemId, diff, helper) {
+  const it = craftItem(itemId), u = trpgHeroes().find(h => h.kit === kit);
+  if (!it || !u) return null;
+  if (u.dead) return null;   // 死亡角色不能制作（主持人复活后才能做）
+  diff = ROGUE_CHECKS.diffs[diff] ? diff : it.diff;
+  const level = trpgProfLevel(u, it.prof);
+  const hp = (u.layers || []).reduce((a, l) => a + (Number(l.current) || 0), 0), max = (u.layers || []).reduce((a, l) => a + (Number(l.max) || 0), 0);
+  const perks = checkPerksFor(u.kit, it.prof, hp * 2 < max);
+  const hu = helper && helper !== kit ? trpgHeroes().find(h => h.kit === helper) : null;
+  const helped = !!(hu && !hu.dead &&trpgProfLevel(hu, it.prof) > 0);
+  const adv = !!perks.adv || helped, dis = !!perks.dis && !adv;
+  const base = ROGUE_CHECKS.chance[level][["easy", "normal", "hard", "extreme"].indexOf(diff)] || 0;
+  let chance = adv ? 1 - (1 - base) * (1 - base) : dis ? base * base : base;
+  if (perks.reroll) chance = 1 - (1 - chance) * (1 - chance);
+  return { kit, item: it.id, name: u.name, prof: it.prof, diff, diffName: ROGUE_CHECKS.diffs[diff].name, level, base, chance: base ? chance : 0,
+    adv, dis, reroll: !!perks.reroll, helped, hours: CRAFT_RULES.hours[diff] };
+}
+/** 制作一样：c = { kit, item, diff?, helper?, result: "roll"（程序掷）/ "ok" / "fail"（记下玩家掷的结果）}。材料要背包里有实物（金属也是）。
+ *  同时做好几样：c = { jobs: [上面那种…] }，大家一起开工，时间只推进一次、按最久的那件算（设计文档：休息时大家同时各做各的） */
+function trpgCraft(c) {
+  c = c || {};
+  if (Array.isArray(c.jobs)) {
+    const out = [], busy = new Set();
+    let hours = 0;
+    const nameOf = (kit) => (trpgHeroes().find(h => h.kit === kit) || {}).name || kit;
+    c.jobs.filter(Boolean).forEach(j => {
+      // 设计文档第 5 节：打下手的人这段时间不能做自己的东西；做东西的人和打下手的人都算忙，同一个人同一段时间只做一件事
+      if (busy.has(j.kit)) { out.push(`${nameOf(j.kit)} 同时只能做一样东西。`); return; }
+      if (j.helper && busy.has(j.helper)) { out.push(`${nameOf(j.helper)} 已经在忙了。`); return; }
+      if (j.helper && j.helper === j.kit) { out.push(`${nameOf(j.kit)} 不能给自己打下手。`); return; }
+      busy.add(j.kit);
+      if (j.helper) busy.add(j.helper);
+      const r = trpgCraftOne(j);
+      out.push(...r.notes);
+      hours = Math.max(hours, r.hours);
+    });
+    return out.concat(trpgPassHours(hours));
+  }
+  const r = trpgCraftOne(c);
+  return r.notes.concat(trpgPassHours(r.hours));
+}
+/** 做一样但不推进时间：返回 { notes, hours }（没做成 hours 为 0） */
+function trpgCraftOne(c) {
+  const it = craftItem(c.item);
+  if (!it) return { notes: ["没有这个配方。"], hours: 0 };
+  if (!trpgKnowsRecipe(it.id)) return { notes: [`还不会做${it.name}（在工坊页教会配方）。`], hours: 0 };
+  const o = trpgCraftOdds(c.kit, it.id, c.diff, c.helper);
+  if (!o) {
+    const d = trpgHero(c.kit);
+    return { notes: [d && d.dead ? `${d.name} 已死亡，不能制作。` : "没有这名角色。"], hours: 0 };
+  }
+  const hd = c.helper ? trpgHero(c.helper) : null;
+  if (hd && hd.dead) return { notes: [`${hd.name} 已死亡，不能打下手。`], hours: 0 };
+  const rc = CRAFT_RECIPES[it.id];
+  const lack = Object.keys(rc).filter(id => bagCount(id) < rc[id]);
+  if (lack.length) return { notes: ["材料不够：" + lack.map(id => `${ITEM_CATALOG[id].name} 差 ${rc[id] - bagCount(id)}`).join("，") + "。"], hours: 0 };
+  let ok, rollText = "";
+  if (c.result === "ok" || c.result === "fail") ok = c.result === "ok";
+  else {
+    if (!o.base) return { notes: [`${o.name} 没有「${it.prof}」熟练，做不了${o.diffName}的东西。`], hours: 0 };
+    const r = typeof Hotseat !== "undefined" ? Hotseat.rollCheck({ base: o.base, adv: o.adv, dis: o.dis, reroll: o.reroll }) : { ok: Math.random() < o.chance, rolls: [] };
+    ok = r.ok;
+    rollText = r.rolls.length ? `d100 ${r.rolls.map(x => x.roll == null ? x.label : (x.label ? x.label + " " : "") + x.roll).join("，")} → ` : "";
+  }
+  const spend = ok ? rc : craftFailLoss(rc);
+  Object.keys(spend).forEach(id => bagAdd(id, -spend[id]));
+  const used = Object.keys(spend).map(id => `${ITEM_CATALOG[id].name}×${spend[id]}`).join("、") || "无";
+  const helperName = o.helped ? `（${(trpgHeroes().find(h => h.kit === c.helper) || {}).name} 打下手）` : "";
+  const out = [`${o.name}${helperName} 制作${it.name}（${o.diffName} · 成功率 ${Math.round(o.chance * 1000) / 10}%）：${rollText}${ok ? "成功" : "失败"}。` +
+    (ok ? `用掉 ${used}。` : `损失 ${used}，壳体留着。`)];
+  if (ok) bagAdd(it.id, 1);
+  return { notes: out, hours: o.hours };
+}
+function trpgSalvage(itemId) {
+  const y = salvageYield(itemId);
+  if (!y) return ["这件东西拆不了。"];
+  if (bagCount(itemId) < 1) return ["背包里没有这件东西。"];
+  bagAdd(itemId, -1);
+  Object.keys(y).forEach(id => bagAdd(id, y[id]));
+  return [`拆掉 ${ITEM_CATALOG[itemId].name}：拿回 ${Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、")}。`];
+}
+/* ---------- 联机玩家的武器升级 / 工坊（规则同主持人面板，入口在 online-ui.js；联机由房主结算，hotseat-game.js）----------
+ * 主持人开了「工匠 / 工坊向联机玩家开放」玩家才能用；只能动自己操控的角色；钱从这名角色自己的钱包出。
+ * 发给玩家的包里只有材料数量、价格、成功率这类公开数字，没有坚毅生命。 */
+/** 联机包 / 界面：{ kit, name, purse, weapons: [{ kit, name, lv, next, max, canSelf, enough, fee, mats }] } */
+function trpgSmithPacket(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const weapons = (u.linkedKits || []).map(k => {
+    const info = trpgUpgradeInfo(u, k);
+    return { kit: k, name: typeof weaponName === "function" ? weaponName(k) : k, lv: info.lv, next: info.next, max: !!info.max, canSelf: !!info.canSelf,
+      enough: !!info.enough, fee: info.max ? 0 : trpgSmithFee(info), mats: info.mats.map(m => ({ name: m.name, need: m.need, have: m.have })) };
+  });
+  return { kit, name: u.name, purse: trpgPurse(kit), weapons };
+}
+/** 玩家升级武器：mode self（工作站，≤ 4 级，只耗材料）/ smith（找工匠，材料 + 参考加工费，费用从这名角色的钱包出）；失败抛错，不扣钱 */
+function trpgSmithUpgrade(kit, weaponKit, mode) {
+  if (!TRPG.smithOpen) throw new Error("工匠现在没开");
+  if (mode !== "self" && mode !== "smith") throw new Error("不认识的升级方式");
+  const u = trpgHero(kit);
+  if (!u) throw new Error("没有这名角色");
+  if (u.dead) throw new Error(`${u.name} 已死亡`);
+  if (!(u.linkedKits || []).includes(weaponKit)) throw new Error("这不是你的武器");
+  const before = trpgWeaponLevel(u, weaponKit);
+  const notes = mode === "smith" ? trpgPayWith(kit, () => trpgUpgradeWeapon(kit, weaponKit, "smith")) : trpgUpgradeWeapon(kit, weaponKit, "self");
+  if (trpgWeaponLevel(u, weaponKit) === before) throw new Error(notes[0] || "升不了");
+  return notes;
+}
+/** 联机包 / 界面：{ kit, name, recipes: [{ id, name, prof, diff, diffName, hours, known, level, chance, mats }], salvage: [{ id, name, qty, yields }], points } */
+function trpgWorkshopPacket(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const recipes = EFFECT_ITEMS.filter(it => CRAFT_RECIPES[it.id]).map(it => {
+    const rc = CRAFT_RECIPES[it.id], o = trpgCraftOdds(kit, it.id, null, null);
+    return { id: it.id, name: it.name, prof: it.prof, diff: it.diff, diffName: ROGUE_CHECKS.diffs[it.diff].name, hours: CRAFT_RULES.hours[it.diff],
+      known: trpgKnowsRecipe(it.id), level: o ? o.level : 0, chance: o ? Math.round(o.chance * 1000) / 10 : 0,
+      mats: Object.keys(rc).map(id => ({ id, name: ITEM_CATALOG[id].name, need: rc[id], have: bagCount(id) })) };
+  });
+  const salvage = bagList().filter(x => salvageYield(x.id)).map(x => {
+    const y = salvageYield(x.id);
+    return { id: x.id, name: x.name, qty: x.qty, yields: Object.keys(y).map(id => `${ITEM_CATALOG[id].name}×${y[id]}`).join("、") };
+  });
+  return { kit, name: u.name, recipes, salvage, points: trpgPointsInfo().points };
+}
+/** 玩家制作：程序掷骰，难度按配方，可以让队友打下手；配方要主持人教会才行。成功率 / 材料不够这类失败抛错，不推进时间 */
+function trpgWorkshopCraft(kit, item, helper) {
+  if (!TRPG.workshopOpen) throw new Error("工坊现在没开");
+  const it = craftItem(item);
+  if (!it) throw new Error("没有这个配方");
+  if (!trpgKnowsRecipe(it.id)) throw new Error(`还不会做${it.name}，要主持人教会配方`);
+  const r = trpgCraftOne({ kit, item: it.id, helper: helper || null, result: "roll" });
+  if (!r.hours) throw new Error(r.notes[0] || "做不了");
+  return r.notes.concat(trpgPassHours(r.hours));
+}
+/** 玩家拆解背包里的东西（不花时间、不花钱） */
+function trpgWorkshopSalvage(kit, itemId) {
+  if (!TRPG.workshopOpen) throw new Error("工坊现在没开");
+  const u = trpgHero(kit);
+  if (!u || u.dead) throw new Error("没有这名角色");
+  const notes = trpgSalvage(itemId);
+  if (!/^拆掉/.test(notes[0] || "")) throw new Error(notes[0] || "拆不了");
+  return notes;
 }
 /** 背包里的东西 ±n（丢弃、剧情里拿走 / 得到） */
 function trpgAdjustItem(id, n) {
@@ -55,6 +263,169 @@ function trpgAdjustKuizhi(n, why) {
   state.kuizhi = Math.max(0, (Number(state.kuizhi) || 0) + n);
   return [`奎支 ${n > 0 ? "+" : ""}${n}${why ? "（" + why + "）" : ""}，现有 ${state.kuizhi}。`];
 }
+/* ---------- 私人钱包 ----------
+ * 每名角色一个钱包（LEDGER.purse，跟着跑团存档走）；state.kuizhi 是队伍公账（战斗掉落、主持人加减的钱进这里）。
+ * 任务的奎支报酬自动平分进还活着的角色的钱包（个人任务只进那名角色的）；队员之间可以互相转钱，公账也能转进 / 转出。
+ * 买东西、升级武器、改装、制作……主持人可以选「由谁付」：选了角色就从他的钱包扣（trpg-commands.js · payer）。 */
+const TRPG_PARTY_PURSE = "party";
+function trpgPurseKits() { return trpgHeroes().filter(h => !h.dead).map(h => h.kit); }
+function trpgPurse(kit) {
+  if (kit === TRPG_PARTY_PURSE) return Math.max(0, Number(state.kuizhi) || 0);
+  return Math.max(0, Math.floor(Number((LEDGER.purse || {})[kit]) || 0));
+}
+function trpgPurseSet(kit, n) {
+  n = Math.max(0, Math.floor(Number(n) || 0));
+  if (kit === TRPG_PARTY_PURSE) { state.kuizhi = n; return; }
+  LEDGER.purse = LEDGER.purse || {};
+  if (n) LEDGER.purse[kit] = n; else delete LEDGER.purse[kit];
+}
+function trpgPurseName(kit) { return kit === TRPG_PARTY_PURSE ? "队伍公账" : (typeof trpgHeroLabel === "function" ? trpgHeroLabel(kit) : kit); }
+/** 把 amount 奎支平分进 kits 的钱包（默认还活着的全队）；分不尽的零头从前面的人起每人多 1。返回日志行 */
+function trpgPurseSplit(amount, kits, why) {
+  amount = Math.floor(Number(amount) || 0);
+  kits = (kits && kits.length ? kits : trpgPurseKits()).slice();
+  if (amount <= 0) return [];
+  if (!kits.length) { trpgPurseSet(TRPG_PARTY_PURSE, trpgPurse(TRPG_PARTY_PURSE) + amount); return [`${amount} 奎支${why ? "（" + why + "）" : ""}：没有能分的人，进队伍公账。`]; }
+  const each = Math.floor(amount / kits.length), rest = amount - each * kits.length;
+  kits.forEach((k, i) => trpgPurseSet(k, trpgPurse(k) + each + (i < rest ? 1 : 0)));
+  if (kits.length === 1) return [`${amount} 奎支${why ? "（" + why + "）" : ""}进 ${trpgPurseName(kits[0])} 的钱包（现有 ${trpgPurse(kits[0])}）。`];
+  return [`${amount} 奎支${why ? "（" + why + "）" : ""}平分给 ${kits.length} 人：每人 ${each}${rest ? `（零头 ${rest} 从前面的人起每人多 1）` : ""}。`];
+}
+/** 转钱：from / to 是角色 kit 或 "party"（队伍公账） */
+function trpgPurseTransfer(from, to, amount) {
+  amount = Math.floor(Number(amount) || 0);
+  const ok = (k) => k === TRPG_PARTY_PURSE || trpgHeroes().some(h => h.kit === k);
+  if (!ok(from) || !ok(to)) return ["没有这个钱包。"];
+  if (from === to) return ["不能转给自己。"];
+  if (amount <= 0) return ["转多少要大于 0。"];
+  if (trpgPurse(from) < amount) return [`${trpgPurseName(from)} 只有 ${trpgPurse(from)} 奎支，不够转 ${amount}。`];
+  trpgPurseSet(from, trpgPurse(from) - amount);
+  trpgPurseSet(to, trpgPurse(to) + amount);
+  if (typeof ledgerCapture === "function") ledgerCapture();
+  return [`${trpgPurseName(from)} 转给 ${trpgPurseName(to)} ${amount} 奎支（${trpgPurseName(from)} 剩 ${trpgPurse(from)}，${trpgPurseName(to)} 现有 ${trpgPurse(to)}）。`];
+}
+/** 用某名角色的钱包付这次操作的钱：把他的钱包换成 state.kuizhi 跑一遍，跑完写回（公账原样还回去） */
+function trpgPayWith(payer, fn) {
+  if (!payer || payer === TRPG_PARTY_PURSE) return fn();
+  if (!trpgHeroes().some(h => h.kit === payer)) return ["没有这名角色。"];
+  const pool = Number(state.kuizhi) || 0;
+  const start = trpgPurse(payer);
+  state.kuizhi = start;
+  try {
+    const out = fn();
+    trpgPurseSet(payer, state.kuizhi);
+    // 没花钱（维修 / 制作 / 教配方这类不收钱的操作，或者操作失败）就不写「由谁付」
+    if (Array.isArray(out) && trpgPurse(payer) !== start) out.push(`（由 ${trpgPurseName(payer)} 付，钱包剩 ${trpgPurse(payer)}）`);
+    return out;
+  } finally { state.kuizhi = pool; }
+}
+/* ---------- 诊所：义体改造（规则和单局一样：growth.js · cyberPlanError / cyberLayersFor，价格 ROGUE_CLINIC.cyberPerHp）----------
+ * 方案记在角色身上（u.cyberPlan），跟着跑团存档走（game.js · packHero）；升级后按方案重建血量层。
+ * 主持人在「诊所」页直接改（可以选由谁付）；联机玩家在诊所开放时提交申请，主持人同意后才改，钱从那名角色的钱包出。 */
+function trpgHero(kit) { return trpgHeroes().find(h => h.kit === kit) || null; }
+/** 没改造时的肉体上限（和 applyLevelStats 一样算） */
+function trpgFleshMax(u) {
+  if (u.growth && !u.attrs) return (u.baseHp || 14) + (u.growth.hp || 0) * Math.max(0, (u.level || 1) - 1);
+  return u.attrs ? derivedFromAttrs(u.attrs, u.level).hp : ((u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0));
+}
+function trpgCyberPlan(p) {
+  p = p || {};
+  return { armor: Math.floor(Number(p.armor) || 0), shield: Math.floor(Number(p.shield) || 0), sand: Math.floor(Number(p.sand) || 0), spirit: !!p.spirit };
+}
+/** { fleshMax, rate, limit, current, perHp } */
+function trpgCyberInfo(kit) {
+  const u = trpgHero(kit);
+  if (!u) return null;
+  const fleshMax = trpgFleshMax(u) - (u.cyberware && u.cyberware.length && typeof cyberwareHpCut === "function" ? cyberwareHpCut(u) : 0);
+  const rate = u.cyberware && u.cyberware.length && typeof cyberwareLayerRateFor === "function" ? cyberwareLayerRateFor(u, fleshMax) : cyberRateOf(u.attrs, u.level);   // 和义体共用改造率
+  return { kit, name: u.name, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate), current: trpgCyberPlan(u.cyberPlan), perHp: ROGUE_CLINIC.cyberPerHp };
+}
+/** 改造预览：{ error, cost, layers（从外到内） } —— 动了多少点肉体（加减都算），换成 / 换回星灵按被换的肉体点数算 */
+function trpgCyberPreview(kit, plan) {
+  const info = trpgCyberInfo(kit);
+  if (!info) return { error: "没有这名角色", cost: 0, layers: [] };
+  const p = trpgCyberPlan(plan), a = info.current;
+  const error = cyberPlanError(p, info.fleshMax, info.rate);
+  if (error) return Object.assign({ error, cost: 0, layers: [] }, info);
+  let pts = CYBER_OUTER.reduce((s, t) => s + Math.abs(p[t] - a[t]), 0);
+  if (a.spirit !== p.spirit) pts += info.fleshMax - CYBER_OUTER.reduce((s, t) => s + p[t], 0);
+  return Object.assign({ error: null, cost: pts * info.perHp, layers: cyberLayersFor(info.fleshMax, p) }, info);
+}
+/** 做改造：扣钱（state.kuizhi —— 由谁付由 trpgPayWith 换好），按方案重建血量层；伤势照旧带着（缺的先从外层扣，最内层至少留 1）。
+ *  free：主持人直接改，不收钱 */
+function trpgModifyHero(kit, plan, free) {
+  const u = trpgHero(kit);
+  if (!u) return ["没有这名角色。"];
+  const pv = trpgCyberPreview(kit, plan);
+  if (pv.error) return [pv.error + "。"];
+  if (!pv.cost) return ["方案没有变化。"];
+  if (!free && (Number(state.kuizhi) || 0) < pv.cost) return [`奎支不够：改造要 ${pv.cost}，只有 ${Number(state.kuizhi) || 0}。`];
+  if (!free) state.kuizhi -= pv.cost;
+  const before = (u.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0);
+  const beforeMax = (u.layers || []).reduce((s, l) => s + (Number(l.max) || 0), 0);
+  let missing = Math.max(0, beforeMax - before);
+  const p = trpgCyberPlan(plan);
+  u.cyberPlan = (p.armor || p.shield || p.sand || p.spirit) ? p : null;
+  u.layers = pv.layers.map((l, i) => ({ type: l.type, current: l.max, max: l.max, inner: i === pv.layers.length - 1 }));
+  u.layers.forEach((l, i) => {
+    const keep = i === u.layers.length - 1 ? 1 : 0;
+    const take = Math.min(missing, Math.max(0, l.current - keep));
+    l.current -= take; missing -= take;
+  });
+  if (typeof ledgerCapture === "function") ledgerCapture();
+  const text = pv.layers.map(l => `${LAYER[l.type] || l.type} ${l.max}`).join(" / ");
+  return [`义体改造：${u.name} 完成改造（${text}）${free ? "，主持人免费安排" : `，花掉 ${pv.cost} 奎支`}。`];
+}
+/** 改造成功了吗（失败时规则函数返回一句说明） */
+function trpgModifyOk(notes) { return /^义体改造：/.test((notes || [])[0] || ""); }
+
+/* 联机玩家的改造申请（主持人同意 / 拒绝） */
+function trpgCyberRequest(kit, plan, by, byName) {
+  if (!TRPG.clinicOpen) return { error: "诊所现在没开" };
+  const pv = trpgCyberPreview(kit, plan);
+  if (pv.error) return { error: pv.error };
+  if (!pv.cost) return { error: "方案没有变化" };
+  if (trpgPurse(kit) < pv.cost) return { error: `钱包里的钱不够：要 ${pv.cost}，只有 ${trpgPurse(kit)}` };
+  TRPG.cyberRequests = (TRPG.cyberRequests || []).filter(r => !(r.kit === kit && r.status === "pending")).slice(-20);
+  const r = { id: "cy" + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36), kit, plan: trpgCyberPlan(plan), by, byName: String(byName || "").slice(0, 30), status: "pending", cost: pv.cost, note: "" };
+  TRPG.cyberRequests.push(r);
+  return { request: r };
+}
+function trpgCyberDecide(id, ok) {
+  const r = (TRPG.cyberRequests || []).find(x => x.id === id && x.status === "pending");
+  if (!r) return ["没有这条申请（可能已经处理过了）。"];
+  const name = (trpgHero(r.kit) || {}).name || r.kit;
+  if (!ok) { r.status = "denied"; return [`拒绝了 ${name} 的义体改造申请。`]; }
+  const notes = trpgPayWith(r.kit, () => trpgModifyHero(r.kit, r.plan, false));
+  r.status = trpgModifyOk(notes) ? "done" : "denied";
+  r.note = r.status === "done" ? "" : String(notes[0] || "").slice(0, 80);
+  return notes;
+}
+/* ---------- 诊所：义体（cyberware.js）——和单局一样：装 / 拆从这名角色自己的钱包出；联机由房主结算 ---------- */
+/** 联机包 / 界面：{ kit, name, purse, view, shop, previews }（没有坚毅数值） */
+function trpgCyberwarePacket(kit) {
+  const u = trpgHero(kit);
+  if (!u || typeof cyberwarePacket !== "function") return null;
+  const previews = {};
+  cyberwareCatalog().forEach(d => { previews[d.id] = cyberwareInstallPreview(u, d.id); });
+  return Object.assign(cyberwarePacket(u), { kit, name: u.name, purse: trpgPurse(kit), previews });
+}
+function trpgCyberwareAct(kit, id, remove) {
+  if (!TRPG.clinicOpen) throw new Error("诊所现在没开");
+  const u = trpgHero(kit);
+  if (!u) throw new Error("没有这名角色");
+  let pv = null, cost = 0;
+  const name = (cyberwareDef(id) || {}).name || id;
+  const notes = trpgPayWith(kit, () => {
+    const purse = { kuizhi: Number(state.kuizhi) || 0 };
+    if (remove) cost = cyberwareRemove(u, id, purse).cost; else { pv = cyberwareInstall(u, id, purse); cost = pv.cost; }   // 同系列的旧义体一起拆掉（以新换旧）
+    state.kuizhi = purse.kuizhi;
+    return [remove ? `${u.name} 拆掉了义体「${name}」，花掉 ${cost} 奎支。` : cyberwareInstallNote(u.name, pv)];
+  });
+  return notes;
+}
+function trpgCyberwareInstall(kit, id) { return trpgCyberwareAct(kit, id, false); }
+function trpgCyberwareRemove(kit, id) { return trpgCyberwareAct(kit, id, true); }
 function trpgAdjustWater(ml) {
   ml = Math.floor(Number(ml) || 0);
   if (!ml) return [];
@@ -98,9 +469,24 @@ function trpgShortRest(kits) {
 }
 /** plan：{ hours, food: { kit: foodId }, force } */
 function trpgLongRest(plan) {
+  TRPG.camp = null;
   const r = ledgerLongRest(plan || {}, []);
-  if (typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  // 补给不够只能硬撑（ok:false）时队员没恢复，护送 VIP 也一样不恢复
+  if (r.ok !== false && typeof trpgTaskRestEscort === "function") trpgTaskRestEscort(r.notes);
+  if (r.report) TRPG.lastRest = r.report;   // 长休结算画面：主持人本机弹，联机玩家收到 rest 包（online-view.js · projectRest）
   return r.notes;
+}
+
+/** 营地（issue #52）：长休前大家围着篝火坐下，看全队状态和补给；主持人点「开始长休」才真的休息 */
+function trpgCampOpen(plan) {
+  plan = plan || {};
+  TRPG.camp = { plan: JSON.parse(JSON.stringify(plan)), force: !!plan.force, status: campStatus(plan) };
+  return ["队伍在营地坐下，准备长休。"];
+}
+function trpgCampClose() {
+  if (!TRPG.camp) return [];
+  TRPG.camp = null;
+  return ["先不休息，收起营地。"];
 }
 
 /* ---------- 道具 ---------- */
@@ -131,7 +517,7 @@ function trpgSpendAttr(kit, attr) {
   u.attrs = Object.assign({}, u.attrs || {});
   // 手册：8 级的那一点不能加在曾经加过的同一项上
   u.attrPicks = u.attrPicks || [];
-  if (u.attrPicks.length >= 1 && u.attrPicks.indexOf(attr) >= 0) {
+  if (u.attrPicks.length === 1 && u.attrPicks.indexOf(attr) >= 0) {   // 19 级那点（第三点）可以重复
     return ["8 级的属性点不能加在曾经加过的同一项上。"];
   }
   u.attrs[attr] = (Number(u.attrs[attr]) || 0) + 1;
@@ -141,6 +527,32 @@ function trpgSpendAttr(kit, attr) {
   ledgerCapture();
   const nm = typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES[attr] : attr;
   return [`${u.name} ${nm} +1（现在 ${u.attrs[attr]}）。`];
+}
+
+/* ---------- 专长（feats.js）：7 / 11 / 13 / 16 级各一项，主持人在队伍页分配 ----------
+ * fullId：选「兼修」时一起选要升成完整版的涉猎专长。多面手 / 万事通的熟练项照旧由主持人记在角色卡上 */
+function trpgPickFeat(kit, id, fullId) {
+  const u = trpgHeroes().find(h => h.kit === kit);
+  if (!u) return ["没有这个角色。"];
+  if (!(Number(u.featPoints) > 0)) return [`${u.name} 没有可以分配的专长。`];
+  // 每个专长点按自己的来源等级判断能选哪层；用满足条件的最低一点，高等级的点留着
+  const pts = featPointLevelsOf(u);
+  const at = typeof featChoicesFor !== "function" ? -1 : pts.findIndex(L => featChoicesFor(u, L).indexOf(id) >= 0);
+  if (at < 0) return ["这项专长现在不能选。"];
+  const f = FEATS[id];
+  if (id === "dualclass" && featFullOptions(u).indexOf(fullId) < 0) return ["兼修要选一张专长①–③的职责涉猎专长。"];
+  u.feats = (u.feats || []).concat(id);
+  if (id === "dualclass") u.featFull = (u.featFull || []).concat(fullId);
+  u.featPointLevels = pts.filter((_, i) => i !== at);
+  u.featPoints -= 1;
+  if (typeof applyLevelStats === "function") applyLevelStats(u);
+  ledgerCapture();
+  const out = [`${u.name} 获得专长：${featLabel(id)}。`];
+  if (id === "dualclass") out.push(`兼修：「${FEATS[fullId].name}」改成原职责技能的完整版。`);
+  if (id === "versatile") out.push("多面手：三项熟练项各升一级（主持人记在角色卡上）。");
+  if (id === "polymath") out.push("万事通：选一项熟练项升到三级（主持人记在角色卡上）。");
+  if (f.explore) out.push("探索专长：检定、商店、休息时由主持人照卡面结算。");
+  return out;
 }
 
 /* ---------- 武器升级（手册：材料 + 4 级以上找工匠付费） ---------- */
@@ -163,6 +575,11 @@ function trpgUpgradeInfo(owner, kit) {
   }));
   return { lv, next, max: false, mats, labor: rc.labor || 0, canSelf: next <= U.selfMaxLevel, enough: mats.every(m => m.have >= m.need) };
 }
+/** 找工匠升级的默认加工费：参考费用，带巧手匠人的队伍打八折（主持人另填费用则按填的） */
+function trpgSmithFee(info) {
+  const mul = typeof featHaggleMul === "function" ? featHaggleMul(trpgHeroes(), 1) : 1;
+  return Math.round((Number(info.labor) || 0) * mul);
+}
 /** mode：self 自己在工作站（≤4 级，只耗材料）/ smith 找工匠（材料 + 费用）/ gm 主持人直接升（不耗） */
 function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   const owner = trpgHeroes().find(h => h.kit === ownerKit);
@@ -174,7 +591,7 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   if (mode !== "gm") {
     if (mode === "self" && !info.canSelf) return [`${wname} 升 ${info.next} 级要找武器工匠，自己在工作站只能升到 ${HANDBOOK_WEAPON_UPGRADE.selfMaxLevel} 级。`];
     if (!info.enough) return [`材料不够：${info.mats.map(m => `${m.name} ${m.have}/${m.need}`).join("、")}。`];
-    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : info.labor) || 0)) : 0;
+    const pay = mode === "smith" ? Math.max(0, Math.floor(Number(fee != null ? fee : trpgSmithFee(info)) || 0)) : 0;
     if (pay > (Number(state.kuizhi) || 0)) return [`奎支不够付加工费：要 ${pay}，手里只有 ${Number(state.kuizhi) || 0}。`];
     info.mats.forEach(m => bagAdd(m.id, -m.need));
     if (pay) state.kuizhi -= pay;
@@ -182,8 +599,10 @@ function trpgUpgradeWeapon(ownerKit, kit, mode, fee) {
   } else {
     notes.push(`主持人把 ${wname} 升到 ${info.next} 级（不耗材料和奎支）。`);
   }
+  const before = typeof LevelUp !== "undefined" ? LevelUp.snapshot(owner) : null;
   if (typeof setOwnedWeaponLevel === "function") setOwnedWeaponLevel(owner, kit, info.next);
   else { owner.weaponLevels = owner.weaponLevels || {}; owner.weaponLevels[kit] = info.next; }
+  if (before) LevelUp.note("weapon", owner, before, { weapon: wname });
   trpgSyncWeaponMods();   // 升到 4 级：装着的客制化图纸开始生效
   ledgerCapture();
   return notes;

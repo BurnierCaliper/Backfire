@@ -38,7 +38,8 @@ function fixture() {
   };
 }
 function noSecrets(value) {
-  const wire = JSON.stringify(value);
+  // upOnShp 是「起身」布尔值（给玩家看，只准是 true / false）；其余带 shp 的字段仍然不许出现
+  const wire = JSON.stringify(value).replace(/"upOnShp":(true|false)/g, "");
   assert.doesNotMatch(wire, /SECRET|732911|827319|617392|321987|shp|坚毅|backstage|privateHistory|reconnectToken/i);
 }
 
@@ -105,6 +106,17 @@ test("private messages require explicit allowed routing and do not carry nested 
   assert.deepEqual(out, [{ from: "host", to: "p1", text: "你看见一道门", private: true }]);
 });
 
+test("小队聊天：正文保留换行和全角空格（字符画才能对齐），敏感词和其他控制字符照样过滤", () => {
+  const art = "　　龍龍\n龍奶奶龍\n　爪　爪";
+  const out = V.projectView({ chat: [
+    { id: "chat-1", operatorId: "p1", name: "甲", text: art, at: 1 },
+    { id: "chat-2", operatorId: "p1", name: "甲", text: "第一行\r\n第二行\u200b\u202e\u0007", at: 2 },
+    { id: "chat-3", operatorId: "p1", name: "甲", text: "　\nＳ\nＨ\nＰ 732911", at: 3 },
+    { id: "chat-4", operatorId: "p1", name: "甲", text: "坚\n毅\n生命", at: 4 },
+    { id: "chat-5", operatorId: "p1", name: "甲", text: "坚\n毅", at: 5 }] }, player);
+  assert.deepEqual(out.chat.map(m => m.text), [art, "第一行\n第二行", "坚\n毅"]);
+});
+
 test("recipient filtering precedes the live 300-message window and cannot be displaced by other private traffic", () => {
   const messages = [{ id: "mine", from: "host", to: "p1", text: "保留给我的线索", at: 1 },
     ...Array.from({ length: 299 }, (_, i) => ({ id: "other" + i, from: "host", to: "p2", text: "OTHER_PRIVATE_" + i, at: i + 2 }))];
@@ -116,7 +128,7 @@ test("recipient filtering precedes the live 300-message window and cannot be dis
 
 test("result, ack, resync, lobby, waiting and messages envelopes all apply the same outbound boundary", () => {
   for (const type of ["result", "ack", "resync", "lobby", "waiting", "gmMsg", "gmReply", "joined"]) {
-    const source = fixture(); source.type = type; source.error = "SECRET-ERROR 732911"; source.ok = false;
+    const source = fixture(); source.type = type; source.error = "SHP 732911 SECRET-ERROR"; source.ok = false;
     const out = V.projectPacket(source, player); noSecrets(out); assert.equal(out.type, type);
     assert.match(out.error, /操作未生效/);
   }
@@ -154,10 +166,26 @@ test("unknown logs and errors never use free-form notes as public summaries", ()
   noSecrets(logs); assert.equal(logs.length, 5);
   assert.equal(logs[1].text, "主持人调整了战场"); assert.equal(logs[2].text, "主持人更新了天气");
   assert.equal(logs[3].text, "主持人在 2 区加入 狂徒 Lv3");
-  assert.match(V.safeError("不是你的角色"), /其他玩家/); assert.match(V.safeError("还没轮到这个单位"), /还没轮到/);
-  assert.equal(V.safeError("不合法的分步选择 SECRET-DETAIL"), "目标或分步选择已失效");
-  assert.match(V.safeError("未知内部内容 918237"), /操作未生效/);
+  assert.match(V.safeError("坚毅生命 918237"), /操作未生效/); assert.match(V.safeError("后台备注 SECRET"), /操作未生效/);
   assert.equal(V.safeText("ＳＨＰ 732911"), null); assert.equal(V.safeText("S\u200bH\u200bP 732911"), null);
+});
+
+test("按钮灰掉的原因照原样给玩家看，只挡提到坚毅生命的句子；不会被分到错误类别（issue #135）", () => {
+  for (const reason of ["纳米能源不足 20", "只能在居合架势下使用", "陷在流沙里没顶，不能行动", "咖啡液不足 2", "没有咖啡液", "已经在待命",
+    "热锅只能用丹生谷发动", "这个单位没有这项可用技能", "本回合无法移动", "目标已失衡，不能再选", "濒死中，请先起身", "不是你的角色", "还没轮到这个单位"])
+    assert.equal(V.safeError(reason), reason);
+  for (const reason of ["坚毅生命不足 7", "SHP 7", "S​H​P 7"]) assert.match(V.safeError(reason), /操作未生效/);
+  const menu = V.projectActionMenu({ choices: { kind: "skill", options: [{ value: "a", label: "斩", disabled: true, reason: "只能在居合架势下使用" }, { value: "b", label: "刺", disabled: true, reason: "还剩 坚毅生命 9" }] } });
+  assert.equal(menu.choices.options[0].reason, "只能在居合架势下使用"); assert.match(menu.choices.options[1].reason, /操作未生效/);
+});
+
+test("起身状态：玩家收到 upOnShp 布尔值，但没有任何坚毅数值（issue #135）", () => {
+  const up = { ...unit("u9"), upOnShp: true, dying: false };
+  const p = V.projectUnit(up);
+  assert.strictEqual(p.upOnShp, true); assert.strictEqual(V.projectUnit(unit()).upOnShp, false);
+  const wire = JSON.stringify(p).replace(/"upOnShp":(true|false)/, "");
+  assert.doesNotMatch(wire, /shp|732911|827319|617392|321987|坚毅/i);
+  assert.deepEqual(Object.keys(p).filter(k => /shp/i.test(k)), ["upOnShp"]);
 });
 
 test("ask projection repeats ownership checks and rejects hidden extras and stale cached recipient views", () => {
@@ -290,4 +318,90 @@ test("状态图标：自我效果、挂着的攻击效果、角色仪表数据�
     { type: "pop", unitId: "u1", kind: "fxword", text: "猛击" }
   ]);
   assert.deepEqual(tape.map(e => e.kind + ":" + (e.fx || e.text || "")), ["proc:burn", "fxword:猛击"]);
+});
+
+test("聚焦：层、属性序列、当前步数发给玩家（只认白名单的层和属性）", () => {
+  const u = unit();
+  u.focuses = [{ layerType: "armor", seq: ["fire", "SECRET-EL", "ice", "electric"], step: 1 }, { layerType: "SECRET", seq: ["fire"], step: 0 }];
+  const out = V.projectUnit(u);
+  assert.deepEqual(JSON.parse(JSON.stringify(out.focuses)), [{ layerType: "armor", seq: ["fire", "ice", "electric"], step: 1 }]);
+  assert.doesNotMatch(JSON.stringify(out), /SECRET/);
+  assert.equal(V.projectUnit(unit()).focuses, undefined);
+});
+
+test("field choice asks keep the field flag and unit targets for the owner only", () => {
+  const source = fixture(); source.view.ask = { id: "choice-3", kind: "choice", title: "更换刀头", deadline: null, field: true, eligible: true, waitingNames: ["甲"],
+    options: [{ helper: "u1", label: "不切换", extra: { index: 0 } }, { helper: "u1", label: "切换并打", target: "e1", extra: { index: 1 } }, { helper: "u2", label: "SECRET-OTHER-CHOICE", target: "e1", extra: { index: 2 } }] };
+  const out = V.projectPacket(source, player); noSecrets(out);
+  assert.equal(out.view.ask.field, true);
+  assert.deepEqual(out.view.ask.options, [{ helper: "u1", label: "不切换", extra: { index: 0 } }, { helper: "u1", label: "切换并打", target: "e1", extra: { index: 1 } }]);
+  const stranger = V.projectPacket(source, { recipientId: "p3", gmId: "host" });
+  assert.equal(stranger.view.ask.field, true); assert.deepEqual(stranger.view.ask.options, []);
+});
+
+test("H13：技能分步的每个 key 都在联机白名单里（不然联机玩家收不到、答不了那一步）", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const OV = require("../online-view.js");
+  const keys = new Set();
+  for (const file of ["app.js", "feats.js", "items.js"]) {
+    const src = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
+    for (const m of src.matchAll(/key: "([A-Za-z0-9_]+)",[^}]{0,80}type: "(choice|unit|zone)"/g)) keys.add(m[1]);
+  }
+  assert.ok(keys.size >= 15, [...keys].join(","));
+  const missing = [...keys].filter(k => !OV.pickKeys.has(k));
+  assert.deepEqual(missing, [], "缺：" + missing.join("、"));
+  // 新加的 key 照样能投影出去
+  const menu = OV.projectActionMenu({ actor: "u1", skill: "chuan_whip", choices: { kind: "choice", key: "pull", title: "拉过去吗", options: [{ value: true, label: "拉" }, { value: false, label: "不拉" }] } });
+  assert.equal(menu.choices.key, "pull");
+  assert.equal(menu.choices.options.length, 2);
+});
+
+// 报告「中」联机四条：龙哥弹序、维修工具包、询问选项的 extra、聊天过滤
+test("Longge's unseen capsule rounds go out as unknown; only peeked rounds keep their color", () => {
+  const hud = V.projectHud({ kit: "longge", ammo: [{ c: "blue", seen: true }, { c: "red", seen: false }, { c: "blue" }] });
+  assert.deepEqual(hud.ammo, [{ c: "blue", seen: true }, { c: "unknown", seen: false }, { c: "unknown", seen: false }]);
+});
+
+test("repair kit command keeps its weapon-kit dest; unsafe string dests are still dropped", () => {
+  const cmd = { type: "useItem", actor: "u1", item: "repairkit", target: "u1", dest: "kolt" };
+  assert.deepEqual(V.projectActionMenu({ actor: "u1", command: cmd }).command, cmd);
+  assert.equal(V.projectActionMenu({ actor: "u1", command: { ...cmd, dest: "a b<script>" } }).command.dest, undefined);
+});
+
+test("ask options for 以身作盾 / 龙哥手杖 keep their ironwall / heal extras", () => {
+  const menu = V.projectActionMenu({ actor: "u1", choices: { kind: "choice", key: "mode", title: "协助", options: [
+    { value: { ironwall: true }, label: "以身作盾" }, { value: { mode: "cane", heal: "u2" }, label: "手杖协助" }] } });
+  assert.deepEqual(menu.choices.options.map(o => o.value), [{ ironwall: true }, { mode: "cane", heal: "u2" }]);
+});
+
+test("chat keeps ordinary words like 坚毅 / 'this hp', but still drops hidden-life numbers and backstage words", () => {
+  const msg = t => ({ from: "host", to: "p1", text: t });
+  const out = V.projectMessages([msg("他很坚毅!"), msg("this hp bar is low"), msg("push people"), msg("shp:30"), msg("s h p 3"), msg("坚毅生命还剩一半"), msg("看后台")], player);
+  assert.deepEqual(out.map(m => m.text), ["他很坚毅!", "this hp bar is low", "push people"]);
+});
+
+test("player battlefield receives quicksand / coral / innate field flags (GM can set them; players used to never see them)", () => {
+  const source = fixture();
+  Object.assign(source.state.fields[1], { quicksand: true, innate: true, sinkSecret: "SECRET-SINK" });
+  const out = V.projectPacket(source, player);
+  assert.equal(out.state.fields[1].quicksand, true);
+  assert.equal(out.state.fields[1].innate, true);
+  assert.equal(out.state.fields[1].sinkSecret, undefined);
+});
+
+test("public battle log lists per-target results (damage / break / heal / popup words) but never numbers outside the whitelist", () => {
+  const logs = V.projectLogs([{ kind: "action", actorName: "红玉", actionName: "普通攻击", hits: [
+    { name: "狂徒", dmg: 12, brk: 2, heal: 0, words: ["失衡", "SECRET-WORD", "被打倒"] },
+    { name: "夕夏", dmg: 0, brk: 0, heal: 6, words: [] },
+    { name: "SHP 732911", dmg: 99, words: [] },
+    { name: "空", dmg: "12", brk: -3, words: [] }] }]);
+  assert.equal(logs[0].text, "红玉 · 普通攻击 → 狂徒：12 伤害，击破 2，失衡，被打倒；夕夏：治疗 6");
+});
+
+test("玩家看得到主持人放的沙珊瑚枝 / 触须（种类不被投影丢掉）", () => {
+  const source = fixture();
+  source.state.props.push({ id: "c1", name: "沙珊瑚枝", kind: "coral_branch", faction: "neutral", hp: 30, maxHp: 30, zone: 1 },
+    { id: "c2", name: "沙珊瑚触须", kind: "coral_tentacle", faction: "neutral", hp: 8, maxHp: 8, zone: 1 });
+  const out = V.projectPacket(source, player);
+  assert.deepEqual(out.state.props.filter(p => p.id[0] === "c").map(p => [p.kind, p.faction, p.hp]), [["coral_branch", "neutral", 30], ["coral_tentacle", "neutral", 8]]);
 });

@@ -22,6 +22,24 @@ test("自爆小车：引爆是同区不分敌我的范围伤害，玩家不会�
   assert.ok(!st.pendingBlock, "范围伤害不能协助格挡");
 });
 
+test("自爆小车：敌人回合引爆后当场死亡、离场（不会只剩 0 血还算活着），也不再触发死亡引爆", () => {
+  const { c, st, k } = field([{ id: "boomcar", lv: 3, zone: 1 }]);
+  st.units.forEach(u => { u.zone = 1; });
+  const car = k("boomcar"), kolt = k("kolt");
+  car.resources.fuse = 0;
+  c.endPlayerTurn();
+  const hp0 = c.totalHp(kolt);
+  const r = c.BattleCommands.execute({ type: "battle.enemyAction", actor: car.id, step: 0 });
+  assert.equal(r.executed, true);
+  assert.equal(car.dead, true, "自爆后死亡");
+  assert.equal(car._removed, true, "离场");
+  assert.ok(!c.EnemyAI.foes().includes(car), "不再算活着的敌人");
+  const lost = hp0 - c.totalHp(kolt);
+  assert.ok(lost > 0, "炸到了同区的柯尔特");
+  // 只炸一次：清场时不会再走一遍「死亡引爆」
+  assert.equal(st.logPages.flatMap(p => p.lines).map(l => l.text).join("\n").includes("死亡引爆"), false);
+});
+
 test("远程敌人：有隔一区的目标就打它，不去瞄准同区打不到的人", () => {
   const { c, st, k } = field([{ id: "dumpdrone", lv: 1, zone: 1 }]);
   const drone = st.units.find(u => !u.isPlayer);

@@ -23,12 +23,21 @@ function passCheck(R, run) {
   run.party.forEach(h => { h.profs[info.prof] = 3; });
   return R.attemptCheck(run, run.party[0].kit);
 }
-/** 非检定节点：随便走过去 */
+/** 非检定节点：随便走过去，一直走到下一个检定（或目标）。
+ *  按小时强制的休息点是额外的一站（tests/rest-spacing.test.js）：休息点 → 随机站 → 检定，所以两个检定之间可能有两站 */
 function passOther(c, R, run) {
-  const n = R.currentNode(run);
-  if (n.type === "battle" || n.type === "elite") return R.finishBattle(run, "win");
-  if (n.type === "rest") return R.restAtNode(run, "leave");
-  return R.leaveNode(run);
+  let out;
+  for (let g = 0; g < 4; g++) {
+    const n = R.currentNode(run);
+    if (!n || n.type === "check" || n.target || run.stage !== "task") break;
+    const forced = n.type === "rest" && n.noPay;
+    if (n.type === "battle" || n.type === "elite") out = R.finishBattle(run, "win");
+    else if (n.type === "rest") out = R.restAtNode(run, "leave");
+    else out = R.leaveNode(run);
+    const nx = R.currentNode(run);
+    if (forced && nx && !nx.target) assert.notEqual(nx.type, "check", "强制休息点后面先接随机站");
+  }
+  return out;
 }
 
 test("任务板：悬赏不显示路线，只有第一个线索检定", () => {
@@ -65,10 +74,16 @@ test("检定和其他节点交替，一站一站加进路线；3 次成功找到
   assert.ok(tg);
   assert.match(tg.name, /^【目标】/);
   const base = c.enemyPresets().find(p => p.id === run.task.hunt.target.preset).build(spec.level, c.S.state.partySize);
-  assert.equal(tg.layers[0].max, Math.round(base.layers[0].max * 1.5));
-  assert.equal(c.effectiveAtk(tg, c.S.state.units), Math.round(base.personalAtk * 1.5));
-  // 每一行敌人按代币算（成群的一行只算一次），目标再多算 1 枚：总数不超过精英战的 5 枚
-  const tokens = spec.encounter.enemies.reduce((s, e) => s + c.enemyTokens(e.preset), 0);
+  // 目标也有个体值（enemies.js）：先按水平波动，再 ×1.5
+  const iv = tg.iv || { hp: 0, atk: 0 };
+  assert.equal(tg.layers[0].max, Math.round(Math.round(base.layers[0].max * (1 + iv.hp / 100)) * 1.5));
+  assert.equal(c.effectiveAtk(tg, c.S.state.units), Math.round(Math.round(base.personalAtk * (1 + iv.atk / 100) * 10) / 10 * 1.5));
+  // 每一行敌人按代币算（成群的整组记一次：三区制的站位把一组拆成一只一行，按只数折回去，和 tests/three-way.test.js 一样），
+  // 目标再多算 1 枚：总数不超过精英战的 5 枚
+  const tokens = Math.round(spec.encounter.enemies.reduce((s, e) => {
+    const g = Number((c.enemyInfo(e.preset) || {}).group) || 1;
+    return s + c.enemyTokens(e.preset) * (e.count || 1) / g;
+  }, 0));
   assert.ok(tokens + 1 <= 5, `目标多占 1 枚代币：${tokens} + 1`);
   assert.equal(spec.encounter.enemies.filter(e => e.bounty).length, 1);
   const notes = R.finishBattle(run, "win");
@@ -156,4 +171,29 @@ test("悬赏线索检定：用第三种熟练项成功也算找到线索；失�
   passOther(null, s3.R, s3.run);
   const next = s3.R.checkInfo(s3.run).options.map(o => o.prof);
   skipped.forEach(p => assert.ok(!next.includes(p), "绕过去的三种都不再出：" + p));
+});
+
+/* ---------- issue #124：第三采矿场悬赏 ---------- */
+const vm = require("node:vm");
+test("悬赏目标只从本区域的敌人表里抽（第三采矿场的敌人都只占 1 枚代币，以前落到全部区域去抽）", () => {
+  const c = H.load();
+  for (const region of ["第三采矿场", "第一采矿场", "第二采矿场", "外城区", "沙漠", "巨人城"]) {
+    const r = JSON.stringify(region);
+    assert.deepEqual(plain(vm.runInContext(`bountyCandidates(${r}).filter(k => ENEMY_INFO[k].regions.indexOf(${r}) < 0)`, c)), [], `${region} 的悬赏候选都在本区域`);
+    assert.ok(vm.runInContext(`bountyCandidates(${r}).length`, c) > 0);
+  }
+});
+
+test("第三采矿场悬赏战：随从和目标同一阵营（安保 / 异星生物不互相敌对）", () => {
+  const c = H.load();
+  const bad = plain(vm.runInContext(`(() => {
+    const bad = [];
+    for (const preset of bountyCandidates("第三采矿场")) for (let i = 0; i < 40; i++) {
+      const enc = rollBountyEncounter(preset, { region: "第三采矿场", tokens: 5, extraTokens: 1, hpMul: 1.5, atkMul: 1.5 });
+      const allow = alliesOf(ENEMY_INFO[preset].faction);
+      enc.enemies.forEach(e => { if (allow.indexOf(ENEMY_INFO[e.preset].faction) < 0) bad.push([preset, e.preset]); });
+    }
+    return bad;
+  })()`, c));
+  assert.deepEqual(bad, []);
 });

@@ -59,8 +59,46 @@ function totalMaxHp(unit) {
 function baseMaxHp(unit) {
   return (unit.layers || []).reduce((s, l) => {
     if (l.temp) return s;
-    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    return s + Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
   }, 0);
+}
+
+/* ---------- 临时护盾 ----------
+ * 技能、道具、扫描……施加的护盾都是临时护盾（tempShield）：并在护盾层里显示，不算额外一层，克制表照护盾算；
+ * 但不会在「一回合没挨打」时回满——单位自带的那部分护盾才回满。挨打时临时护盾先扣。
+ * 护盾层的 max = 自带上限 + 剩下的临时护盾；临时护盾扣掉多少，max 就跟着少多少，所以「回满」（current = max）只补自带的部分。
+ * 不管伤害从哪条路扣的护盾，syncTempShield 按上次记下的 current（_lastCur）结算掉了多少。 */
+function tempShieldOf(layer) { return layer && layer.type === "shield" ? Math.max(0, Number(layer.tempShield) || 0) : 0; }
+function syncTempShield(unit) {
+  if (!unit || !unit.layers) return;
+  unit.layers.forEach(l => {
+    if (l.type !== "shield") return;
+    const cur = Math.max(0, Number(l.current) || 0);
+    const t = tempShieldOf(l);
+    if (t > 0 && l._lastCur != null) {
+      const use = Math.min(t, Math.max(0, Number(l._lastCur) - cur));
+      if (use > 0) { l.tempShield = t - use; l.max = Math.max(0, (Number(l.max) || 0) - use); }
+    }
+    if (tempShieldOf(l) > cur) { l.max = Math.max(0, (Number(l.max) || 0) - (tempShieldOf(l) - cur)); l.tempShield = cur; }
+    if (l.current > l.max) l.current = l.max;
+    l._lastCur = Math.max(0, Number(l.current) || 0);
+  });
+  // 纯临时的护盾层（单位本来没有护盾）用完就去掉
+  unit.layers = unit.layers.filter(l => !(l.type === "shield" && (l.granted || l.temp) && !l.batteryShield && !(Number(l.max) > 0)));
+}
+/** 加临时护盾：并进现有的护盾层（没有就新开一层，标 granted） */
+function addTempShield(unit, amt) {
+  amt = Math.max(0, Math.floor(Number(amt) || 0));
+  if (!unit || !amt) return null;
+  unit.layers = unit.layers || [];
+  syncTempShield(unit);
+  let layer = unit.layers.find(l => l.type === "shield" && !l.batteryShield);
+  if (!layer) { layer = { type: "shield", current: 0, max: 0, granted: true }; unit.layers.unshift(layer); }
+  layer.max = (Number(layer.max) || 0) + amt;
+  layer.current = (Number(layer.current) || 0) + amt;
+  layer.tempShield = tempShieldOf(layer) + amt;
+  layer._lastCur = layer.current;
+  return layer;
 }
 
 /** 给单位加一段临时血量层（战斗结束消失）。已有同类型的层就叠上去，并记在 tempBonus 里，
@@ -68,6 +106,7 @@ function baseMaxHp(unit) {
 function addTempLayer(unit, type, amt) {
   amt = Math.max(0, Number(amt) || 0);
   if (!unit || !amt) return null;
+  if (type === "shield") return addTempShield(unit, amt);   // 护盾一律是临时护盾
   unit.layers = unit.layers || [];
   let layer = unit.layers.find(l => l.type === type);
   if (!layer) {
@@ -90,7 +129,7 @@ function persistentLayers(unit) {
     if (ruby) src = (ruby.layers || []).filter(l => l.mecha);
   }
   return src.filter(l => !l.temp).map(l => {
-    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0));
+    const cap = Math.max(0, Number(l.max || 0) - Number(l.tempBonus || 0) - tempShieldOf(l));
     return { type: l.type, current: Math.max(0, Math.min(cap, Number(l.current) || 0)) };
   });
 }
@@ -98,8 +137,10 @@ function persistentLayers(unit) {
 /** 战斗结束：去掉临时层，以及叠在原有层上的临时部分 */
 function stripTempLayers(unit) {
   if (!unit || !unit.layers) return;
-  unit.layers = unit.layers.filter(l => !l.temp);
+  unit.layers = unit.layers.filter(l => !l.temp && !(l.type === "shield" && l.granted));
   unit.layers.forEach(l => {
+    const ts = tempShieldOf(l);
+    if (ts) { l.max = Math.max(0, (Number(l.max) || 0) - ts); l.current = Math.min(Number(l.current) || 0, l.max); l.tempShield = 0; }
     const b = Number(l.tempBonus) || 0;
     if (!b) return;
     l.max = Math.max(0, (Number(l.max) || 0) - b);
@@ -313,7 +354,6 @@ const SKILL_RANGE = {
   kolt_rot: { min: 1, max: 1 },      // 腐坏抛射：1 距离的敌人
   kolt_mod: { min: 0, max: 1 },      // 「非法」改装：1 距离以内任意单位
   xia_crush: { min: 0, max: 0 },
-  kolt_aa: { min: 0, max: 1 },
   // 更换刀头的追击射程取决于换上去的新刀头（电钻近距离 / 酸液炮远距离），
   // 所以外层放到 0–1，具体由技能内部按新刀头判定
   kolt_swap: { min: 0, max: 0 },   // 更换刀头的切刀攻击总是打同区
@@ -324,6 +364,8 @@ const SKILL_RANGE = {
   torque_strip: { min: 0, max: 0 },
   helu_aa: { min: 1, max: 1 },
   helu_scan: { min: 0, max: 99 },
+  helu_rule: { min: 0, max: 1 },      // 规则干涉：1 距离以内的一区；拿附赠动作的单位就在那一区
+  helu_forge: { min: 0, max: 99 },    // 频域造物：任意间隙，不限距离（不选单位）
   ecmo_bite: { min: 0, max: 0 },
   ecmo_focus: { min: 0, max: 99 },
   ecmo_boom: { min: 0, max: 0 },
@@ -337,7 +379,16 @@ const SKILL_RANGE = {
   longge_chill: { min: 0, max: 1 },
   longge_spit: { min: 0, max: 0 },     // 吐酸：近距离
   xiaoxiao_punch: { min: 0, max: 0 },  // 直冲拳：近距离
-  xiaoxiao_combo: { min: 0, max: 0 }   // 连续拳：近距离
+  xiaoxiao_combo: { min: 0, max: 0 },  // 连续拳：近距离
+  longge_heat: { min: 0, max: 0 },     // 热能轰击：手杖、霰弹枪都是近距离
+  ras_torrent: { min: 0, max: 99 },    // 狂瀑：任意距离的高能敌人
+  ruby_algo: { min: 0, max: 99 },      // 算法改变：任意距离
+  latte_claw: { min: 0, max: 0 },
+  naruto_frost: { min: 0, max: 0 },
+  tou_accuse: { min: 0, max: 1 },
+  tou_bash: { min: 0, max: 1 },        // 盾击突进：先移动 ≤1，再打到达后同区的敌人（按出发位置算是距离 0–1）
+  mochi_bite: { min: 0, max: 0 },
+  yuito_duet: { min: 0, max: 99 },
 };
 
 /* 技能能选哪一边的目标。界面原本是从提示文字里猜的（出现「友方」就只让选友方），
@@ -349,18 +400,47 @@ const SKILL_TARGET_SIDE = {
   nora_needle: "any",       // 针尖可以扎敌人，也可以扎队友当治疗手段
   nora_aa: "any",           // 有刺入时打刺入目标，刺入的可能是队友
   kolt_mod: "anySelf",
+  ras_torrent: "enemy",
+  ruby_algo: "enemy",
+  latte_claw: "enemy",
+  naruto_frost: "enemy",
+  tou_accuse: "enemy",
+  mochi_bite: "enemy",
+  yuito_duet: "allySelf",
   chuan_reclaim: "allySelf", // 回收护盾：任意一名友方（含自己）      // 「非法」改装：任意单位（含自己）施加过载
   role_renew: "ally",       // 续命：任意距离一名友方（以前没登记，被推断成敌方）
   role_harsh: "anySelf",    // 恶劣环境：「一名单位」敌我都行（以前被推断成只能选敌人）
   role_double_dot: "enemy", // 加倍计量：一个敌人
-  chuan_over: "anySelf"     // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
+  chuan_over: "anySelf",    // 电站超频：任意单位（敌人也行：主动让敌人过载），也可以对川川自己用
+  helu_rule: "anySelf"      // 规则干涉：同区自选任意单位拿附赠动作（敌人也行，作者 10/23），Helumica 自己也行
 };
+
+/* 谐波攻击的技能（打得到下潜中的单位，effects.js · 下潜，#360）：选目标的名单——最后单独选的目标（game.js · candidateUnits）、
+ * 分步里选单位的那几步（app.js · skillFlowSteps）——里留着下潜中的单位；别的技能名单里没有下潜中的单位。
+ * 只打范围的（音爆、声波震击）、只打刺入目标的（扯下）不用选目标，不在这里；分步里只有某一步是谐波攻击的，在那一步上写 harmonic。
+ * 谐波的义体攻击注册时自己登记进来（cyberware.js · cwRegisterSkill） */
+const SKILL_HITS_SUBMERGED = {
+  helu_aa: true,       // 普通攻击：远距离 1atk 谐波
+  helu_assist: true,   // 协助攻击：1atk 谐波（单人模式的「支援」叫 Helumica 来打时，分步里选的敌人）
+  mochi_roar: true,    // 吼叫：同区 atk+1d4 谐波
+  tou_sonic: true,     // 声波切割：同区 1atk、距离 1 的 0.5atk 谐波（分步里各选一个）
+  tou_accuse: true,    // 赤诚控诉：距离 1 以内 1atk 谐波
+  vitas_slash: true    // 针尖剑斩：同区 1atk 谐波
+};
+/** 这个技能是不是谐波攻击（选目标时下潜中的单位也能选） */
+function skillHitsSubmerged(id) {
+  return Object.prototype.hasOwnProperty.call(SKILL_HITS_SUBMERGED, id) && SKILL_HITS_SUBMERGED[id] === true;
+}
 
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
 const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1
   hiaki_aa: (a) => ((a && a.resources && a.resources.stance) === "iai" ? { min: 0, max: 1 } : { min: 0, max: 0 }),
   // 诺拉普攻：没有刺入时是「距离 1 的敌人」；有刺入时针尖把两人连在一起，刺入目标在同区也能打（刺入超过距离 1 会自己断）
+  // 碎渣重炮：酸液炮（迫击炮，越墙）距离 1-2；电钻（机枪，选区域）距离 0-1
+  // 柯尔特普攻：电钻只打同区，酸液炮只打距离 1（战-M1：以前固定 0–1，电钻打距离 1 会先扣点再拒绝）
+  kolt_aa: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 1 } : { min: 0, max: 0 }),
+  kolt_cannon: (a) => ((a && a.resources && a.resources.bit) === "acid" ? { min: 1, max: 2 } : { min: 0, max: 1 }),
   nora_aa: (a) => (typeof piercedTargets === "function" && a && piercedTargets(a).length ? { min: 0, max: 1 } : { min: 1, max: 1 })
 };
 /** 技能射程：先看随状态变的表，再看固定表（SKILL_RANGE）。都没写返回 null（由提示文字推断） */
@@ -402,6 +482,8 @@ function inSkillRange(actor, target, text, zoneMode) {
 /** field：受击者所在区的场地（飞行单位、保释中的单位由调用方传空——冻土对飞行无效）；
  *  fieldMult：恶劣环境 / 末日让场地效果翻倍（冻土对冰 25% → 50%） */
 function chartMod(element, layerType, weather, field, acidRainCancelArmor, fieldMult) {
+  // 平衡测算（tools/dpt.js）：关掉属性克制表，所有属性对所有血量层都按 0 修正
+  if (typeof state !== "undefined" && state && state.noChart) return 0;
   let table = CHART[element];
   if (!table) return 0;
   let v = table[layerType] || 0;
@@ -409,8 +491,9 @@ function chartMod(element, layerType, weather, field, acidRainCancelArmor, field
   if (weather === "glow" && element !== "energy") {
     v = -v;
   }
-  if (field && field.ice) {
-    if (element === "ice") v = 0.25 * (Number(fieldMult) || 1);
+  // 冻土：强制冰属性对目标易伤 25%（恶劣环境/末日可翻倍）。独立于天气，雪天等天气修正不会覆盖或取消这个强制易伤。
+  if (field && field.ice && element === "ice") {
+    v = 0.25 * (Number(fieldMult) || 1);
   }
   if (acidRainCancelArmor && layerType === "armor" && element !== "acid" && element !== "ice") {
     v += 0.25;
@@ -524,6 +607,24 @@ function weatherDamagePct(weather, element) {
   }
 }
 
+/** 干涉场叠层上限（作者定）：±100%，到顶后不再叠加（以前无上限，曾叠到 −2425% 把伤害全变成 0） */
+const INTERFERE_CAP = 1;
+/** 出血（通用攻击效果，docs/ratfolk.md 2.3）：攻击规格上写 bleed: true（dealTo 的 opt，敌人、角色都能用）。
+ *  这一段打中肉体 / 星灵层（layers）、并对这一层造成了伤害时，对同一层再造成「这一层上限 × pct」的真实伤害：
+ *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
+ *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
+const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
+/** 驻波墙（Helumica「频域造物」，作者 10/23 定；放墙、穿墙、消失在 app.js · placeWaveWall / wavePassUnit / expireWaveWalls）：
+ *  dampenPct    降幅墙：穿过它的选定属性伤害 −50%，和其他百分比加算（作者 10/23：两道墙 −100% 直接归零，触发极少，保留这个免伤连招），并且不造成任何击破
+ *  amplifyPct   增幅墙：穿过它的选定属性伤害 +25%，和其他百分比加算（两道墙 +50%），击破照常
+ *  rounds       持续几个整轮：1 = 放下的这一整轮结束时消失（我方回合 + 敌人回合都过完）
+ *  dampenStatus / amplifyStatus  单位穿过驻波墙时挂上的状态（降幅：不稳、虚弱；增幅：坚挺、振奋）
+ *  elements     能选的属性 */
+const WAVE_WALL = {
+  dampenPct: 0.5, amplifyPct: 0.25, rounds: 1,
+  dampenStatus: ["unstable", "weak"], amplifyStatus: ["sturdy", "inspire"],
+  elements: ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]
+};
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -595,7 +696,7 @@ function statusDotDice(kind, level, weather, extraArmor = false, envX = 1) {
  *   element, baseBreak, hits,
  *   flags, weather, phaseStep, zoneMode,
  *   attackerField, targetField, highGround,
- *   dist
+ *   dist, bleed（出血，见 BLEED）
  * }
  */
 function resolveAttack(ctx) {
@@ -614,7 +715,8 @@ function resolveAttack(ctx) {
   // 灼烧 / 腐蚀这类状态伤害、场地伤害、雷击转移这类派生伤害（action: false 或 environment）都不吃
   const isAttack = flags.action !== false && !flags.environment;
   // 恶劣环境（这个单位，到回合结束）/ 末日（整场）：天气与场地效果翻倍
-  const envX = t.harshEnv || (typeof state !== "undefined" && state && state.apocalypse) ? 2 : 1;
+  // 恶劣环境 / 末日：天气与场地效果翻倍，两个叠加 ×4
+  const envX = (t.harshEnv ? 2 : 1) * (typeof state !== "undefined" && state && state.apocalypse ? 2 : 1);
 
   if (flags.immune) {
     // 血量层原样带回：应用结果时要用（原来缺了这一项，屹立不倒一挨打就报错）
@@ -643,6 +745,11 @@ function resolveAttack(ctx) {
       element = latest;
     }
   }
+  // 驻波墙（dealTo 算好这一击的连线穿过了哪几道，flags.waveWalls）：只管墙选的那一种属性（按这一击最终结算的属性），
+  // 增幅每道 +25%（和其他百分比加算）、击破照常；降幅每道 ×0.5（另外相乘）并且这一击不造成任何击破
+  const waveHere = (Array.isArray(flags.waveWalls) ? flags.waveWalls : []).filter(w => w && w.el === element);
+  const waveAmp = waveHere.filter(w => w.mode === "amplify").length;
+  const waveDamp = waveHere.filter(w => w.mode !== "amplify").length;
 
   let atk = Number(ctx.atk) || 0;
   if (a && a.statuses) {
@@ -663,6 +770,8 @@ function resolveAttack(ctx) {
   const refAtk = (Number(ctx.atk) || 0) * (a && a.statuses && a.statuses.inspire ? 1.25 : 1);
   const refBase = Math.max(0, refAtk * mult + (Number(ctx.flat) || 0) + diceV);
   let totalReduced = 0;
+  // 天气带来的伤害变化（环境分数：天气的所有者按这部分加分）：up 多打出来的，down 少挨的
+  let weatherUp = 0, weatherDown = 0;
   add(`基础包 = ATK ${round2(atk)} × 倍率 ${round2(mult)} + 固定 ${ctx.flat || 0} + 骰子 ${round2(diceV)} = ${round2(rawBase)}`);
   // 只加在第一击基础包上的骰（「准备」：复数攻击只生效一次），之后照样吃倍率和克制
   const firstBonus = Math.max(0, Number(ctx.firstHitBonus) || 0);
@@ -702,9 +811,12 @@ function resolveAttack(ctx) {
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
+  // 出血（BLEED）：这次攻击触发了几次（第 2 次起减半）、一共打了多少
+  let bleedCount = 0;
+  let bleedTotal = 0;
   // 干涉场：叠层只在单位站在干涉场里时生效（叠层记着是在哪一区叠的，换了区就不算）；不在干涉场里挨打就清掉
   const interfHere = !!fieldT.harmonic && (t.interfereZone == null || Number(t.interfereZone) === Number(t.zone));
-  let interfDelta = interfHere ? (Number(t.interfere) || 0) : 0;
+  let interfDelta = interfHere ? Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, Number(t.interfere) || 0)) : 0;
   let firstStartType = null;
   // 熔融：多段攻击每一段都吃熔融（冰 ×2 伤害、+1 击破），整次攻击结算完才结束（作者定：每段都算）
   let meltLive = !!(t.instant && t.instant.melt);
@@ -717,24 +829,31 @@ function resolveAttack(ctx) {
   for (let h = 0; h < hits; h++) {
     const hitLog = [];
     const hAdd = (s) => { hitLog.push(s); add(`#${h + 1} ${s}`); };
+    // hitMults：每段倍率不同的多段攻击（例如柯尔特电钻普攻 0.3 / 0.3 / 0.4）；多出来的段数沿用最后一段
+    const hm = Array.isArray(ctx.hitMults) && ctx.hitMults.length ? Number(ctx.hitMults[Math.min(h, ctx.hitMults.length - 1)]) || 0 : null;
+    const multAdj = hm == null ? 0 : hm - (Number(ctx.mult) || 0);
+    // 这一段的基础包（只含攻击者一侧：ATK × 倍率 + 固定 + 骰子 + 第一击加骰），还没吃目标一侧的任何修正。导体额外那一下用它重新结算
+    const segBase = Math.max(0, rawBase + atk * multAdj) + (h === 0 ? firstBonus : 0);
 
     if (flags.block === "assistOk") {
       let br = ctx.breakOnce ? onceBreak : (Number(ctx.baseBreak) || 0);
       if (ctx.breakOnce && h > 0) {
-        perHit.push({ dealt: 0, breakDealt: 0, layers: clone(layersWork) });
+        perHit.push({ dealt: 0, breakDealt: 0, base: segBase, layers: clone(layersWork) });
         continue;
       }
       if (flags.smash) br *= 2;
       if (weather === "glow" && br > 0) br = Math.max(1, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 0) br = Math.max(0, br - 1);
       if (weather === "phase" && Number(ctx.phaseStep) === 2) br += 1;
+      if (waveDamp && br > 0) { br = 0; hAdd("驻波墙（降幅）：这一击不造成击破。"); }
       totalBreak += br;
       hAdd("协助格挡成功：目标免伤，击破 " + br + " 改由格挡者承担。");
-      perHit.push({ dealt: 0, breakDealt: br, layers: clone(layersWork) });
+      perHit.push({ dealt: 0, breakDealt: br, base: segBase, layers: clone(layersWork) });
       continue;
     }
 
-    let packet = rawBase + (h === 0 ? firstBonus : 0);
+    if (multAdj) hAdd(`本段倍率 ${round2(hm)}`);
+    let packet = segBase;
 
     const startIdx = pickStartIndex(layersWork, flags.pierce, flags.focusLayer);
     let startLayer = layersWork[startIdx] || layersWork.find(l => l.current > 0);
@@ -757,9 +876,12 @@ function resolveAttack(ctx) {
     const layerTypeForChart = onShp ? "shp" : startLayer.type;
     // 冻土对飞行单位无效：飞行的受击者不吃冻土的冰易伤
     let cMod = onShp ? 0 : chartMod(element, layerTypeForChart, weather, t.flying ? null : fieldT, acidRain, envX);
+    // 天气改了克制表的那部分（微光反转克制、酸雨让装甲减伤失效）
+    let wSum = onShp || weather === "none" ? 0 : cMod - chartMod(element, layerTypeForChart, "none", t.flying ? null : fieldT, false, envX);
     if (!onShp && meltLive && startLayer && startLayer.type === "armor" && element === "physical") {
       hAdd(`克制表原值 ${pctTxt(cMod)}，熔融装甲将物理修正强制改为 +50%。`);
       cMod = 0.50;
+      wSum = 0;
     }
     if (!onShp && typeof bpChartCap === "function") {
       const capped = bpChartCap(t, cMod);
@@ -774,7 +896,7 @@ function resolveAttack(ctx) {
     const kindNow = etchAdv ? "adv" : matchupKind(cMod);
 
     const wPct = weatherDamagePct(weather, element) * envX;
-    if (wPct) { pct += wPct; hAdd(`天气：${pctTxt(wPct)}${envX > 1 ? "（恶劣环境 / 末日：翻倍）" : ""}`); }
+    if (wPct) { pct += wPct; wSum += wPct; hAdd(`天气：${pctTxt(wPct)}${envX > 1 ? "（恶劣环境 / 末日：翻倍）" : ""}`); }
 
     if (flags.weak) {
       const w = kindNow === "adv" ? 0.25 : -0.25;
@@ -782,10 +904,17 @@ function resolveAttack(ctx) {
       hAdd(`弱点特效（${kindNow === "adv" ? (etchAdv && matchupKind(cMod) !== "adv" ? "蚀刻视为克制" : "克制") : "非克制"}）：${pctTxt(w)}`);
     }
 
-    if (ctx.dist === 1 && ctx.atkRange !== "melee") {
+    if (ctx.dist >= 1 && ctx.atkRange !== "melee") {   // 隔区的远程攻击（三区模式隔两区的也算）
       if (ctx.highA && !ctx.highT) { pct += 0.25; hAdd("高地打低地远程：+25%。"); }
-      if (!ctx.highA && ctx.highT) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      const pointBlank = typeof featHas === "function" && featHas(ctx.attacker, "pointblank");   // 抵近射击（feats.js）
+      if (!ctx.highA && ctx.highT && !pointBlank) { pct -= 0.25; hAdd("低地打高地远程：−25%。"); }
+      if (!ctx.highA && ctx.highT && pointBlank) hAdd("低地打高地远程：抵近射击，不受 −25%。");
     }
+    // 无可阻挡（feats.js）：这一击无视目标的百分比减伤（血量层照常要打）
+    const noDr = !!flags.unstoppable;
+    if (noDr) hAdd("无可阻挡：无视目标的百分比减伤。");
+    // 尘虫摊平（desert.js）：受到的伤害 −50%
+    if (t && t.resources && t.resources.flattened && !noDr) { pct -= (typeof DESERT !== "undefined" ? DESERT.flattenCut : 0.5); hAdd("摊平：受到伤害 −50%。"); }
 
     if (interfDelta) {
       pct += interfDelta;
@@ -815,7 +944,7 @@ function resolveAttack(ctx) {
       if (["physical", "acid", "energy", "harmonic", "ice"].includes(element)) {
         pct -= 0.25; hAdd("目标霜结：该类受伤 −25%。");
       }
-      if (weather === "snow") { pct -= 0.10 * envX; hAdd(`雪天霜结：全属性再 −${10 * envX}%。`); }
+      if (weather === "snow") { pct -= 0.10 * envX; wSum -= 0.10 * envX; hAdd(`雪天霜结：全属性再 −${10 * envX}%。`); }
     }
     if (t.self === "splash") {
       if (element === "acid" || element === "fire") { pct -= 0.25; hAdd("目标溅射：酸/火受伤 −25%。"); }
@@ -824,6 +953,10 @@ function resolveAttack(ctx) {
     if (element === "energy" && t.kit && typeof heroProfile === "function" && (heroProfile(t.kit) || {}).race === "兽人-蜥蜴" && t.isPlayer && !t.weaponOf) {
       pct += 0.25; hAdd("鳞片（兽人-蜥蜴）：能量受伤 +25%。");
     }
+    // 敌人的种族被动（enemies.js · RACE_PERKS）：热耐性、鳞片，和克制表加算
+    if (typeof raceDefendMods === "function") raceDefendMods(t, element).forEach(m => { pct += m.value; hAdd(m.reason); });
+    // 攻击者一侧：注意力涣散（连续打同一个目标伤害 −25%）
+    if (isAttack && typeof raceAttackMods === "function") raceAttackMods(a, t).forEach(m => { pct += m.value; hAdd(m.reason); });
     // 蓄能：能量、谐波、电攻击造成的伤害提高「高能值占血量上限的百分比」
     // （手册正文没写电，作者确认是手册漏写，电也加）
     if (a && a.self === "store" && (element === "energy" || element === "harmonic" || element === "electric")) {
@@ -845,7 +978,7 @@ function resolveAttack(ctx) {
     }
 
     if (weather === "phase" && Number(ctx.phaseStep) === 2) {
-      pct += 0.50 * envX; hAdd(`相位波峰：伤害 +${50 * envX}%。`);
+      pct += 0.50 * envX; wSum += 0.50 * envX; hAdd(`相位波峰：伤害 +${50 * envX}%。`);
     }
 
     if (flags.icebreak) {
@@ -869,20 +1002,53 @@ function resolveAttack(ctx) {
         }
       });
     }
+    if (waveAmp) {
+      const wp = WAVE_WALL.amplifyPct * waveAmp;
+      pct += wp;
+      hAdd(`驻波墙（增幅${ELE[element] || element}${waveAmp > 1 ? ` ×${waveAmp} 道` : ""}）：${pctTxt(wp)}`);
+    }
+    if (waveDamp) {
+      // 降幅也是百分比，和其他的加在一起（两道墙 −100%，伤害归零）
+      const wd = -WAVE_WALL.dampenPct * waveDamp;
+      pct += wd;
+      hAdd(`驻波墙（降幅${ELE[element] || element}${waveDamp > 1 ? ` ×${waveDamp} 道` : ""}）：${pctTxt(wd)}`);
+    }
 
-    packet *= (1 + pct);
+    // 以百分比写的增伤 / 减伤（攻击方、受击方都算）一律和上面的加在一起，不连乘：
+    // 相位波谷、减伤率、自保、过度自信、全队集结的坦克减伤、冰冻 +50%
+    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%
+    if (weather === "phase" && Number(ctx.phaseStep) === 0) { pct -= 0.5 * envX; wSum -= 0.5 * envX; hAdd(`相位波谷：伤害 −${50 * envX}%。`); }
+    if (flags.dr50 && !noDr) { pct -= 0.5; hAdd("目标减伤 +50%：−50%。"); }
+    if (flags.dr25 && !noDr) { pct -= 0.25; hAdd("自保模式：受伤 −25%。"); }
+    // 狂暴（effects.js · FRENZY.takenCut）：受到的所有伤害（攻击、状态、场地……）减少，和其他百分比加算
+    const frenzyCut = typeof frenzyTakenCut === "function" ? frenzyTakenCut(t) : 0;
+    if (frenzyCut && !noDr) { pct -= frenzyCut; hAdd(`目标狂暴：受到的伤害 −${Math.round(frenzyCut * 100)}%。`); }
+    if (flags.drPct && !noDr) { pct -= Number(flags.drPct) || 0; hAdd(`${flags.drWhy || "减伤"}：−${Math.round((Number(flags.drPct) || 0) * 100)}%。`); }
+    if (flags.prideReduce && !noDr) {
+      const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
+      pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
+    }
+    // 集结持续到自己失衡或濒死
+    if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
+    if (t.resources && t.resources.rallyDr && !noDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
+      pct += 0.5;
+      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
+      t.instant.iceNext = false;
+    }
+
+    const packetNoWeather = wSum ? packet * Math.max(0, 1 + pct - wSum) : null;
+    packet *= Math.max(0, 1 + pct);
     hAdd(`加算百分比合计 ${pctTxt(pct)} → ${round2(packet)}`);
 
+    // 写成「翻倍 / 减半 / ×N」的才另外相乘
     let mul = 1;
-    // 波谷 −50% 伤害；恶劣环境 / 末日翻倍成 −100%（加减翻倍，不是再乘一次 ×0.5）
-    if (weather === "phase" && Number(ctx.phaseStep) === 0) { mul *= Math.max(0, 1 - 0.5 * envX); hAdd(envX > 1 ? "相位波谷：伤害 −100%（恶劣环境 / 末日）。" : "相位波谷：伤害减半。"); }
     if (flags.doubleDeal) { mul *= 2; hAdd("造成伤害翻倍。"); }
     if (flags.doubleTake) { mul *= 2; hAdd("目标受伤翻倍。"); }
-    if (flags.dr50) { mul *= 0.5; hAdd("目标减伤 +50%。"); }
-    if (flags.holyShield) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
-    if (flags.prideReduce) {
-      const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
-      mul *= 1 - pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
+    if (flags.holyShield && !noDr) { mul *= 0.5; hAdd("圣盾：本次伤害减半。"); }
+    if (flags.pointBlank) {   // 抵近射击（feats.js）：远距离攻击打同区，倍率只有原本的 60%
+      const pb = typeof FEAT_CFG !== "undefined" && FEAT_CFG.pointblank ? FEAT_CFG.pointblank.mult : 0.6;
+      mul *= pb; hAdd(`抵近射击：远距离攻击打同区，倍率 ×${pb}。`);
     }
     // 事故幸存+：拉斯缪尔不稳态下受到的伤害 ×3（不再倒地 / 死亡）
     if (t.kit === "ras" && t.resources && t.resources.unstable && typeof passivePlus === "function" && passivePlus(t, 2)) {
@@ -892,11 +1058,6 @@ function resolveAttack(ctx) {
     if (t.flying && flags.action) { mul *= 0.5; hAdd("飞行单位：攻击行动伤害减半。"); }
     if (meltIceHit) { mul *= 2; }
     if (flags.block === "bareOk") { mul *= 0.5; hAdd("空手格挡成功：伤害一半。"); }
-    if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
-      mul *= 1.5;
-      hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");
-      t.instant.iceNext = false;
-    }
     packet *= mul;
 
     packet = Math.max(0, packet);
@@ -905,14 +1066,21 @@ function resolveAttack(ctx) {
     else hAdd(`最终伤害包 ${floored}`);
     packet = floored;
     totalIntended += packet;
+    if (packetNoWeather != null && !ghost) {
+      const diff = packet - Math.floor(Math.max(0, packetNoWeather * mul) + 1e-9);
+      if (diff > 0) weatherUp += diff; else if (diff < 0) weatherDown -= diff;
+    }
     // 减伤：这一段比参照少了多少（空手格挡减半那部分不算，归格挡）
-    if (!ghost) totalReduced += Math.max(0, (refBase + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
+    if (!ghost) totalReduced += Math.max(0, (Math.max(0, refBase + refAtk * multAdj) + (h === 0 ? firstBonus : 0)) * (flags.block === "bareOk" ? 0.5 : 1) - packet);
 
     let hitDealt = packet;
+    let hitBleed = 0;
     if (ghost) {
       hitDealt = 0;
       hAdd(`目标已倒下：这一段 ${packet} 全部算作溢出伤害。`);
     } else if (!onShp) {
+      // 出血要看这一段扣到了哪一层：打穿外层、溢进肉体 / 星灵的也算（作者 10/22 定），所以先记下每一层原来的血量
+      const layersBefore = layersWork.map(l => Math.max(0, Number(l.current) || 0));
       const distribute = distributePacket({
         layers: layersWork,
         startIdx,
@@ -927,6 +1095,25 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
+      // 出血：这一段扣到了肉体 / 星灵层的血（直接打中，或者打穿外层溢进去都算）→ 对扣到的第一层肉体 / 星灵再扣「上限 × 比例」的真实伤害（不溢出）
+      const bleedIdx = ctx.bleed ? layersWork.findIndex((l, i) => BLEED.layers.includes(l.type) && layersBefore[i] > (Number(l.current) || 0)) : -1;
+      const bleedLayer = bleedIdx >= 0 ? layersWork[bleedIdx] : null;
+      if (bleedLayer) {
+        const startLayer = bleedLayer;   // 下面照原来的写法结算这一层
+        const rate = BLEED.pct * Math.pow(BLEED.decay, bleedCount);
+        bleedCount++;
+        const cap = Number(startLayer.max) || 0;
+        const want = Math.max(1, Math.floor(cap * rate + 1e-9));
+        const left = Math.max(0, Number(startLayer.current) || 0);
+        hitBleed = Math.min(want, left);
+        startLayer.current = Math.max(0, Math.floor(left - hitBleed + 1e-9));
+        bleedTotal += hitBleed;
+        hitDealt += hitBleed;
+        const rateTxt = Math.round(rate * 1000) / 10 + "%";
+        const tail = left <= 0 ? "，这一层已经打空，不溢出" : hitBleed < want ? `，这一层只剩 ${left}，不溢出` : "";
+        hAdd(`出血${bleedCount > 1 ? `（第 ${bleedCount} 次，减半）` : ""}：${LAYER[startLayer.type]}上限 ${cap} × ${rateTxt} → ${want}（真实伤害，不吃任何修正）${tail}` +
+          (left > 0 ? `：${LAYER[startLayer.type]} ${left} → ${startLayer.current}` : ""));
+      }
     } else {
       hAdd("起身状态：本段伤害改由坚毅生命承受（不显示剩余值）。");
     }
@@ -947,8 +1134,9 @@ function resolveAttack(ctx) {
         br += 1; hAdd("熔融沙尘：击破 +1。");
       }
       if (meltIceHit) br += 1;
+      if (h === 0 && isAttack && Number(ctx.firstBreak) > 0) { br += Number(ctx.firstBreak); hAdd(`迅袭：整场第一个行动的第一击，击破 +${Number(ctx.firstBreak)}。`); }
       if (flags.smash) {
-        selfBreak += br;
+        if (!waveDamp) selfBreak += br;   // 降幅驻波墙：这一击没有任何击破，反震也没有
         br *= 2;
         hAdd("猛击：击破 ×2，攻击者承受原击破。");
       }
@@ -956,6 +1144,9 @@ function resolveAttack(ctx) {
         br += 1; anchorBreak = true;
         hAdd("千钧：击破 +1。");
       }
+      // 狂暴（effects.js · FRENZY.breakBonus）：和千钧一样，每一次攻击、多段攻击的每一段都加
+      const frenzyBr = isAttack && typeof frenzyBreakBonus === "function" ? frenzyBreakBonus(a) : 0;
+      if (frenzyBr) { br += frenzyBr; hAdd(`狂暴：击破 +${frenzyBr}。`); }
       if (weather === "glow") {
         if (br > 0) br = Math.max(1, br - envX);
         hAdd(`微光：击破 −${envX}（不会减到 0）。`);
@@ -968,6 +1159,7 @@ function resolveAttack(ctx) {
           br += 1; hAdd(meltArmor ? "错位 + 熔融装甲加伤：击破 +1。" : "错位 + 克制/蚀刻：击破 +1。");
         }
       }
+      if (waveDamp && br > 0) { br = 0; hAdd("驻波墙（降幅）：这一击不造成击破。"); }
     }
     // 冰打熔融：这次攻击结算完熔融结束（后面的段数照样吃熔融）
     if (meltIceHit) meltEnded = true;
@@ -980,16 +1172,21 @@ function resolveAttack(ctx) {
         interfDelta = up ? step : -step;
         hAdd(`干涉场遇到反向：清空后从 ${stepTxt} 重计。`);
       } else {
-        interfDelta += up ? step : -step;
-        hAdd(`干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
+        const before = interfDelta;
+        interfDelta = Math.max(-INTERFERE_CAP, Math.min(INTERFERE_CAP, interfDelta + (up ? step : -step)));
+        hAdd(interfDelta === before
+          ? `干涉场：叠层已到上限 ${pctTxt(interfDelta)}，不再叠加。`
+          : `干涉场：本次${up ? "克制" : "劣势"}，下次伤害 ${stepTxt}。`);
       }
     }
 
     totalBreak += br;
 
     perHit.push({
-      dealt: hitDealt,
-      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶），画面按段弹字用
+      dealt: hitDealt,    // 这一段实际扣掉的血（含出血）
+      intended: packet,   // 这一段打出去的伤害（不按剩余血量封顶，不含出血），画面按段弹字用
+      bleed: hitBleed,    // 这一段的出血（真实伤害，已算在 dealt 里）
+      base: segBase,      // 这一段吃目标修正之前的基础包（导体额外一下用）
       breakDealt: br,
       notes: hitLog,
       shp: onShp
@@ -1030,7 +1227,7 @@ function resolveAttack(ctx) {
     if (t.instant && t.instant.sting) pierColdRetrig = true;
   }
 
-  if (t.self === "cat" && totalBreak > 2) {
+  if ((t.self === "cat" || (typeof raceBreakCap === "function" && raceBreakCap(t) != null)) && totalBreak > 2) {
     add("兽人猫·灵巧：一回合失去架势不超过 2。已在应用阶段封顶。");
   }
 
@@ -1045,8 +1242,10 @@ function resolveAttack(ctx) {
     blockedRaw: flags.block === "assistOk" ? Math.round(rawBase * hits + firstBonus) : 0,
     // 受击方的减伤减免掉的伤害（天气、血量层抗性、角色能力、减半……；协助格挡成功的不算）
     reduced: flags.block === "assistOk" ? 0 : Math.round(totalReduced),
-    total: totalDealt,
+    weatherUp, weatherDown,
+    total: totalDealt,                      // 实际扣掉的血（含出血）
     intended: totalIntended,
+    bleed: bleedTotal,                      // 出血的真实伤害合计（已算在 total 里）
     extraHarmonic,
     breakDealt: totalBreak,
     helperBreak,
@@ -1221,25 +1420,37 @@ function applyResultToUnit(target, result, attacker) {
   const notes = [];
   if (!result.ok) return notes;
   target.layers = clone(result.layersAfter);
-  if (result.knockdownHp) {
-    const d = applyTrueDamage(target.layers, result.knockdownHp);
-    notes.push(`击落真伤 ${d}`);
-    target.flying = false;
-  }
   let spent = result.breakDealt;
   if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     spent = 0;
     notes.push("背水一战：起身中不失去架势。");
   }
-  if (target.raceTrait === "catFocus") spent = Math.min(spent, Math.max(0, 2 - (target.lostDefThisTurn || 0)));
+  if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
+  // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
+  const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
+  if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
   // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
   if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
     notes.push(`${target.name} 坚挺：架势保留 1。`);
   }
+  // 决不后退（feats.js）：这一击要把架势打空时，有附赠动作就先 +2 架势
+  if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
+  // 决不后退 / 坚挺 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
+  if (result.broke && defBeforeHit - spent > 0) {
+    result.broke = false;
+    result.knockdownHp = 0;
+  }
+  if (result.knockdownHp) {
+    const d = applyTrueDamage(target.layers, result.knockdownHp);
+    notes.push(`击落真伤 ${d}`);
+    target.flying = false;
+  }
   const wasStunned = !!target.stunned;
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
     notes.push(...registerZoneBreak(target.zone, spent));
@@ -1277,11 +1488,24 @@ function applyResultToUnit(target, result, attacker) {
   target.interfereZone = !target.interfere ? null
     : result.interfereZone !== undefined ? result.interfereZone : target.zone;
   target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
+  // 瑞比「算法改变」：被它标记的敌人这一回合每次受到伤害，瑞比 +5 纳米
+  if (result.total > 0 && target.algoTurn != null && typeof state !== "undefined" && target.algoTurn === state.turnNo && typeof addNano === "function") {
+    addNano(5);
+    if (typeof appendLog === "function") appendLog(`算法改变：${target.name} 受到伤害，瑞比纳米 +5。`);
+  }
   if (result.total > 0) target.gotHitThisTurn = true;
   if (result.selfBreak && attacker) {
-    attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
-    notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
-    if (attacker.def <= 0) attacker.stunned = true;
+    if (attacker.kit === "xia" && attacker.upOnShp && (typeof passiveOn !== "function" || passiveOn(attacker))) {
+      notes.push("背水一战：起身中不失去架势（猛击反震无效）。");
+    } else if (typeof dealBreak === "function") {
+      // 反震和普通击破一样：屹立不倒 / 坚挺 / 决不后退照算，打进失衡时写失衡、敌人排协助攻击。
+      // keepSelf：晕眩后的自我效果留到 dealTo 把这一击结算完再结束
+      dealBreak(attacker, result.selfBreak, "none", notes, "猛击反震", { by: target, keepSelf: true });
+    } else {
+      attacker.def = Math.max(0, (Number(attacker.def) || 0) - result.selfBreak);
+      notes.push(`猛击反震：攻击者架势 −${result.selfBreak}`);
+      if (attacker.def <= 0) attacker.stunned = true;
+    }
   }
   // 自焚吸血只在 app.js · applyCombat 里结算一次（以前这里也治一次，吸血翻倍）
   return notes;
@@ -1294,6 +1518,8 @@ function healUnit(unit, amount, opt) {
   if (typeof bpHealBonus === "function") raw += bpHealBonus(unit);   // 单局图纸：愿你无恙
   // 事故幸存+：拉斯缪尔不稳态下受到的治疗 ×3
   if (unit.kit === "ras" && unit.resources && unit.resources.unstable && typeof passivePlus === "function" && passivePlus(unit, 2)) raw *= 3;
+  // 疫病暴徒（下水道狂鼠）：狂暴时受到的治疗 +50%（enemies.js · ratHealMult）
+  if (typeof ratHealMult === "function") raw *= ratHealMult(unit);
   opt = opt || {};
   // 起身中（靠坚毅生命战斗）：普通治疗不回坚毅生命，只有自焚吸血回（这场战斗里临时有效，见 ledgerCapture）
   if (unit.upOnShp && !opt.selfBurn) return 0;
@@ -1439,12 +1665,57 @@ function rebalanceEnemiesForParty(party, units) {
   return changed.length ? [`人数平衡：按 ${n} 人队重新换算 ${changed.join("、")} 的血量与架势。`] : [];
 }
 
-/** 沙灵聚合体三层血量（人数缩放前）：最外 30 沙尘 / 40 装甲 / 最内 50 沙尘，每级 +9 外沙尘 +8 装甲 +6 内沙尘。
+/** 沙灵聚合体三层血量（人数缩放前）：最外 30 沙尘 / 40 装甲 / 最内 50 沙尘，每级 +9 外沙尘 +8 装甲 +6 内沙尘，再 × AGG_HP_MULT。
  *  三阶段「吸引碎片两次后装甲回满」也按这个算回装甲上限（enemies.js · en_agg3_debris） */
 function aggregateLayerHp(lv) {
   const d = Math.max(0, (Number(lv) || 1) - 1);
-  return { outer: 30 + d * 9, armor: 40 + d * 8, inner: 50 + d * 6 };
+  const k = AGG_HP_MULT;
+  return { outer: Math.round((30 + d * 9) * k), armor: Math.round((40 + d * 8) * k), inner: Math.round((50 + d * 6) * k) };
 }
+/** 沙灵聚合体三层血量的倍率（终局平衡：原本三个首领里它血最少，聪明打法 6 回合就打穿，机制来不及放） */
+const AGG_HP_MULT = 1.5;
+
+/** 沙灵聚合体二阶段 · 电能炮（作者定：做成「死刑」首领机制，boss-mechanics.js）
+ *  进入二阶段就锁定血量上限最高的我方单位，turns 回合后在敌人回合开始时开炮；开完炮过 interval 回合再开下一炮。
+ *  hits：每一段 mult × atk + 1d(diceS)，各自可以协助格挡；目标和聚合体不同区时每段衰减为 far.mult × atk + 1d(far.diceS)。
+ *  splash：目标所在区的其他友方各挨 splash × atk（范围伤害，不能格挡）——要分开站。
+ *  chargeDr：开炮那一回合（倒数到 0）聚合体蓄满能量，我方这回合打它伤害 −chargeDr——要考虑防御和移动，而不是硬拼。
+ *  开炮后机体过热：给自己上熔融，留到下一个我方回合结束（以前是空过一回合）。 */
+const AGG_CANNON = {
+  turns: 1,
+  interval: 2,
+  hits: [{ mult: 1, diceS: 20, baseBreak: 2 }, { mult: 1, diceS: 20, baseBreak: 1 }],
+  far: { mult: 0.5, diceS: 10 },
+  splash: 0.5,
+  chargeDr: 0.5
+};
+
+/** 亡命之王（作者定的强化：用首领机制把「指挥官」做实，boss-mechanics.js）
+ *  exec · 公开处刑（死刑，王在自己回合用的技能，花 1 行动点）：标记血量上限最高的我方单位，turns 回合后的敌人回合开始时落下；
+ *    落下之后过 cooldown 回合（从标记那回合算）才会再用。
+ *    第一刀是王自己：kingMult × atk + 1d(kingDie 随等级升档) 酸；之后每个还站着的手下（狂徒 / 强盗头子）各补一刀：
+ *    crewMult × 自己的 atk + 1d(crewDie 随等级升档)。每一刀都可以协助格挡——先清掉手下，处刑就轻。
+ *    落下后强盗头子还在：grab 概率擒拿，目标失去下回合行动。王被挟持（哗变）时推迟。
+ *  volley · 齐射（回防命令之后）：回防时标记我方每个角色，下一个敌人回合开始时王朝每人各开一枪（mult × atk + 1d(diceS)，物理，
+ *    baseBreak 击破，每枪都能协助格挡）。开枪用掉王那一回合的行动点。和公开处刑撞在同一回合时，处刑往后推一回合。
+ *  援军：首领战开场就写着狂徒援军要赶来（run.js · ENEMY_INFO.outlaw_king.waves，chain.js）；场上敌人全灭、战斗结束就不来了。
+ *  攻击命令 / 处死命令的骰子随等级升档（每 5 级一档，和杂兵一样）。 */
+const KING_CFG = {
+  exec: { turns: 2, cooldown: 3, kingMult: 1.5, kingDie: 6, crewMult: 1, crewDie: 6, grab: 0.5 },
+  volley: { mult: 1, diceS: 8, baseBreak: 2 },
+  // 回防：手下（狂徒 / 强盗头子）被打倒过，王下次行动改成回防命令；cooldown 回合内最多一次（作者定：先设 3，实际游玩再调）
+  hold: { cooldown: 3 }
+};
+
+/** 沙灵聚合体一阶段 · 沙尘爆裂（作者定：「远离」首领机制）：开场标记我方全员，turns 回合后在敌人回合开始时
+ *  每个被标记的人在自己所在的区爆炸一次，对这个区每个友方各 blast × atk（不能格挡）——要分开站。之后每 interval 回合一次；外层沙壳打穿就停。 */
+const AGG_SPREAD = { firstTurn: 1, turns: 1, interval: 2, blast: 0.6 };
+
+/** 沙灵聚合体一阶段 · 狂暴连打（作者定）：聚合体回合花 1 行动点预备，指定一名随机敌人（被嘲讽 / 决一死战时就是牵制者）；
+ *  下一个敌人回合冲到目标所在的区连打 hits 击：每击 mult × atk + 1d(diceS) 物理、baseBreak 击破，每击都能协助格挡，成功率 +blockBonus%。
+ *  出手时被嘲讽就转火牵制者；原目标倒下就随机换一个。全部被格挡下来：聚合体自己受到 selfBreak 击破。
+ *  firstTurn 起才会预备；打完过 cooldown 回合（从出手那回合算）才会再预备。进入二阶段就作废。 */
+const AGG_RUSH = { firstTurn: 2, cooldown: 3, hits: 4, mult: 1, diceS: 8, baseBreak: 1, blockBonus: 10, selfBreak: 4 };
 
 function ufoLegStats(lv) {
   const extra = Math.max(0, (Number(lv) || 1) - 1);
@@ -1455,6 +1726,49 @@ function ufoLegStats(lv) {
     def: 10 + milestone(lv, 2),
     atk: 9 + extra
   };
+}
+
+/** 外城区镇压部队的数值（docs/suppression-force.md 第 1 节）：shield / flesh = [1 级血量, 每级增量]；
+ *  def = 1 级架势（杂兵每 10 级 +1，精英照警卫队队长每 5 级 +1）；atk = 1 级 atk（已经是比参照模板减 1 之后的数；
+ *  杂兵每级 +1，精英的成长项照队长，写在 enemyPresets 里） */
+const RIOT_STATS = {
+  baton:   { shield: [8, 2],   flesh: [12, 4], def: 4, atk: 3 },
+  rifle:   { shield: [6, 2],   flesh: [6, 2],  def: 3, atk: 4 },
+  molotov: { shield: [5, 2],   flesh: [5, 2],  def: 3, atk: 3 },
+  flamer:  { shield: [16, 6],  flesh: [26, 7], def: 5, atk: 5 },   // 牛队长 atk 6 + 2/5 级 → 5 + 2/5 级
+  captain: { shield: [15, 6],  flesh: [20, 5], def: 4, atk: 7 }    // 狼队长 atk 8 + … → 7 + …
+};
+
+/** 下水道狂鼠的数值（docs/ratfolk.md 第 3 节）：血量全部是纯肉体（模板原来的护盾 + 肉体合成一层，总量不变），flesh = [1 级血量, 每级增量]；
+ *  fleshPer5：每 5 级再加的血量（牛队长的护盾每 5 级 +4）；def = 1 级架势（杂兵每 10 级 +1，精英照队长每 5 级 +1，精英已经比模板 −1）；
+ *  atk = 1 级 atk（成长项照模板，写在 enemyPresets 里）；atkMult：ATK 是模板的几成（四舍五入）；dice：普通攻击的伤害骰（固定，不随等级升档）。
+ *  种族「鼠类人·鼠」的六维修正（体质 −1：最内层肉体 −(1 + 等级)，不随人数缩放；耐力 −1：架势不变）在生成时按 run.js · ENEMY_INFO 的
+ *  raceAttrs 换算（enemies.js · setEnemyRace），这里不算 */
+const RAT_STATS = {
+  lurker: { flesh: [17, 4], def: 3, atk: 5, atkMult: 0.75, dice: 6 },   // 潜藏者：狂徒（匕首），ATK × 0.75
+  biter:  { flesh: [17, 4], def: 3, atk: 5, dice: 6 },                  // 撕咬者：狂徒（匕首）
+  plague: { flesh: [42, 12], fleshPer5: 4, def: 4, atk: 6, dice: 8 },   // 疫病暴徒：警卫队队长（牛）护盾 16 + 肉体 26（每级 5 + 7）合成，架势 5 → 4
+  tyrant: { flesh: [35, 11], def: 3, atk: 8, dice: 8 }                  // 暴虐猎手：警卫队队长（狼）护盾 15 + 肉体 20（每级 6 + 5）合成，架势 4 → 3
+};
+
+/** 下水道维护的数值（docs/sewer-maintenance.md 第 2 节；表是 2 人队，3、4 人队的血量按 scaleHp 放大）。
+ *  sweeper 下水道清扫机：血量照空投蜂群——外层护盾 shield = [1 级血量, 每级增量]、内层装甲 armor（不随等级），两层原样保留；
+ *    架势 def + ⌊等级/2⌋，最多 defCap；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
+ *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
+ *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
+ *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
+ *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
+const SEWER_STATS = {
+  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 },
+  elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
+};
+/** 下水道维护的两个精英共用的数值（SEWER_STATS.elite）：护盾在外、星灵在内，远程 */
+function sewerEliteOf(name, lv, p, extra) {
+  const S = SEWER_STATS.elite;
+  return unitOf(name, lv, [
+    { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1] + milestone(lv, 2) * S.shieldPer2, p) },
+    { type: "spirit", hp: scaleHp(S.spirit[0] + (lv - 1) * S.spirit[1], p) }
+  ], S.def, S.atk + milestone(lv, 2) + milestone(lv, 5), Object.assign({ range: "ranged" }, extra));
 }
 
 function enemyPresets() {
@@ -1473,6 +1787,26 @@ function enemyPresets() {
       if (lv >= 25) extraFlat = 10;
       if (lv >= 30) extraFlat = 20;
       return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(armor, p) }], def, atk, { kit: "guard_sword", range: "melee", dice, flat: extraFlat, element: "electric" });
+    }},
+    // 第一采矿场：数值同机器人看守（剑），装甲的一半换成护盾（护盾在外）；攻击改成酸
+    { id: "mine_guard", name: "矿场看守机器人", build(lv, p) {
+      const extra = lv - 1;
+      const armor = 14 + extra * 5;
+      const shield = Math.round(armor / 2);
+      const def = 3 + Math.floor(lv / 5);
+      const atk = 4 + Math.floor(lv / 2);
+      let dice = [1, 4], extraFlat = 0;
+      if (lv >= 4) dice = [1, 6];
+      if (lv >= 8) dice = [1, 8];
+      if (lv >= 12) dice = [1, 10];
+      if (lv >= 16) dice = [1, 12];
+      if (lv >= 20) dice = [1, 20];
+      if (lv >= 25) extraFlat = 10;
+      if (lv >= 30) extraFlat = 20;
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(armor - shield, p) }
+      ], def, atk, { kit: "mine_guard", range: "melee", dice, flat: extraFlat, element: "acid" });
     }},
     { id: "guard_gun", name: "机器人看守（枪）", build(lv, p) {
       const armor = 12 + (lv - 1) * 4;
@@ -1560,6 +1894,191 @@ function enemyPresets() {
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
       ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
     }},
+    // —— 外城区镇压部队（docs/suppression-force.md）：外层护盾、内层肉体，武器全是火；atk 比参照模板低 1 ——
+    // 警棍盾：总血量同狂徒（锤），atk 4 → 3
+    { id: "riot_baton", name: "镇压队员·警棍盾", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.baton.shield[0] + (lv - 1) * RIOT_STATS.baton.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.baton.flesh[0] + (lv - 1) * RIOT_STATS.baton.flesh[1], p) }
+      ], RIOT_STATS.baton.def + milestone(lv, 10), RIOT_STATS.baton.atk + (lv - 1), { kit: "riot_baton", range: "melee", dice: [1, 4], element: "fire", baseBreak: 2 });
+    }},
+    // 燃烧步枪：总血量同机器人看守（枪），atk 5 → 4
+    { id: "riot_rifle", name: "镇压队员·燃烧步枪", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.rifle.shield[0] + (lv - 1) * RIOT_STATS.rifle.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.rifle.flesh[0] + (lv - 1) * RIOT_STATS.rifle.flesh[1], p) }
+      ], RIOT_STATS.rifle.def + milestone(lv, 10), RIOT_STATS.rifle.atk + (lv - 1), { kit: "riot_rifle", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃烧瓶投手：比步枪兵更脆；燃烧瓶是范围攻击，没有伤害骰
+    { id: "riot_molotov", name: "燃烧瓶投手", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.molotov.shield[0] + (lv - 1) * RIOT_STATS.molotov.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.molotov.flesh[0] + (lv - 1) * RIOT_STATS.molotov.flesh[1], p) }
+      ], RIOT_STATS.molotov.def + milestone(lv, 10), RIOT_STATS.molotov.atk + (lv - 1), { kit: "riot_molotov", range: "ranged", dice: [0, 0], element: "fire", baseBreak: 0 });
+    }},
+    // 火焰喷射兵：照警卫队队长（牛）的写法（架势、atk 成长），血量层换成护盾 + 肉体，atk 每级 −1；喷火没有伤害骰
+    { id: "riot_flamer", name: "火焰喷射兵", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.flamer.shield[0] + (lv - 1) * RIOT_STATS.flamer.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.flamer.flesh[0] + (lv - 1) * RIOT_STATS.flamer.flesh[1], p) }
+      ], RIOT_STATS.flamer.def + milestone(lv, 5), RIOT_STATS.flamer.atk + milestone(lv, 5) * 2, { kit: "riot_flamer", range: "melee", dice: [0, 0], element: "fire" });
+    }},
+    // 镇压小队长：照警卫队队长（狼）的写法（架势、atk 成长），血量层是护盾 + 肉体，atk 每级 −1
+    { id: "riot_captain", name: "镇压小队长", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(RIOT_STATS.captain.shield[0] + (lv - 1) * RIOT_STATS.captain.shield[1], p) },
+        { type: "flesh", hp: scaleHp(RIOT_STATS.captain.flesh[0] + (lv - 1) * RIOT_STATS.captain.flesh[1], p) }
+      ], RIOT_STATS.captain.def + milestone(lv, 5), RIOT_STATS.captain.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "riot_captain", range: "any", dice: [1, 6], element: "fire" });
+    }},
+    // —— 下水道狂鼠（docs/ratfolk.md）：纯肉体；种族「鼠类人·鼠」的六维修正生成时再换算（ENEMY_INFO.raceAttrs）——
+    // 潜藏者：狂徒（匕首）的血量 / 架势，ATK × 0.75 四舍五入；开战时躲藏
+    { id: "rat_lurker", name: "潜藏者", build(lv, p) {
+      const S = RAT_STATS.lurker;
+      const u = unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10),
+        Math.round((S.atk + (lv - 1)) * S.atkMult), { kit: "rat_lurker", range: "melee", dice: [1, S.dice], element: "physical" });
+      u.statuses.hide = true;
+      return u;
+    }},
+    // 撕咬者：数值同狂徒（匕首）
+    { id: "rat_biter", name: "撕咬者", build(lv, p) {
+      const S = RAT_STATS.biter;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }], S.def + milestone(lv, 10), S.atk + (lv - 1),
+        { kit: "rat_biter", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // 疫病暴徒：照警卫队队长（牛）的写法（血量合成纯肉体、架势 −1），骰子固定 1d8
+    { id: "rat_plague", name: "疫病暴徒", build(lv, p) {
+      const S = RAT_STATS.plague;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1] + milestone(lv, 5) * S.fleshPer5, p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 5) * 2, { kit: "rat_plague", range: "any", dice: [1, S.dice], element: "physical" });
+    }},
+    // 暴虐猎手：照警卫队队长（狼）的写法（血量合成纯肉体、架势 −1），骰子 1d8
+    { id: "rat_tyrant", name: "暴虐猎手", build(lv, p) {
+      const S = RAT_STATS.tyrant;
+      return unitOf(this.name, lv, [{ type: "flesh", hp: scaleHp(S.flesh[0] + (lv - 1) * S.flesh[1], p) }],
+        S.def + milestone(lv, 5), S.atk + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "rat_tyrant", range: "melee", dice: [1, S.dice], element: "physical" });
+    }},
+    // —— 下水道维护（docs/sewer-maintenance.md）——
+    // 下水道清扫机：血量照空投蜂群（护盾 + 装甲，不会飞），ATK 照机器人看守（剑）；远程，机械、没有种族
+    { id: "sewer_sweeper", name: "下水道清扫机", build(lv, p) {
+      const S = SEWER_STATS.sweeper;
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1], p) },
+        { type: "armor", hp: scaleHp(S.armor, p) }
+      ], S.def + milestone(lv, 2), S.atk + milestone(lv, 2), { kit: "sewer_sweeper", range: "ranged", dice: [1, S.dice], element: "harmonic" });
+      // 架势照空投蜂群：无论几级、几人队都不超过 defCap
+      u.defMax = Math.min(S.defCap, u.defMax);
+      u.def = Math.min(u.def, u.defMax);
+      return u;
+    }},
+    // 触灵维护员 / 触灵清扫员（精英）：照警卫队队长（蜥蜴）的写法，肉体层换成星灵；远程，种族「触灵」（run.js · ENEMY_INFO）
+    // 维护员：普通攻击 1×atk + 1d4 电击；清扫员：普通攻击是对一区所有敌人 0.5×atk 谐波（没有伤害骰）
+    { id: "sewer_keeper", name: "触灵维护员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_keeper", dice: [1, SEWER_STATS.elite.dice], element: "electric" });
+    }},
+    { id: "sewer_cleaner", name: "触灵清扫员", build(lv, p) {
+      return sewerEliteOf(this.name, lv, p, { kit: "sewer_cleaner", dice: [0, 0], element: "harmonic" });
+    }},
+    // 第一采矿场精英（暂定数值，按狼队长的总血量 / 架势 / atk 拆成护盾、装甲、肉体三层）
+    { id: "ant_guard", name: "蚁型特殊戒备兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(10 + (lv - 1) * 3, p) },
+        { type: "flesh", hp: scaleHp(15 + (lv - 1) * 4, p) }
+      ], 4 + milestone(lv, 5), 8 + milestone(lv, 2) + milestone(lv, 5) * 2, { kit: "ant_guard", range: "ranged", dice: [1, 6], element: "acid" });
+    }},
+    // —— 第二采矿场（火）——
+    // 矿场监工：数值同狂徒（锤），血量的一半换成装甲（装甲在外）
+    { id: "mine_overseer", name: "矿场监工", build(lv, p) {
+      const hp = 20 + (lv - 1) * 6, armor = Math.round(hp / 2);
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(armor, p) },
+        { type: "flesh", hp: scaleHp(hp - armor, p) }
+      ], 4 + milestone(lv, 10), 4 + (lv - 1), { kit: "mine_overseer", range: "melee", dice: [1, 6], element: "fire", baseBreak: 2 });
+    }},
+    // 火石清扫机：数值同机器人看守（枪）
+    { id: "flint_sweeper", name: "火石清扫机", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "armor", hp: scaleHp(12 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "flint_sweeper", range: "ranged", dice: [1, 4], element: "fire" });
+    }},
+    // 燃气收集机：数值同机甲触灵（榴弹），星灵换成肉体
+    { id: "gas_collector", name: "燃气收集机", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(10 + (lv - 1) * 4 + milestone(lv, 5) * 2, p) },
+        { type: "armor", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "flesh", hp: scaleHp(5 + (lv - 1) * 2, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "gas_collector", range: "melee", dice: [0, 0], element: "fire", baseBreak: 1 });
+    }},
+    // 蚁型特殊剿灭兵种：血量 / 架势同牛队长，护盾换成装甲；atk 线性成长（1 级 6、20 级 30）
+    { id: "ant_hunter", name: "蚁型特殊剿灭兵种", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "armor", hp: scaleHp(16 + (lv - 1) * 5 + milestone(lv, 5) * 4, p) },
+        { type: "flesh", hp: scaleHp(26 + (lv - 1) * 7, p) }
+      ], 5 + milestone(lv, 5), Math.round(6 + (lv - 1) * 24 / 19), { kit: "ant_hunter", range: "ranged", dice: [1, 8], element: "fire", baseBreak: 1 });
+    }},
+    // —— 第三采矿场（能量）——
+    // 矿场警戒自动机：数值同机器人看守（剑），血量 60% 装甲 + 40% 护盾（护盾在外）；开场休眠
+    { id: "alarm_bot", name: "矿场警戒自动机", build(lv, p) {
+      const total = 14 + (lv - 1) * 5, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "armor", hp: scaleHp(total - shield, p) }
+      ], 3 + Math.floor(lv / 5), 4 + Math.floor(lv / 2), { kit: "alarm_bot", range: "any", dice: [1, 4], element: "energy" });
+      u.dormant = true;
+      return u;
+    }},
+    // 陨石开采机：数值同投料无人机，血量 60% 星灵 + 40% 护盾（护盾在外）；开场带蓄能
+    { id: "meteor_miner", name: "陨石开采机", build(lv, p) {
+      const total = 8 + (lv - 1) * 3, shield = Math.round(total * 0.4);
+      const u = unitOf(this.name, lv, [
+        { type: "shield", hp: scaleHp(shield, p) },
+        { type: "spirit", hp: scaleHp(total - shield, p) }
+      ], 2 + milestone(lv, 2), 5 + (lv - 1) * 2, { kit: "meteor_miner", flying: true, range: "ranged", dice: [0, 0], element: "energy" });
+      u.self = "store";
+      return u;
+    }},
+    // —— 第三采矿场 · 异星生物（星灵）——
+    // 陨体衍蛛：血量同空投蜂群（全部星灵），架势同机器人看守（枪），atk 同巡检浮标
+    { id: "meteor_spider", name: "陨体衍蛛", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(5 + (lv - 1) * 2, p) }], 3 + milestone(lv, 10), 4 + (lv - 1) * 2,
+        { kit: "meteor_spider", range: "melee", dice: [0, 0], element: "energy" });
+    }},
+    // 陨体弦蚣：数值同狂徒（匕首），血量全部星灵
+    { id: "meteor_centipede", name: "陨体弦蚣", build(lv, p) {
+      return unitOf(this.name, lv, [{ type: "spirit", hp: scaleHp(17 + (lv - 1) * 4, p) }], 3 + milestone(lv, 10), 5 + (lv - 1),
+        { kit: "meteor_centipede", range: "ranged", dice: [0, 0], element: "energy" });
+    }},
+    // —— 沙漠生物（desert.js）：沙尘 + 装甲 ——
+    { id: "sandfish_lead", name: "领潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(15 + (lv - 1) * 4, p) },
+        { type: "armor", hp: scaleHp(20 + (lv - 1) * 5, p) }
+      ], 5 + milestone(lv, 5), 6 + (lv - 1), { kit: "sandfish_lead", range: "melee", dice: [1, 6], element: "physical", baseBreak: 2 });
+    }},
+    { id: "sandfish_drive", name: "赶潮沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(6 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(8 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 4 + (lv - 1), { kit: "sandfish_drive", range: "melee", dice: [1, 4], element: "physical" });
+    }},
+    { id: "sandfish_ambush", name: "伏咬沙鱼", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(5 + (lv - 1) * 2, p) },
+        { type: "armor", hp: scaleHp(7 + (lv - 1) * 2, p) }
+      ], 3 + milestone(lv, 10), 6 + (lv - 1), { kit: "sandfish_ambush", range: "melee", dice: [1, 6], element: "physical" });
+    }},
+    // —— 中立生物：不攻击，血量 = 沙鱼吞掉它能回的血 ——
+    { id: "dust_bug", name: "尘虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(2 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(3 + (lv - 1), p) }
+      ], 2 + milestone(lv, 10), 0, { kit: "dust_bug", range: "melee", dice: [0, 0], element: "physical" });
+    }},
+    { id: "tube_worm", name: "管虫", build(lv, p) {
+      return unitOf(this.name, lv, [
+        { type: "sand", hp: scaleHp(3 + (lv - 1), p) },
+        { type: "armor", hp: scaleHp(5 + (lv - 1), p) }
+      ], 1 + milestone(lv, 10), 0, { kit: "tube_worm", range: "melee", dice: [0, 0], element: "physical" });
+    }},
     { id: "bigsand", name: "大沙灵", build(lv, p) {
       return unitOf(this.name, lv, [{ type: "sand", hp: scaleHp(37 + (lv - 1) * 6 + milestone(lv, 2), p) }], 4, 5 + milestone(lv, 2), { kit: "bigsand", range: "melee", dice: [1, 4], element: "physical" });
     }},
@@ -1605,20 +2124,23 @@ function enemyPresets() {
       const { outer, armor, inner } = aggregateLayerHp(lv);
       const atk = 10 + d;
       const def = 11 + milestone(lv, 2);
-      return unitOf("沙灵聚合体", lv, [
+      const u = unitOf("沙灵聚合体", lv, [
         { type: "sand", hp: scaleHp(outer, p) },
         { type: "armor", hp: scaleHp(armor, p) },
         { type: "sand", hp: scaleHp(inner, p) }
       ], def, atk, {
         kit: "sand_aggregate", range: "any", element: "physical", dice: [1, 8], baseBreak: 3,
-        resources: { phase: 1, debrisCount: 0, forceCharge: false, forceOverheat: false }
+        resources: { phase: 1, debrisCount: 0 }
       });
+      if (typeof aggArmSpread === "function") aggArmSpread(u);   // 一阶段：沙尘爆裂（远离机制）
+      return u;
     }},
     { id: "outlaw_king", name: "亡命之王", build(lv, p) {
-      return unitOf(this.name, lv, [
+      const u = unitOf(this.name, lv, [
         { type: "armor", hp: scaleHp(35 + (lv - 1) * 7, p) },
         { type: "flesh", hp: scaleHp(50 + (lv - 1) * 11, p) }
-      ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, 4], element: "fire" });
+      ], 7 + milestone(lv, 5), 11 + (lv - 1) + milestone(lv, 5) * 2, { kit: "outlaw_king", range: "any", dice: [1, leveledSides(lv, 4)], element: "fire" });
+      return u;
     }},
     { id: "chixia", name: "赤牙", build(lv, p) {
       const table = {

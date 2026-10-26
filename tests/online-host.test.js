@@ -122,3 +122,71 @@ test("message IDs remain unique beyond 300 retained messages in one millisecond 
   assert.equal(JSON.parse(recovered.c.localStorage.getItem("backfire-online-v1")).messageNo, 303);
   assert.deepEqual([...initial.errors, ...live.errors, ...recovered.errors], []);
 });
+
+test("offline owner of a battlefield-pick choice (Kolt blade swap) falls back to the first option after the wait", async () => {
+  const f = await fixture(); f.offlinePlayer();
+  const foe = f.state.units.find(u => !u.isPlayer);
+  let answer;
+  f.c.HotseatGame.ownedChoice(f.actor, "更换刀头", [{ label: "不切换", value: { swap: false } }, { label: "切换并打", value: { swap: true, targetId: foe && foe.id } }]).then(value => { answer = value; });
+  assert.equal(f.c.HotseatGame.getView().ask.field, !!foe);
+  f.tick(); f.time(59999); f.tick(); await delay(0); assert.equal(answer, undefined);
+  f.time(2); f.tick(); await delay(0); assert.deepEqual(plain(answer), { swap: false }); assert.equal(f.c.HotseatGame.hasAsk(), false);
+  assert.deepEqual(f.errors, []);
+});
+
+test("公开记录：移动写去向、道具写名字和对象、起身写清楚、回合开始带回合数、胜负撤退进记录，且不带坚毅数值", async () => {
+  const V = require("../online-view.js");
+  const f = await fixture(); start(f);
+  const settle = (cmd, tape = []) => f.c.OnlineGame.onActionSettled(cmd, { executed: true }, tape, {});
+  const itemId = Object.keys(f.c.ITEM_CATALOG).find(k => f.c.ITEM_CATALOG[k].combat && f.c.ITEM_CATALOG[k].name);
+  settle({ type: "move", actor: f.actor.id, dest: 3 });
+  settle({ type: "useItem", actor: f.actor.id, item: itemId, target: f.actor.id, dest: null });
+  settle({ type: "standUp", actor: f.actor.id });
+  settle({ type: "battle.endEnemyTurn" });
+  for (const outcome of ["win", "lose", "retreat"]) await f.c.GAME.actSystem({ type: "battle.finish", outcome }, {});
+  const projected = V.projectLogs(f.c.OnlineGame.getView().packet.publicLogs), texts = projected.map(r => r.text);
+  assert.ok(texts.some(t => t.includes("移动 → 3 区")), texts.join("|"));
+  assert.ok(texts.some(t => t.includes("使用道具 " + f.c.ITEM_CATALOG[itemId].name) && t.includes("→ " + f.actor.name)), texts.join("|"));
+  assert.ok(texts.some(t => t.includes("起身 · 重新站起")), texts.join("|"));
+  assert.ok(texts.some(t => t === `第 ${f.state.turnNo} 回合开始`), texts.join("|"));
+  for (const word of ["战斗胜利", "战斗结束", "队伍撤退"]) assert.ok(texts.includes(word), word + " 缺失：" + texts.join("|"));
+  assert.ok(!/shp|坚毅/i.test(JSON.stringify(projected)));
+});
+
+test("转交角色（#165）：回合之间主持人把角色转给玩家，双方立刻换手，写一行公开记录；一名玩家可以有几个角色，收回给主持人", async () => {
+  const f = await fixture(); start(f);
+  const { OnlineGame, HotseatGame } = f.c, ruby = f.state.units.find(u => u.kit === "ruby" && u.isPlayer && !u.weaponOf);
+  const owners = () => Object.fromEntries(HotseatGame.getView().heroes.map(h => [h.id, h.owner]));
+  assert.deepEqual(plain(OnlineGame.transferState()), { ok: true, reason: "" });
+  OnlineGame.transfer(ruby.id, "p2");   // 柯尔特还在 p2 手里：#165 的每人一个角色限制已取消，可以再给他一个
+  assert.equal(owners()[ruby.id], "p2"); assert.equal(owners()[f.actor.id], "p2");
+  OnlineGame.transfer(ruby.id, "host");
+  OnlineGame.transfer(f.actor.id, "host");   // 收回给主持人
+  assert.equal(owners()[f.actor.id], "host");
+  assert.throws(() => HotseatGame.assertActionFrom("p2", f.actor.id), /不是你的/);
+  OnlineGame.transfer(ruby.id, "p2");
+  assert.equal(owners()[ruby.id], "p2"); assert.equal(owners()[f.actor.id], "host");
+  const logs = OnlineGame.getView().packet.publicLogs.filter(r => r.kind === "transfer");
+  assert.deepEqual(logs.map(r => [r.heroName, r.toName, !!r.toGM]), [[ruby.name, "玩家", false], [ruby.name, "主持人", true], [f.actor.name, "主持人", true], [ruby.name, "玩家", false]]);
+  assert.deepEqual(f.errors, []);
+});
+
+test("转交角色（#165）：分步选择没回答时拒绝并写明原因；公开记录文案走白名单、不带坚毅数值", async () => {
+  const f = await fixture(); start(f);
+  const { OnlineGame, HotseatGame } = f.c;
+  HotseatGame.ownedChoice(f.actor, "选一个", [{ label: "甲", value: 1 }, { label: "乙", value: 2 }]);   // 分步选择在等人回答
+  assert.match(OnlineGame.transferState().reason, /分步选择/);
+  assert.throws(() => OnlineGame.transfer(f.actor.id, "host"), /分步选择/);
+  const out = require("../online-view.js").projectLogs([{ kind: "transfer", heroName: "柯尔特", toName: "Bob", toGM: false, shp: 9 }, { kind: "transfer", heroName: "柯尔特", toGM: true }]);
+  assert.deepEqual(out.map(r => r.text), ["主持人把 柯尔特 交给 Bob 操作", "主持人收回了 柯尔特"]);
+  assert.ok(!/shp|坚毅/i.test(JSON.stringify(out)));
+});
+
+test("offlineTick：掉线玩家的选择询问选项为空时不抛错，也不挡住掉线玩家回合超时", async () => {
+  const f = await fixture(); start(f); f.offlinePlayer();
+  const real = f.c.HotseatGame.getViewFor;
+  f.c.HotseatGame.getViewFor = id => ({ ...real.call(f.c.HotseatGame, id), ask: { id: "empty", eligible: true, kind: "choice", options: [] } });
+  assert.doesNotThrow(() => f.tick());
+  f.c.HotseatGame.getViewFor = real;
+  assert.deepEqual(f.errors, []);
+});

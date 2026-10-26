@@ -15,6 +15,26 @@ const vm = require("vm");
 const H = require("../tests/headless");
 
 const B = require("./balance-common");
+/** 任务板怎么接（自动策略）。返回 { pick: "main" | 任务下标 | null, fallback: 兜底接下的任务名 }
+ *  R = Rogue 接口；单独拿出来是为了能直接测兜底分支（固定种子不一定走得到） */
+function pickBoardTask(R, run) {
+  const avgLv = run.party.reduce((a, h) => a + (h.level || 1), 0) / Math.max(1, run.party.length);
+  const legal = (run.board || []).map((t, i) => ({ t, i }))
+    .filter(x => !R.taskBlocked(run, x.t) && !R.taskWarning(run, x.t))
+    .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
+  const side = legal
+    // 精英支线（悬赏）：等级没高过敌人一截就不接
+    .filter(x => !(x.t.nodeTypes.includes("elite") || x.t.hunt) || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)   // 悬赏路线不预先给出，最后照样是精英战
+    .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
+  if (!run.main.done && R.daysLeft(run) - (side[0] ? side[0].t.days + run.CONFIG_restDays : 0) < run.main.days + 1) return { pick: "main" };
+  if (side.length) return { pick: side[0].i };
+  // Once the main task is complete there is no legal "wait for boss" API on
+  // the board. A danger preference must not erase the remaining legal actions.
+  // Accept the best-paying legal side task and let the normal camp/boss flow run.
+  if (run.main.done && legal.length) return { pick: legal[0].i, fallback: legal[0].t.name };
+  return { pick: run.main.done ? null : "main" };
+}
+
 function runCampaign(options = {}) {
 const SEED = options.seed || "PLAYTEST";
 const env = options.env || {};
@@ -279,21 +299,9 @@ function levelChoices() {
   }
 }
 function boardPick() {
-  const avgLv = run.party.reduce((a, h) => a + (h.level || 1), 0) / Math.max(1, run.party.length);
-  const legal = (run.board || []).map((t, i) => ({ t, i }))
-    .filter(x => !R.taskBlocked(run, x.t) && !R.taskWarning(run, x.t))
-    .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
-  const side = legal
-    // 精英支线（悬赏）：等级没高过敌人一截就不接
-    .filter(x => !(x.t.nodeTypes.includes("elite") || x.t.hunt) || avgLv > R.enemyLevel(run, (x.t.diff || 0) + 1) + 1)   // 悬赏路线不预先给出，最后照样是精英战
-    .sort((a, b) => R.taskPay(run, b.t).kuizhi / b.t.days - R.taskPay(run, a.t).kuizhi / a.t.days);
-  if (!run.main.done && R.daysLeft(run) - (side[0] ? side[0].t.days + run.CONFIG_restDays : 0) < run.main.days + 1) return "main";
-  if (side.length) return side[0].i;
-  // Once the main task is complete there is no legal "wait for boss" API on
-  // the board. A danger preference must not erase the remaining legal actions.
-  // Accept the best-paying legal side task and let the normal camp/boss flow run.
-  if (run.main.done && legal.length) { ev("常规偏好没有可选任务，按合法任务兜底：" + legal[0].t.name); return legal[0].i; }
-  return run.main.done ? null : "main";
+  const r = pickBoardTask(R, run);
+  if (r.fallback) ev("常规偏好没有可选任务，按合法任务兜底：" + r.fallback);
+  return r.pick;
 }
 function prepareFor(boss) {
   levelChoices();
@@ -393,7 +401,7 @@ if (env.ARENA) {
       terminalOutcome = null;
       run.main.done = false;
       run.actDay = 0;
-      run.stage = kind === "boss" ? "boss" : "task";
+      run.stage = kind === "boss" ? "boss" : "board";   // acceptTask 只在任务板前才让接
       run.seed = SEED + ":" + kind + i;
       run.result = null;
       if (kind !== "boss") { tryDo("接任务", () => R.acceptTask(run, "main")); run.stage = "task"; run.task.nodes[run.task.index] = { type: kind, done: false }; }
@@ -453,7 +461,7 @@ while (run.stage !== "over" && !terminalOutcome && steps++ < maxSteps) {
         ? run.party.slice().sort((a, b) => R.heroView(run, b).hp / R.heroView(run, b).hpMax - R.heroView(run, a).hp / R.heroView(run, a).hpMax)[0].kit
         : null;
       if (R.canLongRest(run)) tryDo("休息点长休", () => R.restAtNode(run, "long", { watch }));
-      else if (partyHpRatio() < 0.85) tryDo("休息点短休", () => R.restAtNode(run, "short"));
+      else if (partyHpRatio() < 0.85 && R.canShortRestAtNode(run).ok) tryDo("休息点短休", () => R.restAtNode(run, "short"));
       else tryDo("休息点离开", () => R.restAtNode(run, "leave"));
     } else if (node.type === "shop") {
       shopping(); repairs(); tryDo("离开商店", () => R.leaveNode(run));
@@ -519,4 +527,4 @@ function main(argv = process.argv.slice(2)) {
   return report.outcome === "error" ? 1 : 0;
 }
 if (require.main === module) { try { process.exitCode = main(); } catch (e) { console.error(e.stack || e.message); process.exitCode = 1; } }
-module.exports = { runCampaign, formatCampaign, main };
+module.exports = { runCampaign, formatCampaign, main, pickBoardTask };

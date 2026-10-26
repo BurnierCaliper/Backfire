@@ -1,0 +1,21 @@
+/* 背包浮层（backpack-ui.js）：外框、标签、天气层都和工坊共用（workshop.css · .ovl / .ovl-card / .ws-*），这里只放列表 */
+.bp-card { width: min(820px, 100%); }
+.bp-tabs { margin-bottom: 10px; }
+.bp-tab small { font-family: var(--num); opacity: .7; margin-left: 2px; }
+.bp-row { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; padding: 6px 10px; margin-bottom: 4px; border: 1px solid var(--sk-edge, #4d4337); background: var(--sk-oil-2, #1a1511); }
+.bp-row small { grid-column: 1 / -1; font-size: 11px; color: var(--sk-muted, #a8977b); }
+.bp-row.click { cursor: pointer; }
+.bp-row.click:hover { border-color: var(--sk-brass, #c99a46); }
+.bp-row.sel { outline: 2px solid var(--sk-hazard, #f2c230); outline-offset: -2px; }
+.bp-qty { font-family: var(--num); color: var(--sk-hazard, #f2c230); }
+.bp-own { grid-column: 1 / -1; font-style: normal; font-size: 11px; color: var(--sk-mint, #39e6b4); }
+.bp-uses li { padding: 2px 0; font-size: 13px; }
+.bp-detail .g-btn { margin-top: 10px; }
+.bp-open { margin-left: 4px; }
+/* 战斗里只读（挂在 #g-app 下）：遮罩在战场之上 */
+.g-app > .bp-overlay { position: fixed; }
+/* 工匠装件：装前 / 装后对比（rogue-ui.js · partRows） */
+.pt-cmp { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.pt-cmp .up { color: var(--heal, #8fe39a); } .pt-cmp .down { color: #f08a7a; }
+/* 窄屏 / 触屏（和 online.css 同一断点 760px）：标签、关闭按钮、可点的材料行保留 44px 触屏高度 */
+@media (max-width: 760px), (pointer: coarse) { .bp-overlay .bp-tab, .bp-overlay .g-btn, .bp-overlay .bp-row.click { min-height: 44px; } }

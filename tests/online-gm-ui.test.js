@@ -13,21 +13,27 @@ test.after(async () => { if (browser) await browser.close(); });
 async function fixture(t, mobile = false) {
   if (!browser) { t.skip("Playwright/browser unavailable"); return; }
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1300, height: 900 }, isMobile: mobile, hasTouch: mobile });
+  await require("./old-screen")(context);   // #316：新画面默认开，这里测的是旧画面
   t.after(() => context.close()); const page = await context.newPage(), errors = [];
   page.on("pageerror", e => errors.push(e.message));
   await page.setContent('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body><main class="g-app">战场</main></body>');
   await page.addStyleTag({ path: path.join(__dirname, "..", "online-gm-ui.css") });
+  await page.addStyleTag({ path: path.join(__dirname, "..", "pause-menu.css") });
   await page.evaluate(() => {
     const hero = { id: "hero", name: '<img src=x onerror="window.pwned=1">', zone: 1, isPlayer: true, level: 3, layers: [{ type: "flesh", current: 14, max: 20 }], shp: 11, shpMax: 18, def: 3, defMax: 4, ap: 1, apMax: 1, bonus: 1, bonusMax: 1, atk: 8, statuses: {} };
     const enemy = { id: "enemy", name: "狂徒", zone: 2, isPlayer: false, level: 2, layers: [{ type: "flesh", current: 12, max: 15 }], ap: 1, bonus: 1, statuses: {} };
     window.fixture = { calls: [], listeners: [], reject: "", view: { active: false, isHost: false, manualPhase: false, players: [], manual: { enemy: true }, enemyCatalog: [{ id: "thug_knife", name: "狂徒（匕首）" }], enemySkills: { enemy: [{ id: "en_aa", label: "普通攻击" }, { id: "en_gl", label: "榴弹标定" }] }, skillSteps: { en_gl: [{ key: "dest", type: "zone", label: "榴弹落点", zones: [1, 2], optional: false }] }, state: { units: [hero, enemy], zoneMode: 2, props: [{ id: "prop1", name: "爆炸桶", kind: "boom", zone: 1, level: 1, faction: "player", hp: 3, maxHp: 3, link: "1-2" }], fields: { 1: { fire: 0, ruinHp: 30, ruinMax: 30 }, 2: {} }, gaps: { "1-2": { type: "open", hp: 0, maxHp: 0, open: true } }, weather: "none", sandDir: "12" } }, emit() { this.listeners.forEach(f => f()); } };
     window.bridge = { getView: () => JSON.parse(JSON.stringify(fixture.view)), subscribe: fn => { fixture.listeners.push(fn); return () => { fixture.listeners = fixture.listeners.filter(x => x !== fn); }; }, submit: async cmd => { fixture.calls.push(JSON.parse(JSON.stringify(cmd))); return fixture.reject ? { ok: false, error: fixture.reject } : { ok: true }; } };
   });
+  // 入口在暂停页面里（#298）：pause-menu.js 先加载，online-gm-ui.js 往里登记「主持人工具」
+  await page.addScriptTag({ path: path.join(__dirname, "..", "pause-menu.js") });
   await page.addScriptTag({ path: path.join(__dirname, "..", "online-gm-ui.js") });
   await page.evaluate(() => { window.component = OnlineGMUI.mount(bridge); });
   return { page, errors };
 }
-async function host(page) { await page.evaluate(() => { Object.assign(fixture.view, { active: true, isHost: true }); fixture.emit(); }); await page.click("#ogm-toggle"); }
+// 主持人工具的入口在暂停页面里（#298，以前是 #ogm-toggle）：联机时（online-ui.js 会 setOnline）打开菜单，点「主持人工具」
+async function openTools(page) { await page.evaluate(() => PauseMenu.open()); await page.click('#pm-overlay [data-pause-item="gmTools"]'); }
+async function host(page) { await page.evaluate(() => { Object.assign(fixture.view, { active: true, isHost: true }); fixture.emit(); PauseMenu.setOnline({ host: true }); }); await openTools(page); }
 async function calls(page) { return page.evaluate(() => fixture.calls); }
 async function tab(page, name) { await page.click(`[data-tab="${name}"]`); }
 
@@ -52,13 +58,24 @@ test("D3 GM UI: spawn and distinct remove/kill commands are explicit JSON with s
   assert.deepEqual(f.errors, []);
 });
 
+test("GM UI（作者 10/20）：「生成敌人」的等级默认填队伍平均等级（trpgPartyLevel），照样可以改", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f;
+  await page.evaluate(() => { window.trpgPartyLevel = () => 7; });   // 规则里的队伍平均等级（trpg-tasks.js）
+  await host(page);
+  assert.equal(await page.inputValue("#ogm-enemy-level"), "7", "默认填队伍平均等级");
+  await page.click('[data-action="spawn"]');
+  await page.fill("#ogm-enemy-level", "3"); await page.click('[data-action="spawn"]');
+  assert.deepEqual((await calls(page)).map(c => c.level), [7, 3], "不改就按队伍平均等级，改了按改的");
+  assert.deepEqual(f.errors, []);
+});
+
 test("D3 GM UI: manual action uses chosen target/flow and closes tools for real reaction dialogs", async t => {
   const f = await fixture(t); if (!f) return; const { page } = f; await host(page);
   assert.equal(await page.locator('[data-action="enemy-skill"]').isDisabled(), true);
   await page.evaluate(() => { fixture.view.manualPhase = true; fixture.emit(); });
   await page.selectOption("#ogm-target", "hero"); await page.click('[data-action="enemy-skill"]');
   assert.equal(await page.locator("#ogm-panel").count(), 0);
-  await page.click("#ogm-toggle"); await page.selectOption("#ogm-skill", "en_gl"); await page.selectOption("#ogm-pick-dest", "1"); await page.click('[data-action="enemy-skill"]');
+  await openTools(page); await page.selectOption("#ogm-skill", "en_gl"); await page.selectOption("#ogm-pick-dest", "1"); await page.click('[data-action="enemy-skill"]');
   const sent = await calls(page);
   assert.deepEqual(sent[0], { type: "gm.enemyAct", actor: "enemy", action: "skill", skill: "en_aa", picks: {}, target: "hero", silent: false });
   assert.deepEqual(sent[1], { type: "gm.enemyAct", actor: "enemy", action: "skill", skill: "en_gl", picks: { dest: 1 }, target: null, silent: false });
@@ -73,7 +90,8 @@ test("D3 GM UI: unit forms escape names, preserve typing across updates, and sub
   assert.equal(await page.inputValue("#ogm-unit-value"), "7"); await page.click('[data-action="edit-unit"]');
   assert.deepEqual((await calls(page))[0], { type: "gm.editUnit", actor: "hero", patch: { shp: 7 }, silent: false });
   await page.selectOption("#ogm-unit-field", "layers"); await page.fill("#ogm-layer-hp-0", "9"); await page.fill("#ogm-layer-max-0", "25"); await page.click('[data-action="edit-unit"]');
-  assert.deepEqual((await calls(page))[1].patch, { layers: [{ current: 9, max: 25 }] });
+  // #186：编辑器统一成单机那套后，血量层带上类型（可以改层类型）
+  assert.deepEqual((await calls(page))[1].patch, { layers: [{ type: "flesh", current: 9, max: 25 }] });
   assert.deepEqual(f.errors, []);
 });
 
@@ -105,8 +123,22 @@ test("D3 GM UI: rejected commands show safe text and malformed negative values n
 test("D3 GM UI: Esc closes the tools panel whether focus is inside it or on the page", async t => {
   const f = await fixture(t); if (!f) return; const { page } = f; await host(page);
   await page.keyboard.press("Escape"); assert.equal(await page.locator("#ogm-panel").count(), 0);
-  await page.click("#ogm-toggle"); await page.focus("#ogm-enemy-level");
+  await openTools(page); await page.focus("#ogm-enemy-level");
   await page.keyboard.press("Escape"); assert.equal(await page.locator("#ogm-panel").count(), 0);
   await page.evaluate(() => component.destroy());
+  assert.deepEqual(f.errors, []);
+});
+
+test("GM UI: sand fish spawn offers 富集 / 普通 / 随机; other enemies have no such option", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f;
+  await page.evaluate(() => { window.SAND_FISH_KITS = ["sandfish_drive"]; fixture.view.enemyCatalog.push({ id: "sandfish_drive", name: "赶潮沙鱼" }); });
+  await host(page);
+  assert.equal(await page.locator("#ogm-enemy-enrich").count(), 0, "狂徒没有富集选项");
+  await page.selectOption("#ogm-enemy-kind", "sandfish_drive");
+  await page.selectOption("#ogm-enemy-enrich", "on"); await page.click('[data-action="spawn"]');
+  await page.selectOption("#ogm-enemy-enrich", ""); await page.click('[data-action="spawn"]');
+  const spawns = (await calls(page)).filter(c => c.type === "gm.spawnEnemy");
+  assert.equal(spawns[0].enriched, true);
+  assert.equal("enriched" in spawns[1], false, "随机就不带这一项");
   assert.deepEqual(f.errors, []);
 });

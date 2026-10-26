@@ -44,6 +44,12 @@ function makeRng(seed) {
   return next;
 }
 
+/** 画面效果（粒子、音效、动画令牌、骰子滚动动画……）用的随机数。
+ *  RNG.install 会把 Math.random 换成战斗用的种子随机数，画面效果如果也从那里取，
+ *  骰子结果就会跟着动画停了多久、开没开特效变；所以画面效果一律用这个，永远是系统自带的随机数。 */
+const NATIVE_RANDOM = Math.random;
+function fxRandom() { return NATIVE_RANDOM(); }
+
 const RNG = {
   seed: null,
   fn: null,
@@ -76,6 +82,12 @@ const RNG = {
 };
 
 /* ===== 2. 遭遇数据 ============================================== */
+
+/** 亡命之王的狂徒援军（作者定）：开场就写着要赶来（chain.js），到王身边集合；战斗已经结束（场上全灭）就不来了 */
+const OUTLAW_KING_WAVES = [
+  { turns: 3, cancelOnClear: true, enemies: [{ preset: "thug_knife", zone: 2, near: "outlaw_king" }, { preset: "thug_hammer", zone: 2, near: "outlaw_king" }] },
+  { turns: 6, cancelOnClear: true, enemies: [{ preset: "thug_knife", zone: 2, near: "outlaw_king" }, { preset: "thug_hammer", zone: 2, near: "outlaw_king" }] }
+];
 
 /* 一场战斗写成数据，setupBattle 照着摆。
  *   enemies: [{ preset, level, zone, count? }]
@@ -176,7 +188,8 @@ const ENCOUNTERS = [
       { preset: "bandit_boss", zone: 2 },
       { preset: "thug_knife", zone: 2 },
       { preset: "thug_hammer", zone: 2 }
-    ]
+    ],
+    waves: OUTLAW_KING_WAVES
   },
   {
     id: "boss_aggregate",
@@ -209,29 +222,79 @@ const ENCOUNTER_TOKENS = 4;
 const CHANCE_EXTRA_TOKEN = 0.05;   // 变 5 代币
 const CHANCE_MIXED = 0.05;         // 混战：无视阵营
 
-/** 每个敌人的阵营、出没区域、代币、成组数量 */
+/** 随机种族的权重表（写进 ENEMY_INFO.races；有哪些种族、小分支见 enemies.js · ENEMY_RACES）。
+ *  race 可以写大支（"猫类人"，小分支再平分）、"类人"（四个大支平分）或带小分支的 "兽人·猫"；w 是权重，不必加到 100 */
+const ENEMY_RACE_TABLES = {
+  // 盗匪：人类 60 / 红皮人 20 / 类人 20（四个大支各 5%，大支里的小分支再平分）
+  bandit: [{ race: "人类", w: 60 }, { race: "红皮人", w: 20 }, { race: "类人", w: 20 }],
+  // 燃气收集机：类人四个大支各 25%
+  humanoid: [{ race: "类人", w: 100 }],
+  // 蚁型兵种：兽人五支，猫约 6.7%（其余的 2/7），狼 / 牛 / 蜥蜴 / 熊各约 23.3%
+  ant: [{ race: "兽人·狼", w: 7 }, { race: "兽人·牛", w: 7 }, { race: "兽人·蜥蜴", w: 7 }, { race: "兽人·熊", w: 7 }, { race: "兽人·猫", w: 2 }]
+};
+
+/** 每个敌人的阵营、出没区域、代币、成组数量
+ *  种族（有机体的敌人才写，没写 = 无种族；规则见 docs/enemy-race.md，换算在 enemies.js · applyEnemyRace）：
+ *    race: "兽人·牛"                      固定种族（大支·小分支），不受个体值开关影响，不套六维
+ *    races: ENEMY_RACE_TABLES.bandit      随机种族：[{ race: "人类", w: 60 }, …] 权重表，生成时抽
+ *    raceAttrs: true                      再按种族的六维修正改数值（体质只加最内层肉体）；不写 = 只挂种族、不改数值。
+ *                                         随机种族的写这个；固定种族一般不写（数值设计时已经算进去了），下水道的狂鼠是特意套六维的固定种族（docs/ratfolk.md）
+ *  新增兵种照这个格式加。 */
 const ENEMY_INFO = {
   // —— 天网安保（机械）——
   guard_sword: { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
   guard_gun:   { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
   patrol_car:  { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
   boomcar:     { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1 },
-  buoy:        { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
-  dumpdrone:   { faction: "安保", regions: ["矿场", "巨人城"], tokens: 1 },
-  swarm:       { faction: "安保", regions: ["外城区", "巨人城", "矿场"], tokens: 1, group: 3 },
-  patrolboat:  { faction: "安保", regions: ["巨人城", "矿场"], tokens: 2 },
-  spreader:    { faction: "安保", regions: ["矿场"], tokens: 2 },
+  buoy:        { faction: "安保", regions: ["巨人城"], tokens: 1 },
+  swarm:       { faction: "安保", regions: ["外城区", "巨人城"], tokens: 1, group: 3 },
+  patrolboat:  { faction: "安保", regions: ["巨人城"], tokens: 2 },
+  // 第一采矿场：用酸的安保机械（工蚁的部下）
+  dumpdrone:   { faction: "安保", regions: ["第一采矿场", "巨人城"], tokens: 1 },
+  spreader:    { faction: "安保", regions: ["第一采矿场"], tokens: 2 },
+  mine_guard:  { faction: "安保", regions: ["第一采矿场"], tokens: 1 },
+  ant_guard:   { faction: "安保", regions: ["第一采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.ant },
+  // 第二采矿场：用火的安保部队
+  mine_overseer: { faction: "安保", regions: ["第二采矿场"], tokens: 1, race: "兽人·熊" },
+  flint_sweeper: { faction: "安保", regions: ["第二采矿场"], tokens: 1 },
+  gas_collector: { faction: "安保", regions: ["第二采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.humanoid, raceAttrs: true },
+  ant_hunter:    { faction: "安保", regions: ["第二采矿场"], tokens: 2, races: ENEMY_RACE_TABLES.ant },
+  // 第三采矿场：用能量的安保部队（还会有异星生物）
+  alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
+  meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
+  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币
+  meteor_spider:    { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 },
+  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 1 },
   // —— 警卫队（有机体，可与安保混编）——
-  captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
-  captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
-  captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2 },
+  captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·狼" },
+  captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·牛" },
+  captain_lizard: { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·蜥蜴" },
+  // —— 镇压队（外城区；赤牙麾下的火属性部队，固定种族，docs/suppression-force.md）——
+  riot_baton:    { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·牛" },
+  riot_rifle:    { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·熊" },
+  riot_molotov:  { faction: "镇压队", regions: ["外城区"], tokens: 1, race: "兽人·蜥蜴" },
+  riot_flamer:   { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·熊" },
+  riot_captain:  { faction: "镇压队", regions: ["外城区"], tokens: 2, race: "兽人·狼" },
+  // —— 狂鼠（下水道；鼠类人接触实验废料变异而成，和所有阵营敌对，不和任何阵营混编；固定「鼠类人·鼠」并且套六维，docs/ratfolk.md）——
+  rat_lurker: { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_biter:  { faction: "狂鼠", regions: ["下水道"], tokens: 1, race: "鼠类人·鼠", raceAttrs: true },
+  rat_plague: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  rat_tyrant: { faction: "狂鼠", regions: ["下水道"], tokens: 2, race: "鼠类人·鼠", raceAttrs: true },
+  // —— 下水道维护（下水道；清洁和保护，和安保、警卫队、镇压队是一伙，和其他所有阵营敌对，docs/sewer-maintenance.md）——
+  // 清扫机是机械，没有种族；一枚代币 3 只（照空投蜂群的 group: 3）
+  sewer_sweeper: { faction: "下水道维护", regions: ["下水道"], tokens: 1, group: 3 },
+  // 两个精英固定「触灵」种族（和机甲触灵、飞碟触灵同类；触灵没有六维修正、暂时没有种族被动），阵营照旧是下水道维护
+  sewer_keeper:  { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
+  sewer_cleaner: { faction: "下水道维护", regions: ["下水道"], tokens: 2, race: "触灵" },
   // —— 盗匪 ——
-  thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1 },
-  thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1 },
-  bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2 },
+  thug_knife:  { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
+  thug_hammer: { faction: "盗匪", regions: ["外城区"], tokens: 1, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
+  bandit_boss: { faction: "盗匪", regions: ["外城区"], tokens: 2, races: ENEMY_RACE_TABLES.bandit, raceAttrs: true },
   // 主持人手册：每次出场带强盗头子、匕首狂徒、锤狂徒各一，和他同区（固定随从，不按代币抽）
   outlaw_king: { faction: "盗匪", regions: ["外城区"], tokens: 4, boss: true,
-                 escorts: ["bandit_boss", "thug_knife", "thug_hammer"] },
+                 races: ENEMY_RACE_TABLES.bandit, raceAttrs: true,
+                 escorts: ["bandit_boss", "thug_knife", "thug_hammer"],
+                 waves: OUTLAW_KING_WAVES },
   // —— 沙灵 ——
   sand_beast: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
   sand_human: { faction: "沙灵", regions: ["沙漠"], tokens: 1 },
@@ -240,23 +303,48 @@ const ENEMY_INFO = {
   dustbody:   { faction: "沙灵", regions: ["沙漠"], tokens: 2 },
   sand_aggregate: { faction: "沙灵", regions: ["沙漠"], tokens: 4, boss: true },
   // —— 触灵（天网造物）——
-  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2 },
-  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true },
+  // 种族也是「触灵」（docs/sewer-maintenance.md 第 1 节：下水道维护的触灵精英和它们分在一类；没有六维修正、暂时没有种族被动）
+  mecha_mg: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  mecha_gl: { faction: "触灵", regions: ["天网设施", "巨人城"], tokens: 2, race: "触灵" },
+  ufo_boss: { faction: "触灵", regions: ["天网设施"], tokens: 4, boss: true, race: "触灵" },
   // —— 巨人 ——
   giant: { faction: "巨人", regions: ["巨人城"], tokens: 2 },
   // —— 野生动物：只在外城区与沙漠 ——
   // 穴鸦成群出现（4–6 只一群），一群占满一场的 4 枚代币；pack：成群的杂兵，不算精英战
   crow: { faction: "野生", regions: ["外城区", "沙漠"], tokens: 4, group: [4, 6], pack: true },
+  // —— 沙漠生物（desert.js）：沙鱼群；和沙灵互相敌对 ——
+  sandfish_lead:   { faction: "沙漠生物", regions: ["沙漠"], tokens: 2 },
+  sandfish_drive:  { faction: "沙漠生物", regions: ["沙漠"], tokens: 1 },
+  sandfish_ambush: { faction: "沙漠生物", regions: ["沙漠"], tokens: 1 },
+  // —— 中立生物：不占代币，不进随机抽取；有沙鱼的沙漠遭遇按 DESERT.spawn 另外配 ——
+  dust_bug:  { faction: "中立生物", regions: ["沙漠"], tokens: 0, neutral: true },
+  tube_worm: { faction: "中立生物", regions: ["沙漠"], tokens: 0, neutral: true },
   // —— 古代造物：沙漠 ——
   watchcrow: { faction: "古代造物", regions: ["沙漠"], tokens: 2 }
 };
 
-/** 可以同场混编的阵营（安保与警卫队是一套体系的两个分支） */
-const ALLIED_FACTIONS = [["安保", "警卫队"]];
+/** 是一伙的阵营（安保、警卫队是一套体系的两个分支；镇压队是赤牙的部队，和它们是一伙；
+ *  下水道维护和巨人方友好，也是这一伙，docs/sewer-maintenance.md）。
+ *  「一伙」只管不互相敌对、友军判断；遭遇里能不能同场混编另看 FACTION_MIX_CHANCE */
+const ALLIED_FACTIONS = [["安保", "警卫队", "镇压队", "下水道维护"]];
+/** 同场混编概率：写在这里的阵营不是想混就混——抽遭遇时它和同伙阵营只有这么大的概率混编，
+ *  其余时候各打各的（抽到镇压队就只出镇压队；抽到安保 / 警卫队时，镇压队也只有这个概率加进来）。
+ *  没写的阵营照旧想混就混（安保 + 警卫队）。
+ *  下水道维护照镇压队的做法给 15%（实际上下水道只抽下水道的敌人，平时碰不到安保） */
+const FACTION_MIX_CHANCE = { "镇压队": 0.15, "下水道维护": 0.15 };
 function alliesOf(faction) {
   const g = ALLIED_FACTIONS.find(a => a.indexOf(faction) >= 0);
   return g ? g.slice() : [faction];
+}
+/** 抽遭遇时这个阵营可以同场出现的阵营：alliesOf 去掉没掷中混编概率的阵营，每次调用各掷一次。
+ *  抽到的是受限阵营（镇压队、下水道维护）：整个同伙一起混进来或一起不来；
+ *  抽到的是同伙（安保 / 警卫队）：受限阵营各自掷一次决定加不加进来 */
+function encounterFactions(faction) {
+  const all = alliesOf(faction);
+  const loose = all.filter(f => FACTION_MIX_CHANCE[f] != null);
+  if (!loose.length) return all;
+  if (loose.includes(faction)) return Math.random() < FACTION_MIX_CHANCE[faction] ? all : [faction];
+  return all.filter(f => !loose.includes(f) || Math.random() < FACTION_MIX_CHANCE[f]);
 }
 
 function enemyInfo(preset) { return ENEMY_INFO[preset] || null; }
@@ -270,12 +358,18 @@ function enemyTokens(preset) {
   const i = enemyInfo(preset);
   return i ? (i.tokens || 1) : 1;
 }
+/** 专门区域（作者 10/22，docs/ratfolk.md 第 1 节）：隶属某个大区（parent）、有自己的敌人池的区域。
+ *  只出没在专门区域里的敌人不进「敌人不分地区」的遭遇（单局休息时被偷袭的遭遇战，anyRegion），不和别的区域的敌人混用；
+ *  大区自己的遭遇本来就按 ENEMY_INFO.regions 分池，抽不到它们。单局怎么进下水道：带着下水道地图，幕间改走（rogue.js · interludeOptions） */
+const SUB_REGIONS = { "下水道": { parent: "巨人城" } };
 function regionPool(region, opt) {
   opt = opt || {};
   return Object.keys(ENEMY_INFO).filter(k => {
     const i = ENEMY_INFO[k];
     if (i.boss && !opt.boss) return false;
-    return !region || i.regions.indexOf(region) >= 0;
+    if (i.neutral) return false;   // 中立生物不当敌人抽
+    if (!region) return !i.regions.every(r => SUB_REGIONS[r]);   // 不分地区：只出没在专门区域里的不算
+    return i.regions.indexOf(region) >= 0;
   });
 }
 function regionFactions(region) {
@@ -289,10 +383,66 @@ function regionFactions(region) {
 
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level } */
+/** 按代币从池子里抽敌人：[{ preset, count }] */
+function pickByTokens(pool, tokens) {
+  const enemies = [];
+  let left = tokens;
+  for (let guard = 0; guard < 40 && left > 0; guard++) {
+    const ok = pool.filter(k => enemyTokens(k) <= left);
+    if (!ok.length) break;
+    const k = pickOne(ok);
+    enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
+    left -= enemyTokens(k);
+  }
+  return enemies;
+}
+
+/* 三方混战（三区制）：玩家在中间 2 区，两个互相敌对的阵营各占一边，两边各 3 枚代币。
+ *   sides：两边各自的阵营（可混编的阵营写在一起）。chance：这个区域三区制的遭遇变成三方混战的概率 */
+const THREE_WAY = {
+  tokens: 3,
+  chance: 0.15,   // 作者 10/22 定 15%（原来 50%）
+  regions: {
+    "第三采矿场": { name: "三方混战", sides: [["安保"], ["异星生物"]] },
+    "外城区": { name: "三方混战", sides: [["安保", "警卫队"], ["盗匪"]] },
+    // 下水道：狂鼠 ↔ 下水道维护（docs/sewer-maintenance.md 第 4 节）；两边照代币正常抽，清扫机、维护员、清扫员可能混着出
+    "下水道": { name: "三方混战", sides: [["狂鼠"], ["下水道维护"]] }
+  }
+};
+function rollThreeWay(region, opt) {
+  const cfg = THREE_WAY.regions[region];
+  const sides = cfg.sides.slice();
+  if (Math.random() < 0.5) sides.reverse();   // 谁在 1 区、谁在 3 区随机
+  const enemies = [];
+  sides.forEach((fs, i) => {
+    const pool = regionPool(region).filter(k => fs.includes(ENEMY_INFO[k].faction));
+    const zone = i === 0 ? 1 : 3;
+    pickByTokens(pool, THREE_WAY.tokens).forEach(e => {
+      for (let n = 0; n < Math.max(1, Number(e.count) || 1); n++) enemies.push({ preset: e.preset, count: 1, zone });
+    });
+  });
+  const spec = {
+    name: `${region}·${cfg.name}`, region, faction: cfg.name,
+    tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
+    tokens: THREE_WAY.tokens * 2, mixed: false, threeWay: true, enemies,
+    layout: "threeway", layoutLocked: true, playerZone: 2
+  };
+  return finishEncounter(spec, Object.assign({}, opt, { zoneMode: 3 }));
+}
+
+/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level, threeWay } */
 function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
+
+  // 第三采矿场 / 外城区 / 下水道：三区制的遭遇有 THREE_WAY.chance 的概率变成三方混战（指定了阵营 / 混战 / 不分地区的不算）。
+  // 先定下区制（和平常一样两区 / 三区各一半），三区才掷三方混战
+  if (THREE_WAY.regions[region] && !opt.anyRegion && !opt.faction && opt.mixed == null) {
+    const zm = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
+    const want = zm === 3 && (opt.threeWay != null ? !!opt.threeWay : Math.random() < THREE_WAY.chance);
+    if (want) return rollThreeWay(region, opt);
+    opt = Object.assign({}, opt, { zoneMode: zm });
+  }
 
   // 代币：5% 变 5 枚
   const extra = opt.tokens == null && Math.random() < CHANCE_EXTRA_TOKEN;
@@ -308,21 +458,12 @@ function rollEncounter(opt) {
   if (!mixed) {
     const fs = opt.faction ? [opt.faction] : regionFactions(region);
     faction = pickOne(fs);
-    const allow = alliesOf(faction);
+    const allow = encounterFactions(faction);
     pool = pool.filter(k => allow.indexOf(ENEMY_INFO[k].faction) >= 0);
   }
   if (!pool.length) pool = regionPool(poolRegion);
 
-  const enemies = [];
-  let left = tokens;
-  for (let guard = 0; guard < 40 && left > 0; guard++) {
-    const ok = pool.filter(k => enemyTokens(k) <= left);
-    if (!ok.length) break;
-    const k = pickOne(ok);
-    const info = ENEMY_INFO[k];
-    enemies.push({ preset: k, count: groupCount(info) });
-    left -= enemyTokens(k);
-  }
+  const enemies = pickByTokens(pool, tokens);
 
   return finishEncounter({
     name: opt.anyRegion ? (mixed ? "遭遇·混战" : `遭遇·${faction}`) : mixed ? `${region}·混战` : `${region}·${faction}`,
@@ -330,7 +471,7 @@ function rollEncounter(opt) {
     tier: enemies.some(e => enemyTokens(e.preset) >= 2 && !(ENEMY_INFO[e.preset] || {}).pack) ? "elite" : "normal",
     tokens, mixed, extraToken: extra,
     enemies
-  }, opt);
+  }, opt, pool);
 }
 
 /** 悬赏目标（rogue.js 悬赏任务）：血量、atk 乘倍率，名字前加【目标】 */
@@ -358,11 +499,21 @@ function rollBountyEncounter(preset, opt) {
   enc.id = "bounty:" + enc.id;
   return enc;
 }
-/** 本区域可以当悬赏目标的精英（2 代币及以上、不是首领、不是成群的） */
+/** 悬赏目标的资格：至少占几枚代币（本区域没有这么大的敌人时，退而取本区域里代币最多的） */
+const BOUNTY_TARGET = { minTokens: 2 };
+/** 本区域可以当悬赏目标的精英（不是首领、不是成群的；优先 minTokens 枚代币及以上）。
+ *  只从本区域的敌人表里抽：第三采矿场的敌人都只占 1 枚代币，以前因此落到全部区域去抽，
+ *  抽到别的区域的目标，随从又和目标不是一个阵营 */
 function bountyCandidates(region) {
-  const ok = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack && (i.tokens || 1) >= 2; };
-  const here = regionPool(region).filter(ok);
-  return here.length ? here : Object.keys(ENEMY_INFO).filter(ok);
+  const base = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack; };
+  const here = regionPool(region).filter(base);
+  const big = here.filter(k => enemyTokens(k) >= BOUNTY_TARGET.minTokens);
+  if (big.length) return big;
+  if (here.length) {
+    const top = Math.max(...here.map(enemyTokens));
+    return here.filter(k => enemyTokens(k) === top);
+  }
+  return Object.keys(ENEMY_INFO).filter(k => base(k) && enemyTokens(k) >= BOUNTY_TARGET.minTokens);   // 区域没有敌人表（不应出现）
 }
 
 /** BOSS 遭遇：BOSS 本体不占代币，随从另给。手册写死了随从的 BOSS（ENEMY_INFO.escorts）照写的来，不抽代币。 */
@@ -372,7 +523,7 @@ function rollBossEncounter(bossPreset, opt) {
   const region = opt.region || (info && info.regions[0]) || "外城区";
   const tokens = opt.tokens != null ? Number(opt.tokens) : 2;
   const enemies = [{ preset: bossPreset, zone: 2 }];
-  const allow = info ? alliesOf(info.faction) : null;
+  const allow = info ? encounterFactions(info.faction) : null;
   let pool = regionPool(region).filter(k => !allow || allow.indexOf(ENEMY_INFO[k].faction) >= 0);
   if (info && info.escorts) info.escorts.forEach(k => enemies.push({ preset: k, zone: 2 }));
   let left = info && info.escorts ? 0 : tokens;
@@ -383,11 +534,13 @@ function rollBossEncounter(bossPreset, opt) {
     enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
     left -= enemyTokens(k);
   }
-  return finishEncounter({
+  const spec = {
     name: (info && bossPreset) ? `${region}·首领战` : "首领战",
     region, faction: info ? info.faction : null, tier: "boss",
     tokens, mixed: false, enemies
-  }, opt);
+  };
+  if (info && Array.isArray(info.waves)) spec.waves = JSON.parse(JSON.stringify(info.waves));   // 首领自带的援军
+  return finishEncounter(spec, opt);
 }
 
 /** 三区站位：全在 3 区 / 2+3 对半 / 玩家在 2、敌人 1+3 对半。飞碟触灵不改。 */
@@ -439,18 +592,29 @@ function layoutLabel(kind) {
     all3: "全员 3 区",
     split23: "2 / 3 区对半",
     pincer: "夹击（玩家 2 区）",
+    threeway: "三方混战（玩家 2 区，两个阵营各占一边）",
     front2: "敌人 2 区",
     custom: "主持人预设"
   })[kind] || kind;
 }
 
-/** 补上区制、天气和站位 */
-function finishEncounter(spec, opt) {
+/** 补上区制、天气和站位。pool：抽敌人用的池子（rollEncounter 传进来；车占代币时补抽用，vehicle.js · vehiclePayTokens） */
+function finishEncounter(spec, opt, pool) {
   opt = opt || {};
+  const picks = (spec.enemies || []).slice();   // 抽到的先后：三区制的站位会把敌人拆开打乱，车占代币时从最后抽到的往前退
   const zoneMode = Number(opt.zoneMode) || (Math.random() < 0.5 ? 2 : 3);
   spec.zoneMode = zoneMode;
   spec.weather = opt.weather != null ? opt.weather : regionWeather(spec.region);
+  if (!spec.features) { const feats = regionFeatures(spec.region, zoneMode); if (feats.length) spec.features = feats; }
   applyEncounterLayout(spec);
+  // 载具（vehicle.js）：镇压部队的遭遇有概率带一台移动堡垒，一场最多一台；开战时由 buildEncounter 摆上场，并安排驾驶员
+  if (spec.vehicles === undefined && typeof vehicleRollEncounter === "function") {
+    spec.vehicles = vehicleRollEncounter(spec);
+    // 车占代币（VEHICLES.*.tokens：移动堡垒占 1 枚，作者 10/21 定；填 0 = 不占，这一步什么都不做）：带车的遭遇退掉这么多代币的敌人
+    if (typeof vehiclePayTokens === "function") vehiclePayTokens(spec, picks, pool);
+  }
+  // 有沙鱼的沙漠遭遇：配上尘虫 / 管虫（中立生物，不占代币，desert.js · DESERT.spawn）
+  if (typeof addDesertNeutrals === "function") addDesertNeutrals(spec);
   spec.id = "roll:" + spec.region + ":" + (spec.faction || "") + ":" + spec.enemies.map(e => e.preset).join("+");
   return spec;
 }
@@ -458,9 +622,22 @@ function finishEncounter(spec, opt) {
 /** 区域默认天气 */
 function regionWeather(region) {
   if (region === "沙漠") return Math.random() < 0.6 ? "sand" : "none";
-  if (region === "矿场") return Math.random() < 0.4 ? "acid" : "none";
+  if (region === "第一采矿场") return Math.random() < 0.4 ? "acid" : "none";
+  if (region === "第二采矿场") return Math.random() < 0.4 ? "heat" : "none";
+  if (region === "第三采矿场") return Math.random() < 0.3 ? "glow" : "none";
   if (region === "巨人城") return Math.random() < 0.3 ? "thunder" : "none";
   return "none";
+}
+
+/** 区域自带的场地：第三采矿场 20% 有一个区是能量场（随机一区） */
+function regionFeatures(region, zoneMode) {
+  const out = [];
+  if (region === "沙漠" && typeof desertFeatures === "function") out.push(...desertFeatures(zoneMode));   // 沙珊瑚台地 / 沙珊瑚枝
+  if (region === "第三采矿场" && Math.random() < 0.2) {
+    const n = Number(zoneMode) || 2;
+    out.push({ type: "field", what: "energy", zone: 1 + Math.floor(Math.random() * n) });
+  }
+  return out;
 }
 
 function encounterById(id) {
@@ -473,17 +650,24 @@ function encountersByTier(tier, region) {
 /** 按数据把敌人摆上场。返回摆好的单位数组。 */
 function buildEncounter(spec, baseLevel, partySize) {
   if (!spec) return [];
-  const lv = (v) => {
-    if (v == null) return baseLevel;
-    if (typeof v === "string" && /^[+-]/.test(v)) return Math.max(1, baseLevel + Number(v));
-    return Math.max(1, Number(v) || baseLevel);
-  };
-  const presets = enemyPresets();
-  const made = [];
   state.zoneMode = Number(spec.zoneMode) || 2;
   state.board = null;
-  state.weather = spec.weather || "none";
+  state.weather = spec.weather || "none"; state.weatherBy = null;
+  state.playerWeatherChanges = 0;   // 本场我方主动改天气的次数（长线养成每日任务用）
   if (state.weather === "sand" && typeof rollSandDir === "function") rollSandDir();   // 开场沙暴：风向随机
+  // 我方同阵营（跑团战斗模板）：这个阵营和能和它混编的阵营都算友军
+  state.playerAllies = spec.allyFaction ? alliesOf(spec.allyFaction) : [];
+  buildEncounterField(spec);
+  const made = spawnEncounterRows(spec.enemies, baseLevel, partySize);
+  applyBattlefieldFeatures(spec.features, baseLevel);
+  // 移动堡垒：一定有一个这个阵营的敌人坐在车上当驾驶员（vehicle.js）
+  if (typeof vehicleEncounterSetup === "function") vehicleEncounterSetup(spec, made, baseLevel, partySize);
+  return made;
+}
+/** 遭遇的区、棋盘、场地（不动天气）。连续战斗换到下一个区域时也用这个（chain.js） */
+function buildEncounterField(spec) {
+  state.zoneMode = Number(spec.zoneMode) || 2;
+  state.board = null;
   state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
   if (spec.board) applyBoard(spec.board);   // 特殊棋盘的遭遇（大型 boss）
   else if (state.gaps) {
@@ -491,10 +675,22 @@ function buildEncounter(spec, baseLevel, partySize) {
     Object.keys(state.gaps).forEach(k => { if (k !== "1-2" && k !== "2-3") delete state.gaps[k]; });
     ["1-2", "2-3"].forEach(k => { if (!state.gaps[k]) state.gaps[k] = emptyGap(); });
   }
+  // 换区域开新的一场：上一场的危墙 / 空隙 / 桥梁 / 门不带过来（遭遇自己的 gap 在 applyBattlefieldFeatures 里再摆）
+  if (state.gaps) Object.keys(state.gaps).forEach(k => { state.gaps[k] = emptyGap(); });
   if (spec.fields) {
-    Object.keys(spec.fields).forEach(z => Object.assign(state.fields[z], spec.fields[z]));
+    Object.keys(spec.fields).forEach(z => { if (state.fields[z]) Object.assign(state.fields[z], spec.fields[z]); });
   }
-  (spec.enemies || []).forEach(row => {
+}
+/** 按遭遇里的敌人行摆上场：[{ preset, level, zone, count, bounty, mechanics }]。援军（chain.js）也用这个。返回摆好的单位 */
+function spawnEncounterRows(rows, baseLevel, partySize) {
+  const lv = (v) => {
+    if (v == null) return baseLevel;
+    if (typeof v === "string" && /^[+-]/.test(v)) return Math.max(1, baseLevel + Number(v));
+    return Math.max(1, Number(v) || baseLevel);
+  };
+  const presets = enemyPresets();
+  const made = [];
+  (rows || []).forEach(row => {
     const p = presets.find(x => x.id === row.preset);
     if (!p) return;
     const n = Math.max(1, Number(row.count) || 1);
@@ -510,16 +706,22 @@ function buildEncounter(spec, baseLevel, partySize) {
         continue;
       }
       const u = p.build(lv(row.level), partySize);
-      u.zone = Number(row.zone) || 2;
+      // 个体值（enemies.js）：模板里主持人写死的水平照写，没写的随机
+      // 种族（enemies.js）：先种族、再个体值；模板里写了种族的照写，空着 = 随机（固定种族的敌人照固定）
+      if (typeof applyEnemyIV === "function") applyEnemyIV(u, row.iv, row.race);
+      // near：跟着某个单位进场（援军赶到亡命之王身边），那个单位不在了就照写的区
+      const nearU = row.near ? (state.units || []).find(x => !x.isPlayer && !x.dead && !x.hidden && x.kit === row.near) : null;
+      u.zone = nearU ? Number(nearU.zone) : (Number(row.zone) || 2);
       if (row.bounty) makeBountyTarget(u, row.bounty);
       // 战斗模板（battle-templates.js）里预先挂好的首领机制
       if (Array.isArray(row.mechanics) && typeof addBossMechanic === "function") row.mechanics.forEach(m => addBossMechanic(u, JSON.parse(JSON.stringify(m))));
+      // 主持人定的富集与否（沙鱼，desert.js）；不写就开战时随机
+      if (typeof row.enriched === "boolean" && typeof desertSetEnriched === "function") desertSetEnriched(u, row.enriched);
       state.units.push(u);
       made.push(u);
     }
   });
   made.forEach(u => { if (typeof refreshEnemyEconomy === "function") refreshEnemyEconomy(u); });
-  applyBattlefieldFeatures(spec.features, baseLevel);
   return made;
 }
 
@@ -529,7 +731,7 @@ function applyBattlefieldFeatures(features, level) {
   if (!features || !features.length) return;
   state.props = state.props || [];
   state.gaps = state.gaps || { "1-2": emptyGap(), "2-3": emptyGap() };
-  const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal" };
+  const EFFECT = { fire: "fire", acid: "acid", ice: "ice", electric: "electric", energy: "energy", harmonic: "harmonic", heal: "heal", quicksand: "quicksand", coral: "coral" };
   features.forEach(f => {
     if (f.type === "prop" && typeof makeProp === "function") {
       const p = makeProp(f.what, f.zone, f.level != null ? f.level : level);

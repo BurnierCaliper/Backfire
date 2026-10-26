@@ -1,7 +1,7 @@
 /* Antlerscale: Backfire · 配置物图鉴 / 效果图鉴（规则 / 数据）
  *
  * 和敌人图鉴（bestiary.js）放在同一个图鉴界面里（bestiary-ui.js 顶上的「敌人 / 配置物 / 效果」切换）。
- * 配置物和效果是规则说明，不需要遭遇过，一直都能查。
+ * 配置物和效果是规则说明，不需要遭遇过，一直都能查。角色、专长、义体图鉴也在这里（见文件后半）。
  * 文字按《游戏规则》第五章（伤害属性、血量层）、第七章（效果系统）、第八章（攻击效果、飞行、配置物）整理；
  * 和手册不同的地方以游戏里的实现为准（碎渣机炮每次使用也 −1 耐久；超充能电池摧毁时炸同区所有单位，不分敌我）。
  * 铁壁 / 防护罩 / 废铁墙是技能造出来的配置物，手册配置物一节里没有，按技能说明写。 */
@@ -18,7 +18,7 @@ const CODEX_EFFECT_GROUPS = [
   { id: "attack", name: "攻击效果", note: "附着在下一次攻击上；七种属性攻击效果占用效果位，穿刺 / 猛击 / 弱点特效不占。" },
   { id: "field", name: "场地效果", note: "只对单个区域生效，不会波及相邻区域。" },
   { id: "weather", name: "天气效果", note: "对全局生效，同时只能存在一种，持续到被覆盖。" },
-  { id: "unit", name: "单位特殊性", note: "飞行等单位本身的特殊规则。" }
+  { id: "unit", name: "单位特殊性", note: "飞行、下潜等单位本身的特殊规则。" }
 ];
 
 /** 伤害属性的核心特性（克制倍率由 engine.js 的 CHART 现算） */
@@ -49,10 +49,27 @@ const CODEX_PROPS = [
   {"id": "boom", "name": "爆炸桶", "place": "区域", "movable": true, "lines": ["拥有3点耐久。", "受到火焰伤害时扣除3耐久。", "受到能量和雷电伤害时扣除1耐久。", "耐久归零时在所在区域产生剧烈爆炸，造成1d20+等级点火焰伤害和2击破。"]},
   {"id": "acid", "name": "酸液桶", "place": "区域", "movable": true, "lines": ["拥有3点耐久。", "受到谐波伤害时扣除3耐久。", "受到其余伤害扣除1耐久。", "耐久少于3时每回合对同区域随机单位造成4+等级点酸液伤害。", "耐久归零时在所在区域产生酸液地面。"]},
   {"id": "scrap", "name": "碎渣机炮", "place": "区域", "movable": false, "lines": ["可以被狂徒或者玩家单位操控。", "操控消耗1行动点。", "对一个2距离内的敌人发射碎渣，造成1d4次6+等级点物理伤害，造成2击破。", "耐久5，每次受到攻击或使用后减少1耐久。"]},
+  {"id": "coral_branch", "name": "沙珊瑚枝", "place": "区域", "movable": false, "lines": ["沙珊瑚单独伸出来的一根分支，拥有 30+4×(等级−1) 点装甲生命值。", "白天没有动作。", "夜晚 / 沙暴：每回合结束缠住同区一个地面单位（最多同时 2 个，不分阵营）。", "被缠住的不能移动、位移也带不走，每回合开始受到 等级+1d6 物理伤害。", "珊瑚枝被摧毁，或一回合内被打掉 25% 耐久（砍断触须），被缠住的单位脱困。", "可燃气通道：白天被火焰打中不掉耐久、反而回复同样多（吸热）；夜晚 / 沙暴被火焰打中，同区所有单位（不分敌我）受到 等级+2d6 火焰 +1 击破，珊瑚自己也挨这一下。每根珊瑚每回合最多爆燃一次。", "打碎掉金属（10 级起 2 个）。"]},
+  {"id": "death_statue", "name": "死亡雕像", "place": "区域", "movable": false, "lines": ["被沙珊瑚缠住时死掉的单位，被珊瑚分泌的金属骨骼覆盖而成（我方只有真正死亡才会留下）。", "拥有 20+3×(等级−1) 点装甲生命值。", "掩体：同区的单位挨其他区打来的远程攻击时，协助格挡 +10%（同区几座都只算一次）。", "打碎掉金属。"]},
+  {"id": "coral_tentacle", "name": "沙珊瑚触须", "place": "区域", "movable": false, "lines": ["夜晚从沙珊瑚台地的缝隙里伸出来，拥有 8+3×(等级−1) 点装甲生命值。", "砍断它，被它缠住的单位就脱困。"]},
+  {"id": "fortress", "name": "移动堡垒", "place": "区域", "movable": true, "lines": ["镇压部队的装甲车，可以上下车的载具配置物：自己不会行动，占1枚代币（带车的遭遇少1枚代币的敌人）。镇压部队的遭遇有30%出现，一场最多一台，开战时一定有一个敌人坐在车上当驾驶员。", "纯装甲：42+11*(等级-1)+2*⌊等级/5⌋，按队伍人数缩放；架势5，每10级+1，两个晕眩标记；ATK 7+(等级-1)；开炮骰1d6起，每5级升一档。", "4个座位，镇压队所有兵种都能上。上车花1行动点，下车不花。第一个上车的是驾驶员，驾驶员下车或倒下时按上车顺序递补。", "驾驶员和堡垒合并成一个单位：堡垒装甲在最外层，驾驶员自己的血量层在里面，架势和晕眩标记用堡垒的；刺骨这类打内层的效果可以直接打到驾驶员。炮手藏在车里，选不中。车上的人只能用车的武器。", "驾驶员：附赠移动一个区，移动后可以撞一个单位（0.75×atk物理，2击破）；行动点开炮，或者张开掩体（到下次行动前代挡100%，堡垒受伤-25%）。", "炮手（行动点二选一）：开炮——2距离内一个目标，1×atk+开炮骰火，1击破，50%灼烧1；焚烧——同区所有敌对单位0.5×atk火，每个被打的单位各有35%灼烧1。", "代挡：堡垒在场时（空车也算），同区同阵营的单位挨打，每次各掷40%，成功由堡垒承受伤害和击破；范围攻击每人各掷一次。车被哪一方占着就替哪一方挡，空车替最后坐在车上的一方。", "被摧毁时殉爆：同区所有单位（不分敌我）1×atk火、灼烧1；车里的人立刻失衡（精英也直接晕眩），再受2×atk火和灼烧。", "抢车：敌我不能同车。同区花1行动点把对方一人拉下车（我方过困难「运动」检定，敌人25%）；车上没有对方的人以后才能上车（我方过普通「载具驾驶」检定，敌人直接上）。"]},
   {"id": "turret", "name": "防卫自律炮台", "place": "区域", "movable": false, "lines": ["行动，自动攻击。", "每回合对一个atk最高的敌对单位造成高能，以及2次等级点能量伤害。", "困难数据操作可以改写阵营。", "拥有25+2*等级点装甲生命值。"]},
   {"id": "ironwall", "name": "铁壁", "place": "区域", "source": "川川「铁壁」", "lines": ["川川把武器变形为大圆盾，为同区域的所有我方角色在一回合内阻挡敌人的攻击。", "盾牌拥有 atk+1d6 点装甲；盾牌被击破后川川自身受到 3 击破。", "回合结束时盾牌未被击破则积攒 2 电能。", "至少 3 电能时可以额外消耗 1 电能，为铁壁外层增加 atk 点护盾。"]},
   {"id": "dome", "name": "防护罩", "place": "区域", "source": "生存职责「防护罩」", "lines": ["在同区域释放血量为 atk+10 的护盾罩（护盾类型）。", "对该区域我方的攻击先打罩，也完全挡住范围攻击。", "每场一次。"]},
-  {"id": "scrapwall", "name": "废铁墙", "place": "区域", "source": "亡命之王「回防命令」", "lines": ["亡命之王下令后，所有人回到他所在的区筑起废铁墙，挡住范围攻击。", "耐久由命令掷骰决定。"]}
+  {"id": "scrapwall", "name": "废铁墙", "place": "区域", "source": "亡命之王「回防命令」", "lines": ["亡命之王下令后，所有人回到他所在的区筑起废铁墙，挡住范围攻击。", "耐久由命令掷骰决定。"]},
+  // 驻波墙：数值跟着 engine.js · WAVE_WALL 写（悬停一道具体的墙时另写它过滤的属性、降幅还是增幅，app.js · waveWallText）
+  (() => {
+    const W = typeof WAVE_WALL !== "undefined" ? WAVE_WALL : { dampenPct: 0.5, amplifyPct: 0.25 };
+    const amp = Math.round(W.amplifyPct * 100);
+    return {"id": "wave", "name": "驻波墙", "place": "间隔", "source": "Helumica「频域造物」", "lines": [
+      "扫描过当前战场后，在任意间隙创造（花 1 行动点，能放好几道）。驻波墙不挡移动：间隙里原来的危墙、机关门、不稳桥梁、空隙被暂时取代，取代期间都可以直接走过去。",
+      "创造时选一种属性，再选降幅或增幅。攻击者和目标之间的连线经过这道间隙就算穿墙（判定和危墙挡远程攻击一样），范围攻击按每个目标各自算；一次攻击穿过两道墙，效果叠加两次。其他属性照常穿过。",
+      `降幅：这一属性的伤害 −${Math.round(W.dampenPct * 100)}%（和其他百分比加算，两道墙 −${Math.round(W.dampenPct * 200)}%），也不造成任何击破；任何单位穿过时受到不稳和虚弱。`,
+      `增幅：这一属性的伤害 +${amp}%，和其他百分比加算（两道墙 +${amp * 2}%），击破照常；任何单位穿过时获得坚挺和振奋。`,
+      "敌我都算，被推、被击退过去也算；受到聚焦的单位穿过时，立刻推进一步序列。",
+      "这一整轮结束时消失（我方回合和敌人回合都过完），原来的配置物原样恢复（危墙的耐久、门的开关、桥、空隙）。"
+    ]};
+  })()
 ];
 
 const CODEX_EFFECTS = [
@@ -63,7 +80,7 @@ const CODEX_EFFECTS = [
   {"group": "status", "element": "physical", "name": "震荡", "lines": ["架势条上限减少 2。 "]},
   {"group": "status", "element": "energy", "name": "高能", "lines": ["每次受到能量伤害都会积攒 1d4+1 高能值。", "单位血量低于高能值时自爆，秒杀单位，同时额外造成 AOE × (高能值 ÷ 2) 的伤害。", "每 5 级提高骰子。"]},
   {"group": "status", "element": "harmonic", "name": "共振", "lines": ["受到共振影响的单位：", "每次受到伤害或治疗时，将半值共享给其他受到共振的单位。", "每次受到状态效果或即时效果时，完整共享给其他受到共振的单位。", "不分敌我。", "共振产生的共享效果不会回传。"]},
-  {"group": "common", "name": "不稳", "lines": ["失去附赠动作，且仅剩1def的情况也会失衡晕眩。叠加两个不稳则转换为晕眩。 触发一次后消失"]},
+  {"group": "common", "name": "不稳", "lines": ["下回合附赠动作 −1（最少 0，可被其他附赠加成抵掉），且仅剩1def的情况也会失衡晕眩。叠加两个不稳则转换为晕眩。 触发一次后消失"]},
   {"group": "common", "name": "晕眩", "lines": ["跳过回合。触发一次后消失"]},
   {"group": "common", "name": "紧追", "lines": ["施加者会在目标移动时与其移动到同区域。此移动不消耗附赠动作，无触发次数上限"]},
   {"group": "common", "name": "虚弱", "lines": ["atk −25%"]},
@@ -83,6 +100,8 @@ const CODEX_EFFECTS = [
   {"group": "field", "name": "深渊", "lines": ["无法站在此区域。进入此区域的地面单位会坠落并且失去10%最大生命值的生命，飞行单位在深渊被击坠时总计失去30%最大生命值的生命。如果战斗开始时2区制的其中一个区域为深渊，那么所有地面单位会在同一个区域出现。"]},
   {"group": "field", "name": "损毁地面", "lines": ["区域内每有一个地面单位都会每回合损失1d6耐久。拥有20～50点耐久。塌陷区域触发的伤害会直接摧毁地面，变成深渊。"]},
   {"group": "field", "name": "隔离区", "lines": ["区域内不受天气效果影响。"]},
+  {"group": "field", "element": "physical", "name": "流沙", "lines": ["站在里面会下陷（0–3 层）：走进去 +1；回合结束时这回合花过行动点再 +1，一个行动点都没花 −1。", "每回合开始失去 生命上限 × 5% × 下陷层数（窒息，不分属性）。", "下陷 2 层起自己走不出去；3 层没顶，不能用行动点和附赠动作、不能协助。", "同伴可以花附赠动作拉人出来；被位移带出去也会脱困。飞行单位、沙灵和沙漠生物不受影响。"]},
+  {"group": "field", "element": "physical", "name": "沙珊瑚台地", "lines": ["战斗在沙珊瑚上面进行：自带高地效果。", "夜晚 / 沙暴：每回合开始从缝隙里伸出一根沙珊瑚触须（同区最多 2 根），缠住台地上随机一个地面单位（不分阵营）。", "被缠住的不能移动、位移也带不走，每回合开始受到 等级+1d6 物理伤害；砍断触须才能脱困。", "沙漠生物有躲开珊瑚的习性，沙灵不会躲。"]},
   {"group": "field", "name": "空隙（间隔）", "lines": ["无法通过地面移动通过，飞行单位或是带有飞行/空中/跃过描述的移动技能可以通过。如果桥梁摧毁后地面单位被迫进行地面移动，地面单位坠落，受到最大生命10%点伤害，移动会不生效。消耗行动点并通过成功的运动检定可以通过。"]},
   {"group": "weather", "element": "fire", "name": "酷暑", "lines": ["火焰及酸液伤害 +25%，寒冰伤害 −25%", "灼烧和火场和自焚每回合层数再加 1，自焚层数上限变为10。", "腐蚀伤害骰 +1 个", "冻伤状态会在触发一次之后结束"]},
   {"group": "weather", "element": "ice", "name": "雪天", "lines": ["寒冰和物理伤害 +25%，火焰及酸液伤害 −25%", "灼烧每回合不再增加层数", "腐蚀伤害骰数量减半", "冻伤和冻土击破效果翻倍", "霜结效果额外得到全属性10%减伤率。"]},
@@ -90,7 +109,7 @@ const CODEX_EFFECTS = [
   {"group": "weather", "element": "electric", "name": "雷鸣", "lines": ["闪电和能量伤害 +25%", "感电伤害骰去掉减值", "成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤", "导体效果变为每两次攻击就会有一次攻击额外目标。"]},
   {"group": "weather", "element": "energy", "name": "微光", "lines": ["能量伤害 +25%", "除能量外的所有属性受到嬗变，反转克制表（负变正，正变负）", "所有单位造成的击破 −1（不会导致击破变成 0）", "高能值累积时累积 +1", "蓄能状态下，高能值在连续两个回合结束时都超过血量才会导致自爆。"]},
   {"group": "weather", "element": "physical", "name": "沙暴", "lines": ["闪电和酸液伤害 −25%", "沙尘血量恢复效果翻倍", "具有方向：从 1 区吹向 2 区，或反之，总是对释放者所在区域顺风。", "顺风的地面单位每回合多一个附赠行动", "顺风的空中单位每回合多一个行动点", "逆风的空中单位每回合失去一个行动点"]},
-  {"group": "weather", "element": "harmonic", "name": "相位", "lines": ["以四回合为周期循环：波谷 → 平衡 → 波峰 → 平衡", "波谷：全场所有伤害减半，击破 −1", "平衡：无特殊效果", "波峰：全场所有伤害 +50%，击破 +1", "相位下，谐波对晕眩敌人的每一层血量层都造成伤害。", "计数器从第一次释放后持续运行，即使被其他天气覆盖也不停止。", "再次释放时，接入当前计数器状态。"]},
+  {"group": "weather", "element": "harmonic", "name": "相位", "lines": ["以四回合为周期循环：波谷 → 平衡 → 波峰 → 平衡", "波谷：全场所有伤害 −50%（和其他增减伤加算），击破 −1", "平衡：无特殊效果", "波峰：全场所有伤害 +50%，击破 +1", "相位下，谐波对晕眩敌人的每一层血量层都造成伤害。", "计数器从第一次释放后持续运行，即使被其他天气覆盖也不停止。", "再次释放时，接入当前计数器状态。"]},
   {"group": "weather", "element": "physical", "name": "常态", "lines": ["没有任何效果。可以覆盖其他天气。"]},
   {"group": "instant", "element": "fire", "name": "熔融", "lines": ["使单位的外层血量开始熔化。", "装甲：受物理伤害变为 +50%，但失去 +1 击破的额外效果", "沙尘：受到额外 +1 击破", "护盾：若一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复", "冰属性攻击对熔融状态的敌人会造成 ×2 伤害和 +1 击破，并立刻结束熔融状态。"]},
   {"group": "instant", "element": "ice", "name": "刺骨", "lines": ["立刻对单位的肉体 / 星灵 / 沙尘层造成 10% 本层血量上限的冰属性伤害。", "目标被击破时再次造成一次此伤害。", "电属性攻击对此目标将有 50% 的伤害转移到最内层的肉体 / 星灵 / 沙尘血量上。", "受到火属性伤害后立刻解除效果，并且对内层血量造成 10% 本层血量上限的火属性伤害。"]},
@@ -116,7 +135,8 @@ const CODEX_EFFECTS = [
   {"group": "attack", "name": "穿刺", "lines": ["攻击对次外层造成伤害，而非最外层"]},
   {"group": "attack", "name": "猛击", "lines": ["攻击造成击破 ×2，但同时对自己造成一半的击破"]},
   {"group": "attack", "name": "弱点特效", "lines": ["对克制属性额外 +25% 伤害；对一般或劣势伤害均额外 −25%"]},
-  {"group": "unit", "name": "飞行", "lines": ["只有在单位描述中明确写出「飞行」，或在战斗中使用技能进入飞行状态的单位，才是飞行单位。", "架势被击破：强制被击落，并立刻扣除等于 20% 最大血量的血量", "近程攻击：需额外消耗附赠动作；不消耗则无法指定飞行单位为目标", "AOE 攻击：可以攻击到飞行单位，即使是近程 AOE 也不需要消耗附赠动作", "伤害减免：受到的所有攻击行动伤害减半。状态效果不受影响", "场地效果：见各场地条目，多数地面场地对飞行单位无效"]}
+  {"group": "unit", "name": "飞行", "lines": ["只有在单位描述中明确写出「飞行」，或在战斗中使用技能进入飞行状态的单位，才是飞行单位。", "架势被击破：强制被击落，并立刻扣除等于 20% 最大血量的血量", "近程攻击：需额外消耗附赠动作；不消耗则无法指定飞行单位为目标", "AOE 攻击：可以攻击到飞行单位，即使是近程 AOE 也不需要消耗附赠动作", "伤害减免：受到的所有攻击行动伤害减半。状态效果不受影响", "场地效果：见各场地条目，多数地面场地对飞行单位无效"]},
+  {"group": "unit", "name": "下潜", "lines": ["钻进沙层 / 地下，定位和飞行类似：任何单位都可以带，单位描述或技能里写明「下潜」的才算。", "下潜中不能被选为攻击目标，范围攻击也打不到。", "例外：谐波攻击（单体、范围都算）和塌陷区域的伤害照样打得到；被这两种打到时下潜被迫解除，并受到 1 击破。", "自己发动攻击时浮上来，下潜解除（主动解除，没有代价）。", "沙鱼的声呐能找到沙下的尘虫、管虫（捕食），不算把它们打出来。"]}
 ];
 
 function codexPct(v) { return (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.round(Math.abs(v) * 100) + "%"; }
@@ -164,7 +184,7 @@ const HERO_CODEX = {
   hiaki: { stars: 4, intro: "双刀剑客，火属性大太刀【丹生谷】和冰属性打刀【鳴門】可以随时切换，也能把其中一把分出去变成武器人并肩作战。技能会随拔刀、居合、胁构三种刀势派生出不同效果。顺好刀势的节奏后，输出和格挡都很强。" },
   tou: { stars: 2, intro: "站在最前面的盾。「决一死战」逼同区唯一的敌人只能打他，而且伤害骰取最低；圣盾点每回合自动回复，挨打时消耗一点就能把伤害减半。规则直白，站好位置就能发挥作用，最适合新手。" },
   xia: { stars: 3, intro: "开着引擎往前冲的近战。拉响引擎后多数技能都会变强，但一回合不攻击引擎就会熄火，所以要一直保持进攻。濒死起身后引擎总是开着，越到绝境越凶。被动升级后加入燃油槽，火属性伤害的爆发会更高，玩法也稍微复杂一些。" },
-  chuan: { stars: 3, intro: "攻守兼备的电工。用技能积攒电能，再换成铁壁、电站超频这类强力技能。他施加的护盾被打破时，会把同区敌人全部推到另一区并造成击破，可以用来解围或者控场。需要规划电能怎么花、护盾放在哪里。" },
+  chuan: { stars: 3, fullName: "哈雷 川川 托马斯", intro: "攻守兼备的电工。用技能积攒电能，再换成铁壁、电站超频这类强力技能。他施加的护盾被打破时，会把同区敌人全部推到另一区并造成击破，可以用来解围或者控场。需要规划电能怎么花、护盾放在哪里。" },
   nora: { stars: 4, intro: "拿着注射器的远程冰属性辅助。武器系统在温和和残忍两种状态之间随机切换，同一个技能在两种状态下效果不同。针尖留在敌人身上会形成「刺入」，配合冷气注射打出额外的冰伤。状态不由自己决定，要临场应变。" },
   kolt: { stars: 2, intro: "爱出风头的改装狂。电钻（电）和酸液炮（酸）两种刀头可以随时更换，换刀头时顺手打一下同区敌人。他打过的敌人都会被嘲讽来打他，满血时受到的伤害降低。思路简单：抢仇恨、换刀头打克制。" },
   helu: { stars: 5, intro: "战场分析师。用聚焦锁定敌人的血量层，按照正确的步骤攻击就能直接抹掉整层血量，再附加 2 击破。精英和首领需要走更多步，用符合当前天气的属性攻击可以推进步数。还能扫描环境、预测敌人的下一步行动。需要整队配合他的节奏，上限极高。" },
@@ -206,7 +226,7 @@ function codexHeroEntries() {
       group: HERO_CODEX[card.kit].stars <= 2 ? "easy" : HERO_CODEX[card.kit].stars === 3 ? "mid" : "hard",
       groupName: "难度 " + HERO_CODEX[card.kit].stars + " 星",
       // 搜索用：介绍、种族职业、被动和技能的名字与说明
-      lines: [HERO_CODEX[card.kit].intro, prof ? prof.race + " " + prof.job : ""].concat(sheet ? [].concat(
+      lines: [HERO_CODEX[card.kit].intro, HERO_CODEX[card.kit].fullName || "", prof ? prof.race + " " + prof.job : ""].concat(sheet ? [].concat(
         sheet.passives.map(x => x.name + " " + x.text + " " + (x.next || "")),
         sheet.skills.now.concat(sheet.skills.later).map(x => x.name + " " + x.text),
         sheet.weapons.map(w => w.name), roleSkills.map(x => x.name + " " + x.text)) : [])
@@ -216,4 +236,79 @@ function codexHeroEntries() {
 /** 被动升级的解锁条件：武器等级（growth.js · PASSIVE_PLUS_LEVEL） */
 function codexPlusLevel(n) {
   return typeof PASSIVE_PLUS_LEVEL !== "undefined" ? PASSIVE_PLUS_LEVEL[n] || null : null;
+}
+
+/* ---------- 专长图鉴（#52） ---------- */
+/** 专长条目：直接读 feats.js · FEATS，文字和选专长时看到的一样。全部列出（不做解锁），探索专长也列，带标签 */
+const CODEX_FEAT_TIER_MARK = ["①", "②", "③", "④"];
+const CODEX_ROLE_SKILL_NO = ["", "一", "二", "三", "四"];
+/** 次数：每场 / 每次短休 / 每长休（战斗动作看 skill，被动看专长上的 short / rest）；说明里自己写清楚的（还魂、决不后退……）返回 "" */
+function codexFeatUses(f) {
+  const s = f.skill || {};
+  if (s.short || f.short) return `每次短休 ${s.short || f.short} 次`;
+  if (s.rest || f.rest) return `每长休 ${s.rest || f.rest} 次${s.rest ? "（同一场最多 1 次）" : ""}`;
+  if (s.uses) return `每场 ${s.uses} 次`;
+  return "";
+}
+function codexCostText(c) {
+  if (!c) return "";
+  const out = [];
+  if (c.ap) out.push(`行动点 ${c.ap}`);
+  if (c.bonus) out.push(`附赠 ${c.bonus}`);
+  return out.join(" + ") || "不花行动";
+}
+/** 消耗：另写的削弱版看 skill.cost；直接调用原技能的涉猎专长看原技能 */
+function codexFeatCost(f) {
+  if (!f.skill) return "";
+  if (f.skill.cost) return codexCostText(f.skill.cost);
+  if (f.dabble && typeof skillCost === "function") { try { return codexCostText(skillCost(f.dabble.base)); } catch (e) { return ""; } }
+  return "";
+}
+function codexFeatEntries() {
+  if (typeof FEATS === "undefined") return [];
+  return Object.keys(FEATS).map(id => {
+    const f = FEATS[id];
+    const lv = typeof FEAT_TIER_LEVEL !== "undefined" ? FEAT_TIER_LEVEL[f.tier] : null;
+    const kindName = f.dabble ? "涉猎" : (typeof FEAT_KIND_NAME !== "undefined" && FEAT_KIND_NAME[f.kind]) || "专长";
+    let dabbleFrom = "";
+    if (f.dabble) {
+      let base = null;
+      try { base = typeof roleSkillDef === "function" ? roleSkillDef(f.dabble.role, f.dabble.n, null) : null; } catch (e) { base = null; }
+      dabbleFrom = `${f.dabble.role}职责 ${CODEX_ROLE_SKILL_NO[f.dabble.n] || f.dabble.n} 号技能${base ? "「" + base.name + "」" : ""}的涉猎版；已经会这个技能的角色不能选`;
+    }
+    const tags = [];
+    if (f.repeatable) tags.push("可以重复选");
+    if (f.explore) tags.push("跑团规则（探索）");
+    if (f.trpgOnly) tags.push("只在跑团模式");
+    if (typeof f.requires === "function") tags.push("有选取前提");
+    return {
+      id: "feat:" + id, featId: id, name: f.name, tier: f.tier, level: lv,
+      group: "t" + f.tier, groupName: `专长${CODEX_FEAT_TIER_MARK[f.tier - 1] || ""}${lv ? " · " + lv + " 级" : ""}`,
+      kindName, uses: codexFeatUses(f), cost: codexFeatCost(f), dabbleFrom, tags,
+      lines: [f.text || ""].filter(Boolean)
+    };
+  }).sort((a, b) => a.tier - b.tier);
+}
+
+/* ---------- 义体图鉴（#262） ---------- */
+/** 义体条目：读 cyberware.js 的正式目录（示例不列），文字由义体种类表生成（cyberware.js · cyberwareCodexInfo），和诊所、战斗里一致。
+ *  按种类分组（CYBERWARE_KINDS 的顺序，以后加了新种类自动多一个标签）；每条写名称、等级、效果、改造率、坚毅生命的消耗、诊所规则。
+ *  只写固定的规则文字：可以写坚毅生命的具体消耗，不显示任何角色当前的坚毅生命，也没有能推出它的数字 */
+function codexCyberwareEntries() {
+  if (typeof cyberwareCatalog !== "function" || typeof cyberwareCodexInfo !== "function") return [];
+  const kinds = typeof CYBERWARE_KINDS !== "undefined" ? Object.keys(CYBERWARE_KINDS) : [];
+  return cyberwareCatalog().filter(d => !d.example).map(d => {
+    const info = cyberwareCodexInfo(d);
+    return {
+      id: "cw:" + d.id, cwId: d.id, name: d.name, tier: d.tier, vol: d.vol, line: d.line, kind: d.kind, kindName: info.kindName,
+      element: d.element || null, group: d.kind, groupName: info.kindName, short: info.short, tags: info.tags,
+      effect: info.effect, use: info.use, rate: info.rate, rateSamples: info.rateSamples, grit: info.grit, clinic: info.clinic,
+      price: d.price, removePrice: d.removePrice, hpCut: d.hpCut,
+      lines: [].concat(info.effect, [info.use, info.rate], info.grit, info.clinic)
+    };
+  }).sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind));
+}
+/** 义体图鉴的分组标签：全部 + 每个种类一个 */
+function codexCyberwareGroups() {
+  return typeof CYBERWARE_KINDS === "undefined" ? [] : Object.keys(CYBERWARE_KINDS).map(k => ({ id: k, name: CYBERWARE_KINDS[k].name || k }));
 }
