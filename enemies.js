@@ -864,6 +864,7 @@ function crushSkullDown(t, lines) {
   } else {
     t.dying = true;
     t.upOnShp = false;
+    if (typeof noteKnockdown === "function") noteKnockdown(t);   // 战场数据：倒地次数（app.js）
     if (typeof clearStunOnDown === "function") clearStunOnDown(t);
     lines.push(`${t.name} 被捏碎颅骨，倒地陷入濒死。`);
   }

@@ -368,6 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
+  - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
+  - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
+    - `applyKnockdown`：攻击打到最内层归零，还有坠落、高能自爆、窒息、被击落……都走这里；
+    - 拉斯缪尔不稳态（`rasUnstableHit`）：受到伤害直接倒地；
+    - 巨人协助「捏碎颅骨」（`crushSkullDown`）：直接倒地；起身中被捏倒，算又倒了一次。
+    - 已经濒死的再挨打不重复记。没有陷入濒死的不算倒地：力竭 3 被击倒立刻死亡、起身中坚毅生命打光死亡、武器人倒下、还魂（专长）留 1 点生命。
+    - 战场数据表在「承受伤害」后面多一列「倒地次数」，合计行、「合并武器人」、「复制」出来的文字里都有，面板开着时跟着刷新。和其他战场数据一样记在 `state.battleStats` 上：撤销时一起回退，每场开战清零。
+  - **没改的**：倒地本身的规则；整局数据（`ledger.js · CAREER_KEYS`）、联机玩家看的「最近 10 场战绩」、探索记录里的战斗小结都没有加这一项。
+  - **测试**：
+    - tests/battle-stats-downs.test.js（新，5 条，在没改的代码上都失败）：真的攻击打到最内层归零记 1 次，已经濒死的再挨打、再结算不重复记，没倒地的人是 0；拉斯缪尔不稳态受伤倒地记 1 次，起身后再受伤直接死亡、不再记；巨人协助捏碎颅骨记 1 次，起身后再被捏倒记第 2 次；力竭 3 即死、起身中坚毅生命打光、武器人倒下、还魂救下都不记（还魂用掉以后再倒地记 1 次）；战场数据表（game.js 的 `statRows` / `statsText` / `mergeStatRows`）多一列「倒地次数」、排在「承受伤害」后面，还没有数据的人是 0，合并武器人时加在一起。
+    - tests/battle-stats-downs-ui.test.js（新，要浏览器；没装 Playwright 时用机器自带的 Chrome）：真画面里开一场战斗，一个人倒地后打开「战场数据」：表头有「倒地次数」，这个人 1、其他人 0、合计 1；面板开着时又倒一个，跟着刷新成合计 2；点「合并武器人」以后照样有这一列。在没改的代码上失败（表头没有这一列）。
 - **联机房主在跑团任务战斗里刷新页面，恢复后打完照样推进任务、判护送对象：正在打的任务战斗跟着房间检查点走**（#340 第 7 条；trpg-ui.js · `TrpgFlow.onlineCheckpoint` / `restoreOnline`；trpg-tasks.js · `trpgTaskBattleNormalize`（新）；trpg.js 里 `TRPG.taskBattle` 的注释；测试 tests/task-battle-resume.test.js（新）、tests/task-battle-resume-ui.test.js（新））
   - **以前**：主持人在任务页点「开战」时记下这场是哪个任务的第几站（`TRPG.taskBattle`），战斗结算时按它推进路线、记护送对象的血量。可联机房主的房间检查点（online-game.js 存在房主本机、刷新后用来恢复房间的那一份）里没有它。房主在任务战斗里刷新页面、恢复房间接着打：
     - 打赢了任务不动：还停在这一站，这一站的奖励也不发（探索记录里只有「战斗胜利」那一行）；
