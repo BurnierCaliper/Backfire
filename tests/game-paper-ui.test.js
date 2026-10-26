@@ -1,5 +1,6 @@
 // 单机战斗画面的「纸片风」界面（#339，game-paper.js / game-paper.css；和联机玩家同一套 paper-ui.js / online-paper.css）——要浏览器的那部分：
-//   · 单机开着新画面时是新排版（战场铺满、顶上一条胶带、吊牌、左上角队伍、底下技能栏、右边缘的战斗记录竖标签），关着新画面一点不变
+//   · 单机开着新画面时是新排版（战场铺满、顶上一条胶带、吊牌、左上角队伍、左下角技能栏、右边缘的战斗记录竖标签），关着新画面一点不变
+//   · #384：窗口够宽时技能栏让开右边抽屉那一列，战斗记录的抽屉拉开一直到底
 //   · 旧顶栏的每一个按钮、下拉框、链接在「工具 ▾」里都有（同一个元素、同一个处理），按模式藏的照旧藏；纸片画面开 / 关来回切不丢按钮、不留痕迹
 //   · 胶带上的「菜单」打开暂停页面；抽屉收起 / 展开记在本机；新加的 DOM 里没有坚毅生命的数字
 // 用 Playwright；没装 Playwright 时在 Linux 上用机器自带的 Chrome（tests/cdp-browser.js），都没有就跳过。
@@ -111,7 +112,7 @@ const oldControls = page => page.evaluate(() => [...document.querySelectorAll("#
   .map(el => el.id || el.textContent.trim()));
 const openTools = async page => { await page.click('#g-paper [data-olp="tools"]'); await page.waitForSelector("#g-app > .g-top.gp-open", { state: "visible" }); };
 
-test("单机开着新画面：战场铺满；顶上一条写模式 · 遭遇 · 回合 · 我方 / 敌人行动 · 天气，右边镜头 / 工具 / 菜单；吊牌是我方每个人；队伍在左上角、技能栏在底下、战斗记录收成右边缘的竖标签；旧顶栏、右侧栏让开", { timeout: 90000 }, async t => {
+test("单机开着新画面：战场铺满；顶上一条写模式 · 遭遇 · 回合 · 我方 / 敌人行动 · 天气，右边镜头 / 工具 / 菜单；吊牌是我方每个人；队伍在左上角、技能栏在左下角、战斗记录收成右边缘的竖标签；旧顶栏、右侧栏让开", { timeout: 90000 }, async t => {
   const o = await soloPage(t); if (!o) return; const { page } = o;
   // 战场铺满整个画面
   const field = await rect(page, "#g-field");
@@ -132,11 +133,11 @@ test("单机开着新画面：战场铺满；顶上一条写模式 · 遭遇 · 
   assert.ok(tags.top >= bar.bottom - 8 && tags.top < bar.bottom + 20 && Math.abs((tags.left + tags.right) / 2 - tags.vw / 2) < 4, "吊牌在顶栏下面中间：" + JSON.stringify(tags));
   assert.deepEqual(await page.locator("#g-paper .olp-tag .olp-tag-nm b").evaluateAll(els => els.map(e => e.textContent)), await page.evaluate(() => [...document.querySelectorAll("#g-party > .pc[data-id]")].map(b => state.units.find(u => u.id === b.dataset.id).name)));
   assert.equal(await page.locator("#g-paper .olp-tag.on").count(), 1, "选着的那个高亮");
-  // 左上角队伍、底下技能栏、右边缘的竖标签
+  // 左上角队伍、左下角技能栏（#384：以前在底下中间）、右边缘的竖标签
   const party = await rect(page, "#g-app .hd2d-party");
   assert.ok(party.left < 30 && party.top > bar.bottom && party.top < 160, "队伍在左上角：" + JSON.stringify(party));
   const dock = await rect(page, "#g-app > .g-hud");
-  assert.ok(dock.bottom > dock.vh - 30 && Math.abs((dock.left + dock.right) / 2 - dock.vw / 2) < 4 && dock.width < dock.vw - 40, "技能栏浮在底下中间：" + JSON.stringify(dock));
+  assert.ok(dock.bottom > dock.vh - 30 && dock.left < 30 && dock.width < dock.vw - 40, "技能栏浮在左下角：" + JSON.stringify(dock));
   assert.ok(await page.isVisible("#g-skills .sk"), "技能照旧（同一个按钮）");
   const tab = await rect(page, "#g-log");
   assert.ok(tab.right >= tab.vw - 1 && tab.width <= 44, "战斗记录收成右边缘一个竖标签：" + JSON.stringify(tab));
@@ -755,5 +756,65 @@ test("#362 选中技能以后技能栏先收起：选目标时技能那一排藏
   assert.deepEqual(await look(), before, "演完展开：取景、--olp-dock-h 还是没变");
   assert.equal(await page.evaluate(() => window.__refits), 0, "从选技能到演完，镜头一次都没重新取景");
   assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null, "自己收起 / 展开的不记在本机");
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- #384：技能栏挪到左下角（以前在底下中间），右边的战斗记录抽屉拉开一直到底 ---------- */
+/** 纸片画面排版的几个数（online-paper.css 开头的变量）：面板离屏幕边、技能栏 / 拉到底的抽屉离下边、抽屉多宽 */
+const paperVars = page => page.evaluate(() => { const s = getComputedStyle(document.body), px = k => parseFloat(s.getPropertyValue(k)); return { edge: px("--olp-edge"), foot: px("--olp-foot"), side: px("--olp-side") }; });
+
+test("#384 技能栏在左下角：窗口够宽（1280px 起）时让开右边抽屉那一列；战斗记录的抽屉拉开从吊牌下面一直到底（底边和技能栏对齐、在技能栏右边），记录排到抽屉最底下；收起的技能栏也在左下角；悬停预演挂在技能栏右端上方，不压在拉开的抽屉底下", { timeout: 150000 }, async t => {
+  for (const [w, h] of [[1920, 1080], [1440, 900], [1366, 768], [1280, 720]]) {
+    const o = await soloPage(t, { context: { viewport: { width: w, height: h } } }); if (!o) return; const { page } = o;
+    // 等纸纹贴完（技能吊牌贴上纸纹才是 150px 宽，技能栏的高度这时才定下来）
+    await page.waitForFunction(() => document.querySelector("#g-app > .g-hud").dataset.olpTex === "dock" && [...document.querySelectorAll("#g-skills .sk")].every(b => b.dataset.olpTex) && PaperUI.pending() === 0, null, { timeout: 30000 });
+    await settle(page);
+    const V = await paperVars(page), tag = `${w}×${h}`;
+    const dock = await rect(page, "#g-app > .g-hud");
+    assert.ok(Math.abs(dock.left - V.edge) < 1 && Math.abs(dock.bottom - (h - V.foot)) < 1, `${tag} 技能栏贴着左下角：` + JSON.stringify(dock));
+    // 让开抽屉那一列以后至少还有 898px（1280 宽时）：技能吊牌照旧一排两个，技能栏不变高
+    assert.ok(dock.right <= w - 2 * V.edge - V.side + 1 && dock.width >= 898 - 1 && dock.height < 260, `${tag} 技能栏让开右边抽屉那一列：` + JSON.stringify(dock));
+    // 拉开抽屉：从吊牌下面一直到底（底边和技能栏对齐），在技能栏右边、不压技能栏；记录（#g-logs）排到抽屉最底下
+    await page.click("#g-log .gp-drawer-tab");
+    await page.waitForFunction(() => !document.getElementById("g-log").classList.contains("gp-collapsed"));
+    await settle(page);
+    const drawer = await rect(page, "#g-log"), logs = await rect(page, "#g-logs");
+    assert.ok(Math.abs(drawer.bottom - dock.bottom) < 1 && drawer.top < 140 && drawer.left >= dock.right + V.edge - 1 && Math.abs(drawer.right - (w - V.edge)) < 1,
+      `${tag} 抽屉一直到底、在技能栏右边：` + JSON.stringify([drawer, dock]));
+    assert.ok(logs.bottom > drawer.bottom - 40 && logs.height > h - 300, `${tag} 记录排到抽屉最底下：` + JSON.stringify(logs));
+    // 收起的技能栏（只剩「技能 ▲」那一行）也在左下角
+    await page.click("#g-app > .g-hud .hd2d-dock-toggle");
+    await page.waitForSelector("#g-app > .g-hud.dock-closed");
+    const closed = await rect(page, "#g-app > .g-hud");
+    assert.ok(Math.abs(closed.left - V.edge) < 1 && Math.abs(closed.bottom - (h - V.foot)) < 1 && closed.right < drawer.left, `${tag} 收起的技能栏也在左下角：` + JSON.stringify(closed));
+    await page.click("#g-app > .g-hud .hd2d-dock-toggle");
+    await page.waitForFunction(() => { const hud = document.querySelector("#g-app > .g-hud"); return !hud.classList.contains("dock-closed") && document.body.style.getPropertyValue("--olp-dock-h") === hud.offsetHeight + "px"; });
+    // 悬停预演（game.js 预演时给 #g-pvbox 加 .live）：右边对齐技能栏的右端、挂在技能栏上面，不压在拉开的抽屉底下
+    await page.evaluate(() => { const pv = document.getElementById("g-pvbox"); pv.innerHTML = '<h4>普通攻击 · 预演</h4><div class="ln">消耗 1 行动点</div><div class="ln key">→ 狂徒：12 伤害</div>'; pv.classList.add("live"); });
+    const pv = await rect(page, "#g-pvbox"), open = await rect(page, "#g-app > .g-hud");
+    assert.ok(Math.abs(pv.right - open.right) < 1 && pv.bottom <= open.top && pv.bottom > open.top - 30 && pv.right <= drawer.left, `${tag} 悬停预演挂在技能栏右端上方：` + JSON.stringify([pv, open, drawer]));
+    await shot(page, `solo-paper-384-${w}x${h}`);
+    await page.evaluate(() => document.getElementById("g-pvbox").classList.remove("live"));
+    assert.deepEqual(o.errors, []);
+  }
+});
+
+test("#384 不到 1280px：电脑上（1024 × 768）技能栏也贴着左边，照旧差不多横贯（960 宽，不为抽屉变窄），战斗记录的抽屉照旧停在技能栏上面、不压技能栏；手机竖屏（390 × 844）技能栏照旧横贯最底下", { timeout: 90000 }, async t => {
+  let o = await soloPage(t, { context: { viewport: { width: 1024, height: 768 } } }); if (!o) return;
+  let page = o.page;
+  const V = await paperVars(page);
+  await page.click("#g-log .gp-drawer-tab");
+  await page.waitForFunction(() => !document.getElementById("g-log").classList.contains("gp-collapsed"));
+  // 等纸纹贴完、量好技能栏的高度（抽屉按它让）
+  await page.waitForFunction(() => { const hud = document.querySelector("#g-app > .g-hud"); return hud.dataset.olpTex === "dock" && PaperUI.pending() === 0 && document.body.style.getPropertyValue("--olp-dock-h") === hud.offsetHeight + "px"; }, null, { timeout: 30000 });
+  await settle(page);
+  const dock = await rect(page, "#g-app > .g-hud"), drawer = await rect(page, "#g-log");
+  assert.ok(Math.abs(dock.left - V.edge) < 1 && Math.abs(dock.width - 960) < 1 && Math.abs(dock.bottom - (dock.vh - V.foot)) < 1, "技能栏贴着左下角、照旧 960 宽：" + JSON.stringify(dock));
+  assert.ok(drawer.bottom <= dock.top && drawer.height >= 200, "抽屉照旧停在技能栏上面：" + JSON.stringify([drawer, dock]));
+  assert.deepEqual(o.errors, []);
+  o = await soloPage(t, { context: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }); if (!o) return;
+  page = o.page;
+  const phone = await rect(page, "#g-app > .g-hud");
+  assert.ok(Math.abs(phone.left) < 1 && Math.abs(phone.right - phone.vw) < 1 && Math.abs(phone.bottom - phone.vh) < 1, "手机：技能栏横贯最底下：" + JSON.stringify(phone));
   assert.deepEqual(o.errors, []);
 });
