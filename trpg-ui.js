@@ -1706,7 +1706,9 @@
   }
   window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
     refresh: render,
-    onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel })),
-    restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true; document.body.classList.add("trpg"); }
+    // 联机房主的房间检查点（online-game.js · save / doResume）：正在打的任务战斗也带上，刷新后接着打，打完照样推进任务、判护送对象（trpg-tasks.js · trpgTaskBattleNormalize）
+    onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel, taskBattle: TRPG.taskBattle })),
+    restoreOnline(saved) { slot = saved.slot; slotName = saved.slotName; log = saved.log || []; tab = saved.tab || "party"; commandLevel = saved.commandLevel || 1; TRPG.active = true;
+      TRPG.taskBattle = trpgTaskBattleNormalize(saved.taskBattle); document.body.classList.add("trpg"); }
   };
 })();

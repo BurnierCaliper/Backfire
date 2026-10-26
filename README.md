@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机房主在跑团任务战斗里刷新页面，恢复后打完照样推进任务、判护送对象：正在打的任务战斗跟着房间检查点走**（#340 第 7 条；trpg-ui.js · `TrpgFlow.onlineCheckpoint` / `restoreOnline`；trpg-tasks.js · `trpgTaskBattleNormalize`（新）；trpg.js 里 `TRPG.taskBattle` 的注释；测试 tests/task-battle-resume.test.js（新）、tests/task-battle-resume-ui.test.js（新））
+  - **以前**：主持人在任务页点「开战」时记下这场是哪个任务的第几站（`TRPG.taskBattle`），战斗结算时按它推进路线、记护送对象的血量。可联机房主的房间检查点（online-game.js 存在房主本机、刷新后用来恢复房间的那一份）里没有它。房主在任务战斗里刷新页面、恢复房间接着打：
+    - 打赢了任务不动：还停在这一站，这一站的奖励也不发（探索记录里只有「战斗胜利」那一行）；
+    - 护送对象被摧毁也不判任务失败，它的血量也不记回任务。
+  - **现在**：房间检查点带上正在打的任务战斗，恢复房间时读回去。只认 `{ id, index }` 这个样子：旧检查点没有这一项、写坏了，都当作不是任务战斗，不报错。恢复后打赢了照样走到下一站、发这一站的奖励；护送对象被摧毁照样判任务失败；血量照样记回任务。结算完以后检查点里就没有了，之后的战斗不会被当成任务战斗。
+  - **没改的**：开战、结算、放弃战斗（没结算就回探索环节）时怎么记 / 清 `TRPG.taskBattle` 都没动。单机跑团不能「打到一半刷新接着打」（刷新后是开战前那份存档），不受影响。检查点只存在房主本机，不发给玩家。
+  - **测试**：
+    - tests/task-battle-resume.test.js（新，6 条；4 条在没改的代码上失败，另外 2 条是照旧的行为）：用真的联机协调层（online-game.js 的 save / resume）和真的 trpg-ui.js，战斗画面换成替身。检查点里有任务战斗；恢复后打赢了，走到下一站、发 300 奎支、记下护送对象的血量；恢复后护送对象被摧毁，任务失败；结算完再刷新，下一场不算任务战斗；检查点里的任务战斗不像样（9 种）或者没有这一项时，当作不是任务战斗、不报错；`trpgTaskBattleNormalize` 只认 `{ id, index }`。
+    - tests/task-battle-resume-ui.test.js（新，要浏览器；没装 Playwright 时用机器自带的 Chrome）：真画面里在任务页点「开战」，打到一半存下房主的房间检查点、刷新页面、照 online-game.js · doResume 的顺序恢复，再打赢（走真的结算），任务走到第 2 站，奖励和护送对象的血量都对。在没改的代码上失败（任务还在第 1 站）。
 - **跑团任务进行中改路线（删站、插站、挪站）不再跳站、重复发奖：每一站有固定的 id，走过没有、奖励发过没有都跟着站走**（#340 第 6 条；trpg-tasks.js · `trpgTaskNodeIds`（新）、`trpgTaskNormalizeNode`、`trpgTaskNormalize`、`trpgTaskGranted`、`trpgTaskUpgrade`、`trpgTaskSave`、`trpgTaskNodeDone`、`trpgQuestLog`；trpg-ui.js · `taskRoute` / `taskCardHtml` / `taskEditorHtml`、任务页的提示；测试 tests/task-route-edit.test.js（新）、tests/task-route-edit-ui.test.js（新）、tests/quest-log.test.js 的「旧存档的任务」）
   - **以前**：任务走到第几站（`index`）、哪几站发过奖励（`granted`）都按站在路线上的位置记，主持人在任务编辑里删站、插站、挪站，保存以后位置就对不上了。例：A / B / C 三站，完成了 A：
     - 删掉 A：当前站直接跳到 C，B 没走；B 顶着 A 的「奖励已发」，它的奖励永远不发。

@@ -12,7 +12,7 @@ const TRPG = {
   active: false,
   lastRest: null,    // 最近一次长休的结算（ledger.js · restReport）
   camp: null,        // 营地（长休前）：{ plan, force, status: ledger.js · campStatus }；联机玩家也看到
-  taskBattle: null,  // 正在打的任务战斗 { id, index }（trpg-tasks.js）
+  taskBattle: null,  // 正在打的任务战斗 { id, index }（trpg-tasks.js）；联机房主的房间检查点带着它（trpg-ui.js · TrpgFlow.onlineCheckpoint）
   clinicOpen: false, // 诊所向联机玩家开放（玩家可以申请义体改造），主持人在「诊所」页开关
   smithOpen: false,  // 工匠向联机玩家开放（玩家给自己的武器升级，加工费从这名角色的钱包出），主持人在「武器升级」页开关
   workshopOpen: false, // 工坊向联机玩家开放（玩家给自己制作 / 拆解），主持人在「工坊」页开关
