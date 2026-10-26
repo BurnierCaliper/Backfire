@@ -222,7 +222,7 @@ const CalcCommands = (() => {
         return;
       }
       case "unitZone": if (!u) return; if (Math.abs(Number(c.dest) - Number(u.zone)) === 1) return doMove(u, Number(c.dest)); snapshot(); u.zone = Number(c.dest); paintSkillLog(`${u.name} 被直接放到 ${u.zone} 区（GM 强制换位，不走移动规则）。`); render(); return;
-      case "status": if (!statuses.includes(c.key)) throw new Error("Unknown status"); if (u) { u.statuses[c.key] = c.value; if (c.key === "shockwave") syncShockwave(u, null); } return;
+      case "status": if (!statuses.includes(c.key)) throw new Error("Unknown status"); if (u) { u.statuses[c.key] = c.key === "blind" && typeof blindStacksOf === "function" ? blindStacksOf(c.value) : c.value; if (c.key === "shockwave") syncShockwave(u, null); } return;   // 目盲：折成 0–3 层（effects.js）
       case "instant": if (!instants.includes(c.key)) throw new Error("Unknown instant effect"); if (u) u.instant[c.key] = c.value; return;
       case "neutralize": if (u) { snapshot(); const notes = applyNeutralize(u); appendLog(notes.join("\n") || `${u.name} 身上没有可中和的属性状态。`); render(); } return;
       case "self": if (u) { u.self = c.value; u.selfBurnStacks = u.self === "burn" ? Math.max(1, Number(u.selfBurnStacks) || 1) : 0; if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, null); renderZones(); } return;

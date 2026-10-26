@@ -450,7 +450,8 @@ function statusLine(u) {
     if (sinkOf(u) && inQuicksand(u)) s.push("下陷 " + sinkOf(u) + (sinkOf(u) >= QUICKSAND.lockAt ? "（没顶）" : ""));
     if (u.statuses.advantage) s.push("优势");
     if (u.statuses.chase) s.push("紧追");
-    if (u.statuses.blind) s.push("目盲");
+    const blindN = typeof blindStacks === "function" ? blindStacks(u) : 0;   // 目盲按层数写（effects.js）
+    if (blindN) s.push("目盲×" + blindN);
   }
   (u.focuses || []).forEach(f => {
     const names = (f.seq || []).map((el, i) => (i === f.step ? "[" + (ELE[el] || el) + "]" : (ELE[el] || el)));
@@ -1125,7 +1126,7 @@ function renderEditor() {
       <label><input id="stInsp" type="checkbox" ${u.statuses.inspire?"checked":""}> 振奋</label>
       <label><input id="stHide" type="checkbox" ${u.statuses.hide?"checked":""}> 躲藏</label>
       <label><input id="stAdv" type="checkbox" ${u.statuses.advantage?"checked":""}> 优势</label>
-      <label><input id="stBlind" type="checkbox" ${u.statuses.blind?"checked":""}> 目盲</label>
+      <label>目盲层 <input id="stBlind" type="number" min="0" max="${typeof blindMaxStacks === "function" ? blindMaxStacks() : 3}" value="${typeof blindStacks === "function" ? blindStacks(u) : 0}" style="width:52px"></label>
     </div>
     <div class="section-title">即时效果</div>
     <div class="chk">
@@ -1198,7 +1199,8 @@ function renderEditor() {
   bind("edFly", () => editField("flying", uiEl("edFly").checked));
   bind("edStun", () => editField("stunned", uiEl("edStun").checked));
   bind("stBurn", () => calcCommand("status", { actor: u.id, key: "burn", value: Number(uiEl("stBurn").value) || 0 }));
-  const statuses = { Shock: "shock", Corr: "corr", Frost: "frostbite", Wave: "shockwave", High: "high", Reso: "reso", Un: "unstable", Weak: "weak", Insp: "inspire", Hide: "hide", Adv: "advantage", Blind: "blind" };
+  bind("stBlind", () => calcCommand("status", { actor: u.id, key: "blind", value: Number(uiEl("stBlind").value) || 0 }));   // 目盲层数（CalcCommands 折成 0–3）
+  const statuses = { Shock: "shock", Corr: "corr", Frost: "frostbite", Wave: "shockwave", High: "high", Reso: "reso", Un: "unstable", Weak: "weak", Insp: "inspire", Hide: "hide", Adv: "advantage" };
   Object.entries(statuses).forEach(([key, status]) => bind("st" + key, () => calcCommand("status", { actor: u.id, key: status, value: uiEl("st" + key).checked })));
   const imap = { inMelt: "melt", inSting: "sting", inOver: "overload", inShift: "shift", inSpread: "spread", inRef: "refract" };
   Object.entries(imap).forEach(([id, key]) => bind(id, () => calcCommand("instant", { actor: u.id, key, value: uiEl(id).checked })));
@@ -4210,9 +4212,11 @@ function flushAoePulse() {
     if (!zones.length) break;
     state.aoePulse = {};
     zones.forEach(z => {
-      // 危墙 / 关着的门：倒塌 / 打开之前，范围攻击影响不到墙对面的按钮、拉杆和配置物
+      // 危墙 / 关着的门：倒塌 / 打开之前，范围攻击影响不到墙对面的按钮、拉杆和配置物；
+      // 目盲落空的攻击整次没打出去（effects.js · blindMissedThisAction），也不算波及
       const all = (map[z] && map[z].hits) || [];
-      const hits = all.filter(h => h.from == null || !lineBlocked(h.from, z));
+      const missed = h => !h.env && typeof blindMissedThisAction === "function" && blindMissedThisAction(h.attacker);
+      const hits = all.filter(h => (h.from == null || !lineBlocked(h.from, z)) && !missed(h));
       if (all.length && !hits.length && !(map[z] && map[z].bare)) return;
       if (!map[z].devicesDone) pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
       if (!hits.length || map[z].propsDone) return;
@@ -5723,7 +5727,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (attacker && Number(attacker.blockMalus) > 0) c -= Number(attacker.blockMalus);   // 赤牙霰弹枪：对这一枪的协助格挡 −40%
   if (attacker && Number(attacker.rushBlock) > 0) c += Number(attacker.rushBlock);       // 沙灵聚合体狂暴连打：每一击的协助格挡 +10%（AGG_RUSH）
   if (attacker && Number(attacker.ratExecBlock) > 0) c += Number(attacker.ratExecBlock); // 暴虐猎手斩杀：这一击的协助格挡 +5%（enemies.js · RAT_CFG.tyrant）
-  if (typeof blindBlockBonus === "function") c += blindBlockBonus(attacker);              // 攻击者目盲：被格挡下来的概率 +25%（engine.js · BLIND）
+  if (typeof blindBlockBonus === "function") c += blindBlockBonus(attacker);              // 攻击者目盲：被格挡下来的概率 1 / 2 / 3 层 +25% / 50% / 100%（engine.js · BLIND）
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
@@ -7119,7 +7123,7 @@ function tryOxAutoBlock(attacker, target, atkRange) {
     const selfBreak = ox.kit === "captain_ox";
     appendLog(selfBreak ? `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。成功后反击 1 击破。`
       : `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。`);
-    if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：被格挡下来一次就解除
+    if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：被格挡下来一次卸一层
     if (attacker && selfBreak) {
       // 反击走 dealBreak：坚挺、塌陷计数、失衡后的协助攻击都照常（以前直接改架势）
       const notes = [];
@@ -7182,7 +7186,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (ok) {
       notes.push("空手格挡成功：目标仍受一半伤害，架势照常扣（可能被打进失衡）。格挡者下回合附赠行动 −1。");
       helper.loseBonusNext = true;
-      if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：空手挡住也算被格挡下来
+      if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：空手挡住也算被格挡下来，卸一层
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
   }
@@ -7213,7 +7217,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
   }
   if (ok) {
     notes.push("成功：目标免伤，击破改由格挡者承担。");
-    if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：被格挡下来一次就解除
+    if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：被格挡下来一次卸一层
     if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
@@ -7432,7 +7436,7 @@ function finishBlockInner(helperId, forced) {
     if (wall && typeof featIronwallDeclarers === "function" && featIronwallDeclarers(target).indexOf(wall) >= 0) {
       featUseOnce(wall, "ironwall");
       appendLog(`${wall.name} 以身作盾：这一击视为协助格挡成功。`);
-      if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：算被格挡下来
+      if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：算被格挡下来，卸一层
       block = "assistOk";
       blockHelperId = wall.id;
       addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
@@ -7519,7 +7523,7 @@ function resetBattleFlags(u) {
   u.statuses = {
     burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
     high: false, reso: false, unstable: false, weak: false, inspire: false,
-    sturdy: false, hide: false, advantage: false, chase: false, blind: false, latestElement: null
+    sturdy: false, hide: false, advantage: false, chase: false, blind: 0, latestElement: null
   };
   u.instant = {};
   const r = u.resources = u.resources || {};
@@ -8265,7 +8269,7 @@ function dealToInner(attacker, target, opt) {
     surfaceUnit(attacker, n, false, "发动攻击");
     n.forEach(t => appendLog(t));
   }
-  let blindSurface = null;   // 目盲的攻击者用谐波打下潜的目标：等落空骰掷完、没落空才把它打出沙层（落空就没打到）
+  let blindSurface = null;   // 目盲的攻击者用谐波打下潜的目标：等落空判定完、没落空才把它打出沙层（落空就没打到）
   if (target && target.submerged && attacker && !opt.flags.environment) {
     // 沙鱼的声呐找得到沙下的尘虫 / 管虫（捕食），不算把它打出来
     const fishPrey = typeof isSandFish === "function" && isSandFish(attacker) && isDesertPrey(target);
@@ -8381,11 +8385,12 @@ function dealToInner(attacker, target, opt) {
     if (ww.length) opt.flags.waveWalls = ww.map(w => ({ el: w.el, mode: w.mode }));
   }
   if (typeof featArmAttack === "function" && target && !target.isPlayer) featArmAttack(attacker, target, opt);   // 无可阻挡（feats.js）：不能被格挡
-  // 目盲（effects.js · blindRollApplies / blindRoll）：这一击确定打得出去了（射程、躲藏、飞行、危墙都过了，代挡也换好了人），出手时掷落空骰。
+  // 目盲（effects.js · blindRollApplies / blindRoll）：这一击确定打得出去了（射程、躲藏、飞行、危墙都过了，代挡也换好了人），做落空判定。
+  // 一次攻击只掷一次（范围攻击、一个技能里分几下打的都算一次）：这次攻击前面已经掷过就照那次的结果。
   // 落空就到此为止：不进协助格挡、碰不到屏障，没有伤害、击破和任何命中效果；落空也算发动过攻击，躲藏照样解除（反应不算，和 afterAttackDealt 一样）
-  const blindRolled = typeof blindRollApplies === "function" && blindRollApplies(attacker, target, opt.flags);
-  if (blindRolled) {
-    const b = blindRoll(attacker, target);
+  const blindChecked = typeof blindRollApplies === "function" && blindRollApplies(attacker, target, opt.flags);
+  if (blindChecked) {
+    const b = blindRoll(attacker, target, opt.flags);
     if (b.miss) {
       if (!isReaction && attacker.statuses && attacker.statuses.hide) {
         attacker.statuses.hide = false;
@@ -8452,8 +8457,8 @@ function dealToInner(attacker, target, opt) {
         atk: opt.atk, mult: opt.mult, hitMults: opt.hitMults, flat: opt.flat, hits: opt.hits, baseHits: opt.baseHits, breakOnce: opt.breakOnce, element: opt.element,
         bleed: opt.bleed,   // 出血（engine.js · BLEED）：等格挡结果的这一击落下时照样带着
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
-        // blindChecked：目盲的落空骰出手时已经掷过（没落空），这一击落下时不再掷
-        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false }, blindRolled ? { blindChecked: true } : {})
+        // blindChecked：目盲的落空判定出手时已经做过（没落空），这一击落下时不再掷
+        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false }, blindChecked ? { blindChecked: true } : {})
       }))
       });
       presentBlockModal();
@@ -13296,6 +13301,7 @@ function runSkillInner(id, optRun) {
       lines.push(`${t.name} 陷入折射。`);
     } else if (id === "mochi_boom") {
       const boom = () => {
+        if (typeof blindNewAttack === "function") blindNewAttack(a);   // 目盲：每次音爆各是一次范围攻击，各掷一次落空骰（effects.js）
         visibleEnemies(a.zone).forEach(u => hitOne(a, u, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } }));
         markAoeZone(a.zone, { element: "harmonic", dmg: Math.floor(atk * 0.5), attacker: a });
         flushAoePulse();   // 再耗圣盾炸第二次算另一次范围攻击，按钮再触发一次

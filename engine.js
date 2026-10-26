@@ -625,11 +625,11 @@ const WAVE_WALL = {
   dampenStatus: ["unstable", "weak"], amplifyStatus: ["sturdy", "inspire"],
   elements: ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]
 };
-/** 目盲（通用状态 statuses.blind，#405；规则在 effects.js · blindRollApplies / blindRoll，app.js · dealToInner 出手时掷、finalBlockChance 加格挡率）：
- *  missPct   攻击落空的概率：出手时掷 d100，≤ missPct 就落空（这一击没有伤害、击破和任何命中效果），目盲解除
- *  blockPct  被格挡下来的概率 +N%（协助格挡、敌人的自动格挡都算，和其他格挡加成加算，加完再封顶）；被格挡下来一次目盲解除
- *  aoe       范围攻击会不会落空（false：范围攻击不用瞄准单个目标，不掷落空骰；它本来也不能被格挡） */
-const BLIND = { missPct: 25, blockPct: 25, aoe: false };
+/** 目盲（通用状态，statuses.blind 记层数，#405；规则在 effects.js · blindRollApplies / blindRoll，app.js · dealToInner 出手时掷、finalBlockChance 加格挡率）：
+ *  可以叠加，最多叠到表的长度（3 层）；挂着 n 层就用表里第 n 个数，每多一层效果翻倍（1 层 25%、2 层 50%、3 层 100%）。
+ *  missPct   攻击落空的概率：一次攻击（单体、范围都算）只掷一次 d100，≤ 这个数就落空——整次攻击没有伤害、击破和任何命中效果，卸一层目盲
+ *  blockPct  被格挡下来的概率 +N%（协助格挡、敌人的自动格挡都算，和其他格挡加成加算，加完再封顶）；被格挡下来一次卸一层目盲 */
+const BLIND = { missPct: [25, 50, 100], blockPct: [25, 50, 100] };
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -2232,7 +2232,7 @@ function unitOf(name, level, layers, def, atk, extra = {}) {
     statuses: {
       burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
       high: false, reso: false, unstable: false, weak: false, inspire: false,
-      sturdy: false, hide: false, advantage: false, chase: false, blind: false, latestElement: null
+      sturdy: false, hide: false, advantage: false, chase: false, blind: 0, latestElement: null
     },
     instant: { melt: false, sting: false, overload: false, shift: false, spread: false, refract: false },
     self: "none",

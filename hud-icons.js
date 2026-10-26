@@ -216,7 +216,7 @@
       // 高能只看高能状态；没有高能状态的高能值记在蓄能徽章上（#52）
       if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high) out.push({ key: "high", stack: he > 0 ? he : "" }); else if (he > 0 && u.self !== "store") out.push({ key: "store", stack: he }); return; }
       const v = st[k];
-      if (v) out.push({ key: STATUS_KEY[k], stack: k === "burn" && Number(v) > 0 ? Number(v) : "" });
+      if (v) out.push({ key: STATUS_KEY[k], stack: (k === "burn" || k === "blind") && Number(v) > 0 ? Number(v) : "" });   // 灼烧、目盲按层数
     });
     const ins = u.instant || {};
     Object.keys(INSTANT_KEY).forEach(k => { if (ins[k]) out.push({ key: INSTANT_KEY[k], stack: "" }); });

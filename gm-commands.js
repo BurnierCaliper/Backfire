@@ -7,8 +7,8 @@
   const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "copyUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn"].map(x => "gm." + x);
   const PROP_KINDS = ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle"];   // 沙珊瑚枝 / 触须：和沙漠遭遇同一套（props.js · desert.js）
   const WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
-  const STATUS_NUM = ["burn"];
-  const STATUS_BOOL = ["shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "sturdy", "advantage", "hide", "chase", "blind"];
+  const STATUS_NUM = ["burn", "blind"];   // 目盲记层数：0 到最多层数的整数（effects.js · blindMaxStacks）
+  const STATUS_BOOL = ["shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "sturdy", "advantage", "hide", "chase"];
   const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_riot_bottle en_riot_bottle_fire en_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));
   const INSTANTS = ["melt", "sting", "overload", "shift", "spread", "refract"];   // 即时效果（trpg-commands.js · CalcCommands 同一份）
   const UNIT_NAME_MAX = 40, MAX_LAYERS = 6;
@@ -114,6 +114,7 @@
       Object.entries(p.statuses).forEach(([k, v]) => {
         if (k === "latestElement") { if (v !== null) one(v, Object.keys(ELE), "最近元素"); }
         else if (STATUS_BOOL.includes(k)) { if (typeof v !== "boolean") number(v, k); }
+        else if (k === "blind") number(v, "目盲层数", 0, typeof blindMaxStacks === "function" ? blindMaxStacks() : 3, true);
         else number(v, k);
       });
     }

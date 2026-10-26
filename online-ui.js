@@ -278,7 +278,7 @@
       if (u.dying && !u.dead) tokens.push("濒死");
       if (u.stunned && !u.dead) tokens.push("失衡");
       if (u.flying) tokens.push("飞行");
-      Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push(k === "burn" && Number(st.burn) > 0 ? "灼烧×" + st.burn : TIP_STATUS[k]); });
+      Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push((k === "burn" || k === "blind") && Number(st[k]) > 0 ? TIP_STATUS[k] + "×" + Number(st[k]) : TIP_STATUS[k]); });   // 灼烧、目盲按层数
       if (st.high) tokens.push("高能 " + (Number(u.highEnergy) || 0));
       else if (Number(u.highEnergy) > 0) tokens.push("蓄能 " + Number(u.highEnergy));   // 蓄能攒的高能值，不算高能（#52）
       Object.keys(TIP_INSTANT).forEach(k => { if ((u.instant || {})[k]) tokens.push(TIP_INSTANT[k]); });

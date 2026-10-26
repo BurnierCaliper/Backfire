@@ -4379,7 +4379,7 @@
     return {
       burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
       high: false, reso: false, unstable: false, weak: false, inspire: false,
-      sturdy: false, hide: false, advantage: false, chase: false, blind: false, latestElement: null
+      sturdy: false, hide: false, advantage: false, chase: false, blind: 0, latestElement: null
     };
   }
 

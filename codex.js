@@ -88,13 +88,14 @@ const CODEX_EFFECTS = [
   {"group": "common", "name": "坚挺", "lines": ["架势值不会低于 1，一回合生效"]},
   {"group": "common", "name": "躲藏", "lines": ["不会被选做攻击目标。单位发动攻击或受到伤害后解除"]},
   {"group": "common", "name": "优势", "lines": ["攻击和格挡或是检定都可以得到一个优势骰，取最大值"]},
-  // 目盲（#405）：数值跟着 engine.js · BLIND 写（规则在 effects.js · blindRollApplies / blindRoll）
+  // 目盲（#405，可叠加）：每层的数值跟着 engine.js · BLIND 写（规则在 effects.js · blindRollApplies / blindRoll）
   (() => {
-    const B = typeof BLIND !== "undefined" ? BLIND : { missPct: 25, blockPct: 25, aoe: false };
+    const B = typeof BLIND !== "undefined" ? BLIND : { missPct: [25, 50, 100], blockPct: [25, 50, 100] };
+    const per = (list, sign) => list.map((p, i) => `${i + 1} 层 ${sign}${p}%`).join("、");
     return {"group": "common", "name": "目盲", "lines": [
-      `攻击有 ${B.missPct}% 概率落空：落空的这一击没有伤害、击破和任何命中效果，也不用格挡。协助攻击、借机攻击也会落空${B.aoe ? "，范围攻击也会" : "；范围攻击不会落空"}。`,
-      `被格挡下来的概率 +${B.blockPct}%（协助格挡、敌人的自动格挡都算，和其他格挡加成加算）。`,
-      "落空一次，或者攻击被格挡下来一次（空手挡住、以身作盾也算）后解除。"
+      `可以叠加，最多 ${B.missPct.length} 层。攻击有概率落空（${per(B.missPct, "")}），一次攻击只掷一次，范围攻击也会落空：落空的攻击整个作废，没有伤害、击破和任何命中效果，也不用格挡。协助攻击、借机攻击也会落空。`,
+      `被格挡下来的概率提高（${per(B.blockPct, "+")}），协助格挡、敌人的自动格挡都算，和其他格挡加成加算。`,
+      "落空一次，或者攻击被格挡下来一次（空手挡住、以身作盾也算），卸掉一层，剩下的继续挂着。"
     ]};
   })(),
   {"group": "field", "element": "fire", "name": "火场", "lines": ["区域内所有单位每回合开始时按火场层数受到 1d4 × 层数 火焰伤害，触发后火场 +1。", "每 5 级提高伤害骰一次。对飞行单位无效。"]},
