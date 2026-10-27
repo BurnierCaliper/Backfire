@@ -4358,6 +4358,14 @@ function scrapTargets(p, u) {
     zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2 &&
     !lineBlocked(p.zone, t.zone) && !(t.statuses && t.statuses.hide) && !t.submerged && !(t.dying && !t.upOnShp));
 }
+/** 音爆 / 探测模式自动触发的碎渣机炮打谁（#437，作者 10/27）：照旧挑名单（scrapTargets，场上单位的顺序）里的第一个。
+ *  a 开着友伤、名单里有 a 以外的队友时（我方排在敌人前面，挑第一个就一定先打队友），改成在整份名单（敌人和队友一起）里随机挑一个，
+ *  用游戏的种子随机数（Math.random：回放、联机同一种子结果一样）。开关关着、名单里没有队友时照旧挑第一个，不多掷随机数 */
+function scrapAutoTarget(p, a) {
+  const list = scrapTargets(p, a);
+  if (!list.some(t => typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return list[0] || null;
+  return list[Math.floor(Math.random() * list.length)];
+}
 /** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
 function controlScrap(a, p, t) {
   if (!p || p.kind !== "scrap" || !((Number(p.hp) || 0) > 0)) return "碎渣机炮已经不在了。";
@@ -6415,8 +6423,9 @@ function ecmoProbeTrigger(a, notes) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
-      const t = scrapTargets(p, a)[0];
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑），
+      // 名单里有队友就在敌人和队友里随机挑（scrapAutoTarget，#437）
+      const t = scrapAutoTarget(p, a);
       if (!t) { notes.push(`探测模式触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -8933,7 +8942,8 @@ function triggerMagnetShield(broken) {
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
   const dest = magnetPushDest(c.zone);
   notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
-  visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
+  // 川川开着友伤（enemies.js · friendlyFireHit，#437）：同区川川以外的队友也被推开、各受 1 击破（照常结算，不计分数）
+  visibleEnemies(c.zone, c).filter(u => !ignoresAoe(u)).forEach(u => {
     if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
@@ -9638,8 +9648,9 @@ function ecmoBoomTriggerProps(a, lines) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
-      const t = scrapTargets(p, a)[0];
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑），
+      // 名单里有队友就在敌人和队友里随机挑（scrapAutoTarget，#437）
+      const t = scrapAutoTarget(p, a);
       if (!t) { lines.push(`音爆触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -14439,7 +14450,8 @@ function runSkillInner(id, optRun) {
         const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
         if (c === "red") {
           lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
-          visibleEnemies(z).forEach(u => applyInstantEffect(u, "melt", lines));
+          // 龙哥开着友伤（enemies.js · friendlyFireHit，#437）：同区龙哥以外的队友也熔融；红弹治疗照旧给同区全部友方
+          visibleEnemies(z, a).forEach(u => applyInstantEffect(u, "melt", lines));
           allies.forEach(u => longgeBulletHeal("red", u, lines));
         } else {
           lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
