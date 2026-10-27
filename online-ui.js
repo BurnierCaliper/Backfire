@@ -204,14 +204,15 @@
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
-    // 纸片画面（#308）的顶栏 / 吊牌：「工具 ▾」开关、镜头按钮（点新画面原来那几个）、⇅ 点开「延后 / 换位」（点热座栏原来那几个按钮）；
+    // 纸片画面（#308）的顶栏 / 吊牌：「工具 ▾」开关、镜头按钮（点新画面原来那几个；手机上收成一个，#429）、⇅ 点开「延后 / 换位」（点热座栏原来那几个按钮）；
     // 下拉里的一项（地图、战绩……：上面的 click 照旧处理；申请检定、新画面开关由它们自己的模块处理）点完就收起
     paperBox.addEventListener("click", event => {
       const t = event.target, OP = global.OnlinePaper;
       if (!t || !t.closest || !OP) return;
       if (t.closest('[data-olp="tools"]')) { toolsOpen = !toolsOpen; swapOpen = null; paintPaper(); return; }
-      const cam = t.closest("[data-olp-cam]");
-      if (cam) { OP.pressCam(stage, Number(cam.dataset.olpCam)); return; }
+      // 镜头：远 / 中 / 近，手机上收成的那一个（#429：点下一段）点的都是新画面原来那几个按钮
+      const cam = t.closest("[data-olp-cam], [data-olp-cam-next]");
+      if (cam) { OP.pressCam(stage, Number(cam.dataset.olpCam != null ? cam.dataset.olpCam : cam.dataset.olpCamNext)); return; }
       const sw = t.closest("[data-olp-swap]");
       if (sw) { const i = Number(sw.dataset.olpSwap); swapOpen = swapOpen === i ? null : i; toolsOpen = false; paintPaper(); return; }
       const mv = t.closest("[data-olp-move]");
@@ -939,6 +940,7 @@
         if (checkReq) checkReq.sync();
       }
       html(q(".olp-tags-host"), OP.tagsHtml(paperSlots(data, moves), { open: swapOpen, moving }), "paperTags");
+      if (OP.revealTag) OP.revealTag(q(".olp-tags-host"));   // 触屏上吊牌放不下横着滑（#429）：轮到的 / 点开 ⇅ 的那一张滑进来
       const hn = document.getElementById("hs-notice"), note = hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = q(".olp-note");
       noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note;
       watchPaper(true);

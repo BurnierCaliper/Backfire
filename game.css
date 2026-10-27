@@ -1955,6 +1955,12 @@ body:not([data-screen="battle"]) .g-rank { display: none !important; }
   .run-party { order: 2; }
   .run-log { order: 3; }
 }
+/* 触屏（没有悬停：手机、平板，和 game.js · touchUI 同一条，#429）：没有键盘，按键的小字不画——
+ * 技能按钮上的数字键（单机、联机玩家，旧画面、新画面都是 .sk .key）、问答框选项前的数字和 Esc。
+ * 开始 / 结束按钮的「空格」、唤出的「· Q」、「放弃（Esc）」在 game.js / online-battle.js 里触屏就不写；电脑上照旧 */
+@media (hover: none) {
+  .g-hud .skills .sk .key, .choice .opts button .key { display: none; }
+}
 
 /* ================= 任务路线图（routemap.js；美术见 art/style-guide.html） ================= */
 .route-map {

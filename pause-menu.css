@@ -29,6 +29,7 @@
 }
 .pm-resume:focus-visible { outline: 2px solid var(--sk-holo, #3fe0ff); outline-offset: 2px; }
 .pm-resume kbd { font: 700 11px/1 var(--num, sans-serif); padding: 2px 5px; border: 1px solid currentColor; opacity: .7; }
+@media (hover: none) { .pm-resume kbd { display: none; } }   /* 触屏没有 Esc（#429）：「继续」就是关掉菜单的按钮 */
 /* 角上的「菜单」按钮：单机插在顶栏最前面；提示（红点 / 数字）挂在右上角 */
 .pm-open { position: relative; overflow: visible; }
 .pm-badge { position: absolute; z-index: 1; top: -8px; right: -8px; pointer-events: none; }
