@@ -24,6 +24,14 @@
     if (sensitiveTech.test(clean)) return null;
     return keepLines ? v.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "").slice(0, limit) : clean.slice(0, limit);
   }
+  // （新）#340 第 11 条：和 hotseat-game.js · hideWallets 同一套规则。
+  // 房间检查点里可能还留着这次修复之前带余额的旧聊天（最多 300 条），投影时再滤一遍。
+  function hideWallets(text) {
+    return String(text)
+      .replace(/（([^（）]*?) 剩 \d+，([^（）]*?) 现有 \d+）/g, "")
+      .replace(/（由 ([^（），]+?) 付，钱包剩 \d+）/g, "（由 $1 付）")
+      .replace(/进 ([^（）]+?) 的钱包（现有 \d+）/g, "进 $1 的钱包");
+  }
   function id(v) { return typeof v === "string" && /^[\w:./-]{1,160}$/.test(v) && !sensitive.test(v) && !["__proto__", "prototype", "constructor"].includes(v) ? v : null; }
   function number(v) { return typeof v === "number" && Number.isFinite(v) ? v : undefined; }
   function copyFields(src, dst, strings = [], numbers = [], booleans = []) {
@@ -578,7 +586,9 @@
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
       const isTitle = !!get(m, "title");
-      const t = chatText(get(m, "text"), 500, true); if (t === null) return [];
+      const raw = chatText(get(m, "text"), 500, true); if (raw === null) return [];
+      // #340 第 11 条：敏感词过完再去余额（旧检查点消息也走这里；sensitiveTech 已在挡坚毅）
+      const t = hideWallets(raw);
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
       const roll = get(m, "roll");
       if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }
@@ -953,7 +963,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, hideWallets, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

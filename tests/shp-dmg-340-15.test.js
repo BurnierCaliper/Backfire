@@ -116,7 +116,8 @@ test("第 15 条：计算器（非游戏版）起身中仍弹数字；README 有
   // 整节「规则改动记录」里找（不按字数截：上面别的记录再长也不会让它失败）
   const idx = readme.indexOf("## 规则改动记录");
   assert.ok(idx >= 0);
-  const section = readme.slice(idx);
+  const end = readme.indexOf("\n## ", idx + 5);
+  const section = end > idx ? readme.slice(idx, end) : readme.slice(idx);
   assert.match(section, /#340 第 15 条/);
   assert.match(section, /坚毅受创/);
   assert.match(readme, /已作废[\s\S]{0,80}受伤时伤害数字照常显示|受伤时伤害数字照常显示[\s\S]{0,40}已作废/);

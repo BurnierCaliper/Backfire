@@ -3584,6 +3584,8 @@
   function setRogueMode(rogue) {
     G.rogue = rogue;
     document.body.classList.toggle("rogue-battle", !!rogue);
+    // #340 第 14 条：训练场不走 rogue-battle，以前后台按钮露出来；训练中挂 training-battle 藏后台
+    document.body.classList.toggle("training-battle", !rogue && trainingActive());
   }
 
   /**
@@ -4886,6 +4888,8 @@
    *  把它要写入的 #backstageBody 从隐藏的 #calc-core 搬到游戏面板中，
    *  这样规则和字段只有一份，计算器改了游戏跟着变。 */
   function openBackstage() {
+    // #340 第 14 条：训练场后台写着坚毅生命剩余和上限，玩家不能开
+    if (trainingActive()) return;
     const mount = $("g-bs-mount");
     let body = document.getElementById("backstageBody");
     if (!body) {
