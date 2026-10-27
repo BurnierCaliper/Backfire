@@ -82,6 +82,29 @@ test("汇总、自动标记和报告", () => {
   assert.ok(Math.abs(s.share - rows[1].dmg / rows[1].heroHp) < 1e-9, "整场伤害占比 = 伤害 ÷ 我方血量上限");
   assert.equal(report.paper.thug_knife[20].atk, 24, "纸面：狂徒（匕首）20 级 atk 5 + 19");
   const md = E.markdown(report);
-  ["# 后期敌人实际威胁模拟（issue #401）", "总览：每个等级的中位数", "20 级：各敌人的实际伤害", "20 级：击破与控场", "5 级（前期参照）", "等级变化", "首领", "自动标记"].forEach(t => assert.ok(md.includes(t), t));
+  ["# 后期敌人实际威胁模拟（issue #401）", "总览：每个等级的中位数", "单局各幕", "20 级：各敌人的实际伤害", "20 级：击破与控场", "5 级（前期参照）", "等级变化", "首领", "自动标记"].forEach(t => assert.ok(md.includes(t), t));
+  assert.match(md, /\|1\|外城区\|1–4\|/, "第 1 幕外城区：抽得到狂徒（匕首）");
+  assert.doesNotMatch(md, /假设性对照/, "默认参数不写假设性对照");
   assert.doesNotMatch(md, /坚毅生命还剩|shpMax/, "报告里不写坚毅生命的剩余值");
+});
+
+test("假设性对照：--tokens 凑满几枚代币、--atk 乘敌人攻击力（只在模拟里）；默认参数和以前一样", () => {
+  assert.deepEqual([E.parseArgs([]).tokens, E.parseArgs([]).atk], [4, 1]);
+  assert.deepEqual([E.parseArgs(["--tokens", "6"]).tokens, E.parseArgs(["--atk", "1.5"]).atk], [6, 1.5]);
+  assert.throws(() => E.parseArgs(["--tokens", "9"]), /Tokens/);
+  assert.throws(() => E.parseArgs(["--atk", "0"]), /Atk/);
+  assert.deepEqual(E.plan({ samples: 1, levels: [20], sizes: [2], kits: ["thug_knife"] })[0], unit("thug_knife", 20, 2, 0), "默认参数不写进每场，抽样计划和以前一样");
+  assert.deepEqual(E.plan({ samples: 1, levels: [20], sizes: [2], kits: ["thug_knife"], tokens: 6, atk: 1.5 })[0], Object.assign(unit("thug_knife", 20, 2, 0), { tokens: 6, atk: 1.5 }));
+  const six = E.runJob(Object.assign(unit("thug_knife", 20, 2, 1), { tokens: 6 }));
+  assert.notEqual(six.outcome, "error", six.error);
+  assert.equal(six.units, 6, "6 枚代币：杂兵 6 只");
+  const ox = E.runJob(Object.assign(unit("captain_ox", 20, 2, 1), { tokens: 6 }));
+  assert.equal(ox.units, 3, "精英 3 只");
+  const base = E.runJob(unit("captain_ox", 20, 2, 1)), strong = E.runJob(Object.assign(unit("captain_ox", 20, 2, 1), { atk: 1.5 }));
+  [base, strong].forEach(r => assert.notEqual(r.outcome, "error", r.error));
+  assert.deepEqual(strong.party, base.party, "同一格：队伍一样");
+  assert.ok(Math.abs(strong.foeAtk - base.foeAtk * 1.5) <= 0.5, `攻击力 ×1.5：${base.foeAtk} → ${strong.foeAtk}`);
+  assert.equal(strong.dmg + strong.friendly, strong.takenGame, "乘了攻击力，计数照样和游戏自己记的承伤一致");
+  const report = E.buildReport([strong], { samples: 1, levels: [20], sizes: [2], groups: ["unit"], kits: null, atk: 1.5 }, fakeProvenance);
+  assert.match(E.markdown(report), /假设性对照：敌人攻击力 ×1\.5/);
 });

@@ -6,6 +6,12 @@
 //   node tools/enemy-threat.js                         全部敌人 × 5（前期参照）/ 10 / 15 / 20 级 × 2–4 人，每格 40 场 → docs/balance/enemy-threat-1026.{md,json}
 //   node tools/enemy-threat.js --kits thug_knife,giant --levels 20 --samples 5 --out docs/balance/try
 //   node tools/enemy-threat.js --groups boss           只跑首领
+//   node tools/enemy-threat.js --groups unit --levels 20 --atk 1.5 --out docs/balance/enemy-threat-1026-l20-atk150
+//                                                      假设性对照：敌人 atk ×1.5（只在模拟里乘，游戏数值不动）
+//   node tools/enemy-threat.js --groups unit --levels 20 --tokens 6 --out docs/balance/enemy-threat-1026-l20-tok6
+//                                                      假设性对照：每场凑满 6 枚代币
+//   node tools/enemy-threat.js --rebuild docs/balance/enemy-threat-1026
+//                                                      不重跑，用已有的 json 重新生成报告（改了报告格式时用）
 //
 // 每场的布置照 R1 单场矩阵（tools/score-by-act.js · one）：R1 的 10 名角色里按种子随机 2–4 人，我方等级 = 敌人等级，
 // 升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6（最高 10），满状态、不用道具、BASIC 打法，敌人用游戏里的 AI，30 回合上限。
@@ -29,7 +35,8 @@ const CONFIG = {
   samples: 40,             // 每格（一种敌人 × 一个等级 × 一种人数）场数
   levels: [5, 10, 15, 20], // 10 / 15 / 20 是 issue 要的后期；5 级当前期参照，看「后期掉了多少」
   sizes: [2, 3, 4],
-  tokens: 4,               // 普通战的代币（run.js · ENCOUNTER_TOKENS）
+  tokens: 4,               // 普通战的代币（run.js · ENCOUNTER_TOKENS）；--tokens 改（假设性对照）
+  atk: 1,                  // 敌人攻击力倍率；1 = 游戏里的数值，--atk 改（假设性对照，只在模拟里乘）
   maxRounds: 30,           // 同 R1 单场
   workers: 4,
   out: "docs/balance/enemy-threat-1026",
@@ -51,6 +58,8 @@ const BOSSES = [
 // 首领自己（含身上的部件）：其余的算随从 / 援军 / 召唤物
 const BOSS_FAMILY = { outlaw_king: ["outlaw_king"], sand_aggregate: ["sand_aggregate"], ufo_boss: ["ufo_body", "ufo_leg"], chixia: ["chixia"] };
 const RANK_NAME = { minion: "杂兵", elite: "精英", boss: "首领" };
+// 假设性对照乘攻击力时乘哪几项：敌人出手用 personalAtk（+ weaponAtk），面板显示 atk（同 run.js · makeBountyTarget）
+const ATK_FIELDS = ["atk", "personalAtk", "weaponAtk", "baseAtk"];
 // 统计的状态（每个敌人回合结束时我方在场角色身上挂着的）：持续伤害、减益、控制
 const STATUS_NAME = { burn: "灼烧", corr: "腐蚀", frostbite: "冻伤", shock: "感电", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", chase: "紧追", high: "高能" };
 
@@ -81,10 +90,11 @@ function appearance(c, kit) {
   const total = C.acts + (C.extraActs || 0);
   const levelsOf = act => act <= C.acts ? C.actLevels[act - 1] : (C.extraActLevels || [])[act - C.acts - 1];
   for (let act = 1; act <= total; act++) {
-    const places = [C.regions[(act - 1) % C.regions.length]];
-    if (act <= C.acts && C.altRegions && C.altRegions[act]) places.push(C.altRegions[act]);
-    if (act >= 2 && C.sewer) places.push(C.sewer.region);
-    places.filter(r => regions.includes(r)).forEach(region => out.push({ act, region, levels: levelsOf(act) ? [...levelsOf(act)] : null }));
+    // kind：main 本幕区域 / alt 幕间可选的采矿场 / sewer 带地图去的下水道
+    const places = [[C.regions[(act - 1) % C.regions.length], "main"]];
+    if (act <= C.acts && C.altRegions && C.altRegions[act]) places.push([C.altRegions[act], "alt"]);
+    if (act >= 2 && C.sewer) places.push([C.sewer.region, "sewer"]);
+    places.filter(([r]) => regions.includes(r)).forEach(([region, kind]) => out.push({ act, region, kind, levels: levelsOf(act) ? [...levelsOf(act)] : null }));
   }
   return out;
 }
@@ -170,6 +180,7 @@ function instrument(c, job) {
   });
   // 敌人回合开始：这一种敌人还活着几只（按代币折算），以后的伤害记进第几个敌人回合
   wrap("startEnemyPhase", (orig, args) => {
+    boostAtk(c, job);
     m.enemyPhases++;
     now.phase = m.enemyPhases;
     const live = c.EnemyAI.foes().filter(u => job.group === "unit" ? u.kit === job.kit : (BOSS_FAMILY[job.kit] || []).includes(u.kit));
@@ -186,6 +197,17 @@ function instrument(c, job) {
     return orig(...args);
   });
   return { m, now };
+}
+/** 假设性对照（--atk）：敌人（不含中立生物）的攻击力乘倍率。开战时和每个敌人回合开始时各补一次，
+ *  中途上场的援军、召唤物也乘到；每个单位只乘一次。倍率 1 什么都不做（默认，和游戏一样） */
+function boostAtk(c, job) {
+  const mul = Number(job.atk) || 1;
+  if (mul === 1) return;
+  c.S.state.units.forEach(u => {
+    if (u.isPlayer || u.etAtkBoosted || (c.enemyInfo(u.kit) || {}).neutral) return;
+    ATK_FIELDS.forEach(k => { if (u[k] != null) u[k] = Math.round((Number(u[k]) || 0) * mul); });
+    u.etAtkBoosted = true;
+  });
 }
 
 /** 照 R1 单场矩阵布置队伍：等级 = 要测的等级，选好升级、满状态 */
@@ -204,7 +226,8 @@ function prepare(c, job) {
   c.S.LEDGER.dur = {}; c.S.LEDGER.weapons = {}; c.S.LEDGER.heroes = {}; c.S.LEDGER.hours = 0;
   return { run, spec };
 }
-/** 这一场的遭遇：要测的敌人凑满 4 枚代币 / 首领战。中性战场：没有天气、配置物、场地、载具 */
+const tokensOf = job => Number(job.tokens) || CONFIG.tokens;
+/** 这一场的遭遇：要测的敌人凑满 4 枚代币（--tokens 改）/ 首领战。中性战场：没有天气、配置物、场地、载具 */
 function encounter(c, job) {
   const [zoneMode, layout] = LAYOUTS[job.index % LAYOUTS.length];
   c.S.RNG.install(`${CONFIG.seedPrefix}:enc:${job.kit}:${job.level}:${job.size}:${job.index}`);
@@ -214,9 +237,9 @@ function encounter(c, job) {
     if (b.alone) enc = c.finishEncounter({ name: "首领 · " + job.kit, region: b.region, faction: null, tier: "boss", tokens: 0, mixed: false, enemies: [{ preset: job.kit, zone: 2 }], layout, vehicles: [] }, { zoneMode, weather: b.weather || "none" });
     else enc = c.rollBossEncounter(job.kit, { region: b.region, tokens: c.Rogue.CONFIG.bossEscortTokens, zoneMode, weather: b.weather || "none" });
   } else {
-    const info = c.enemyInfo(job.kit) || {}, picks = Math.max(1, Math.floor(CONFIG.tokens / c.enemyTokens(job.kit)));
+    const tokens = tokensOf(job), info = c.enemyInfo(job.kit) || {}, picks = Math.max(1, Math.floor(tokens / c.enemyTokens(job.kit)));
     const rows = Array.from({ length: picks }, () => ({ preset: job.kit, count: c.groupCount(info) }));
-    enc = c.finishEncounter({ name: "单一兵种 · " + job.kit, region: (info.regions || [])[0] || "外城区", faction: info.faction || null, tier: "normal", tokens: CONFIG.tokens, mixed: false,
+    enc = c.finishEncounter({ name: "单一兵种 · " + job.kit, region: (info.regions || [])[0] || "外城区", faction: info.faction || null, tier: "normal", tokens, mixed: false,
       enemies: rows, layout, vehicles: [] }, { zoneMode, weather: "none" });
   }
   enc.features = [];
@@ -234,11 +257,12 @@ function runJob(job) {
     spec.encounter = encounter(c, job);
     spec.seed = `${CONFIG.seedPrefix}:battle:${job.level}:${job.size}:${job.index}`;
     c.BattleSim.setup(spec);
+    boostAtk(c, job);
     const S = c.S.state, heroes = S.units.filter(u => isHero(c, u));
     const mine = u => job.group === "unit" ? u.kit === job.kit : (BOSS_FAMILY[job.kit] || []).includes(u.kit);
     const foes = S.units.filter(u => !u.isPlayer && !u.hidden && !u.dead && mine(u));
     if (!foes.length) throw new Error("No tested enemy on field");
-    now.weight = job.group === "unit" ? CONFIG.tokens / foes.length : 1;
+    now.weight = job.group === "unit" ? tokensOf(job) / foes.length : 1;
     const maxHp = u => (u.layers || []).reduce((s, l) => s + Math.max(0, Number(l.max) || 0), 0);
     Object.assign(row, { party: heroes.map(u => u.kit), heroLevels: heroes.map(u => u.level), foeLevels: [...new Set(foes.map(u => u.level))], zoneMode: S.zoneMode, weather: S.weather, units: foes.length,
       enemies: S.units.filter(u => !u.isPlayer && !u.hidden && !u.dead).map(u => u.kit),
@@ -259,7 +283,9 @@ function plan(opt = {}) {
   const kits = opt.kits || null;
   const want = (group, kit) => groups.includes(group) && (!kits || kits.includes(kit));
   const list = unitKits().filter(k => want("unit", k)).map(kit => ({ group: "unit", kit })).concat(BOSSES.filter(b => want("boss", b.kit)).map(b => ({ group: "boss", kit: b.kit })));
-  for (const { group, kit } of list) for (const level of levels) for (const size of sizes) for (let i = 0; i < n; i++) jobs.push({ group, kit, level, size, index: i });
+  // 假设性对照的代币 / 攻击力倍率跟着每场走（工作线程只看得到 job）；默认值不写进去，和以前的抽样计划一样
+  const hypo = Object.assign({}, opt.tokens && opt.tokens !== CONFIG.tokens ? { tokens: opt.tokens } : {}, opt.atk && opt.atk !== CONFIG.atk ? { atk: opt.atk } : {});
+  for (const { group, kit } of list) for (const level of levels) for (const size of sizes) for (let i = 0; i < n; i++) jobs.push(Object.assign({ group, kit, level, size, index: i }, hypo));
   return jobs;
 }
 
@@ -360,6 +386,29 @@ function overviewTable(l, report) {
   l.push("|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|");
   levels.forEach(L => l.push(`|${L}|${f1(heroHp(L))}|**${pct(col(L, s => s.share))}** / ${pct(col(L, s => s.share, "minion"))} / ${pct(col(L, s => s.share, "elite"))}|${pct(col(L, s => s.perTokenRoundShare))}|${f1(col(L, s => s.tokenRounds))}|${f1(col(L, s => s.brk))}|${pct(col(L, s => s.stunShare))}|${f2(col(L, s => s.downs))}|${pct(col(L, s => s.winRate))}|${f1(col(L, s => s.rounds))}|`));
 }
+const PLACE_NAME = { main: "", alt: "（幕间可选）", sewer: "（带地图）" };
+function actTable(l, report) {
+  const S = report.summary, M = report.meta, levels = report.options.levels;
+  const near = L => levels.reduce((a, b) => Math.abs(b - L) < Math.abs(a - L) ? b : a);
+  const places = new Map();
+  report.kits.forEach(k => (M[k].appear || []).forEach(x => {
+    const key = `${x.act}|${x.region}`;
+    if (!places.has(key)) places.set(key, { act: x.act, region: x.region, kind: x.kind || "main", range: x.levels, kits: [] });
+    places.get(key).kits.push(k);
+  }));
+  const order = { main: 0, alt: 1, sewer: 2 };
+  l.push("|幕|区域|普通战等级|抽得到几种|测的等级|整场伤害占比 中位数|最低的三种|最高的一种|");
+  l.push("|---:|---|---|---:|---:|---:|---|---|");
+  [...places.values()].sort((a, b) => a.act - b.act || order[a.kind] - order[b.kind]).forEach(p => {
+    const tested = p.range ? [...new Set([near(p.range[0]), near(p.range[1])])] : [];
+    tested.forEach(L => {
+      const xs = p.kits.filter(k => S[`${k}|${L}|all`]).sort((a, b) => S[`${a}|${L}|all`].share - S[`${b}|${L}|all`].share);
+      if (!xs.length) return;
+      const cell = k => `${M[k].name} ${pct0(S[`${k}|${L}|all`].share)}`;
+      l.push(`|${p.act}|${p.region}${PLACE_NAME[p.kind] || ""}|${p.range ? p.range.join("–") : "—"}|${p.kits.length}|${L}|**${pct(median(xs.map(k => S[`${k}|${L}|all`].share)))}**|${xs.slice(0, 3).map(cell).join("、")}|${cell(xs[xs.length - 1])}|`);
+    });
+  });
+}
 function damageTable(l, report, level) {
   const S = report.summary, M = report.meta;
   l.push("|排名|敌人|档次|单局里出现|只数|纸面 ATK|纸面单击|实际每击|每代币·回合伤害（占角色血量）|存活代币·回合 / 场|**整场伤害占我方血量**|持续伤害占比|我方胜率（95%）|平均回合|");
@@ -416,23 +465,35 @@ function bossTable(l, report) {
   }));
 }
 
+/** 假设性对照的说明（默认参数返回空串） */
+function hypoText(o) {
+  const xs = [];
+  if ((o.atk || CONFIG.atk) !== CONFIG.atk) xs.push(`敌人攻击力 ×${o.atk}`);
+  if ((o.tokens || CONFIG.tokens) !== CONFIG.tokens) xs.push(`每场 ${o.tokens} 枚代币`);
+  return xs.join("、");
+}
 function markdown(report) {
   const P = report.provenance, o = report.options, l = [];
   const levels = o.levels, hi = Math.max(...levels), lo = Math.min(...levels);
-  l.push("# 后期敌人实际威胁模拟（issue #401）", "",
-    "只测量，不改任何数值。下面的表由 `tools/enemy-threat.js` 生成，重跑会覆盖到「手写分析」标记为止，标记之后的手写内容保留。", "",
+  const tokens = o.tokens || CONFIG.tokens, hypo = hypoText(o);
+  l.push(`# 后期敌人实际威胁模拟（issue #401）${hypo ? "· 假设性对照：" + hypo : ""}`, "",
+    "只测量，不改任何数值。下面的表由 `tools/enemy-threat.js` 生成，重跑会覆盖到「手写分析」标记为止，标记之后的手写内容保留。", "");
+  if (hypo) l.push(`> **假设性对照：${hypo}**——只在模拟里改（攻击力在开战后乘到敌人的 ${ATK_FIELDS.join(" / ")} 上，中途上场的援军、召唤物也乘；代币是凑满的枚数），游戏里的数值没有动。种子、队伍、区制和站位和正式结果（\`${CONFIG.out}\`）的同一格一样，可以逐格对照。`, "");
+  l.push(
     `- 版本：提交 \`${P.commit || "未知"}\`${P.dirty ? "（生成时工作区有未提交改动，见 json 的 sourceHash）" : ""}；规则源码 SHA256 \`${P.sourceHash.slice(0, 16)}…\`；Node ${P.node}；工具 ${CONFIG.version}`,
     `- 命令：\`${P.command}\``,
     `- 样本：每格（一种敌人 × 一个等级 × 一种人数）**${o.samples} 场**，等级 ${levels.join(" / ")}，人数 ${o.sizes.join(" / ")}；共 ${report.rows} 场，异常 ${report.errors} 场，超时 ${report.timeouts} 场（超时算进分母，不算胜）。`,
     `- 种子：队伍 \`${CONFIG.seedPrefix}:party:人数:序号\`、战斗 \`${CONFIG.seedPrefix}:battle:等级:人数:序号\`。同一个序号的队伍、区制、站位、战斗种子对每种敌人、每个等级都一样。`,
     "- 布置：照 R1 单场矩阵——R1 的 10 名角色里按种子随机 2–4 人，**我方等级 = 敌人等级**，升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6（最高 10）；满状态、不用道具；我方 BASIC 打法（打得到就普攻血最少的，打不到就走一格，会协助格挡），敌人用游戏里的 AI；30 回合上限。",
-    "- 敌人：**只放要测的那一种，凑满普通战的 4 枚代币**（杂兵 4 只、精英 2 只、空投蜂群 / 下水道清扫机 4 组 × 3 只、陨体衍蛛 4 组 × 2 只、穴鸦一群 4–6 只），全部同一个等级（精英不 +1），个体值 ±10%、随机种族照游戏里抽。沙鱼照游戏里有概率带尘虫 / 管虫（中立生物，不算敌人）。",
+    tokens === CONFIG.tokens
+      ? "- 敌人：**只放要测的那一种，凑满普通战的 4 枚代币**（杂兵 4 只、精英 2 只、空投蜂群 / 下水道清扫机 4 组 × 3 只、陨体衍蛛 4 组 × 2 只、穴鸦一群 4–6 只），全部同一个等级（精英不 +1），个体值 ±10%、随机种族照游戏里抽。沙鱼照游戏里有概率带尘虫 / 管虫（中立生物，不算敌人）。"
+      : `- 敌人：**只放要测的那一种，凑满 ${tokens} 枚代币**（普通战是 4 枚；杂兵 ${tokens} 只、精英 ${Math.floor(tokens / 2)} 只、成组的 ${tokens} 组），全部同一个等级（精英不 +1），个体值 ±10%、随机种族照游戏里抽。沙鱼照游戏里有概率带尘虫 / 管虫（中立生物，不算敌人）。`,
     "- 战场：中性——没有天气、配置物、场地、载具（区域自带的天气、沙暴风向、高压场地……都不算）。区制 / 站位按序号轮流：两区一半，三区的「全员 3 区 / 2·3 区对半 / 夹击」各六分之一。",
     "- 首领（单独一节）：亡命之王 / 沙灵聚合体 / 飞碟触灵照单局的首领战（`rollBossEncounter`：亡命之王带固定随从和两波援军，另外两个按 1 枚代币抽随从），赤牙单独上场、天气写死成它的部队天气「酷暑」。", "",
     "列的意思：",
     "- **整场伤害占我方血量**：一场里这种敌人打在我方身上的伤害合计（含坚毅生命、灼烧等持续伤害、敌人留下的场地；不含我方误伤）÷ 我方角色开战时的血量上限合计，每场单独算再平均。看「一场下来它能把队伍打掉多少」，同时受打得多重、活得多久影响。和游戏自己记的承伤（`battleStats.taken`）逐场核对过。",
     "- **每代币·回合伤害**：伤害 ÷（每个敌人回合开始时还活着的这种敌人，按代币折算后加起来）。括号里再除以平均每名角色的血量上限——跨等级可比：数字掉了，说明它的输出没跟上角色血量的成长。",
-    "- **存活代币·回合 / 场**：上面那个分母的每场平均（4 枚代币全活着撑过 1 个敌人回合 = 4）。看它活得多久、能出手几次。整场伤害 ≈ 每代币·回合伤害 × 存活代币·回合。",
+    `- **存活代币·回合 / 场**：上面那个分母的每场平均（${tokens} 枚代币全活着撑过 1 个敌人回合 = ${tokens}）。看它活得多久、能出手几次。整场伤害 ≈ 每代币·回合伤害 × 存活代币·回合。`,
     "- **纸面 ATK**：上场时的平均 atk（个体值、种族六维都算进去），括号里是预设的数（2 人队、没有个体值）。**纸面单击** = 预设 atk + 伤害骰平均 + 固定加值（普通攻击 1 倍），括号里是伤害骰。**实际每击**：有敌人出手、真的打掉血的每一下的平均伤害（范围攻击每个目标各算一下，不含持续伤害）。**持续伤害占比**：没有出手方的伤害（灼烧、腐蚀、余波、敌人留下的场地……）占整场伤害的比例。",
     "- **击破 / 场**：我方实际掉的架势（已经失衡再打不算）。**打进失衡 / 场**：我方角色被打到架势 0 的次数。**失衡回合**：我方回合开始时处于失衡（这一回合没有行动点和附赠）的人·回合占比。**失去行动**：失衡算 2 个、失去行动点 1 个、不稳 1 个附赠，除以我方每人每回合本来有的 2 个。**倒地 / 场、死亡 / 场**：我方角色。",
     "- **我方胜率**是 BASIC 自动打法的胜率，**不是真人胜率**（真人会用技能，打得更快，敌人能出手的回合更少），只用来横向比较。区间是 Wilson 95%。**主要状态**：每个敌人回合结束时我方在场角色身上挂着的状态，人·回合占比。",
@@ -442,6 +503,10 @@ function markdown(report) {
   if (report.kits.length) {
     l.push(`## ${++n}. 总览：每个等级的中位数`, "", "每种敌人先按人数合在一起算，再取全部敌人的中位数。", "");
     overviewTable(l, report);
+    l.push("");
+    l.push(`## ${++n}. 单局各幕：抽得到的敌人在这一幕的等级附近打得多重`, "",
+      "每一幕的每个区域（本幕区域、幕间可选的采矿场、带地图去的下水道）抽得到哪些敌人；「测的等级」取测过的等级里离这一幕普通战起、止最近的。只看单一兵种，真实遭遇是几种混着来的。", "");
+    actTable(l, report);
     l.push("");
     levels.slice().sort((a, b) => b - a).forEach(L => {
       const ref = L === lo && levels.length > 1;
@@ -489,7 +554,7 @@ function provenance(argv) {
   return { commit, dirty, sourceHash: B.hash(sourceHashes), sourceHashes, node: process.version, command: ["node", "tools/enemy-threat.js", ...argv].join(" "), strategy: B.STRATEGIES.matrix.version };
 }
 function parseArgs(argv) {
-  const out = {}, allowed = ["samples", "levels", "sizes", "kits", "groups", "out", "workers"];
+  const out = {}, allowed = ["samples", "levels", "sizes", "kits", "groups", "out", "workers", "tokens", "atk"];
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (!key.startsWith("--") || !allowed.includes(key.slice(2))) throw new Error("Unknown argument: " + key);
@@ -505,7 +570,11 @@ function parseArgs(argv) {
   if (sizes.some(s => ![2, 3, 4].includes(s))) throw new Error("Sizes must be 2, 3, 4");
   const kits = out.kits ? out.kits.split(",") : null;
   if (kits) { const known = unitKits().concat(BOSSES.map(b => b.kit)); const bad = kits.filter(k => !known.includes(k)); if (bad.length) throw new Error("Unknown kit: " + bad.join(",")); }
-  return { samples: out.samples ? B.positiveInt(out.samples, "samples") : CONFIG.samples, levels, sizes, kits, groups,
+  const tokens = out.tokens ? B.positiveInt(out.tokens, "tokens") : CONFIG.tokens;
+  if (tokens > 8) throw new Error("Tokens must be 1–8");
+  const atk = out.atk ? Number(out.atk) : CONFIG.atk;
+  if (!(atk > 0 && atk <= 5)) throw new Error("Atk multiplier must be in (0, 5]");
+  return { samples: out.samples ? B.positiveInt(out.samples, "samples") : CONFIG.samples, levels, sizes, kits, groups, tokens, atk,
     workers: out.workers ? B.positiveInt(out.workers, "workers") : CONFIG.workers, out: out.out || CONFIG.out };
 }
 function outPath(file) {
@@ -521,23 +590,39 @@ function buildReport(rows, opt, meta) {
   const metaOf = Object.fromEntries(all.map(k => [k, enemyMeta(c, k)]));
   const paper = Object.fromEntries(all.map(k => [k, Object.fromEntries(opt.levels.map(L => [L, paperStats(c, k, L)]))]));
   const summary = summarizeAll(rows);
-  return { schema: "backfire-enemy-threat-v1", generatedAt: new Date().toISOString(), config: CONFIG, options: { samples: opt.samples, levels: opt.levels, sizes: opt.sizes, groups: opt.groups, kits: opt.kits },
+  return { schema: "backfire-enemy-threat-v1", generatedAt: new Date().toISOString(), config: CONFIG,
+    options: { samples: opt.samples, levels: opt.levels, sizes: opt.sizes, groups: opt.groups, kits: opt.kits, tokens: opt.tokens || CONFIG.tokens, atk: opt.atk || CONFIG.atk },
     provenance: meta, rows: rows.length, errors: rows.filter(r => r.outcome === "error").length, timeouts: rows.filter(r => r.outcome === "timeout").length,
     kits, bossKits, meta: metaOf, paper, summary, flags: flags(summary, kits, opt.levels),
     errorSamples: rows.filter(r => r.outcome === "error").slice(0, 5).map(r => ({ kit: r.kit, level: r.level, size: r.size, index: r.index, error: r.error })) };
 }
+// json 里分人数的汇总只留这些（报告的分人数表用得到的 + 几个常看的）；三种人数合在一起的（size = all）全留
+const SIZE_FIELDS = ["n", "outcomes", "winRate", "ci", "rounds", "share", "dmg", "heroHp", "perTokenRoundShare", "tokenRounds", "brk", "stunShare", "lostShare", "downs", "deaths"];
+function writeReport(file, report) {
+  const summary = Object.fromEntries(Object.entries(report.summary).map(([k, s]) => [k, k.endsWith("|all") ? s : Object.fromEntries(SIZE_FIELDS.filter(f => f in s).map(f => [f, s[f]]))]));
+  // 小数留 4 位就够看了；不缩进（文件小三分之一）
+  fs.writeFileSync(file + ".json", JSON.stringify(Object.assign({}, report, { summary }), (k, v) => typeof v === "number" && !Number.isInteger(v) ? Math.round(v * 1e4) / 1e4 : v) + "\n");
+  const old = fs.existsSync(file + ".md") ? fs.readFileSync(file + ".md", "utf8") : "";
+  const tail = old.includes(MARK) ? old.slice(old.indexOf(MARK)) : MARK + "\n";
+  fs.writeFileSync(file + ".md", markdown(report) + "\n" + tail);
+}
+/** --rebuild 报告路径：不重跑模拟，用已有的 json 按现在的报告格式重新生成（敌人名字、单局里出现的幕按现在的代码重算，数字照旧） */
+function rebuild(out) {
+  const file = outPath(out), report = JSON.parse(fs.readFileSync(file + ".json", "utf8")), c = H.load();
+  report.meta = Object.fromEntries(Object.keys(report.meta).map(k => [k, enemyMeta(c, k)]));
+  writeReport(file, report);
+  console.log(`OK: ${file}.md（按 json 重新生成，${report.rows} 场）`);
+  return 0;
+}
 async function main(argv = process.argv.slice(2)) {
+  if (argv[0] === "--rebuild") { if (argv.length !== 2) throw new Error("Usage: --rebuild docs/balance/<报告名>"); return rebuild(argv[1]); }
   const opt = parseArgs(argv), file = outPath(opt.out), meta = provenance(argv), jobs = plan(opt);
   let done = 0;
   const rows = await runJobs(jobs, opt.workers, () => { if (++done % 200 === 0 || done === jobs.length) console.error(`Completed ${done}/${jobs.length}`); });
   const report = buildReport(rows, opt, meta);
-  // 小数留 4 位就够看了（文件小一半）
-  fs.writeFileSync(file + ".json", JSON.stringify(report, (k, v) => typeof v === "number" && !Number.isInteger(v) ? Math.round(v * 1e4) / 1e4 : v, 1) + "\n");
-  const old = fs.existsSync(file + ".md") ? fs.readFileSync(file + ".md", "utf8") : "";
-  const tail = old.includes(MARK) ? old.slice(old.indexOf(MARK)) : MARK + "\n";
-  fs.writeFileSync(file + ".md", markdown(report) + "\n" + tail);
+  writeReport(file, report);
   console.log(`${report.errors ? "ERRORS" : "OK"}: ${file}.md（${rows.length} 场，异常 ${report.errors}）`);
   return report.errors ? 1 : 0;
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
-module.exports = { CONFIG, GROUPS, BOSSES, LAYOUTS, unitKits, paperStats, appearance, plan, runJob, runJobs, summarize, summarizeAll, flags, buildReport, markdown, parseArgs, main };
+module.exports = { CONFIG, GROUPS, BOSSES, LAYOUTS, ATK_FIELDS, unitKits, paperStats, appearance, plan, runJob, runJobs, summarize, summarizeAll, flags, buildReport, markdown, parseArgs, main };
