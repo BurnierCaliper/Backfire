@@ -4,7 +4,8 @@
 // 规则在 enemies.js · FRIENDLY_FIRE / attackFoe，接线见 app.js · visibleEnemies / fieldFoes / dealTo、game.js · candidateUnits、
 // hotseat-validation.js · checkTarget、hotseat-game.js（按发指令的人记开关）、online-view.js · projectState（白名单）
 // 后续（#432，作者 10/27）：对敌人用的道具开着友伤也能对队友用（items.js · itemEnemyOk）；自动挑目标的（无人机、炮台、护送对象的还击……）
-// 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件最后
+// 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件后面
+// 后续（三）（#437，作者 10/27）：音爆 / 探测模式触发的碎渣机炮开着友伤时在敌人和队友里随机挑（app.js · scrapAutoTarget）。测试在文件最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -635,15 +636,17 @@ test("自动挑目标（#432）：龙哥洗牌的连续红弹——开着友伤�
   assert.ok((on.S.blockQueue || []).some(j => j.attackerId === on.lg.id && j.opt.flags.friendlyFire), "打队友那一下照常等协助格挡，算友伤");
 });
 
-test("自动挑目标（#432）：音爆 / 探测模式触发的碎渣机炮——Ecmo 开着友伤（跟着赫鲁米卡的操控者）时 2 距离内的队友也在名单里（照旧挑第一个），Ecmo 自己不在；关着照旧", () => {
+test("自动挑目标（#432）：音爆 / 探测模式触发的碎渣机炮——Ecmo 开着友伤（跟着赫鲁米卡的操控者）时 2 距离内的队友也在名单里，Ecmo 自己不在；关着照旧（#437 起开着时在名单里随机挑，见文件最后）", () => {
   const run = (on, how) => {
     const { c, S, heroes: [, helu], foe } = field(["kolt", "helu"], "FF432-ECMO-" + how);
     if (on) ffOn(c);
     foe.statuses.hide = true;   // 敌人在躲藏：机炮打不到
     const ecmo = c.spawnWeapon(helu, "ecmo");
     ecmo.zone = 1;
-    S.units = [ecmo].concat(S.units.filter(u => u !== ecmo));   // Ecmo 排在最前面：在名单里的话就打到自己
-    S.props.push(c.makeProp("scrap", 1, 3));
+    S.units = [ecmo].concat(S.units.filter(u => u !== ecmo));   // Ecmo 排在最前面
+    const prop = c.makeProp("scrap", 1, 3);
+    S.props.push(prop);
+    assert.ok(!c.scrapTargets(prop, ecmo).includes(ecmo), how + "：Ecmo 自己不在名单里");
     const lines = [];
     if (how === "boom") c.ecmoBoomTriggerProps(ecmo, lines);
     else { Object.assign(ecmo.resources, { probe: true, probeZones: [1] }); c.ecmoProbeTrigger(ecmo, lines); }
@@ -652,7 +655,7 @@ test("自动挑目标（#432）：音爆 / 探测模式触发的碎渣机炮—�
   for (const how of ["boom", "probe"]) {
     assert.match(run(false, how), /没有打得到的敌人/, how + "：关着照旧");
     const on = run(true, how);
-    assert.match(on, /操控碎渣机炮攻击 柯尔特/, how + "：开着时挑名单里的第一个队友");
+    assert.match(on, /操控碎渣机炮攻击 (柯尔特|Helumica)。/, how + "：开着时挑到名单里的队友");
     assert.doesNotMatch(on, /攻击 Ecmo/, how + "：Ecmo 自己不在");
   }
 });
@@ -671,4 +674,42 @@ test("自动挑目标（#432）：赫鲁米卡「频谱分析+」开局自动聚
   };
   assert.deepEqual(run(false), { helu: 0, kolt: 0, foe: 1 }, "关着：聚焦敌人");
   assert.deepEqual(run(true), { helu: 0, kolt: 1, foe: 0 }, "开着：队友也在里面；赫鲁米卡自己不在");
+});
+
+/* ===== #437：友伤开关后续（三）——碎渣机炮随机挑、漏掉的范围效果、反应和光环（作者 10/27 定）===== */
+
+test("碎渣机炮（#437）：音爆 / 探测模式触发时，Ecmo 开着友伤、名单里有队友就在敌人和队友里随机挑（种子随机数：同一种子结果一样，换种子敌人、队友都挑得到），Ecmo 自己不挑；关着照旧挑第一个敌人", () => {
+  /** 柯尔特、赫鲁米卡（带出 Ecmo）和两个狂徒都在 1 区，碎渣机炮也在 1 区；返回机炮打的是谁。hide：队友都躲藏（名单里只有敌人） */
+  const fire = (seed, how, on, hide) => {
+    const { c, S, heroes, foe } = field(["kolt", "helu"], seed);
+    S.units.push(c.spawnEnemyGroup("thug_hammer", 1, 2, 1)[0]);   // 第二个敌人：关着时随机挑的话会挑到它
+    if (on) ffOn(c);
+    const ecmo = c.spawnWeapon(heroes[1], "ecmo");
+    ecmo.zone = 1;
+    if (hide) heroes.forEach(h => { h.statuses.hide = true; });
+    S.props.push(c.makeProp("scrap", 1, 3));
+    const lines = [];
+    if (how === "boom") c.ecmoBoomTriggerProps(ecmo, lines);
+    else { Object.assign(ecmo.resources, { probe: true, probeZones: [1] }); c.ecmoProbeTrigger(ecmo, lines); }
+    const text = lines.join("\n");
+    const hit = S.units.filter(u => text.includes(`操控碎渣机炮攻击 ${u.name}。`));
+    assert.equal(hit.length, 1, text);
+    return { name: hit[0].name, ally: !!hit[0].isPlayer, self: hit[0] === ecmo, first: foe.name };
+  };
+  for (const how of ["boom", "probe"]) {
+    let foes = 0, allies = 0;
+    for (let i = 0; i < 12; i++) {
+      const seed = `FF437-SCRAP-${how}-${i}`;
+      const on = fire(seed, how, true);
+      assert.equal(fire(seed, how, true).name, on.name, `${how}：同一种子（${seed}）挑到的是同一个`);
+      assert.equal(on.self, false, "Ecmo 自己不挑");
+      if (on.ally) allies++; else foes++;
+      const off = fire(seed, how, false);
+      assert.equal(off.name, off.first, `${how}：关着照旧挑名单里的第一个敌人，不随机（${seed}）`);
+      const none = fire(seed, how, true, true);
+      assert.equal(none.name, none.first, `${how}：开着但名单里没有队友：照旧挑第一个（${seed}）`);
+    }
+    assert.ok(foes > 0, `${how}：开着友伤时敌人也挑得到（${foes} / 12）`);
+    assert.ok(allies > 0, `${how}：队友也挑得到（${allies} / 12）`);
+  }
 });
