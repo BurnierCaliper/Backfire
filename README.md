@@ -368,6 +368,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **打进坚毅生命的伤害，玩家只看到「坚毅受创」，任何界面不写数字**（#340 第 15 条；app.js · `spawnShpHit`（新）、`dealTo` / `applyTypedDotIn` / `tickSelfBurn` / `applyAbyssFall` / `gapFall` / `tickQuicksandFor` / `formatHitLines`；game.js 预览标签；online-view.js · `popupWords` / `projectTape`；online-game.js · `hitSummary`；测试 tests/shp-dmg-340-15.test.js）
+  - **以前**：起身中挨打，战斗日志写「→ 瑞比：7 伤害」、灼烧写「→ 实伤 5」、旧画面弹出伤害数字；联机投影把坚毅上的伤害数字直接丢掉、也不给替代字。README #52 还写着「受伤时伤害数字照常显示」。
+  - **现在**（作者定）：打进坚毅的伤害，单机 / 联机玩家看到的浮字、战斗日志、预览标签、联机摘要一律只显示「坚毅受创」，不写任何数字。主持人 / 计算器照旧弹数字、写实伤。
+    - 攻击、持续伤害、自焚、深渊 / 坠落 / 窒息等凡是改扣坚毅的路径都走 `spawnShpHit`。
+    - 联机：`popupWords` 放行「坚毅受创」；`projectTape` 把起身中的 `dmg` 投影成 status「坚毅受创」；`hitSummary` 记字不记数。
+    - 预览标签「伤到坚毅」改成「坚毅受创」（仍不写数量）。
+  - **作废**：#52「受伤时伤害数字照常显示」那一句（与 CLAUDE.md「实际扣了多少也不能给」对齐）。
+  - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。合并时以本条为准（仍无数字）。道具 / 效果说明里的固定花费照常写；剩余坚毅仍永不显示。
+  - **测试**：tests/shp-dmg-340-15.test.js（新）：起身中挨打日志 / 弹字只有「坚毅受创」、无伤害数字；灼烧同理；联机投影与 hitSummary 有字无数；README 有本条且 #52 旧句已作废。在没改的代码上失败。
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
@@ -1578,7 +1588,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 注射剂的物品说明改成「消耗一些坚毅生命」；
     - 休息时食物、睡袋的说明不写「坚毅 +X」。
   - #52 定的四档、每档 5 句的休息提示已经放进 `SHP_MOOD_LINES`，长休结算画面会用。
-  - 没改的：受伤时伤害数字照常显示（攻击结果），只是不写坚毅剩多少。
+  - ~~没改的：受伤时伤害数字照常显示（攻击结果），只是不写坚毅剩多少。~~ → **已作废**（#340 第 15 条：打进坚毅的伤害只显示「坚毅受创」，见下方规则改动记录）。
 
 - **单局：幕间选择，采矿场进入单局**（作者定；rogue-data.js · `ROGUE_CONFIG.altRegions`；rogue.js · `interludeOptions` / `nextAct(run, region)` / `region(run)` 读 `run.regionPick`；rogue-commands.js；rogue-ui.js 幕间画面、地图路线；online-rogue.js 幕间投票；tests/interlude.test.js、tests/ui.test.js、tests/online-rogue.test.js）
   - 打完一幕的首领，选下一幕去哪：

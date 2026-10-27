@@ -798,7 +798,11 @@ function applyAbyssFall(unit, prevZone, notes) {
     if (who) { scoreEnvHit(unit, { total: Math.min(loss, totalHp(unit)), breakDealt: 0 }, who, 0, "深渊"); }
   }
   applyTrueDamage(unit.layers, loss);
-  if ((loss || 0) > 0) spawnFloater(unit, loss, "physical");
+  // #340 第 15 条：起身中坠入深渊改扣坚毅，弹字 / 日志不写数字
+  if ((loss || 0) > 0) {
+    if (unit.upOnShp) spawnShpHit(unit, "physical", { value: loss });
+    else spawnFloater(unit, loss, "physical");
+  }
   let back = Number(prevZone);
   if (!(back >= 1) || back === Number(unit.zone) || (state.fields[back] && state.fields[back].abyss)) {
     back = otherZone(unit.zone);
@@ -809,7 +813,9 @@ function applyAbyssFall(unit, prevZone, notes) {
   unit.zone = back;
   // 驻波墙：掉下去再回来不算又穿过一次（进深渊那一下已经在移动里算过）
   if (state._waveLedger && unit.id != null && state._waveLedger[unit.id] != null) state._waveLedger[unit.id] = back;
-  notes.push(`${unit.name} 坠入深渊，失去最大生命 10%（${loss}）并回到 ${back} 区。`);
+  notes.push(unit.upOnShp && shpHidden()
+    ? `${unit.name} 坠入深渊，坚毅受创，并回到 ${back} 区。`
+    : `${unit.name} 坠入深渊，失去最大生命 10%（${loss}）并回到 ${back} 区。`);
   // 倒地统一结算：力竭 3 即死；起身中的人这 10% 改扣坚毅生命（以前不扣、也不会死）
   applyKnockdown(unit, notes, { shpLoss: loss, cause: "坠落" });
   return true;
@@ -1364,8 +1370,12 @@ function tickQuicksandFor(u, notes) {
   const pct = QUICKSAND.pctPerSink * sinkOf(u) * envMult(u);
   const dmg = Math.max(1, Math.floor(totalMaxHp(u) * pct));
   applyTrueDamage(u.layers, dmg);
-  spawnFloater(u, dmg, "physical");
-  notes.push(`${u.name} 下陷 ${sinkOf(u)} 层，窒息：失去生命上限 ${Math.round(pct * 100)}%（${dmg}）。`);
+  // #340 第 15 条：起身中窒息改扣坚毅，弹字 / 日志不写数字
+  if (u.upOnShp) spawnShpHit(u, "physical", { value: dmg });
+  else spawnFloater(u, dmg, "physical");
+  notes.push(u.upOnShp && shpHidden()
+    ? `${u.name} 下陷 ${sinkOf(u)} 层，窒息：坚毅受创。`
+    : `${u.name} 下陷 ${sinkOf(u)} 层，窒息：失去生命上限 ${Math.round(pct * 100)}%（${dmg}）。`);
   applyKnockdown(u, notes, { shpLoss: dmg, cause: "窒息" });
 }
 /** 拉出流沙（我方通用动作，附赠）：同区或相邻区一名下陷的友方，下陷清零；在相邻区就把他拉到自己这一区 */
@@ -3464,7 +3474,10 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
       if (lost > 0) { store[type] = (store[type] || 0) + lost; notes.push(`腐坏抛射记录：${LAYER[type] || type} ${lost}（下一次废物利用领取）。`); }
     });
   }
-  notes.push(label + ` → 实伤 ${Math.floor(res.total || 0)}`);
+  // #340 第 15 条：打进坚毅的持续伤害只写「坚毅受创」，不写实伤数字
+  notes.push(unit && unit.upOnShp && shpHidden()
+    ? label + " → 坚毅受创"
+    : label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   rasUnstableHit(unit, res, notes);   // 不稳态：持续伤害、场地、余波这类伤害同样倒地 / 起身后致死
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   // 聚焦只看受到的伤害属性对不对，不看来源：状态、场地、余波的伤害也推进序列
@@ -3477,8 +3490,12 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
   if (unit && unit.isPlayer) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
-  if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
-  if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
+  if (unit && unit.upOnShp) {
+    if ((res.intended || res.total || res.shpDealt || 0) > 0) spawnShpHit(unit, element, { value: res.intended || res.total || res.shpDealt });
+  } else {
+    if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
+    if ((res.extraHarmonic || 0) > 0) spawnFloater(unit, res.extraHarmonic, element);
+  }
   // 带高能状态的单位照打中时的口径累积高能值（gainHighFromHits：只认能量、真的扣到血才掷），累积完再判自爆；
   // 从施加高能的那一刻起就累积（#348：刚被施加高能的那一回合也算，不再单独排除）
   if (highGain) gainHighFromHits(unit, res, notes, highGain);
@@ -3821,8 +3838,14 @@ function rollVoidCross(u) {
 function gapFall(unit, notes) {
   const fall = Math.floor(totalMaxHp(unit) * 0.1);
   applyTrueDamage(unit.layers, fall);
-  if (fall > 0) spawnFloater(unit, fall, "physical");
-  notes.push(`${unit.name} 坠落，失去最大生命 10%（${fall}），移动失败。`);
+  // #340 第 15 条：起身中坠落改扣坚毅，弹字 / 日志不写数字
+  if (fall > 0) {
+    if (unit.upOnShp) spawnShpHit(unit, "physical", { value: fall });
+    else spawnFloater(unit, fall, "physical");
+  }
+  notes.push(unit.upOnShp && shpHidden()
+    ? `${unit.name} 坠落，坚毅受创，移动失败。`
+    : `${unit.name} 坠落，失去最大生命 10%（${fall}），移动失败。`);
   // 倒地统一结算（和坠入深渊同一套）：力竭 3 即死；起身中的人这 10% 改扣坚毅生命
   applyKnockdown(unit, notes, { shpLoss: fall, cause: "坠落" });
 }
@@ -5959,6 +5982,20 @@ function shpHidden() {
   if (typeof TRPG !== "undefined" && TRPG.active) return false;
   return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
+/** #340 第 15 条：打进坚毅生命的伤害，玩家画面只弹「坚毅受创」，不写数字（GM / 计算器仍弹数字） */
+function spawnShpHit(unit, element, opt) {
+  opt = opt || {};
+  if (!unit) return;
+  if (shpHidden()) {
+    spawnPopup(unit, { kind: "status", text: "坚毅受创", element: element || "physical", main: !!opt.main });
+  } else {
+    const v = Math.floor(Number(opt.value) || 0);
+    if (v > 0) spawnPopup(unit, {
+      kind: "dmg", value: v, element: element || "physical",
+      main: !!opt.main, adv: !!opt.adv, dis: !!opt.dis
+    });
+  }
+}
 /* 坚毅对玩家只给模糊说法（issue #52，作者定）：按坚毅占上限的比例分四档（80% 以上 / 50–80% / 20–50% / 20% 以下），
  * 每档 5 句随机抽一句（休息结算用）；角色资料这类常驻的地方用一个短词 */
 const SHP_MOOD_LINES = [
@@ -5997,7 +6034,8 @@ function tickSelfBurn(u, growStacks) {
   const loss = Math.min(maxPool * 0.1 * stacks, cap);
   if (onShp) {
     u.shp = Math.max(1, (Number(u.shp) || 0) - loss);
-    spawnFloater(u, loss, "fire");
+    // #340 第 15 条：起身中自焚只弹「坚毅受创」（与 #415 重叠：那边不弹字；合并后以本条为准）
+    spawnShpHit(u, "fire", { value: loss });
     notes.push(shpHidden() ? `${u.name} 自焚×${stacks} 灼烧着坚毅生命（至少留 1）。`
       : `${u.name} 自焚×${stacks} 对 SHP 造成 ${round2(loss)}（上限10%×层，至少留 1）。SHP ${u.shp}/${u.shpMax || "?"}`);
   } else {
@@ -8751,12 +8789,18 @@ function dealToInner(attacker, target, opt) {
     const advHit = !!(res.advantage && attacker && attacker.isPlayer && mainHit);
     const disHit = !!(res.disadvantage && attacker && attacker.isPlayer && mainHit);   // 劣势：预览写「劣势」、伤害变灰
     // 多段攻击（例：拉斯缪尔两次 0.5atk、不稳态四次）：每一段各跳一个数字，看得出判定了几次
+    // #340 第 15 条：打进坚毅的伤害只弹「坚毅受创」，不弹数字
     const segs = (res.perHit || []).filter(h => (Number(h.intended) || 0) > 0);
-    if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
-    else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
-    if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
-    // 出血：每触发一次另跳一个数字（真实伤害，不算进上面那一段的数字）
-    (res.perHit || []).forEach(h => { if ((Number(h && h.bleed) || 0) > 0) spawnFloater(target, h.bleed, ele); });
+    if (target && target.upOnShp) {
+      const shown = Math.max(Number(res.intended) || 0, Number(res.total) || 0, Number(res.shpDealt) || 0);
+      if (shown > 0 || segs.length) spawnShpHit(target, ele, { value: res.intended || res.total || res.shpDealt, main: mainHit, adv: advHit, dis: disHit });
+    } else {
+      if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
+      else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
+      if ((res.extraHarmonic || 0) > 0) spawnFloater(target, res.extraHarmonic, ele);
+      // 出血：每触发一次另跳一个数字（真实伤害，不算进上面那一段的数字）
+      (res.perHit || []).forEach(h => { if ((Number(h && h.bleed) || 0) > 0) spawnFloater(target, h.bleed, ele); });
+    }
     // 画面：这一击带的攻击效果打出大字（属性专属的用属性颜色，穿刺 / 猛击 / 弱点特效用灰色）
     if (flags.action !== false && !flags.environment && typeof attackConnected === "function" && attackConnected(res, flags)) {
       attackFxWords(flags).forEach(w => spawnPopup(target, { kind: "fxword", text: w.name, element: w.element }));
@@ -11277,7 +11321,9 @@ function formatHitLines(actor, target, out, captured) {
   const hb = Number(res.helperBreak) || 0;
   if (res.blocked) head += `被协助格挡挡下${hb ? `（格挡者承受 ${hb} 击破）` : ""}`;
   else {
-    head += `${dmg} 伤害`;
+    // #340 第 15 条：打进坚毅的伤害，战斗日志只写「坚毅受创」，不写数字
+    if (target && target.upOnShp && shpHidden() && dmg > 0) head += "坚毅受创";
+    else head += `${dmg} 伤害`;
     if (br) head += `、${br} 击破`;
     if (hits.length > 1) head += `（${hits.length} 击）`;
     // 架势：这一击前后实际的架势（含坚挺、背水一战等修正；协助格挡成功时不变）
@@ -11286,16 +11332,18 @@ function formatHitLines(actor, target, out, captured) {
     if (res.broke) head += "，打破架势";
   }
   L.push(head);
+  // #340 第 15 条：打进坚毅时计算过程 / 掷骰会写出「= N」，玩家不能看；只留标题「坚毅受创」和后面不含数字的结算句
+  const shpHitHidden = !!(target && target.upOnShp && shpHidden() && dmg > 0);
   const dice = extra.filter(s => /^\s*掷骰/.test(s));
   const others = extra.filter(s => !/^\s*掷骰/.test(s));
-  dice.forEach(s => {
+  if (!shpHitHidden) dice.forEach(s => {
     // 「掷骰 1d6〔5〕=5」→「掷骰 1d6 → 5」；多颗骰子写出每颗：「掷骰 2d4（3+1）→ 4」
     const t = String(s).trim().replace(/^掷骰\s*/, "");
     const m = t.match(/^(.+?)〔(.+?)〕=(.+)$/);
     L.push("      掷骰 " + (m ? `${m[1]}${/[+,]/.test(m[2]) ? "（" + m[2] + "）" : ""} → ${m[3]}` : t));
   });
   const dead = target && (target.dead || (target.isPlayer && target.dying));
-  tidyCalcLines(res.log, hits.length > 1)
+  if (!shpHitHidden) tidyCalcLines(res.log, hits.length > 1)
     .filter(s => !(dead && !target.isPlayer && /架势归零|晕眩/.test(s)))
     .forEach(s => L.push("      " + s));
   const seen = new Set();
@@ -11305,6 +11353,8 @@ function formatHitLines(actor, target, out, captured) {
     seen.add(t);
     // 目标已经死了：不再写它失衡 / 晕眩
     if (dead && !target.isPlayer && /失衡|晕眩|架势归零/.test(t)) return;
+    // #340 第 15 条：打进坚毅的附带句若带数字（能推出扣了多少）则略过
+    if (shpHitHidden && /\d/.test(t)) return;
     L.push("  " + t);
   });
   return L;
