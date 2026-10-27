@@ -1429,16 +1429,17 @@ function applyResultToUnit(target, result, attacker) {
   // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
   const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
   if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
-  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
-  if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
+  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）；扭矩「转移注意」的自保模式同样（和 app.js · dealBreak 一致，#340 第 17 条）
+  const guardFloor = !!(target.resources && target.resources.divertGuard);
+  if (((target.statuses && target.statuses.sturdy) || guardFloor) && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
-    notes.push(`${target.name} 坚挺：架势保留 1。`);
+    notes.push(`${target.name} ${guardFloor ? "自保模式" : "坚挺"}：架势保留 1。`);
   }
   // 决不后退（feats.js）：这一击要把架势打空时，有附赠动作就先 +2 架势
   if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
-  // 决不后退 / 坚挺 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
+  // 决不后退 / 坚挺 / 自保模式 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
   if (result.broke && defBeforeHit - spent > 0) {
     result.broke = false;
     result.knockdownHp = 0;
@@ -1449,7 +1450,7 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   const wasStunned = !!target.stunned;
-  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、自保模式、已失衡都会让它比名义击破小）
   result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
@@ -1751,15 +1752,23 @@ const RAT_STATS = {
   tyrant: { flesh: [35, 11], def: 3, atk: 8, dice: 8 }                  // 暴虐猎手：警卫队队长（狼）护盾 15 + 肉体 20（每级 6 + 5）合成，架势 4 → 3
 };
 
+/** 空投蜂群 / 下水道清扫机的架势：1–10 级 1，11–20 级 2，21 级起 3（不随人数加：两种都是杂兵，scaleDef 原样返回）。
+ *  base 是 1 级的架势，steps 是每升 1 点架势的等级 */
+const SWARM_STANCE = { base: 1, steps: [11, 21] };
+function swarmStance(level) {
+  const lv = Math.max(1, Number(level) || 1);
+  return SWARM_STANCE.base + SWARM_STANCE.steps.filter(t => lv >= t).length;
+}
+
 /** 下水道维护的数值（docs/sewer-maintenance.md 第 2 节；表是 2 人队，3、4 人队的血量按 scaleHp 放大）。
  *  sweeper 下水道清扫机：血量照空投蜂群——外层护盾 shield = [1 级血量, 每级增量]、内层装甲 armor（不随等级），两层原样保留；
- *    架势 def + ⌊等级/2⌋，最多 defCap；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
+ *    架势照空投蜂群（swarmStance：1–10 级 1、11–20 级 2、21 级起 3）；ATK 照机器人看守（剑）：atk + ⌊等级/2⌋；
  *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
  *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
  *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
  *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
 const SEWER_STATS = {
-  sweeper: { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 },
+  sweeper: { shield: [4, 2], armor: 1, atk: 4, dice: 4 },
   elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
 };
 /** 下水道维护的两个精英共用的数值（SEWER_STATS.elite）：护盾在外、星灵在内，远程 */
@@ -1847,10 +1856,8 @@ function enemyPresets() {
       const u = unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(4 + (lv - 1) * 2, p) },
         { type: "armor", hp: scaleHp(1, p) }
-      ], 1 + milestone(lv, 2), 6 + (lv - 1) * 2, { kit: "swarm", flying: true, range: "melee", dice: [2, 4], element: "physical" });
-      // 靠数量取胜的小兵：架势无论几级、几人队都不超过 3（作者定）
-      u.defMax = Math.min(3, u.defMax);
-      u.def = Math.min(u.def, u.defMax);
+      ], swarmStance(lv), 6 + (lv - 1) * 2, { kit: "swarm", flying: true, range: "melee", dice: [2, 4], element: "physical" });
+      // 靠数量取胜的小兵：架势 1–10 级 1、11–20 级 2、21 级起 3，不随人数加（swarmStance）
       return u;
     }},
     { id: "crow", name: "穴鸦", build(lv, p) {
@@ -1964,10 +1971,8 @@ function enemyPresets() {
       const u = unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1], p) },
         { type: "armor", hp: scaleHp(S.armor, p) }
-      ], S.def + milestone(lv, 2), S.atk + milestone(lv, 2), { kit: "sewer_sweeper", range: "ranged", dice: [1, S.dice], element: "harmonic" });
-      // 架势照空投蜂群：无论几级、几人队都不超过 defCap
-      u.defMax = Math.min(S.defCap, u.defMax);
-      u.def = Math.min(u.def, u.defMax);
+      ], swarmStance(lv), S.atk + milestone(lv, 2), { kit: "sewer_sweeper", range: "ranged", dice: [1, S.dice], element: "harmonic" });
+      // 架势照空投蜂群：1–10 级 1、11–20 级 2、21 级起 3，不随人数加（swarmStance）
       return u;
     }},
     // 触灵维护员 / 触灵清扫员（精英）：照警卫队队长（蜥蜴）的写法，肉体层换成星灵；远程，种族「触灵」（run.js · ENEMY_INFO）
