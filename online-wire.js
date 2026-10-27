@@ -184,14 +184,21 @@
     let sentMatchup = null, hasSentMatchup = false, gotMatchup = null, hasGotMatchup = false;
     let sentRest = null, hasSentRest = false, gotRest = null, hasGotRest = false;
     let sentLore = null, hasSentLore = false, gotLore = null, hasGotLore = false;
+    let sentChat = null, hasSentChat = false, gotChat = null, hasGotChat = false;
     // 克制表逐单位（#340 第 9 条）、state.units 按 id（第 9 条）的上一份
     let sentUnits = null, gotUnits = null;
-    function reset() { sentUnits = gotUnits = null; encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = false; }
+    function reset() { sentUnits = gotUnits = null; encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = sentChat = gotChat = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = hasSentChat = hasGotChat = false; }
     function pack(input) {
       const packet = packetData(input);
       if (!["result", "resync"].includes(packet.type)) return packet;
-      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta") || own(packet, "matchupDelta") || own(packet, "unitsDelta")) fail("packet is already packed");
+      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta") || own(packet, "matchupDelta") || own(packet, "unitsDelta") || own(packet, "chatLength")) fail("packet is already packed");
       let full = !hasEncoded || packet.type === "resync";
+      // 小队聊天（view.chat，最近 300 条；#340 第 8 条：以前每包整份带着，300 条聊天光这一项就 40 KB）：和 messages 一样只发新增的那一截，
+      // 总条数写在 chatLength。不放进 historyLengths——旧版玩家页面只认 messages / publicLogs，多一个键整包解不开；单独一个字段，旧页面只是少看到前面的聊天
+      const chat = object(packet.view) && own(packet.view, "chat") ? packet.view.chat : undefined;
+      if (chat !== undefined && !Array.isArray(chat)) fail("view.chat must be an array");
+      const chatCommon = chat !== undefined && hasSentChat ? overlap(sentChat, chat) : 0;
+      if (chat !== undefined && hasSentChat && !chatCommon && sentChat.length && chat.length) full = true;
       const lengths = {}, deltas = {}, next = { ...encoded };
       for (const key of histories) if (own(packet, key)) {
         if (!Array.isArray(packet[key])) fail(key + " must be an array");
@@ -202,6 +209,7 @@
       }
       const result = { ...packet, wireFormat: FORMAT, historyFull: full, historyLengths: lengths };
       for (const key of histories) if (own(packet, key)) result[key] = full ? packet[key] : deltas[key];
+      if (chat !== undefined) { result.chatLength = chat.length; if (!full) result.view = { ...packet.view, chat: chat.slice(chatCommon) }; }
       if (own(packet, "tape")) result.tape = packTape(packet.tape);
       let nextMatchup = sentMatchup, nextHasMatchup = hasSentMatchup;
       if (own(packet, "matchup")) {
@@ -252,6 +260,7 @@
       sentUnits = nextUnits;
       encoded = full ? Object.fromEntries(histories.filter(key => own(packet, key)).map(key => [key, next[key]])) : next;
       sentLore = nextLore; hasSentLore = nextHasLore;
+      if (chat !== undefined) { sentChat = clone(chat); hasSentChat = true; } else if (full) { sentChat = null; hasSentChat = false; }
       hasEncoded = true; return result;
     }
     function unpack(input) {
@@ -273,6 +282,23 @@
         if (length > rows.length || full && length !== rows.length) fail("history delta cannot reconstruct the declared length");
         result[key] = length ? clone(rows.slice(-length)) : []; next[key] = clone(result[key]);
       }
+      // 小队聊天：有 chatLength 就把这一截接在上一次收到的后面，取最后 chatLength 条；没有（没打包的包、旧版房主）就是整份
+      let nextChat = gotChat, nextHasChat = hasGotChat;
+      const chat = object(packet.view) && own(packet.view, "chat") ? packet.view.chat : undefined;
+      if (chat !== undefined && !Array.isArray(chat)) fail("view.chat must be an array");
+      if (own(packet, "chatLength")) {
+        const length = packet.chatLength;
+        if (!packed) fail("chat metadata without a format");
+        if (chat === undefined) fail("missing chat history");
+        if (!Number.isSafeInteger(length) || length < 0 || length > 10000) fail("invalid chat length");
+        // 之前的包都没带聊天：房主那边也没有基准，这一截就是整份（下面照样核对条数）
+        const rows = full ? chat : [...(hasGotChat ? gotChat : []), ...chat];
+        if (length > rows.length || full && length !== rows.length) fail("chat delta cannot reconstruct the declared length");
+        result.view = { ...packet.view, chat: length ? clone(rows.slice(-length)) : [] };
+        nextChat = clone(result.view.chat); nextHasChat = true;
+      } else if (chat !== undefined) { nextChat = clone(chat); nextHasChat = true; }
+      else if (full) { nextChat = null; nextHasChat = false; }
+      delete result.chatLength;
       if (own(packet, "tape")) result.tape = unpackTape(packet.tape);
       let nextGot = gotMatchup, nextHasGot = hasGotMatchup;
       if (own(packet, "matchupUnchanged")) {
@@ -309,7 +335,8 @@
         nextLore = clone(result.lore);
       } else if (own(packet, "lore")) { nextLore = clone(packet.lore); nextHasLore = true; }
       delete result.wireFormat; delete result.historyFull; delete result.historyLengths;
-      gotUnits = nextGotUnits; decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore; return result;
+      gotUnits = nextGotUnits; decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore;
+      gotChat = nextChat; hasGotChat = nextHasChat; return result;
     }
     return { pack, unpack, reset };
   }
