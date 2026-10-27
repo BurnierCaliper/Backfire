@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **空投蜂群、下水道清扫机的架势改成 1–10 级 1、11–20 级 2、21 级起 3**（下水道清扫机照抄空投蜂群，两个一起改；engine.js · `SWARM_STANCE`（新）/ `swarmStance`（新）、`enemyPresets` 的 `swarm` / `sewer_sweeper`、`SEWER_STATS.sweeper`；docs/sewer-maintenance.md；测试 tests/swarm-stance.test.js（新）、tests/sewer-maintenance.test.js）
+  - **以前**：架势 1 + ⌊等级/2⌋，最多 3——1 级 1、2–3 级 2、4 级起就是 3，前期太硬。
+  - **现在**：1–10 级 1、11–20 级 2、21 级起 3；不随人数加（2 / 3 / 4 人队一样，图鉴一样）。曲线放在配置 `SWARM_STANCE = { base: 1, steps: [11, 21] }`（1 级的架势、每升 1 点的等级），两种敌人生成时直接按 `swarmStance(等级)` 给架势。`SEWER_STATS.sweeper` 里不再起作用的 `def` / `defCap` 去掉，docs/sewer-maintenance.md 的表和公式一起改。额外幕敌人可到 25 级（`rogue-data.js · extraActLevels`），21 级起给 3。
+  - **没改的**：两种敌人的血量、ATK、招式；其它敌人的架势；开战按人数换算（杂兵不加人数加成）。
+  - **测试**：tests/swarm-stance.test.js（新，在没改的代码上失败）：两种敌人各查 1 / 10 / 11 / 20 / 21 级 × 2 / 3 / 4 人队，生成、图鉴都看；改配置 `SWARM_STANCE` 两种敌人跟着变。tests/sewer-maintenance.test.js 的数值表、公式和配置检查跟着改。
+
 - **强化注射剂 / 全队集结·直伤的 ATK 加成算进出手**（修复 #340 第 16 条；party.js · `effectiveAtk`；app.js · `applyRallyBuff` / `resetBattleFlags`、`RALLY_BUFF`（新配置）；测试 tests/atk-buffs.test.js（新））
   - **以前**：强化注射剂写「ATK +3 至战斗结束」，代码给 `u.atk` 和 `u.itemAtkBonus` 各加 3；全队集结·直伤给 `u.atk` +15。出手按 `effectiveAtk` 算，它不读这两个字段，伤害一点不加（坚毅照扣）。
   - **现在**：`effectiveAtk` 加上 `itemAtkBonus` 和 `rallyAtk`。直伤集结另记 `rallyAtk`（数值放在配置 `RALLY_BUFF = { atk: 15 }`，`rallyAtk`、`u.atk` 和日志「ATK +15」都读它；下一场 `resetBattleFlags` 清掉）；注射剂本来就写了 `itemAtkBonus`，现在真的进伤害。
@@ -385,6 +391,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **现在**：近距砸击、远距能量都改成「atk + 等级颗 d8」（写「颗」，免得和蚁卫的「等级 + 1d6」看混）。代码（enemies.js / engine.js）不动，作者定的：按等级掷。
   - **没改的**：协助「捏碎颅骨」、数值栏现算、其它敌人的图鉴。
   - **测试**：tests/giant-bestiary.test.js（新，2 条）：巨人两条主动招式都写「等级颗 d8」，不再写「1d8」（在没改的代码上失败）；4 级巨人真的打一次近距砸击（同区）、远距能量（隔一区），每颗 d8 掷 8，记录里是「掷骰 4d8 → 32」（锁住实际骰数，文字和代码哪边单独变了都会报出来）。
+
 
 
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
