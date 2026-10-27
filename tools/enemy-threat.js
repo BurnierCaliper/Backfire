@@ -10,6 +10,7 @@
 //                                                      假设性对照：敌人 atk ×1.5（只在模拟里乘，游戏数值不动）
 //   node tools/enemy-threat.js --groups unit --levels 20 --tokens 6 --out docs/balance/enemy-threat-1026-l20-tok6
 //                                                      假设性对照：每场凑满 6 枚代币
+//   node tools/enemy-threat.js --mixed                 混编遇敌贡献（见 tools/enemy-threat-mixed.js）→ docs/balance/enemy-threat-mixed-1027
 //   node tools/enemy-threat.js --rebuild docs/balance/enemy-threat-1026
 //                                                      不重跑，用已有的 json 重新生成报告（改了报告格式时用）
 //
@@ -620,6 +621,9 @@ function rebuild(out) {
 }
 async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--rebuild") { if (argv.length !== 2) throw new Error("Usage: --rebuild docs/balance/<报告名>"); return rebuild(argv[1]); }
+  if (argv[0] === "--mixed" || argv.includes("--mixed")) {
+    return require("./enemy-threat-mixed").main(argv.filter(a => a !== "--mixed"));
+  }
   const opt = parseArgs(argv), file = outPath(opt.out), meta = provenance(argv), jobs = plan(opt);
   let done = 0;
   const rows = await runJobs(jobs, opt.workers, () => { if (++done % 200 === 0 || done === jobs.length) console.error(`Completed ${done}/${jobs.length}`); });
@@ -629,4 +633,4 @@ async function main(argv = process.argv.slice(2)) {
   return report.errors ? 1 : 0;
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
-module.exports = { CONFIG, GROUPS, BOSSES, LAYOUTS, ATK_FIELDS, unitKits, paperStats, appearance, plan, runJob, runJobs, summarize, summarizeAll, flags, buildReport, markdown, parseArgs, main };
+module.exports = { CONFIG, GROUPS, BOSSES, LAYOUTS, ATK_FIELDS, unitKits, paperStats, appearance, enemyMeta, plan, runJob, runJobs, summarize, summarizeAll, flags, buildReport, markdown, parseArgs, main };
