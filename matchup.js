@@ -59,7 +59,8 @@ function matchupDefenderRow(u, el, weather, envX, fieldT) {
   if (typeof raceDefendMods === "function") raceDefendMods(u, el).forEach(m => add(m.value, m.reason.replace(/。$/, "")));   // 敌人的种族被动：热耐性、鳞片
   if (u.self === "store" && el === "harmonic") add(0.25, "蓄能：谐波受伤 +25%");
   (u.etchMarks || []).forEach(m => { if (m && m.element === el) { const v = Number(m.pct) || 0.1; add(v, `蚀刻残留：${ELE[el]} +${Math.round(v * 100)}%，并视为被克制`); } });
-  if (r.rallyDr && !(u.stunned || u.dying)) add(-0.15, "全队集结（坦克）：全属性减伤 −15%");
+  // 和 engine.js · resolveAttack 一致：rallyDr 在自己失衡 / 濒死时仍生效（只看施放者是否倒下）
+  if (r.rallyDr) add(-0.15, "全队集结（坦克）：全属性减伤 −15%");
   if (typeof frenzyTakenCut === "function") { const v = frenzyTakenCut(u); if (v) add(-v, `狂暴：受到的伤害 −${Math.round(v * 100)}%`); }   // effects.js · FRENZY
   if (u.instant && u.instant.iceNext) add(0.5, "冰冻：下一次被攻击的第一击 +50%");
   return out;

@@ -24,6 +24,14 @@
     if (sensitiveTech.test(clean)) return null;
     return keepLines ? v.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000b-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, "").slice(0, limit) : clean.slice(0, limit);
   }
+  // （新）#340 第 11 条：和 hotseat-game.js · hideWallets 同一套规则。
+  // 房间检查点里可能还留着这次修复之前带余额的旧聊天（最多 300 条），投影时再滤一遍。
+  function hideWallets(text) {
+    return String(text)
+      .replace(/（([^（）]*?) 剩 \d+，([^（）]*?) 现有 \d+）/g, "")
+      .replace(/（由 ([^（），]+?) 付，钱包剩 \d+）/g, "（由 $1 付）")
+      .replace(/进 ([^（）]+?) 的钱包（现有 \d+）/g, "进 $1 的钱包");
+  }
   function id(v) { return typeof v === "string" && /^[\w:./-]{1,160}$/.test(v) && !sensitive.test(v) && !["__proto__", "prototype", "constructor"].includes(v) ? v : null; }
   function number(v) { return typeof v === "number" && Number.isFinite(v) ? v : undefined; }
   function copyFields(src, dst, strings = [], numbers = [], booleans = []) {
@@ -342,7 +350,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆", "坚毅受创"]);
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
@@ -358,6 +366,9 @@
       if (kind === "break" || kind === "highboom" || visibleHp && ["dmg", "heal"].includes(kind)) {
         const n = number(get(event, "value")); if (n !== undefined) out.value = n;
       }
+      // #340 第 15 条：打进坚毅的伤害（主机标了 grit，或者挨打的人还在起身中）照旧是一下伤害（演打中），
+      // 只带标记 grit: true、不带数字：玩家画面写「坚毅受创」（hd2d-fx.js · numberOf、online-ui.js）
+      if (kind === "dmg" && (get(event, "grit") === true || subject && get(subject, "upOnShp") && !get(subject, "dying") && !get(subject, "dead"))) { delete out.value; out.grit = true; }
       if (kind === "dmg" && get(event, "main") === true) out.main = true;   // 攻击动作本身的伤害（玩家画面在这几段补攻击演出的打击形状）
       if (get(event, "tag") === "boom") out.tag = "boom";   // 爆炸（高能自爆的余波、自爆小车的死亡引爆）：不算这次出手打到的目标
       if (popupWords.has(get(event, "text"))) out.text = get(event, "text");
@@ -575,7 +586,9 @@
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机
       const isTitle = !!get(m, "title");
-      const t = chatText(get(m, "text"), 500, true); if (t === null) return [];
+      const raw = chatText(get(m, "text"), 500, true); if (raw === null) return [];
+      // #340 第 11 条：敏感词过完再去余额（旧检查点消息也走这里；sensitiveTech 已在挡坚毅）
+      const t = hideWallets(raw);
       const dto = identifiers(m, copyFields(m, { text: t }, ["operatorName", "name"], ["at"], []), ["id", "operatorId"]);
       const roll = get(m, "roll");
       if (roll) { dto.roll = true; const tier = obj(roll) ? get(roll, "tier") : null; if (["crit", "extreme", "hard", "normal", "easy", "fail"].includes(tier)) dto.tier = tier; }
@@ -950,7 +963,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, hideWallets, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -611,6 +611,7 @@ function itemStun(u, notes) {
   u.stunned = true;
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
   if (typeof queueAssistAttack === "function") queueAssistAttack(null, u);
   if (typeof bossQuickRecover === "function") bossQuickRecover(u, notes);   // 10 级起精英标记没攒满：失衡立刻恢复，和其他来源一样
 }

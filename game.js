@@ -108,6 +108,7 @@
       unitId: unit.id,
       kind: spec.kind || "dmg",
       value: spec.value,
+      grit: spec.grit ? true : undefined,   // #340 第 15 条：打进坚毅（app.js · spawnShpHit）：画面写「坚毅受创」不写数字
       text: spec.text,
       fx: spec.fx || null,         // kind "proc"：哪个图标生效了（hud-icons.js 的 key）
       element: spec.element || "physical",
@@ -513,7 +514,8 @@
       p.dmgHi = Math.max(0, Math.max(d1, d2));
       // 预览数字写「这一下打出去的伤害」，不按目标剩下的血量封顶（剩 8 血吃 15 伤害就写 15）：
       // 用伤害弹字的数值（规则层的 intended，含溢出）加起来；血条上闪的那段仍然是实际会掉的血
-      const popDmg = (tape) => (tape || []).filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg")
+      // 打进坚毅的那几下（grit，#340 第 15 条）不算：算进来预览就又写出数字了
+      const popDmg = (tape) => (tape || []).filter(e => e.type === "pop" && e.unitId === id && e.kind === "dmg" && !e.grit)
         .reduce((sum, e) => sum + Math.max(0, Number(e.value) || 0), 0);
       const q1 = popDmg(lo.tape), q2 = popDmg(hi.tape);
       if (q1 > 0 || q2 > 0) { p.dmgLo = Math.min(q1, q2); p.dmgHi = Math.max(q1, q2); }
@@ -896,7 +898,7 @@
   }
   /** 新画面（HD-2D）开着：这一下的数字换成原型的纸片风（hd2d/hd2d-field.js · numbers → hd2d-play.js；字号、颜色、摆位、时长照 hd2d-fx.js 的 FX），
    *  旧的 .pop / 攻击效果大字不弹。e = 演出带里的一下（治疗是快照比出来的，也拼成这样的一下）：先过联机演出带的白名单（OnlineView.projectTape，
-   *  和联机玩家收到的一样：打在坚毅生命上、濒死的那几下不给数），再按 hd2d-fx.js · numberOf 挑数字——白名单没给数就什么都不弹；
+   *  和联机玩家收到的一样：濒死的那几下不给数，打在坚毅生命上的那几下只带 grit 标记），再按 hd2d-fx.js · numberOf 挑数字（grit 弹「坚毅受创」）——白名单没给数就什么都不弹；
    *  word = 演出带里没有的字（格挡）：{ kind, text, el }。关着（或者新画面的模块还没加载好）返回 false：照旧弹旧的 */
   function paperPop(id, e, word) {
     if (!field3d() || typeof HD2DField.numbers !== "function" || !window.HD2DFx) return false;
@@ -1586,7 +1588,7 @@
     }
     const firstHit = pops.find(e => e.kind === "dmg" && Number(e.value) > 0);
     const bigOf = (e) => {
-      const s0 = G.view.get(e.unitId), v0 = Math.floor(Number(e.value) || 0);
+      const s0 = G.view.get(e.unitId), v0 = e.grit ? 0 : Math.floor(Number(e.value) || 0);   // 打进坚毅：不按数字放大（#340 第 15 条）
       return typeof bigHitInfo === "function" ? bigHitInfo(s0 ? s0.level : 1, v0) : { big: false, ratio: 0 };
     };
     if (firstHit) {
@@ -1639,7 +1641,8 @@
           if (v <= 0) continue;
           const boom = e.tag === "boom";
           // 大伤害：和计算器同一个区间（目标等级 × 2 + 8 起，到两倍封顶），越重字越大、停得越久；评分加成也按它
-          const bh = typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
+          // 打进坚毅（grit，#340 第 15 条）：不写数字，也不按数字放大（字号也能看出扣了多少）
+          const bh = !e.grit && typeof bigHitInfo === "function" ? bigHitInfo(s ? s.level : 1, v) : { big: false, ratio: 0 };
           const big = bh.big;
           // 主攻击的第 2、3 段：弹道招式再飞一发（能量弹、电弧……），近身招式换个方向再来一刀
           const mainIdx = strike ? strike.mains.indexOf(e) : -1;
@@ -1663,7 +1666,7 @@
           if (mainIdx >= 0 && (pre || big) && !parried && !(instant && mainIdx > 0)) await wait(big ? 110 : 70);
           if (e.adv && !advShook) { advShook = true; advShake(); }
           comboHit(e, v);
-          if (!paperPop(e.unitId, e)) popup(e.unitId, big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
+          if (!paperPop(e.unitId, e)) popup(e.unitId, e.grit ? "坚毅受创" : big ? v + "!" : String(v), "e-" + e.element + (big ? " big" : "") + (boom ? " boom" : ""),
             { icon: e.element, size: big ? Math.round(BIG_POP_SIZE * (0.8 + 0.35 * bh.ratio)) : boom ? 46 : 30,
               dur: boom ? 2.4 : big ? BIG_POP_DUR * (0.8 + 0.45 * bh.ratio) : 1.05 });
           if (boom) await wait(160);
@@ -2296,7 +2299,7 @@
     if (p.dmgHi > 0 && p.dis) h += `<span class="disadv">劣势</span>`;
     if (p.dmgHi > 0) h += `<span class="dmg e-${p.element}${p.dis ? " dis" : ""}">${window.Icons ? Icons.element(p.element) : ""}${p.dmgLo === p.dmgHi ? p.dmgHi : p.dmgLo + "–" + p.dmgHi}</span>`;
     if (p.healHi > 0) h += `<span class="heal">+${p.healHi}</span>`;
-    if (p.shpLoss > 0) h += `<span class="note">${typeof shpHidden === "function" && shpHidden() ? "伤到坚毅" : `坚毅 −${p.shpLoss}`}</span>`;
+    if (p.shpLoss > 0) h += `<span class="note">${typeof shpHidden === "function" && shpHidden() ? "坚毅受创" : `坚毅 −${p.shpLoss}`}</span>`;
     if (p.brHi > 0) h += `<span class="brk">击破 ${p.brLo === p.brHi ? p.brHi : p.brLo + "–" + p.brHi}</span>`;
     if (p.stunSure) h += `<span class="stun${p.ice ? " ice" : ""}">失衡${p.ice ? "·冰冻" : ""}</span>`;
     if (p.stunMaybe) h += `<span class="stun${p.ice ? " ice" : ""}">可能失衡</span>`;
@@ -2526,6 +2529,10 @@
     const n = (job.tried || []).length;   // 连续格挡：第二个人起换一颗骰子
     return 1 + Math.floor(makeRng("block:" + job.seq + (n ? ":" + n : ""))() * 100);
   }
+  // （新）#340 第 15 条：预测里打进坚毅的那个人只写「坚毅受创」，不写伤害数字
+  // （新）#340 第 15 条：打进坚毅的那几下，行动预测只写「坚毅受创」，不写伤害数
+  const GRIT_WORD = "坚毅受创";
+  const hitWords = (v) => /* （新） */ v === GRIT_WORD ? GRIT_WORD : `受到 ${v} 伤害`;
   function predictTurn(id) {
     if (window.GMCommands?.isManual(unitById(id))) return ["由主持人操控，无法预测"];
     const key = `${G.version}|${state.turnNo}|${id}`;
@@ -2544,6 +2551,8 @@
         if (e.type !== "pop" || e.kind !== "dmg") return;
         const u = unitById(e.unitId);
         if (!u || !u.isPlayer) return;
+        // #340 第 15 条：打进坚毅的（grit）不写数字，这个人只写「坚毅受创」
+        if (e.grit || out.get(u.name) === GRIT_WORD) { out.set(u.name, GRIT_WORD); return; }
         out.set(u.name, (out.get(u.name) || 0) + Math.floor(Number(e.value) || 0));
       });
       return out;
@@ -2592,9 +2601,9 @@
           drain(uid === id ? blocked : null);
           if (uid === id) {
             const parts = [];
-            direct.forEach((v, name) => { if (v > 0) parts.push(`${name} 预计受到 ${v} 伤害（无法格挡）`); });
+            direct.forEach((v, name) => { if (v === GRIT_WORD || v > 0) parts.push(`${name} 预计${hitWords(v)}（无法格挡）`); });
             blocked.forEach(b => {
-              parts.push(`${b.target} 预计受到 ${b.dmg} 伤害；格挡骰 ${b.roll}` +
+              parts.push(`${b.target} 预计${hitWords(b.dmg)}；格挡骰 ${b.roll}` +
                 (b.helpers.length ? `：${b.helpers.join("、")}` : "（同区没人能替他格挡）"));
             });
             steps.push(describeIntent(plan.meta) + (parts.length ? " —— " + parts.join("；") : ""));
@@ -3575,6 +3584,8 @@
   function setRogueMode(rogue) {
     G.rogue = rogue;
     document.body.classList.toggle("rogue-battle", !!rogue);
+    // #340 第 14 条：训练场不走 rogue-battle，以前后台按钮露出来；训练中挂 training-battle 藏后台
+    document.body.classList.toggle("training-battle", !rogue && trainingActive());
   }
 
   /**
@@ -4877,6 +4888,8 @@
    *  把它要写入的 #backstageBody 从隐藏的 #calc-core 搬到游戏面板中，
    *  这样规则和字段只有一份，计算器改了游戏跟着变。 */
   function openBackstage() {
+    // #340 第 14 条：训练场后台写着坚毅生命剩余和上限，玩家不能开
+    if (trainingActive()) return;
     const mount = $("g-bs-mount");
     let body = document.getElementById("backstageBody");
     if (!body) {
