@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets`（新） / `teamChat`（新）；online-view.js · `hideWallets`（新）/ `projectView` 聊天投影；测试 tests/online-wallet-privacy.test.js（新））
+  - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱（商人、工匠、义体）时带「钱包剩 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
+  - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付。转进 / 转出队伍公账时整段括号一起去掉（公账余额这句也不写了；公账本来就公开，别处照样看得到）。队伍公账的「现有 N」**只在卖东西那一句**（`进队伍公账（现有 N）`）还留着；其它进 / 出公账的说明不再带余额。「进 X 的钱包（现有 N）」只有主持人分钱（`trpgPurseSplit`）会写，它不经小队聊天，`hideWallets` 里那条只是预防。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。房间检查点里这次修复之前存下的旧聊天（最多 300 条）在 `online-view.js` · `projectView` 投影时也会过同一套 `hideWallets`，读档后队友看不到余额。
+  - **没改的**：钱包本身的读写、谁能转、谁能看余额的权限。
+  - **测试**：tests/online-wallet-privacy.test.js（新）：都走真的联机命令（`HotseatGame.receiveFrom`），看队友 p3 过了 `OnlineView.projectView` 白名单的小队聊天——玩家转给队友 / 转进公账、主持人转给玩家后，聊天写「瑞比 转给 Helumica 34 奎支」，没有「剩 N / 现有 N」；玩家在商人处用自己的钱包买医疗包，聊天写「（由 瑞比 付）」，没有「钱包剩」。另有一条：检查点里塞进带「剩 N / 钱包剩 N」的旧消息，投影后被去掉余额（在没加投影过滤的代码上失败）。把 `teamChat` 改成不过滤也会失败。
 - **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `currentLifeForHigh` / `highLifeOnShp`（新） / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js（新）、tests/ui.test.js）
   - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；自焚扣血量层时实际扣的本来就是整数（`applyTrueDamage` 取整），只是日志写成「失去 3.6」；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
   - **现在**：
