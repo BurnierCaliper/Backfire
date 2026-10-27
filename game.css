@@ -1359,6 +1359,8 @@ body.rogue-battle #g-rogue-next { display: inline-block; }
 body.rogue-battle :is(#g-again, #g-party-cfg, #g-enc-cfg, #g-field-cfg, #g-bag, #g-rest, #g-save, #g-bs, #g-restart),
 body.rogue-battle .g-top label:has(#g-level),
 body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }   /* 这两个 label 带行内 display */
+/* #340 第 14 条：训练场藏后台（顶栏按钮 + 队伍面板里的入口），避免坚毅剩余 / 上限写在后台里 */
+body.training-battle :is(#g-bs, #g-party-backstage) { display: none !important; }
 
 /* ---------- 选队伍 / 单局界面 ---------- */
 .scr-party, .scr-run {
