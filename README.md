@@ -369,11 +369,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **全队集结：施放者晕眩 / 濒死 / 死亡时全体增益结束；扭矩自保模式不受不稳影响**（主人 夕夏 确认；接 #340 第 16 / 17 条；审查修正 PR #418；app.js · `clearRallyBuff` / `endRallyIfCasterDown` / `applyRallyBuff` / `beginRound` 全体兜底 / `maybeUnstableTrip`；items.js · `itemStun`；enemies.js · `crushSkullDown` 等；engine.js / matchup.js 坦克减伤一致；测试 tests/rally-caster-end.test.js、tests/divert-guard.test.js、tests/matchup.test.js）
-  - **以前**：集结增益整场有效（施放者晕眩 / 濒死起身后还在）；「自己」指谁没写清。扭矩自保仍会被不稳直接失衡。坦克集结在坦克**自己**失衡 / 濒死后丢掉减伤（engine 删 `rallyDr`、克制表也不显示）。
-  - **现在**：增益持续到**施放者**晕眩 / 濒死 / 死亡（`rallyOn` + `endRallyIfCasterDown`；牵挂、闪光弹、捏碎颅骨、擒拿、牛反击、流沙、GM、载具殉爆等全路径；`beginRound` 在 `offField` 前对全体含已死再兜）。异常清增益不再 `bonus − 1`；直伤清增益先清 `rallyAtk` 再按 `effectiveAtk` 重算（避免召唤武器后 atk 扣到基础以下）。自保与坚挺一样不受不稳直失衡。坦克自己失衡仍保留 / 显示 −15%。自我效果结束时机**不**顺手改成当场结束（另见 issue #430）。Q1 / Q2 待主人确认；当前 = +1 只施放当回合、单 `rallyOn`、倒下全清。
-  - **没改的**：施放方式与数值、`RALLY_BUFF`、自保架势保底与 25% 减伤、坚挺、不稳叠两次转晕眩；自我效果多半仍等到 `beginRound`。
-  - **测试**：tests/rally-caster-end.test.js（晕眩 / 濒死 / 死亡 / 牵挂 / 闪光弹 / 捏碎颅骨 / 异常附赠不误扣 / 直伤 atk 下限 / 坦克自己失衡仍减伤 / 载具 shrug；main 上约 11 条失败）；divert-guard +2；matchup 失衡坦克仍显示减伤。
+- **全队集结：施放者倒下结束；两人叠加；异常每回合 +1；扭矩自保不受不稳**（主人确认；#340 第 16/17；PR #418；app.js · `rallyBy` / `clearRallyShare` / `endRallyIfCasterDown` / `refreshEconomy`；engine.js / matchup.js / online-view.js；测试 rally-caster-end / divert-guard / matchup）
+  - **以前**：集结整场有效；异常 +1 只施放当回合；两人先后施放互相覆盖、倒下清全队；扭矩自保会被不稳直失衡；坦克自己失衡丢减伤。
+  - **现在**：持续到**该施放者**晕眩/濒死/死亡（每施放者 `rallyOn`；队员 `rallyBy[casterId]` 记 atkGranted/bonusGranted；倒下只清自己那份，另一人的 +15/附赠仍在）。异常 `refreshEconomy` 每回合按仍有效份额加附赠，结束精确扣回。直伤清份额用 `baseEffectiveAtk+itemAtkBonus+剩余rallyAtk` 托底（不把 bond/duet 写进 `u.atk`）。自保不受不稳。坦克自己失衡仍 −15%×份额；克制表/联机投影同数。自我效果结束时机另见 #430。
+  - **没改的**：施放方式与 `RALLY_BUFF.atk`、自保架势保底与 25% 减伤、坚挺。
+  - **测试**：rally-caster-end（晕眩/濒死/死亡/牵挂/闪光弹/捏碎颅骨/异常每回合+1/双施放+30与分清/atk下限/坦克自己失衡/载具 shrug）；divert-guard；matchup。
 - **随机遭遇上场单位上限 12（`ENCOUNTER_UNIT_CAP`）**：五代币的成组杂兵不再摆出 15 只；带车补抽也受同一上限（run.js · `ENCOUNTER_UNIT_CAP`、`groupBounds`、`canSpendTokens`、`pickByTokens`；vehicle.js · `vehiclePayTokens`；测试 tests/encounter-unit-cap.test.js）
   - **以前**：按代币抽满即可。空投蜂群 / 下水道清扫机 `group: 3`，4 枚代币 = 12 只，5 枚（5% 概率）= 15 只，战场挤满。车占代币退掉精英后补抽时，`pickByTokens` 只按新抽的那几只算上限，不管场上已有的敌人和车，补出成组杂兵后敌人+车会超过 12。
   - **现在**：抽的时候累计单位数不超过 `ENCOUNTER_UNIT_CAP = 12`（和 4 枚代币的上限对齐）。若下一抽会超，就只从装得下的选项里再抽（别的杂兵 / 精英）；能花完代币时优先留下还能花完的组合，实在没有装得下的就停。三方混战每一边仍是 3 枚代币，单边最多 9 只，上限约束不到，行为不变；4 枚代币的分布在本来就 ≤12 时也不变。**车占代币补抽**：剩余名额 = `ENCOUNTER_UNIT_CAP − 已有敌人单位 − 1`；**车本身算 1 个单位**（配置物；有驾驶员时和驾驶员合并成一张卡，补抽仍按「车已在场」预留），车上的乘员就是 `enemies` 里的那些人，不另加。

@@ -75,22 +75,25 @@ test("全队集结：施放者濒死 → 全体加成结束", () => {
   assert.ok(notes.some(s => /全队集结结束：施放者濒死/.test(s)), notes.join("\n"));
 });
 
-test("异常集结：施放者倒下后不清队员正常附赠（refreshEconomy 后 bonus 仍是 1）", () => {
-  // 在旧代码上失败：clearRallyBuff 对异常做 u.bonus−1，下一回合 refreshEconomy 后是 1，倒下再扣成 0
+test("异常集结：持续期间每回合 +1 附赠；倒下精确扣回不误伤正常附赠", () => {
+  // Q1：refreshEconomy 按 rallyBy 份额每回合加；倒下 clearRallyShare 扣 bonusGranted
   const { c, y, h } = field();
   h.roles = Object.assign({}, h.roles, { primary: "异常" });
   castRally(c, y);
   assert.equal(h.rallyBuff, "异常");
-  // 下一玩家回合：refreshEconomy 重算附赠（不看集结）→ 正常 1
+  assert.ok(h.rallyBy && h.rallyBy[y.id] && h.rallyBy[y.id].bonusGranted === 1);
+  // 施放当回合已 +1；下一玩家回合 refreshEconomy 仍应带集结份额 → 正常 1 + 集结 1 = 2
   c.refreshEconomy(h);
-  assert.equal(h.bonus, 1, "refreshEconomy 后是正常附赠 1");
+  assert.equal(h.bonus, 2, "集结持续期间每回合都有异常 +1");
   assert.equal(h.rallyBuff, "异常", "标记还在");
   const notes = [];
   c.dealBreak(y, 99, "physical", notes, "测试");
   assert.equal(!!y.stunned, true);
   assert.equal(!!y.resources.rallyOn, false);
   assert.equal(h.rallyBuff, undefined);
-  assert.equal(h.bonus, 1, "清集结不能吃掉正常附赠");
+  assert.equal(h.bonus, 1, "清集结只扣份额，正常附赠仍在");
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 1, "结束后 refreshEconomy 不再加集结附赠");
 });
 
 test("牵挂：结人代扛进失衡 → 集结立刻结束", () => {
@@ -226,4 +229,123 @@ test("直伤集结结束：召唤武器重算 atk 后再清，不把 atk 扣到�
   // 再清一次应幂等
   c.clearRallyBuff(k, []);
   assert.equal(k.atk, personal);
+});
+
+test("异常集结：每回合 refreshEconomy 都加 +1（多回合）", () => {
+  const { c, y, h } = field();
+  h.roles = Object.assign({}, h.roles, { primary: "异常" });
+  castRally(c, y);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 2);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 2, "第二回合仍是 1+1");
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 2, "第三回合仍是 1+1");
+});
+
+test("两人全队集结叠加：直伤 +30；一人倒下留 +15；两人都倒下清零", () => {
+  const c = H.load();
+  c.BattleSim.setup({
+    party: ["yuito", "nora", "helu"],
+    enemies: [{ id: "thug_knife", lv: 3, zone: 1 }],
+    seed: "RALLY-STACK"
+  });
+  c.startCombat();
+  const S = c.S.state;
+  const y = kit(S, "yuito");
+  const m = kit(S, "nora");
+  const h = kit(S, "helu");
+  for (const u of [y, m, h]) u.zone = 1;
+  y.roles = { primary: "辅助", secondary: "辅助" }; y.level = 15;
+  m.roles = { primary: "辅助", secondary: "辅助" }; m.level = 15;
+  h.roles = Object.assign({}, h.roles, { primary: "直伤" });
+  c.resetBattleFlags(y); y.ap = 3; y.bonus = 3;
+  c.resetBattleFlags(m); m.ap = 3; m.bonus = 3;
+  const baseAtk = Number(h.atk) || 0;
+  const beforeEff = c.effectiveAtk(h, S.units);
+
+  castRally(c, y);
+  assert.equal(h.rallyAtk, 15);
+  assert.equal(h.atk, baseAtk + 15);
+  assert.ok(h.rallyBy && h.rallyBy[y.id] && h.rallyBy[y.id].atkGranted === 15);
+
+  castRally(c, m);
+  assert.equal(h.rallyAtk, 30, "两人各 +15 叠加");
+  assert.equal(h.atk, baseAtk + 30);
+  assert.equal(c.effectiveAtk(h, S.units), beforeEff + 30);
+  assert.ok(h.rallyBy[y.id] && h.rallyBy[m.id]);
+
+  // 结人倒下：只清结人那份
+  const notes = [];
+  c.dealBreak(y, 99, "physical", notes, "测试");
+  assert.equal(!!y.resources.rallyOn, false);
+  assert.equal(!!m.resources.rallyOn, true, "诺拉的 rallyOn 还在");
+  assert.equal(h.rallyAtk, 15, "留下诺拉的 +15");
+  assert.equal(h.atk, baseAtk + 15);
+  assert.ok(!h.rallyBy[y.id] && h.rallyBy[m.id]);
+  assert.equal(c.effectiveAtk(h, S.units), beforeEff + 15);
+
+  // 薄荷也倒下：全清
+  c.dealBreak(m, 99, "physical", notes, "测试");
+  assert.equal(!!m.resources.rallyOn, false);
+  assert.equal(h.rallyAtk || 0, 0);
+  assert.equal(h.rallyBuff, undefined);
+  assert.equal(h.atk, baseAtk);
+  assert.equal(c.effectiveAtk(h, S.units), beforeEff);
+});
+
+test("两人全队集结·异常：一人倒下留下另一人的 +1 附赠", () => {
+  const c = H.load();
+  c.BattleSim.setup({
+    party: ["yuito", "nora", "helu"],
+    enemies: [{ id: "thug_knife", lv: 3, zone: 1 }],
+    seed: "RALLY-STACK-BONUS"
+  });
+  c.startCombat();
+  const S = c.S.state;
+  const y = kit(S, "yuito");
+  const m = kit(S, "nora");
+  const h = kit(S, "helu");
+  for (const u of [y, m, h]) u.zone = 1;
+  y.roles = { primary: "辅助", secondary: "辅助" }; y.level = 15;
+  m.roles = { primary: "辅助", secondary: "辅助" }; m.level = 15;
+  h.roles = Object.assign({}, h.roles, { primary: "异常" });
+  c.resetBattleFlags(y); y.ap = 3; y.bonus = 3;
+  c.resetBattleFlags(m); m.ap = 3; m.bonus = 3;
+
+  castRally(c, y);
+  castRally(c, m);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 3, "正常1 + 两份额各+1");
+  assert.equal(Object.keys(h.rallyBy || {}).length, 2);
+
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(h.bonus, 2, "扣回结人份额后剩 正常1+诺拉1");
+  assert.ok(h.rallyBy && h.rallyBy[m.id] && !h.rallyBy[y.id]);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 2, "诺拉还在时每回合仍 +1");
+
+  c.dealBreak(m, 99, "physical", [], "测试");
+  assert.equal(h.bonus, 1);
+  assert.equal(h.rallyBuff, undefined);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 1);
+});
+
+test("直伤集结结束：atk 托底不用 effectiveAtk（不把 bond/duet 写进 u.atk）", () => {
+  const { c, S, y, h } = field();
+  h.roles = Object.assign({}, h.roles, { primary: "直伤" });
+  const personal = Number(h.personalAtk) || 0;
+  const weapon = Number(h.weaponAtk) || 0;
+  const base = personal + weapon;
+  h.bondAtk = 10;
+  h.duetAtk = 7;
+  castRally(c, y);
+  assert.equal(h.rallyAtk, 15);
+  assert.equal(h.atk, base + 15, "u.atk 只含基础+集结，不含 bond/duet");
+  assert.equal(c.effectiveAtk(h, S.units), c.baseEffectiveAtk(h, S.units) + 10 + 7 + 15);
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(h.rallyAtk || 0, 0);
+  assert.equal(h.atk, base, "清掉后 u.atk 回到基础，bond/duet 仍只在 effectiveAtk");
+  assert.ok(!h.bondAtk || h.bondAtk === 10);
 });

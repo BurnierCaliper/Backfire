@@ -124,7 +124,7 @@
     return Object.keys(v).length ? v : null;
   }
   // nanoReserve：瑞比的储备能源（#219，不是坚毅数值，公开）
-  const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount"];
+  const resourceNumbers = ["nano", "nanoReserve", "bean", "liquid", "durability", "shield", "tauntLeft", "charge", "energyPct", "light", "lockLeft", "smashUsed", "phase", "debrisCount", "rallyDr"];
   const resourceFlags = ["mecha", "engine", "prepared", "preparedActive", "preparedPending", "smashNext", "smashOnce", "niuOut", "narutoOut", "forceCruelNext", "scanned", "unstable", "forceCharge", "forceOverheat"];
   const statusKeys = ["burn", "shock", "corr", "frostbite", "shockwave", "high", "reso", "unstable", "weak", "inspire", "hide", "advantage", "chase", "sturdy"];
   // 中立生物（沙漠的尘虫 / 管虫）身上的小标签（#358）：键 → 写什么，和单机旧画面 game.js · snapUnit 的 neutralTags 同一套字
