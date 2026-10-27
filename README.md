@@ -368,11 +368,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **起身中高能自爆阈值按坚毅、不按临时护盾**（#340 相关；app.js · `currentLifeForHigh`；测试 tests/shield-overcharge-threshold.test.js（新））
-  - **以前**：`currentLifeForHigh` 先把 layers（含临时护盾）加总，只有合计为 0 才退回坚毅。起身中（`upOnShp`）身上还有护盾时，拿来和高能比的是护盾——例如坚毅 37、护盾 6，高能 20 就满足「生命 < 高能」而自爆，`applyKnockdown({ lethal: true })` 直接扣光坚毅致死。
-  - **现在**：起身中一律用当前坚毅和高能比（上例 37 与 20，不爆）；护盾仍照常挡伤害，只是不参与高能 / 微光蓄能的「血量」比较。
-  - **没改的**：非起身中仍看血量层（含护盾）；玩家界面仍不显示剩余坚毅。
-  - **测试**：tests/shield-overcharge-threshold.test.js（新）：起身中坚毅 37 + 护盾 6、高能 20 时 `currentLifeForHigh` 为 37、`checkHighBoom` 不自爆；高能 40（> 37）仍自爆。在没改的代码上第一条失败（返回 6）。
+- **起身中高能自爆阈值按坚毅、不按临时护盾：补测试**（#340 相关；测试 tests/shield-overcharge-threshold.test.js（新））
+  - **说明**：逻辑本身已随 #415 进入 main（`highLifeOnShp`：起身中一律用坚毅和高能比，临时护盾不参与高能 / 微光蓄能的「血量」比较）。本 PR 不再改 app.js，只补这条测试。
+  - **测试**：tests/shield-overcharge-threshold.test.js（新）：起身中坚毅 37 + 护盾 6、高能 20 时 `currentLifeForHigh` 为 37、`checkHighBoom` 不自爆；高能 40（> 37）仍自爆。
+- **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `currentLifeForHigh` / `highLifeOnShp`（新） / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js（新）、tests/ui.test.js）
+  - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；自焚扣血量层时实际扣的本来就是整数（`applyTrueDamage` 取整），只是日志写成「失去 3.6」；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
+  - **现在**：
+    - 第 12 条：游戏版起身中，自爆 / 蓄能日志改写「当前坚毅生命」，不写数字。判定仍用 `currentLifeForHigh`。日志和 `currentLifeForHigh` 共用 `highLifeOnShp`（新）：**起身中一律比坚毅**（`!!unit.upOnShp`），临时护盾不参与高能阈值（作者定；与 `fix/shield-overcharge-threshold` 一致）。
+    - 第 13 条：自焚扣量 `Math.floor`（这次修复之后扣的坚毅不再带小数；之前存下来、坚毅已经是 31.7 这类小数的长线存档不会被修正；血量层日志写的扣量和实际一致）。取整方向和 `applyKnockdown` / `applyTrueDamage` 一样向下：**作者接受**坚毅上限 < 10 时 1 层自焚 floor 后一点也不扣（义体能把上限压到 10 以下，少见）。游戏版起身中弹字：合入第 15 条后走 `spawnShpHit`（只写「坚毅受创」、无数字）；本条原先不 `spawnFloater` 的意图保留。日志在游戏版本来就不写数字，照旧。
+    - 第 14 条：训练中给 `body` 挂 `training-battle`，CSS 藏 `#g-bs` 和 `#g-party-backstage`；`openBackstage` 在训练中直接返回。
+  - **没改的**：道具 / 效果说明里的「花费 N 点坚毅」等**固定花费**照常写；单机打进坚毅的伤害数字（第 15 条，另定）；跑团主持人视角（`shpHidden()` 为假）仍看得到数字。
+  - **测试**：tests/shp-leak-340.test.js（新）：起身中自爆 / 蓄能日志无 37；自焚 floor 成整数且游戏版起身中不经 `spawnFloater` 弹数字；血量层自焚日志写「失去 3」这类整数、不写 3.6；源码有 training-battle / openBackstage / CSS 守卫——这几条在没改的代码上失败（第 15 条合入 main 后，自焚 floor / 血量层日志两条在 main 上也会过，标成守卫）。另有守卫：坚毅上限 < 10 时 1 层自焚扣 0（锁作者决定）。另有一条起身中带临时护盾：判定比坚毅 37（高能 20 不爆），蓄能日志写「当前坚毅生命」不写数字、不写护盾 6（在没改的代码上失败：比护盾 6、高能 20 就爆）。tests/ui.test.js「训练场：顶栏「后台」……」（新，需要 Playwright）：真进训练场，`#g-bs` / `#g-party-backstage` 看不见，硬点也打不开后台，在没改的代码上失败。
+
 - **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js、tests/online-actions.test.js）
   - **以前**：联机校验移动只看「目的区编号 − 所在区编号」是不是 1，和单机的 `zonesAdjacent`（按棋盘连接）不一致。四区方形 3→1（相连）被拒、3→2（对角）放行；五区十字玩家起点 5 只连着 3，编号差 2，联机完全走不动。
   - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。走一步只看直连的那条连接：直连是危墙或关着的机关门就拒绝（和单机 `canCross` 一致）——2×2 方形四条连接围成环，以前 `zoneReachable` 会绕另一边放行（例如 1-3 是危墙时 3→1 绕 3→4→2→1），执行时单位却不动；玩家端移动菜单也跟着不再列出这种区。
@@ -394,6 +401,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。本分支 `tickSelfBurn` 已按 #415 用 `Math.floor` 扣量（与 `applyTrueDamage` 一致），弹字用本条的 `spawnShpHit(u, "fire", { value: loss })`（仍无数字）。
   - **联机日志白名单**：`online-view.js` · `popupWords` 补进「坚毅受创」；`projectLogs` 才放行该词。以前缺这一词时，纯坚毅命中（`dmg` 为 0）整行摘要会被丢掉。
   - **测试**：tests/shp-dmg-340-15.test.js（新，5 条，在没改的代码上都失败）：起身中挨打日志 / 弹字只有「坚毅受创」；灼烧、自焚同理；联机投影带标记不带数；计算器照旧弹数字、README 有本条。tests/shp-dmg-340-15-review.test.js（新，8 条）：致命的一下、真实的回合结束灼烧（含致命）、拉斯缪尔不稳态、坠落、联机投影 + 演出（打中照演、数字只写「坚毅受创」）、联机战场日志摘要（改用真实 `OnlineView.projectLogs`，不再透传 mock）、另加一条直接打 `projectLogs` 确认「坚毅受创」留下且不漏坚毅数字；计算器两段攻击各弹一个数字。第 1–3、6、7 条在 main 和本 PR 改之前（9170cc2）都失败，坠落在 main 上失败，计算器两段那条在 9170cc2 上失败。
+
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
