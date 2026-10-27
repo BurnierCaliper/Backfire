@@ -1439,7 +1439,7 @@ function applyResultToUnit(target, result, attacker) {
   if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
-  // 决不后退 / 坚挺 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
+  // 决不后退 / 坚挺 / 自保模式 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
   if (result.broke && defBeforeHit - spent > 0) {
     result.broke = false;
     result.knockdownHp = 0;
@@ -1450,7 +1450,7 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   const wasStunned = !!target.stunned;
-  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、自保模式、已失衡都会让它比名义击破小）
   result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {

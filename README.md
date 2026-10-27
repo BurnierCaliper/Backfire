@@ -371,8 +371,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
   - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
   - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
-  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。
-  - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：自保模式开着、架势 4、被攻击 4 击破 → 架势 1、不进失衡。
+  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。不稳照旧——自保模式下架势剩 1 时仍会因不稳直接失衡（坚挺不会），待主人确认是否要改。
+  - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：走真实流程——柯尔特召唤扭矩 → 扭矩转移注意（进自保模式）→ 敌人攻击扭矩（架势 4、这一击 11 击破）→ 架势 1、不进失衡、不算击破，日志有「自保模式：架势保留 1」。
 
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
