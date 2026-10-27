@@ -247,3 +247,24 @@ test("#429 game-paper.css：联机房主的「检定申请 · N」手机竖屏 /
   assert.match(online, /\.crq-pill \{ position: fixed; inset: auto auto 12px 12px; z-index: 95; min-height: 44px; \}/);
   assert.match(online, /\.ol-chat-mode > :not\(\.ol-host-tabs\):not\(\.ol-host-chat\) \{ display: none !important; \}/, "切到小队只留标签和聊天：那一条照旧（抽屉的标签在这里另外留着）");
 });
+
+/* ---------- 第 5 步：手机横过来（矮、手指点）队伍栏、技能栏默认收起 ---------- */
+test("#429 hd2d-shell.js：手机横过来（矮于 500、手指点：SHELL.short）没记过时技能栏、队伍栏也默认收起（以前 915×412 时两块都开着，把战场整个盖住）；竖屏手机照旧收起；电脑（宽屏、矮窗口用鼠标）照旧展开；记过的照记着的", () => {
+  const SH = require("../hd2d/hd2d-shell.js").SHELL;
+  assert.equal(SH.short, "(max-height: 499px) and (pointer: coarse)");
+  assert.equal(SH.phone, "(max-width: 720px)", "竖屏手机那一条没动");
+  const attach = (match, saved) => {
+    const store = new Map(Object.entries(saved || {}));
+    const storage = { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) };
+    const P = require("./mini-dom").create('<div id="g-app"><div class="g-hud"><div class="party" id="g-party"></div><div class="hud-row"></div></div></div>', { storage, media: q => match.includes(q) });
+    const ctx = vm.createContext(P.window);
+    for (const f of ["hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js"]) vm.runInContext(read(f), ctx, { filename: f });
+    const S = P.window.HD2DShell, hud = P.document.querySelector(".g-hud"), phone = S.phoneNow();
+    S.attach(hud, { storage });
+    return { phone, dock: !hud.classList.contains("dock-closed"), party: !hud.querySelector(".hd2d-party").classList.contains("collapsed") };
+  };
+  assert.deepEqual(attach([SH.short]), { phone: true, dock: false, party: false }, "手机横过来：都收起");
+  assert.deepEqual(attach([SH.phone]), { phone: true, dock: false, party: false }, "竖屏手机：照旧收起");
+  assert.deepEqual(attach([]), { phone: false, dock: true, party: true }, "电脑（宽屏，或者矮窗口但是鼠标，SHELL.short 套不上）：照旧展开");
+  assert.deepEqual(attach([SH.short], { [SH.keys.dock]: "open", [SH.keys.party]: "open" }), { phone: true, dock: true, party: true }, "手动点开过的照本机记着的");
+});

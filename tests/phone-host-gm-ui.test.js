@@ -1,10 +1,12 @@
-// #429 第 4 步：安卓手机竖屏（412×915）当联机跑团主持人，战斗里主持人的专属操作只用点按逐个走通（要浏览器；不用浏览器的在 tests/phone-host.test.js）。
+// #429 第 4、5 步（要浏览器；不用浏览器的在 tests/phone-host.test.js）。
+// 第 4 步：安卓手机竖屏（412×915）当联机跑团主持人，战斗里主持人的专属操作只用点按逐个走通。
 //   · 轮到这台机器出手时技能栏自己展开（照联机玩家 #311；以前单机 / 房主手机上技能栏一直收着，「结束单位行动」看不见），轮到玩家「甲」就收起
 //   · 主持人的「检定申请 · N」挂在技能栏上面（以前贴在左下角，正好压住「技能 ▲」），点开批准并掷骰
 //   · 战斗里打开主持人工具：敌人（加敌人）、单位、配置物、地形、天气、安排攻击六栏都点得到、做得成
 //   · 敌人回合主持人手动操控敌人：选技能、选目标、执行，结束敌人回合
 //   · 发大字；结算以后回到探索；探索里开工匠、开店
 //   · 电脑上照旧：技能栏不跟着轮次收起 / 展开，「检定申请 · N」照旧贴在左下角
+// 第 5 步：手机横过来（915×412：高 < 500、手指点）队伍栏、技能栏默认收起，战场露出来；电脑上的矮窗口（鼠标）照旧开着
 // 页面同 tests/phone-host-ui.test.js：真的 game.html 当联机房主（假的转发连接、房间里还有一名玩家「甲」p-1），新画面换成不画 WebGL 的假场景。
 // 手机用 Playwright 的移动端模拟（412×915、isMobile、hasTouch），只用点按（page.tap；下拉框用 selectOption、输入框用 fill，和手机上点开选一样）；
 // 没装 Playwright 时在 Linux 上用机器自带的 Chrome（tests/cdp-browser.js），都没有就跳过。
@@ -53,7 +55,9 @@ test.after(async () => {
 });
 
 const PHONE = { viewport: { width: 412, height: 915 }, isMobile: true, hasTouch: true };
+const LAND = { viewport: { width: 915, height: 412 }, isMobile: true, hasTouch: true };
 const DESK = { viewport: { width: 1440, height: 900 } };
+const DESK_SHORT = { viewport: { width: 1280, height: 480 } };
 const HD2D_SCRIPTS = ["hd2d/hd2d-layout.js", "hd2d/hd2d-camera.js", "hd2d/hd2d-fx.js", "hd2d/hd2d-ui.js", "hd2d/hd2d-shell.js"];
 const settle = page => page.waitForTimeout(150);
 
@@ -464,5 +468,41 @@ test("#429 电脑上照旧（1440×900、鼠标）：技能栏照旧开着，轮
   await page.waitForSelector(".crq-pill", { state: "visible" });
   const pill = await page.evaluate(() => { const r = document.querySelector(".crq-pill").getBoundingClientRect(); return { left: r.left, bottom: innerHeight - r.bottom }; });
   assert.deepEqual([Math.round(pill.left), Math.round(pill.bottom)], [12, 12], "照旧贴在左下角：" + JSON.stringify(pill));
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- 第 5 步：手机横过来（高 < 500、手指点）队伍栏、技能栏默认收起 ---------- */
+/** 队伍栏、技能栏这一刻：收没收、多大；战场中间那一点露不露出来（没被它们盖住） */
+const panels = page => page.evaluate(() => {
+  const hud = document.querySelector("#g-app > .g-hud"), party = hud.querySelector(".hd2d-party"), d = hud.getBoundingClientRect(), p = party.getBoundingClientRect();
+  const mid = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+  return { dockClosed: hud.classList.contains("dock-closed"), partyClosed: party.classList.contains("collapsed"), dockH: Math.round(d.height), partyW: Math.round(p.width), vw: innerWidth, vh: innerHeight,
+    midFree: !!mid && !hud.contains(mid) };
+});
+test("#429 手机横过来 915×412（只用点按）：队伍栏、技能栏默认收起，战场露出来（以前两块都开着，把战场整个盖住）；点「技能 ▲」照样展开、「结束单位行动」点得到；「菜单」在屏幕里", { timeout: 120000 }, async t => {
+  const o = await hostPage(t, { ctx: LAND }); if (!o) return; const { page } = o;
+  const look = await panels(page);
+  assert.equal(look.dockClosed && look.partyClosed, true, "技能栏、队伍栏都收着：" + JSON.stringify(look));
+  assert.ok(look.dockH <= look.vh * 0.25 && look.partyW <= look.vw * 0.15 && look.midFree, "收起来只占一小块，战场中间露出来：" + JSON.stringify(look));
+  await startByTap(page);
+  await settle(page);
+  const acting = await panels(page);
+  assert.equal(acting.dockClosed && acting.partyClosed, true, "开打以后照旧收着（横屏不跟着轮次自己展开）：" + JSON.stringify(acting));
+  const menu = await reach(page, MENU);
+  assert.ok(menu && menu.inside && menu.hit, "「菜单」在屏幕里、点得到：" + JSON.stringify(menu));
+  await page.tap(DOCK_TOGGLE);
+  await page.waitForFunction(sel => !document.querySelector(sel).classList.contains("dock-closed"), HUD);
+  await settle(page);
+  const end = await reach(page, "#g-endturn");
+  assert.ok(end && end.inside && end.hit, "点「技能 ▲」展开以后「结束单位行动」点得到：" + JSON.stringify(end));
+  const side = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, vw: innerWidth }));
+  assert.ok(side.doc <= side.vw, "不横向溢出：" + JSON.stringify(side));
+  assert.deepEqual(o.errors, []);
+});
+
+test("#429 电脑上的矮窗口（1280×480、鼠标）照旧：队伍栏、技能栏默认开着", { timeout: 120000 }, async t => {
+  const o = await hostPage(t, { ctx: DESK_SHORT }); if (!o) return; const { page } = o;
+  const look = await panels(page);
+  assert.equal(look.dockClosed || look.partyClosed, false, "都开着：" + JSON.stringify(look));
   assert.deepEqual(o.errors, []);
 });
