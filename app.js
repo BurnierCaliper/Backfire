@@ -609,7 +609,9 @@ function glowStoreTurnEnd(notes) {
     if (!(val > 0 && hp < val)) { u._glowStoreOver = 0; return; }
     u._glowStoreOver = (Number(u._glowStoreOver) || 0) + 1;
     if (u._glowStoreOver < 2) {
-      notes.push(`${u.name} 微光 · 蓄能：高能值 ${val} 超过血量 ${hp}（第 1 个回合结束；下个回合结束还超过就自爆）。`);
+      // #340 第 12 条：起身中 currentLifeForHigh 读的是坚毅剩余；游戏版不写这个数字
+      const hpText = u.upOnShp && typeof shpHidden === "function" && shpHidden() ? "当前坚毅生命" : `血量 ${hp}`;
+      notes.push(`${u.name} 微光 · 蓄能：高能值 ${val} 超过${hpText}（第 1 个回合结束；下个回合结束还超过就自爆）。`);
       return;
     }
     u._glowStoreOver = 0;
@@ -647,7 +649,9 @@ function explodeHigh(unit, total, opt) {
   const he = Math.max(Number(total) || 0, Number(unit.highEnergy) || 0);
   const aoe = Math.floor(he / 2);
   const lifeBefore = currentLifeForHigh(unit);
-  appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ 当前生命 ${lifeBefore}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
+  // #340 第 12 条：起身中 lifeBefore 就是坚毅剩余；游戏版日志不写这个数字（判定仍用 currentLifeForHigh）
+  const lifeText = unit.upOnShp && typeof shpHidden === "function" && shpHidden() ? "当前坚毅生命" : `当前生命 ${lifeBefore}`;
+  appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ ${lifeText}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
   // 画面：专门的「高能自爆」演出（大字、震屏、爆炸声、大号数字），溢出部分显示成负血量
   spawnPopup(unit, { kind: "highboom", value: he, text: String(aoe), element: "energy" });
   const envBoom = "envBy" in opt;
@@ -5994,10 +5998,11 @@ function tickSelfBurn(u, growStacks) {
   const maxPool = onShp ? (Number(u.shpMax) || Number(u.shp) || 0) : totalMaxHp(u);
   const cur = onShp ? (Number(u.shp) || 0) : totalHp(u);
   const cap = Math.max(0, cur - 1);
-  const loss = Math.min(maxPool * 0.1 * stacks, cap);
+  // #340 第 13 条：自焚扣量向下取整（坚毅不再出现 31.7 这类小数）；起身中游戏版不弹伤害数字（能推出上限/剩余）
+  const loss = Math.floor(Math.min(maxPool * 0.1 * stacks, cap));
   if (onShp) {
     u.shp = Math.max(1, (Number(u.shp) || 0) - loss);
-    spawnFloater(u, loss, "fire");
+    if (!shpHidden()) spawnFloater(u, loss, "fire");
     notes.push(shpHidden() ? `${u.name} 自焚×${stacks} 灼烧着坚毅生命（至少留 1）。`
       : `${u.name} 自焚×${stacks} 对 SHP 造成 ${round2(loss)}（上限10%×层，至少留 1）。SHP ${u.shp}/${u.shpMax || "?"}`);
   } else {

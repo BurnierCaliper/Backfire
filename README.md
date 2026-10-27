@@ -368,6 +368,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js）
+  - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
+  - **现在**：
+    - 第 12 条：游戏版起身中，自爆 / 蓄能日志改写「当前坚毅生命」，不写数字。判定仍用 `currentLifeForHigh`（规则没动）。
+    - 第 13 条：自焚扣量 `Math.floor`（坚毅 / 血量层都不再出小数）；游戏版起身中不 `spawnFloater`。日志在游戏版本来就不写数字，照旧。
+    - 第 14 条：训练中给 `body` 挂 `training-battle`，CSS 藏 `#g-bs` 和 `#g-party-backstage`；`openBackstage` 在训练中直接返回。
+  - **没改的**：道具 / 效果说明里的「花费 N 点坚毅」等**固定花费**照常写；单机打进坚毅的伤害数字（第 15 条，另定）；跑团主持人视角（`shpHidden()` 为假）仍看得到数字。
+  - **测试**：tests/shp-leak-340.test.js（新）：起身中自爆 / 蓄能日志无 37；自焚 floor 成整数且游戏版不弹字；血量层自焚也取整；源码有 training-battle / openBackstage 守卫。在没改的代码上失败。
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
