@@ -426,8 +426,8 @@ SKILL_RANGE.veh_fire = { min: 0, max: Math.max.apply(null, Object.keys(VEHICLES)
 SKILL_RANGE.veh_ram = { min: 0, max: 1 };
 SKILL_TARGET_SIDE.veh_fire = "enemy";
 SKILL_TARGET_SIDE.veh_ram = "enemy";
-/** u 是 a 能打的敌对单位（车里的炮手藏着，选不中；开车的驾驶员就是车，选得中） */
-function vehicleHostile(a, u) { return !!u && !u.dead && !u._removed && !u.hidden && !u.fused && hostileTo(a, u); }
+/** u 是 a 能打的敌对单位（车里的炮手藏着，选不中；开车的驾驶员就是车，选得中）。我方开着友伤（enemies.js · friendlyFireHit，#428）时也算他以外的队友 */
+function vehicleHostile(a, u) { return !!u && !u.dead && !u._removed && !u.hidden && !u.fused && (hostileTo(a, u) || (typeof friendlyFireHit === "function" && friendlyFireHit(a, u))); }
 
 /** 乘员在车上能用的招式（界面和 AI 共用）：[{ id, name, hint }] */
 function vehicleRideSkills(u) {
@@ -486,7 +486,7 @@ function vehicleSkillWhy(a, id, t) {
   if (k === "veh_leave") return null;
   if ((k === "veh_cover" || k === "veh_ram") && !a.vehMerged) return `只有驾驶员能${k === "veh_cover" ? "张开掩体" : "冲撞"}。`;
   if (t && t.id && !t.isStructure && (k === "veh_fire" || k === "veh_ram")) {
-    if (!hostileTo(a, t)) return `${t.name} 不是敌对的单位。`;
+    if (!hostileTo(a, t) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return `${t.name} 不是敌对的单位。`;
     const d = zoneDist(a.zone, t.zone, state.zoneMode);
     if (k === "veh_fire" && d > c.cannon.range) return `开炮只打距离 ${c.cannon.range} 以内的目标。`;
     if (k === "veh_ram" && d > 1) return "冲撞要先移动一个区：目标得在同区或相邻的区。";

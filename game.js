@@ -55,6 +55,17 @@
   const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
   /** 从 gen 那一刻起这场战斗被放弃了（abandonBattle）：半路的流程醒过来先看这个，是就直接退出，不再结算、不碰之后摆的新战场 */
   const abandoned = (gen) => gen !== G.battleGen;
+  /* 触屏（没有悬停：手机、平板，touchUI，#429）的说法：键盘才有的操作都有看得见的按钮，提示里不写按键（Tab、空格、Esc、右键……），换成点哪里。
+   *   pick / stunned  默认提示（defaultHint）：「Tab 切换角色，空格结束回合」换成点头像换人、点技能栏右下角的按钮结束（{0} = 按钮上的字）
+   *   giveUp          选目标时按钮条上的「放弃」（电脑上写「放弃（Esc）」）
+   *   tapCancel       触屏点了一下不用选目标的技能、正在预演时，按钮条上的「取消」（电脑上没有：鼠标移开预演就收起）
+   * 按键的小字（技能右下角的数字、唤出的「· Q」、开始 / 结束按钮的「空格」、问答框选项前的数字和 Esc）触屏上不画。电脑上的字一个不改 */
+  const TOUCH_TEXT = {
+    pick: "选择技能。点头像换人，点「{0}」结束。",
+    stunned: "失衡中，本回合无法行动。点头像换人。",
+    giveUp: "放弃",
+    tapCancel: "取消"
+  };
 
   function wait(ms) {
     if (G.instant) return Promise.resolve();
@@ -436,7 +447,9 @@
   function undoRules() {
     if (!canUndo()) return;
     const u = G.undo.pop();
+    const ff = state.friendlyFire;   // 友伤开关（#428）是设置：撤销一次行动不把它改回去
     restoreState(u.st);
+    if (ff !== undefined) state.friendlyFire = ff;
     foldLogPages(u.logPages);
     if (u.ledger && typeof LEDGER !== "undefined") {
       const water = ledgerWater();
@@ -450,6 +463,16 @@
     return { label: u.label };
   }
 
+  /** 友伤（#428）：预演里打到队友的那一击排进了格挡队列（等队友回答）——按「没人格挡」落下再看结果
+   *  （和敌人攻击时「不格挡」的预演一样，格挡这类随机判定都按失败预演），不然看不到打到队友的伤害，队友也会被当成「没有效果」选不了。
+   *  只在预演开始时队列是空的才做，只结算排在队首的友伤那几击（不碰敌人攻击的格挡） */
+  function settleFriendlyBlocks() {
+    for (let guard = 0; guard < 30; guard++) {
+      const job = (state.blockQueue || [])[0];
+      if (!job || !(job.opt && job.opt.flags && job.opt.flags.friendlyFire)) return;
+      finishBlock(null);
+    }
+  }
   function simulate(thunk, diceMode) {
     const saved = saveState();
     // 队伍档案（LEDGER）里战斗中会动的东西不在 state 里：预演完也要还原，不然悬停一下就真的用掉了——
@@ -472,7 +495,8 @@
     };
     const before = snapAll();
     let err = null;
-    try { thunk(); } catch (e) { err = e; }
+    const queued = (state.blockQueue || []).length;
+    try { thunk(); if (!queued) settleFriendlyBlocks(); } catch (e) { err = e; }
     const after = snapAll();
     const tape = G.tape;
     Math.random = rnd;
@@ -1935,7 +1959,7 @@
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
-        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
+        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target, attacker) : [];   // 以身作盾（feats.js）；打的人自己不算（友伤，#428）
         let choice = null;
         if (helpers.length || walls.length) {
           // 问要不要格挡时，战场上画出这一击从谁打向谁（红色虚线 + 准星）
@@ -2184,7 +2208,7 @@
   function promptBlock(job, attacker, target, helpers, walls) {
     walls = walls || [];
     // 以身作盾（feats.js）：选项带 extra.ironwall，回答时换成 "ironwall:单位"
-    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []);
+    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target, attacker) : []);
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` }))
         .concat(walls.map(h => ({ helper: h.id, label: `${h.name} 以身作盾`, sub: "专长 · 必定挡住，击破由自己承担 · 每次短休一次", extra: { ironwall: true } }))),
@@ -2470,30 +2494,33 @@
       if (b.isConnected) showSkillPv(sk);   // 技能栏重画过就不算了
     }, SKILL_PV_DELAY);
   }
-  /** 取消等着的预演；clear：画着的悬停预演也收起（回到默认说明） */
+  /** 取消等着的预演；clear：画着的悬停预演也收起（回到默认说明），触屏预演时的「取消」那一条也收起（#429） */
   function stopSkillPv(clear) {
     if (skHover.timer) { clearTimeout(skHover.timer); skHover.timer = 0; }
     if (clear && skHover.shown) clearPreview();
+    if (clear && !G.skillTap) { const bar = $("g-pick-bar"); if (bar && bar.dataset.tap) showPickBar(null); }
   }
   /** 触屏：不用选目标、也没有分步的技能第一下先预演（和悬停一样），再点同一个按钮才放出去。处理了（只预演）返回 true */
   function skillTapPv(sk, b) {
     const actor = skillPvActor();
     if (!actor || blockReason(actor, sk)) { G.skillTap = null; return false; }
     const key = skillPvStampNow() + "|" + actor.id + "|" + sk.id;
-    if (G.skillTap && G.skillTap.key === key) { G.skillTap = null; return false; }   // 第二下：放出去
+    if (G.skillTap && G.skillTap.key === key) { G.skillTap = null; stopSkillPv(true); return false; }   // 第二下：放出去（「取消」那一条收起）
     let info = null;
     try { info = skillPvInfo(actor, sk); } catch (e) { info = null; }
     if (!info || info.kind !== "self") { G.skillTap = null; return false; }   // 要选目标 / 分步：照旧直接进入选择
     paintSkillPv(unitById(actor.id) || actor, sk, info);
     G.skillTap = { key, skillId: sk.id };
     b.classList.add("armed");
-    setHint(`<b>${esc(sk.name)}</b>：预演在上面。再点一下放出去，点别的地方取消。`);
+    setHint(`<b>${esc(sk.name)}</b>：预演在上面。再点一下放出去，点「${esc(TOUCH_TEXT.tapCancel)}」或别的地方收起。`);
+    // 看得见的「取消」（#429：和电脑上 Esc / 鼠标移开一样，收起预演、什么都没扣）
+    showPickBar([{ label: TOUCH_TEXT.tapCancel, tapCancel: true }], false, true);
     return true;
   }
   function cancelSkillTap() {
     if (!G.skillTap) return;
     G.skillTap = null;
-    document.querySelectorAll("#g-skills .sk.armed").forEach(x => { if (!(G.arm && G.arm.skillId === x.dataset.skill)) x.classList.remove("armed"); });
+    document.querySelectorAll("#g-skills .sk.armed, #g-summon.armed").forEach(x => { if (!(G.arm && G.arm.skillId === x.dataset.skill)) x.classList.remove("armed"); });
     stopSkillPv(true);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
   }
@@ -2739,11 +2766,11 @@
     try { return await pickUnit(cands, labelFn, buttons); }
     finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
   }
-  /** 选目标时的额外按钮条（在提示栏下面） */
-  function showPickBar(buttons, giveUp) {
+  /** 选目标时的额外按钮条（在提示栏下面）；tap = 触屏预演时的「取消」那一条（#429：cancelSkillTap 收起的只是它，选目标的那一条不动） */
+  function showPickBar(buttons, giveUp, tap) {
     let bar = $("g-pick-bar");
-    if (giveUp) buttons = (buttons || []).concat([{ label: "放弃（Esc）", giveUp: true }]);
-    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
+    if (giveUp) buttons = (buttons || []).concat([{ label: touchUI() ? TOUCH_TEXT.giveUp : "放弃（Esc）", giveUp: true }]);   // 触屏没有 Esc（#429）
+    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; delete bar.dataset.tap; } return; }
     if (!bar) {
       bar = el("div", "g-pick-bar");
       bar.id = "g-pick-bar";
@@ -2751,10 +2778,12 @@
       if (row && row.parentNode) row.parentNode.insertBefore(bar, row); else document.body.appendChild(bar);
     }
     bar.innerHTML = "";
+    if (tap) bar.dataset.tap = "1"; else delete bar.dataset.tap;
     buttons.forEach(b => {
       const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
-      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改
+      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改；触屏预演时的「取消」：收起预演（和点别的地方一样）
       if (b.giveUp) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); disarm(); }; }
+      else if (b.tapCancel) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); cancelSkillTap(); }; }
       else x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
       bar.appendChild(x);
     });
@@ -2873,6 +2902,24 @@
   }
   /** 触屏没有悬停：第一下点目标先预览，再点一下才出手 */
   function touchUI() { return !!(window.matchMedia && window.matchMedia("(hover: none)").matches); }
+  /** 这一刻算不算手机竖屏（paper-ui.js · BASE.phone.media，和 online-paper.css 手机那一段一样宽；#429 手机上技能栏什么时候自己展开） */
+  function phonePaper() {
+    try { return !!(window.matchMedia && window.PaperUI && window.matchMedia(PaperUI.BASE.phone.media).matches); } catch (e) { return false; }
+  }
+  /** 热座 / 联机：这台机器的操作者现在为什么不能操作 u（空 = 能；画按钮、提示、技能栏要不要展开用，#429）。
+   *  HotseatGame.reason 在执行玩家发来的指令时按发指令的人问（online-game.js · withOperator）：玩家「结束单位行动」后轮到主持人的那一下，
+   *  画出来的「结束单位行动」灰着、提示写「不是你的角色或武器人」，之后没有别的事就一直这样（电脑上空格照样能结束，手机上没有空格就点不了）。
+   *  这里按这台机器的操作者（HotseatGame.getView().playerId）问；hsView 有就直接用 */
+  function localReason(u, hsView) {
+    if (!hotseat()) return "";
+    const id = (hsView || HotseatGame.getView()).playerId;
+    try { return HotseatGame.withOperator(id, () => HotseatGame.reason(u)); } catch (e) { return HotseatGame.reason(u); }
+  }
+  /** 这一刻轮到这台机器出手（#429）：开打了、我方回合、没结束；热座 / 联机房主还要轮到的那个人这台机器的操作者能动（和「结束单位行动」能不能点同一条） */
+  function localTurn(hsView) {
+    if (!state.combatStarted || G.ended || state.combatPhase !== "player") return false;
+    return !hotseat() || !localReason(unitById(HotseatGame.currentUnit()), hsView);
+  }
   /** 选区域时点中某个区（点区里的空白，或者点区里的单位 / 配置物卡片都算）。处理了返回 true */
   function pickZoneByClick(zone) {
     if (!(G.arm && G.arm.mode === "zone" && zone && G.arm.zones.has(Number(zone.dataset.num)))) return false;
@@ -2961,7 +3008,8 @@
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
     let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf" || side === "anySelf"));
     if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
-    else if (side === "enemy") all = all.filter(u => !u.isPlayer);
+    // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428）时自己以外的队友也能选（自己已经在上面去掉了）
+    else if (side === "enemy") all = all.filter(u => !u.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(actor, u)));
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
     const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
     // 抵近射击（专长）：写着距离 1 的攻击也能打同区
@@ -4012,7 +4060,7 @@
         const cost = [];
         if (summonSk.cost.ap) cost.push(`行动 ${summonSk.cost.ap}`);
         if (summonSk.cost.bonus) cost.push(`附赠 ${summonSk.cost.bonus}`);
-        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`);
+        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")}${touchUI() ? "" : " · Q"}</small>`);   // 触屏没有 Q 键（#429）
         hudAttr(sb, "aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
         wireSkill(sb, summonSk, why);
       }
@@ -4055,6 +4103,12 @@
     // 新画面：选中技能以后技能栏先收起（选目标时提示栏、按钮条不再把它撑高挡住战场），演完这一下、回到选技能时再展开（#362，hd2d-shell.js · fold；
     // 收着的这一段取景照收起之前的技能栏让开，镜头不重新取景）。不用选目标的技能直接出手，不收
     if (shell) { if (G.arm && G.arm.skillId) shell.fold(hudEl, true); else if (G.depth === 0) shell.fold(hudEl, false); }
+    // 手机竖屏（#429，照联机玩家 #311）：技能栏没手动点过「技能 ▼ / ▲」时，轮到这台机器出手（演出播完）展开、不是就收起，让出战场
+    // （paper-ui.js · dockAuto；不记在本机，选中技能以后先收着的那一段不在这里展开）。手动点过的照本机记着的（hd2d-shell.js · manual）；电脑上不动
+    if (shell && window.PaperUI) {
+      const want = PaperUI.dockAuto({ phone: phonePaper(), manual: shell.manual(hudEl, "dock"), mine: localTurn(hsView), busy: G.depth > 0 });
+      if (want != null) shell.setPanel(hudEl, "dock", want);
+    }
     // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
     const gauge = $("g-gauge");
     if (gauge) {
@@ -4064,15 +4118,15 @@
       hudAttr(gauge, "aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
     }
 
-    // 开始战斗 / 结束回合：字没变就不碰（#317）
-    const et = $("g-endturn");
+    // 开始战斗 / 结束回合：字没变就不碰（#317）；触屏没有空格键，不写「空格」（#429）
+    const et = $("g-endturn"), spaceKey = touchUI() ? "" : "<small>空格</small>";
     let etText;
     if (!state.combatStarted) {
       et.disabled = G.depth > 0 || G.ended;
-      etText = "开始战斗<small>空格</small>";
+      etText = "开始战斗" + spaceKey;
     } else {
       et.disabled = G.depth > 0 || G.ended || state.combatPhase !== "player";
-      etText = "结束回合<small>空格</small>";
+      etText = "结束回合" + spaceKey;
     }
     if ($("g-start")) {
       $("g-start").disabled = !!state.combatStarted || G.ended;
@@ -4081,7 +4135,7 @@
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
-      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动<small>空格</small>"; }
+      else if (hotseat()) { et.disabled = et.disabled || !!localReason(unitById(HotseatGame.currentUnit()), hsView); etText = "结束单位行动" + spaceKey; }
     }
     hudInner(et, etText);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
@@ -4110,10 +4164,12 @@
   function defaultHint() {
     const a = unitById(G.actorId);
     if (G.ended) return "";
-    if (hotseat() && state.combatStarted) { const why = HotseatGame.reason(a); if (why) return esc(why); }
+    if (hotseat() && state.combatStarted) { const why = localReason(a); if (why) return esc(why); }
     if (!state.combatStarted) return "摆好队伍和敌人后，点「开始战斗」。回合开始效果会在此时结算。";
     if (state.combatPhase !== "player") return "敌人行动中。点击战场可以跳过演出。";
     if (!a) return "选择一名角色。";
+    // 触屏（#429）：没有 Tab、空格，写点哪里（按钮上的字照 refreshHud：热座 / 联机里结束的是这一个单位的行动）
+    if (touchUI()) return `<b>${esc(a.name)}</b>　${esc(a.stunned ? TOUCH_TEXT.stunned : TOUCH_TEXT.pick.replace("{0}", window.HotseatGame && HotseatGame.isRequested() && hotseat() ? "结束单位行动" : "结束回合"))}`;
     if (a.stunned) return `<b>${esc(a.name)}</b> 失衡中，本回合无法行动。Tab 切换角色。`;
     return `<b>${esc(a.name)}</b>　选择技能。Tab 切换角色，空格结束回合。`;
   }
@@ -5381,13 +5437,21 @@
     });
     // 暂停页面（pause-menu.js，#298）：选着技能 / 正在选目标、弹着选项、在播演出时，Esc 留给上面取消，不开菜单
     if (window.PauseMenu) PauseMenu.addBlocker(() => document.body.dataset.screen === "battle" && (!!G.arm || !!choiceResolve || G.depth > 0));
+    // 友伤开关（#428，文字在 pause-menu.js · PAUSE_MENU.items.friendlyFire）：战斗画面里才有；联机玩家用 online-ui.js 那一项。
+    // 点一下开 / 关，菜单不收起，改了立刻生效；改的是自己的那一个（热座 / 联机房主按这台电脑当前的操作者，本机一个人管全队）
+    if (window.PauseMenu) PauseMenu.register({ id: "friendlyFire", stay: true,
+      visible: () => document.body.dataset.screen === "battle" && !document.body.classList.contains("online-player"),
+      pressed: () => friendlyFireMine(),
+      label: () => { const c = PauseMenu.CONFIG.items.friendlyFire; return friendlyFireMine() ? c.on : c.off; },
+      hint: () => { const c = PauseMenu.CONFIG.items.friendlyFire, on = friendlyFireNames(); return on.length ? `${c.hint}。${c.who(on.join("、"))}` : c.hint; },
+      run: () => toggleFriendlyFire() });
     document.addEventListener("contextmenu", (e) => {
       if (G.arm) { e.preventDefault(); disarm(); }
     });
-    // 触屏：不用选目标的技能点了一下正在预演，点别的地方就取消（再点同一个技能按钮才放出去）
+    // 触屏：不用选目标的技能点了一下正在预演，点别的地方就取消（再点同一个技能按钮才放出去；唤出武器人的大按钮也算，#429：以前第二下被这里当成点了别处，永远放不出去）
     document.addEventListener("click", (e) => {
       if (!G.skillTap) return;
-      const b = e.target && e.target.closest ? e.target.closest("#g-skills .sk") : null;
+      const b = e.target && e.target.closest ? e.target.closest("#g-skills .sk, #g-summon") : null;
       if (b && b.dataset.skill === G.skillTap.skillId) return;
       cancelSkillTap();
     }, true);
@@ -5604,6 +5668,24 @@
     $("g-fast").setAttribute("aria-pressed", G.fast ? "true" : "false");
     $("g-fast").textContent = G.fast ? "演出 2×" : "演出 1×";
   }
+  /* 友伤开关（#428，规则在 enemies.js · FRIENDLY_FIRE）：这台电脑上的操作者——热座 / 联机房主按当前操作者（HotseatGame 的 playerId），
+   * 本机（单局、单人、跑团）null = 一个人管全队的那一个开关 */
+  function friendlyFireOwnerHere() { return hotseat() ? HotseatGame.getView().playerId : null; }
+  function friendlyFireMine() { return typeof friendlyFireSetting === "function" && friendlyFireSetting(friendlyFireOwnerHere()); }
+  /** 热座 / 联机：现在开着友伤的人（名字按操作者；这台电脑上的写「你」）。本机一个人就不列 */
+  function friendlyFireNames() {
+    if (!hotseat()) return [];
+    const v = HotseatGame.getView(), map = state.friendlyFire || {};
+    return (v.players || []).filter(p => map[p.id] === true).map(p => (p.id === v.playerId ? "你" : p.name || p.id));
+  }
+  function toggleFriendlyFire() {
+    const on = !friendlyFireMine();
+    try { dispatch({ type: "battle.friendlyFire", on }); } catch (e) { flashHint(e.message); return; }
+    disarm();      // 正在选目标：名单按新的开关重新排
+    G.version++;   // 技能悬停的预演按新的开关重算
+    refreshAll();
+    flashHint(on ? "友伤 开：你的攻击能选中自己以外的队友，范围攻击也会打到队友；打队友不计分数。" : "友伤 关：攻击只打敌人。");
+  }
 
   BattleCommands.configure({ game: G, applyCampaignToField, undo: undoRules, writeSlot, loadSlot, clearSlot, rememberCampaign: rememberCampaignRules, loadCampaignMem: loadCampaignMemRules });
 
@@ -5646,6 +5728,8 @@
   G.abandonBattle = abandonBattle;
   G.refresh = refreshAll;
   G.flashHint = flashHint;   // 新画面（hd2d/hd2d-field.js）打不开时在提示栏说一声
+  G.toggleFriendlyFire = toggleFriendlyFire;   // 友伤开关（菜单里那一项，#428）
+  G.friendlyFireMine = friendlyFireMine;
   G.fitZones = fitZones;
   G.act = act;
   G.actSystem = (cmd, meta, context) => act(cmd, meta, context);

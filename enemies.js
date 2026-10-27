@@ -1617,6 +1617,80 @@ function hostilesOf(a) {
   return (state.units || []).filter(u => u && hostileTo(a, u) && !u.dead && !u.hidden && !u._removed && !u.fused && u.kit !== "ironwall");
 }
 
+/* ===== 友伤开关（#428，作者 10/27）=====
+ * 每个玩家各自一个开关，默认关，战斗中途随时能改、改了立刻生效，只影响他自己操控的单位：
+ *   开着时，他的单位的攻击能选中除自己以外的所有队友（含武器人、护送对象），范围攻击（同区、整排、溅射、导体……）也打到范围里的队友，施放者自己除外。
+ *   打队友和打敌人完全一样算（克制、减伤、格挡 / 协助格挡、失衡……），只是不计分数（这一击带着 flags.friendlyFire：app.js · dealToInner / markPartyHurt /
+ *   applyKnockdown / finishBlockInner 看它不记分、不记战场数据）。
+ *   治疗、振奋这类增益照旧只给自己人；敌人的攻击、范围、AI 全部照旧。
+ * 状态：state.friendlyFire = { 操控者: true / false }，没记的人按 FRIENDLY_FIRE.defaultOn（存档、联机同步都跟着战斗状态走；
+ *   开新的一场战斗清空，回到默认的关：app.js · resetBattleRecords）。
+ * 操控者：本机一个人操控全队（FRIENDLY_FIRE.localOwner）；联机由房主的 hotseat-game.js 按角色分配换成各人（setFriendlyFireOwner）。
+ * 「谁能被这次攻击打到」统一问 attackFoe(a, b)：敌我不同（和以前一样），或者 a 开着友伤、b 是 a 以外的队友。以后 PvP（玩家分队对打）也接在这里 */
+const FRIENDLY_FIRE = {
+  defaultOn: false,      // 默认关
+  localOwner: "local"    // 本机（单局、单人、跑团）：一个开关管全队
+};
+let FRIENDLY_FIRE_OWNER = null;
+/** 联机房主登记「这个单位归谁操控」（u → 操控者 id；null = 回到本机一个人）。返回撤销函数 */
+function setFriendlyFireOwner(fn) {
+  const mine = typeof fn === "function" ? fn : null;
+  FRIENDLY_FIRE_OWNER = mine;
+  return () => { if (FRIENDLY_FIRE_OWNER === mine) FRIENDLY_FIRE_OWNER = null; };
+}
+/** 这个单位归哪个开关管：武器人跟着持有者；登记了联机的操控者就按分配查，查不到的（没分配）归本机 / 房主那一个。
+ *  玩家操控的碎渣机炮这类替身（creditTo）跟着操控它的人 */
+function friendlyFireOwner(u) {
+  if (u && u.creditTo && typeof unitById === "function") u = unitById(u.creditTo) || u;
+  if (!u || !u.isPlayer) return null;
+  if (FRIENDLY_FIRE_OWNER) {
+    let who = null;
+    try { who = FRIENDLY_FIRE_OWNER(u); } catch (e) { who = null; }
+    if (who) return String(who);
+  }
+  return FRIENDLY_FIRE.localOwner;
+}
+/** 某个操控者的开关现在开着没有（owner 不给 = 本机那一个） */
+function friendlyFireSetting(owner) {
+  const map = (typeof state !== "undefined" && state && state.friendlyFire) || null;
+  const key = owner == null ? FRIENDLY_FIRE.localOwner : String(owner);
+  if (map && typeof map === "object" && Object.prototype.hasOwnProperty.call(map, key)) return map[key] === true;
+  return !!FRIENDLY_FIRE.defaultOn;
+}
+/** 改某个操控者的开关（owner 不给 = 本机那一个）。换一份新的对象（联机按差量发、预演的拷贝都看得出变了）。返回改完的值 */
+function setFriendlyFire(owner, on) {
+  const key = owner == null ? FRIENDLY_FIRE.localOwner : String(owner);
+  const old = (state && state.friendlyFire && typeof state.friendlyFire === "object") ? state.friendlyFire : {};
+  const next = {};
+  Object.keys(old).forEach(k => { if (k !== key && typeof old[k] === "boolean") next[k] = old[k]; });
+  next[key] = !!on;
+  state.friendlyFire = next;
+  return !!on;
+}
+/** a 的攻击现在开着友伤没有（只看玩家一方的单位；敌人永远没有） */
+function friendlyFireOn(a) {
+  if (!a || !a.isPlayer) return false;
+  return friendlyFireSetting(friendlyFireOwner(a));
+}
+/** a 这一下打 b 是不是友伤：a 开着友伤，b 是 a 以外的队友（替身打操控它的人也算打自己，不算） */
+function friendlyFireHit(a, b) {
+  if (!a || !b || a === b || (a.id != null && a.id === b.id) || (a.creditTo != null && a.creditTo === b.id)) return false;
+  return !!a.isPlayer && !!b.isPlayer && friendlyFireOn(a);
+}
+/** 谁能被 a 的这次攻击打到（单体选目标、范围攻击挑人共用）：敌我不同的（和以前的 isPlayer 判断一样，友军 / 中立 / 下潜这些照旧另判），
+ *  或者 a 开着友伤、b 是 a 以外的队友（friendlyFireHit） */
+function attackFoe(a, b) {
+  if (!a || !b || a === b || (a.id != null && a.id === b.id)) return false;
+  return !!a.isPlayer !== !!b.isPlayer || friendlyFireHit(a, b);
+}
+/** 自动挑目标（#432，作者 10/27）：by 的自动攻击（瑞比的无人机、炮台、护送对象的还击、洗牌的红弹、音爆 / 探测模式触发的碎渣机炮……）
+ *  挑目标时，by 的操控者开着友伤就把 by 以外的队友（武器人、护送对象也算）也放进候选名单；挑法照原来的规则（最近、血最少、随机……），
+ *  只是名单变大了。u 是不是这样加进来的队友：by 以外、还在场上、没倒地（濒死没起身的打了也白打，和炮台 / 碎渣机炮挑我方时一样不挑）。
+ *  召唤物 / 替身本身不在场上的单位里；替身（creditTo）不挑操控它的人（friendlyFireHit）。射程、躲藏、隔墙这些照各处原来的条件另判 */
+function friendlyFirePick(by, u) {
+  return !!u && !!u.isPlayer && !u.dead && !u.hidden && !u.fused && !u._removed && !(u.dying && !u.upOnShp) && friendlyFireHit(by, u);
+}
+
 /* ===== 第三采矿场 ===== */
 /** 身上有高能状态（#52：蓄能攒的高能值不算） */
 function hasHigh(u) { return !!(u && u.statuses && u.statuses.high); }

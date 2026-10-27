@@ -84,7 +84,8 @@ const CYBERWARE_KINDS = {
     // 打不出去的目标在扣行动点之前拦下（和 app.js · dealTo 的判定一致）：躲藏中的不能被选作攻击目标，下潜中的只有谐波攻击打得到。
     // 到 dealTo 才拦的话，行动点、短休前的次数、坚毅生命都白扣了
     targetWhy: (u, d, t) => {
-      if (!t || !t.id || t.isPlayer || t.isStructure || t.kind) return null;
+      // 开着友伤（enemies.js · friendlyFireHit，#428）打队友：躲藏 / 下潜照样先查
+      if (!t || !t.id || (t.isPlayer && !(typeof friendlyFireHit === "function" && friendlyFireHit(u, t))) || t.isStructure || t.kind) return null;
       if (t.statuses && t.statuses.hide) return `${t.name} 躲藏中，不能被选作攻击目标`;
       if (t.submerged && d.element !== "harmonic") return `${t.name} 下潜中，只有谐波攻击打得到`;
       return null;
@@ -100,7 +101,7 @@ const CYBERWARE_KINDS = {
     roll: (d, rng) => ({ damage: cyberwareRollDamage(d.tier, d.range, rng), element: d.element, break: d.break, range: d.range }),
     run(u, d, ctx) {
       const t = ctx.t;
-      if (!t || (t.isPlayer && !t.isStructure)) { ctx.lines.push(`先选「${d.name}」打哪一名敌人。`); return false; }
+      if (!t || (t.isPlayer && !t.isStructure && !(typeof friendlyFireHit === "function" && friendlyFireHit(u, t)))) { ctx.lines.push(`先选「${d.name}」打哪一名敌人。`); return false; }
       const s = cyberwareDamageSpec(d.tier, d.range);
       ctx.lines.push(`${u.name} 发动义体「${d.name}」。`);
       ctx.hitOne(u, t, { atk: 0, mult: 0, flat: s.flat, diceN: s.dice.length, diceS: s.die.sides, diceB: s.dice.length * s.die.plus,
@@ -331,7 +332,8 @@ function cyberwareSkillTargetWhy(u, skillId, t, picks) {
   if (t && t.id && !t.isStructure && !t.kind) {
     if ((k.target === "ally" || k.target === "allySelf") && !t.isPlayer) return "只能对友方使用";
     if (k.target === "ally" && t.id === u.id) return "要选其他友方";
-    if (k.target === "enemy" && t.isPlayer) return "只能对敌人使用";
+    // 开着友伤（#428）时打敌人的义体也能对自己以外的队友用
+    if (k.target === "enemy" && t.isPlayer && !(typeof friendlyFireHit === "function" && friendlyFireHit(u, t))) return "只能对敌人使用";
   }
   return typeof k.targetWhy === "function" ? (k.targetWhy(u, d, t, picks || {}) || null) : null;
 }

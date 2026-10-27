@@ -204,14 +204,15 @@
       node.addEventListener("input", input); node.addEventListener("change", change);
       node.addEventListener("submit", event => { event.preventDefault(); if (event.target.id === "ol-message-form") sendMessage(); if (event.target.id === "ol-lobby-chat") sendLobbyChat(); });
     }
-    // 纸片画面（#308）的顶栏 / 吊牌：「工具 ▾」开关、镜头按钮（点新画面原来那几个）、⇅ 点开「延后 / 换位」（点热座栏原来那几个按钮）；
+    // 纸片画面（#308）的顶栏 / 吊牌：「工具 ▾」开关、镜头按钮（点新画面原来那几个；手机上收成一个，#429）、⇅ 点开「延后 / 换位」（点热座栏原来那几个按钮）；
     // 下拉里的一项（地图、战绩……：上面的 click 照旧处理；申请检定、新画面开关由它们自己的模块处理）点完就收起
     paperBox.addEventListener("click", event => {
       const t = event.target, OP = global.OnlinePaper;
       if (!t || !t.closest || !OP) return;
       if (t.closest('[data-olp="tools"]')) { toolsOpen = !toolsOpen; swapOpen = null; paintPaper(); return; }
-      const cam = t.closest("[data-olp-cam]");
-      if (cam) { OP.pressCam(stage, Number(cam.dataset.olpCam)); return; }
+      // 镜头：远 / 中 / 近，手机上收成的那一个（#429：点下一段）点的都是新画面原来那几个按钮
+      const cam = t.closest("[data-olp-cam], [data-olp-cam-next]");
+      if (cam) { OP.pressCam(stage, Number(cam.dataset.olpCam != null ? cam.dataset.olpCam : cam.dataset.olpCamNext)); return; }
       const sw = t.closest("[data-olp-swap]");
       if (sw) { const i = Number(sw.dataset.olpSwap); swapOpen = swapOpen === i ? null : i; toolsOpen = false; paintPaper(); return; }
       const mv = t.closest("[data-olp-move]");
@@ -939,6 +940,7 @@
         if (checkReq) checkReq.sync();
       }
       html(q(".olp-tags-host"), OP.tagsHtml(paperSlots(data, moves), { open: swapOpen, moving }), "paperTags");
+      if (OP.revealTag) OP.revealTag(q(".olp-tags-host"));   // 触屏上吊牌放不下横着滑（#429）：轮到的 / 点开 ⇅ 的那一张滑进来
       const hn = document.getElementById("hs-notice"), note = hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = q(".olp-note");
       noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note;
       watchPaper(true);
@@ -1521,6 +1523,14 @@
         pressed: () => !!(global.Sfx && global.Sfx.enabled()),
         label: () => { const c = global.PauseMenu.CONFIG.items.sfx; return global.Sfx && global.Sfx.enabled() ? c.on : c.off; },
         run: () => { const S = global.Sfx; if (!S) return; S.setEnabled(!S.enabled()); if (S.enabled()) S.play("physical"); } }),
+      // 友伤开关（#428）：战斗中，玩家改自己的那一个（发给房主，房主照规则结算）；开着没有看房主发来的 state.friendlyFire。
+      // 主持人用单机那一项（game.js 登记的 friendlyFire）
+      global.PauseMenu.register({ id: "friendlyFireOnline", config: "friendlyFire", stay: true,
+        visible: () => !!(view.active && !view.isHost && view.screen === "battle"),
+        pressed: () => myFriendlyFire(),
+        label: () => { const c = global.PauseMenu.CONFIG.items.friendlyFire; return myFriendlyFire() ? c.on : c.off; },
+        hint: () => { const c = global.PauseMenu.CONFIG.items.friendlyFire, on = friendlyFireNames(); return on.length ? `${c.hint}。${c.who(on.join("、"))}` : c.hint; },
+        run: () => { toggleFriendlyFire(); } }),
       // 离开房间 / 离开并保存（主持人）：每个画面都直接看得见，不用先进「消息与成员」；点了先确认（游戏内确认框）
       global.PauseMenu.register({ id: "leave", visible: () => !!view.active,
         label: () => { const c = global.PauseMenu.CONFIG.items.leave; return view.isHost ? c.hostLabel : c.label; },
@@ -1717,6 +1727,24 @@
       const ok = await askConfirm("结束行动", `${u.name || "这个单位"} 还有 ${Number(u.ap) || 0} 点行动、${Number(u.bonus) || 0} 次附赠没用，确定结束行动吗？`, "结束行动", "继续行动");
       // 等确认的这段时间里回合可能已经变了（超时 / 主持人操作），只在还是这名角色时才结束
       return ok && isMyTurn() && hs().currentUnitId === actor;
+    }
+    /** 友伤开关（#428）：自己的那一个开着没有——看房主发来的 state.friendlyFire（online-view.js 白名单只放行开关；没发 = 默认关） */
+    function myFriendlyFire() {
+      const map = (view.state || {}).friendlyFire, me = view.identity && view.identity.id;
+      return !!(map && me && map[me] === true);
+    }
+    /** 现在开着友伤的人（名字按房间成员；自己写「你」）：各人的开关状态大家都看得到 */
+    function friendlyFireNames() {
+      const map = (view.state || {}).friendlyFire || {}, me = view.identity && view.identity.id;
+      return Object.keys(map).filter(id => map[id] === true).map(id => id === me ? "你" : ((view.players || []).find(p => p.id === id) || {}).name || id);
+    }
+    /** 改自己的友伤开关：发给房主（hotseat-game.js 按发指令的人记）；正在选技能 / 目标时，名单是房主按旧的开关给的——按新的开关重新要一次 */
+    async function toggleFriendlyFire() {
+      if (disabled()) return false;
+      const on = !myFriendlyFire();
+      if (!(await call(() => api.submit({ type: "battle.friendlyFire", on })))) return false;
+      if (request && !destroyed) { const next = copy(request); delete next.target; await menu(next); }
+      return true;
     }
     /** 轮到自己的角色：自动取技能栏（不用再点「选择行动」）。每个回合 / 每次结算后的新状态取一次 */
     function scheduleAutoMenu() {

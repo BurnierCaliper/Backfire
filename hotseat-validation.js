@@ -173,8 +173,10 @@
     const hint = (sk.hint || "") + " " + (sk.name || "");
     const side = typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[cmd.skill] ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
+    // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428；按 actor 的操控者的开关）时自己以外的队友也能选
+    const friendly = side === "enemy" && target.isPlayer && typeof friendlyFireHit === "function" && friendlyFireHit(actor, target);
     if (!target.isStructure && ((target.id === actor.id && side !== "allySelf" && side !== "anySelf") ||
-      (["ally", "allySelf"].includes(side) && !target.isPlayer) || (side === "enemy" && target.isPlayer))) fail("这项技能不能选择这一方的目标", "invalid_target");
+      (["ally", "allySelf"].includes(side) && !target.isPlayer) || (side === "enemy" && target.isPlayer && !friendly))) fail("这项技能不能选择这一方的目标", "invalid_target");
     if (target.isStructure && ["ally", "allySelf", "anySelf"].includes(side)) fail("这项技能需要以单位为目标", "invalid_target");
     const ov = skillRangeFor(actor, cmd.skill), zones = target.zones || [target.zone];
     const reachable = zones.some(zone => {
@@ -217,7 +219,8 @@
       if (typeof cmd.dest !== "string" || !repairTargets().some(r => r.kit === cmd.dest && r.need > 0)) fail("维修工具包需要选一把要修的武器", "invalid_item");
       return;
     }
-    // 效果道具（36 种）：目标、射程、场地能不能改……都按规则层的同一套检查（items.js · itemUseError）
+    // 效果道具（36 种）：目标、射程、场地能不能改……都按规则层的同一套检查（items.js · itemUseError）。
+    // 对敌人用的道具：用道具的人开着友伤（#432，按 actor 的操控者的开关）时自己以外的队友也能选（items.js · itemEnemyOk）
     if (spec.effect && typeof itemUseError === "function") {
       if (spec.target === "zone" && (!Number.isInteger(cmd.dest) || cmd.target != null)) fail("道具需要选择有效区域", "invalid_item");
       if (spec.target !== "zone" && cmd.dest != null) fail("这件道具不接受区域选项", "invalid_item");
