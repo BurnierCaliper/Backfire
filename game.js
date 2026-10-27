@@ -3532,7 +3532,10 @@
     } catch (err) {
       names = (spec.enemies || []).map(e => e.preset);
     }
-    const extra = spec.extraToken ? " · 五代币" : "";
+    // 非默认枚数才标出来（基线 5 / 上滚到 6 等）；用实际 spec.tokens，不写死旧的固定文案
+    const tokN = Number(spec.tokens);
+    const tokBase = (typeof ENCOUNTER_TOKENS !== "undefined") ? ENCOUNTER_TOKENS : 4;
+    const extra = (tokN > 0 && tokN !== tokBase) ? (` · ${tokN} 代币`) : "";
     const mix = spec.mixed ? " · 混战" : "";
     return (spec.name || "遭遇") + extra + mix + (names.length ? " · " + names.join("、") : "");
   }
@@ -5488,8 +5491,8 @@
       const spec = dispatch({
         type: "battle.panel", action: "rollEncounter",
         region: $("g-enc-region").value, faction: $("g-enc-faction").value || null,
-        partySize: Number(state.partySize) || (typeof liveHeroCount === "function" ? liveHeroCount() : 0) || 0,
-        level: Number($("g-level") && $("g-level").value) || Number(G.level) || undefined
+        partySize: (typeof liveHeroCount === "function" ? liveHeroCount() : 0),
+        level: Number($("g-level") && $("g-level").value) || Number(G.level) || null
       }).value;
       $("g-enc-preview").textContent = encSummary(spec);
       startEncounter(spec);

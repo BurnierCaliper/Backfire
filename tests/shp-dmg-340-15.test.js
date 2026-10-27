@@ -113,7 +113,6 @@ test("第 15 条：计算器（非游戏版）起身中仍弹数字；README 有
   assert.ok(!floats.includes("坚毅受创"), "计算器不弹坚毅受创字：" + JSON.stringify(floats));
 
   const readme = fs.readFileSync(path.join(H.ROOT, "README.md"), "utf8");
-  // 整节「规则改动记录」里找（不按字数截：上面别的记录再长也不会让它失败）
   const idx = readme.indexOf("## 规则改动记录");
   assert.ok(idx >= 0);
   const end = readme.indexOf("\n## ", idx + 5);

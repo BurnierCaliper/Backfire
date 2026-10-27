@@ -333,11 +333,12 @@
       case "setScene": value = battleLookSet({ scene: cmd.value }); break;
       case "setLight": value = battleLookSet({ light: cmd.value }); break;
       case "rollEncounter": {
-        // 联机 / 同屏 / 战斗面板：把当前队伍人数（和可选的敌人等级）传进代币基线
+        // 联机 / 同屏 / 战斗面板：按即将上场的英雄数（liveHeroCount，不夹 2–4）和可选敌人等级算代币基线。
+        // 兜底不调 syncPartySizeFromField（会改缩放人数和下拉框）。
         const ps = cmd.partySize != null ? Number(cmd.partySize)
-          : (typeof syncPartySizeFromField === "function" ? syncPartySizeFromField()
-            : (Number(state.partySize) || (typeof liveHeroCount === "function" ? liveHeroCount() : 0) || 0));
-        const lv = cmd.level != null ? Number(cmd.level) : (Number(g.level) || undefined);
+          : (typeof liveHeroCount === "function" ? liveHeroCount()
+            : (Number(state.partySize) || 0));
+        const lv = cmd.level != null ? Number(cmd.level) : (Number(g.level) || null);
         value = rollEncounter({
           region: cmd.region,
           partySize: ps,

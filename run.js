@@ -222,18 +222,24 @@ const ENCOUNTERS = [
  * ============================================================== */
 
 const ENCOUNTER_TOKENS = 4;
-const ENCOUNTER_TOKENS_4P_L10 = 5;  // 4 人队且敌人等级 ≥ 10 的普通战基线
+/** 普通战代币基线例外表（主人 10/27 定）：恰好 partySize 人且敌人等级 ≥ minLevel → tokens。
+ *  查不到用 ENCOUNTER_TOKENS。显式 opt.tokens 不走 encounterTokenBudget。 */
+const ENCOUNTER_TOKEN_RULES = [
+  { partySize: 4, minLevel: 10, tokens: 5 }
+];
 const ENCOUNTER_UNIT_CAP = 12;     // 上场敌人数上限（对齐 4 枚代币 × 每组 3 只）
 const CHANCE_EXTRA_TOKEN = 0.05;   // 基线上再 +1（4→5 / 5→6）
 const CHANCE_MIXED = 0.05;         // 混战：无视阵营
 
-/** 普通战代币基线（不含 5% 上滚）。
- *  4 人队且遭遇敌人等级 ≥ 10 → 5；其余 → ENCOUNTER_TOKENS（4）。
- *  partySize / level 缺省或非法时按 4。显式 opt.tokens 不走这里。 */
+/** 普通战代币基线（不含 5% 上滚）。查 ENCOUNTER_TOKEN_RULES，否则 ENCOUNTER_TOKENS。
+ *  partySize / level 缺省或非法时按默认。显式 opt.tokens 不走这里。 */
 function encounterTokenBudget(partySize, level) {
   const n = Number(partySize);
   const lv = Number(level);
-  if (n === 4 && lv >= 10) return ENCOUNTER_TOKENS_4P_L10;
+  for (let i = 0; i < ENCOUNTER_TOKEN_RULES.length; i++) {
+    const r = ENCOUNTER_TOKEN_RULES[i];
+    if (n === r.partySize && lv >= r.minLevel) return r.tokens;
+  }
   return ENCOUNTER_TOKENS;
 }
 
