@@ -219,7 +219,8 @@
       if (typeof cmd.dest !== "string" || !repairTargets().some(r => r.kit === cmd.dest && r.need > 0)) fail("维修工具包需要选一把要修的武器", "invalid_item");
       return;
     }
-    // 效果道具（36 种）：目标、射程、场地能不能改……都按规则层的同一套检查（items.js · itemUseError）
+    // 效果道具（36 种）：目标、射程、场地能不能改……都按规则层的同一套检查（items.js · itemUseError）。
+    // 对敌人用的道具：用道具的人开着友伤（#432，按 actor 的操控者的开关）时自己以外的队友也能选（items.js · itemEnemyOk）
     if (spec.effect && typeof itemUseError === "function") {
       if (spec.target === "zone" && (!Number.isInteger(cmd.dest) || cmd.target != null)) fail("道具需要选择有效区域", "invalid_item");
       if (spec.target !== "zone" && cmd.dest != null) fail("这件道具不接受区域选项", "invalid_item");

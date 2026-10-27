@@ -3,6 +3,8 @@
 // 打队友和打敌人一样结算（格挡 / 协助格挡、被动、失衡），只是不计分数；敌人不受影响；联机只把开关状态发给玩家。
 // 规则在 enemies.js · FRIENDLY_FIRE / attackFoe，接线见 app.js · visibleEnemies / fieldFoes / dealTo、game.js · candidateUnits、
 // hotseat-validation.js · checkTarget、hotseat-game.js（按发指令的人记开关）、online-view.js · projectState（白名单）
+// 后续（#432，作者 10/27）：对敌人用的道具开着友伤也能对队友用（items.js · itemEnemyOk）；自动挑目标的（无人机、炮台、护送对象的还击……）
+// 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -411,4 +413,128 @@ test("指令：battle.friendlyFire 只收 true / false，owner 只收非空字�
   c.Commands.dispatch({ type: "battle.friendlyFire", on: false });
   assert.deepEqual(plain(S.friendlyFire), { local: false });
   assert.equal(c.friendlyFireSetting(), false);
+});
+
+/* ===== #432：友伤开关后续——道具、自动挑目标（作者 10/27 定）===== */
+
+const useItem = (c, actor, item, target, dest) => c.Commands.dispatch({ type: "useItem", actor: actor.id, item, target: target ? target.id : null, dest: dest == null ? null : dest });
+
+test("道具（#432）：对敌人用的道具开着友伤能对队友用（含武器人、护送对象），不能对自己；关着拦下、不扣道具", () => {
+  const { c, S, heroes: [kolt, helu, tou], foe } = field(["kolt", "helu", "tou"], "FF432-ITEM");
+  c.bagAdd("fx_sting", 3);
+  // 关着：照旧只对敌人
+  assert.match(c.itemUseError(kolt, "fx_sting", helu, null) || "", /敌人/, "关着：不能对队友用");
+  assert.ok(!c.itemTargetUnits(kolt, "fx_sting").some(u => u.isPlayer), "关着：本机名单里没有队友");
+  const hp0 = hp(c, helu), bonus0 = kolt.bonus;
+  useItem(c, kolt, "fx_sting", helu);
+  assert.equal(c.bagCount("fx_sting"), 3, "关着：没用出去，不扣道具");
+  assert.equal(kolt.bonus, bonus0, "也不扣附赠动作");
+  assert.equal(hp(c, helu), hp0);
+  assert.ok(!(helu.instant && helu.instant.sting));
+  // 开着：自己以外的队友（含武器人、护送对象）都能选，自己不能
+  ffOn(c);
+  c.Commands.dispatch({ type: "skill", actor: tou.id, skill: "tou_summon" });
+  const mochi = c.findKit("mochi", S.units);
+  const escort = c.spawnEscort({ kind: "vip" }, 5, null, 1);
+  const ids = c.itemTargetUnits(kolt, "fx_sting").map(u => u.id);
+  for (const u of [helu, tou, mochi, escort, foe]) assert.ok(ids.includes(u.id), "本机名单里有 " + u.name);
+  assert.ok(!ids.includes(kolt.id), "名单里没有自己");
+  assert.equal(c.itemUseError(kolt, "fx_sting", helu, null), null);
+  assert.equal(c.itemUseError(kolt, "fx_sting", escort, null), null, "护送对象也能选");
+  assert.match(c.itemUseError(kolt, "fx_sting", kolt, null) || "", /敌人/, "不能对自己用");
+  // 真的用在队友身上：照常结算（刺骨立刻打掉一截血），不计分数
+  useItem(c, kolt, "fx_sting", helu);
+  assert.equal(c.bagCount("fx_sting"), 2, "用出去了");
+  assert.equal(kolt.bonus, bonus0 - 1, "花 1 附赠动作");
+  assert.ok(helu.instant && helu.instant.sting, "队友被施加刺骨");
+  const lost = hp0 - hp(c, helu);
+  assert.ok(lost > 0, "刺骨立刻打掉一截血");
+  assert.equal(c.battleStat(helu).taken, 0, "承受伤害不记");
+  assert.ok(!S.battleScore.hurt, "不丢「无伤」奖励");
+  assert.equal(c.ffHurtOf(helu), lost, "记成友伤打掉的血：之后治回来先补、不算治疗分");
+});
+
+test("道具（#432）：打队友照常结算、不计分数——闪光震撼弹让队友失衡（由敌人接协助攻击）；超频针翻倍队友的护盾不算治疗；刺骨打倒队友不记倒地", () => {
+  // 不带灯：同区只有一个敌人时它被「决一死战」牵制，不接协助攻击
+  const { c, S, heroes: [kolt, helu, hiaki] } = field(["kolt", "helu", "hiaki"], "FF432-ITEM2");
+  ffOn(c);
+  ["fx_flash", "fx_overload", "fx_sting"].forEach(id => c.bagAdd(id, 2));
+  useItem(c, kolt, "fx_flash", helu);
+  assert.equal(helu.stunned, true, "队友失衡");
+  const job = (S.assistQueue || []).find(j => j.targetId === helu.id);
+  assert.ok(job && job.vsPlayer, "和平时我方失衡一样，由敌人接协助攻击");
+  c.addShieldLayer(hiaki, 10, false);
+  const heal0 = Number(S.battleScore.parts.heal) || 0, hp0 = hp(c, hiaki);
+  useItem(c, kolt, "fx_overload", hiaki);
+  assert.ok(hp(c, hiaki) > hp0, "护盾翻倍：血量变多");
+  assert.equal(c.battleStat(kolt).heal, 0, "不算治疗量");
+  assert.equal(Number(S.battleScore.parts.heal) || 0, heal0, "也不加治疗分");
+  helu.layers.forEach(l => { l.current = 1; });
+  useItem(c, kolt, "fx_sting", helu);
+  assert.equal(helu.dying, true, "刺骨打空最内层：照常濒死");
+  assert.equal(c.battleStat(helu).downs || 0, 0, "倒地次数不记");
+  assert.ok(!S.battleScore.hurt, "不丢「无伤」奖励");
+});
+
+test("道具（#432）：联机房主给的道具名单、出手前的校验（hotseat-validation.js）都认队友，不能选自己；关着照旧", () => {
+  const { c, ruby, hiaki, tou, foe, menu } = menuField();
+  c.bagAdd("fx_sting", 2);
+  const opts = () => menu({ skill: "__item", item: "fx_sting" }).choices.options.map(o => o.value);
+  const session = { assertAction: () => true };
+  const check = t => c.HotseatValidation.validateBattle({ type: "useItem", actor: ruby.id, item: "fx_sting", target: t.id, dest: null }, { session, sender: "p1", game: c.GAME });
+  assert.deepEqual(opts(), [foe.id], "关着：联机名单只有敌人");
+  assert.throws(() => check(hiaki), /敌人/, "关着：出手前的校验拦下");
+  assert.throws(() => menu({ skill: "__item", item: "fx_sting", target: hiaki.id }), /敌人/);
+  c.Commands.dispatch({ type: "battle.friendlyFire", on: true });
+  const on = opts();
+  assert.ok(on.includes(hiaki.id) && on.includes(tou.id) && on.includes(foe.id), "开着：联机名单列出距离 1 以内的队友和敌人");
+  assert.ok(!on.includes(ruby.id), "没有自己");
+  assert.doesNotThrow(() => check(hiaki), "开着：校验放行");
+  assert.throws(() => check(ruby), /敌人/, "不能对自己");
+  const ready = menu({ skill: "__item", item: "fx_sting", target: hiaki.id });
+  assert.equal(ready.choices.kind, "ready");
+  assert.deepEqual(plain(ready.choices.command), { type: "useItem", actor: ruby.id, item: "fx_sting", target: hiaki.id, dest: null });
+});
+
+test("道具（#432）：看的是用道具的人的操控者的开关——热座 p2 开、p1 没开：只有 p2 的角色能对队友用", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "FF432-ITEM-OWNER" });
+  c.location = { search: "?hotseat=1" }; c.URLSearchParams = URLSearchParams;
+  c.document = { getElementById() { return null; } };
+  c.setInterval = () => 1;
+  c.setTimeout = () => 1;
+  c.GAME = { depth: 0, sim: false, tape: null, ended: false, undo: [], disarm() {}, refresh() {} };
+  for (const file of ["hotseat.js", "hotseat-authority.js", "hotseat-validation.js", "hotseat-game.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(H.ROOT, file), "utf8"), c, { filename: file });
+  }
+  const S = c.S.state, kolt = c.findKit("kolt", S.units), helu = c.findKit("helu", S.units);
+  const players = [{ id: "p1", name: "主持人", gm: true }, { id: "p2", name: "玩家 2" }];
+  assert.deepEqual(plain(c.HotseatGame.configure({ mode: "trpg", players, assignments: { [kolt.id]: "p1", [helu.id]: "p2" } })), { ok: true });
+  const send = (id, command) => { c.HotseatGame.switchPlayer(id); return c.HotseatGame.submit(command); };
+  assert.equal(send("p1", { type: "startCombat" }).ok, true);
+  assert.equal(send("p2", { type: "battle.friendlyFire", on: true }).ok, true);
+  kolt.zone = helu.zone = 1;
+  c.bagAdd("fx_sting", 2);
+  assert.equal(c.itemUseError(helu, "fx_sting", kolt, null), null, "p2 的赫鲁米卡能对队友用");
+  assert.match(c.itemUseError(kolt, "fx_sting", helu, null) || "", /敌人/, "p1 的柯尔特不能");
+  const session = { assertAction: () => true }, game = { depth: 0, tape: null };
+  const check = (a, t, sender) => c.HotseatValidation.validateBattle({ type: "useItem", actor: a.id, item: "fx_sting", target: t.id, dest: null }, { session, sender, game });
+  assert.doesNotThrow(() => check(helu, kolt, "p2"));
+  assert.throws(() => check(kolt, helu, "p1"), /敌人/);
+});
+
+test("范围道具（#432，守卫）：投掷类道具本来就打区域里的全部单位（不分敌我，使用者自己也挨），开关开着关着都打得到队友；开着时打到队友不计分数", () => {
+  for (const on of [false, true]) {
+    const { c, heroes: [kolt, helu], foe } = field(["kolt", "helu"], "FF432-ZONE-" + on);
+    if (on) ffOn(c);
+    c.bagAdd("bomb_e", 1); c.bagAdd("fx_burn", 1);
+    const before = { kolt: hp(c, kolt), helu: hp(c, helu), foe: hp(c, foe) };
+    useItem(c, kolt, "bomb_e", null, 1);
+    assert.ok(hp(c, helu) < before.helu, "手榴弹炸到同区的队友");
+    assert.ok(hp(c, kolt) < before.kolt, "使用者自己也挨（不分敌我，和以前一样）");
+    assert.ok(hp(c, foe) < before.foe);
+    assert.equal(c.battleStat(helu).taken > 0, !on, on ? "开着：打到队友不计分数" : "关着：照旧记承受伤害");
+    useItem(c, kolt, "fx_burn", null, 1);
+    for (const u of [kolt, helu, foe]) assert.ok(Number(u.statuses.burn) > 0, "燃烧瓶：区域里的全部单位都挂上灼烧");
+  }
 });

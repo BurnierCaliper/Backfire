@@ -3462,6 +3462,8 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
 }
 function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   opts = opts || {};
+  // 友伤道具（items.js · itemFriendlyFireNow，#432）：对敌人用的道具用在队友身上，这一下落在我方身上的伤害按友伤算（不计分数）
+  if (!opts.friendlyFire && typeof itemFriendlyFireNow === "function" && itemFriendlyFireNow(unit)) opts = Object.assign({}, opts, { friendlyFire: true });
   if (ignoresAoe(unit)) {
     notes.push(`${unit.name} 是飞碟触灵本体，不受该范围/余波伤害。`);
     return;
@@ -6943,7 +6945,8 @@ function clearStunOnDown(u) {
  * opt.shpLoss：起身中的人这次要扣的坚毅生命（攻击已由 applyResultToUnit 扣过，不传）；
  * opt.lethal：秒杀（高能自爆），起身中的人坚毅生命直接扣光；
  * opt.cause：写进记录的原因（「坠落」「高能自爆」…），不传按攻击的说法写。
- * opt.friendlyFire：被开着友伤的队友打倒（#428）——照常濒死 / 扣坚毅，只是不记进战场数据的倒地次数（不计分数）。
+ * opt.friendlyFire：被开着友伤的队友打倒（#428）——照常濒死 / 扣坚毅，只是不记进战场数据的倒地次数（不计分数）；
+ *   正在结算的友伤道具（items.js · itemFriendlyFireNow，#432）打倒的我方单位一样。
  * 返回 "dead" / "dying" / "shp"（起身中，扣了坚毅生命还站着）/ null（没有倒地）。
  * 以前高能自爆、坠入深渊各写一套：绕过力竭 3 即死，起身中的人被炸 / 摔回濒死、坚毅不扣还能再起身。 */
 function applyKnockdown(unit, notes, opt) {
@@ -6977,7 +6980,8 @@ function applyKnockdown(unit, notes, opt) {
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
     if (typeof featReviveCheck === "function" && featReviveCheck(unit, notes)) return null;
     unit.dying = true;
-    if (!opt.friendlyFire) noteKnockdown(unit);   // 战场数据：倒地次数（被队友友伤打倒的不算，#428）
+    // 战场数据：倒地次数（被队友友伤打倒的不算，#428；对敌人用的道具用在队友身上引起的倒地也不算，items.js · itemFriendlyFireNow，#432）
+    if (!opt.friendlyFire && !(typeof itemFriendlyFireNow === "function" && itemFriendlyFireNow(unit))) noteKnockdown(unit);
     clearStunOnDown(unit);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
