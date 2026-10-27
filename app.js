@@ -7505,6 +7505,7 @@ function resetBattleFlags(u) {
   u.harshEnv = false;
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
+  u.rallyAtk = 0;
   u.highEnergy = 0;
   u.highFrom = null;
   u._imbalanceLock = false;
@@ -7849,6 +7850,7 @@ function applyRallyBuff(u, lines) {
   const p = u.roles.primary;
   u.rallyBuff = p;
   if (p === "直伤") {
+    u.rallyAtk = 15;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
     u.atk = (u.atk || 0) + 15;
     lines.push(`${u.name} 直伤集结：ATK +15。`);
   } else if (p === "异常") {

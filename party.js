@@ -1148,6 +1148,8 @@ function effectiveAtk(unit, units) {
   // 更换刀头+：酸液炮模式下柯尔特 atk +5；思念+：被牵挂且回合内未受伤累积的 atk 加成
   if (unit.kit === "kolt" && (unit.resources || {}).bit === "acid" && typeof passivePlus === "function" && passivePlus(unit, 1)) base += 5;
   if (unit.bondAtk) base += Number(unit.bondAtk) || 0;
+  if (unit.itemAtkBonus) base += Number(unit.itemAtkBonus) || 0;   // 强化注射剂（items.js）：ATK +3 至战斗结束（#340 第 16 条）
+  if (unit.rallyAtk) base += Number(unit.rallyAtk) || 0;           // 全队集结·直伤（app.js · applyRallyBuff）：ATK +15
   if (unit.duetAtk) base += Number(unit.duetAtk) || 0;   // 双重奏：溢出的治疗，下回合开始失去
   if (typeof frenzyAtkBonus === "function") base += frenzyAtkBonus(unit);   // 狂暴（effects.js · FRENZY）：ATK + 等级
   if (unit.race && typeof raceAtkAdjust === "function") base += raceAtkAdjust(unit, units);   // 种族被动·独狼（enemies.js）
