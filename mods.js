@@ -162,10 +162,12 @@ function bpDiceAdjust(attacker, target, flags) {
   };
   const dist = attacker && target ? zoneDist(attacker.zone, target.zone, state.zoneMode) : 0;
   const am = attacker ? bpMod(attacker) : {};
+  // 打的是敌人，或者开着友伤打的队友（flags.friendlyFire，#428）：和打敌人一样加
+  const foe = !!target && (!target.isPlayer || !!flags.friendlyFire);
   if (attacker && attacker.isPlayer) {
-    if (am.meleeDice && dist === 0 && !target.isPlayer) roll(am.meleeDice[0], am.meleeDice[1], "狂徒浪漫");
-    if (am.rangedDice && dist === 1 && !target.isPlayer) roll(am.rangedDice[0], am.rangedDice[1], "稳妥的距离");
-    if (am.meleeFlat && dist === 0 && !target.isPlayer) { out.value += Number(am.meleeFlat); out.text.push(`稳妥的距离 ${am.meleeFlat}`); }
+    if (am.meleeDice && dist === 0 && foe) roll(am.meleeDice[0], am.meleeDice[1], "狂徒浪漫");
+    if (am.rangedDice && dist === 1 && foe) roll(am.rangedDice[0], am.rangedDice[1], "稳妥的距离");
+    if (am.meleeFlat && dist === 0 && foe) { out.value += Number(am.meleeFlat); out.text.push(`稳妥的距离 ${am.meleeFlat}`); }
     if (am.attackDice) roll(am.attackDice[0], am.attackDice[1], "愿你无恙", am.attackDice[2] || -1);
   }
   const tm = target && target.isPlayer ? bpMod(target) : {};
@@ -193,7 +195,8 @@ const BP_ELEMENT_STATUS = {
 /** 愿你常胜：攻击后按属性效果追加击破 / 状态 */
 function bpAfterAttack(attacker, target, res, flags, notes) {
   if (!bpActive() || !attacker || !target || !res || !flags || !flags.action) return;
-  if (!attacker.isPlayer || target.isPlayer || target.dead || !res.startLayerType) return;
+  // 开着友伤打队友（flags.friendlyFire，#428）也照样追加
+  if (!attacker.isPlayer || (target.isPlayer && !flags.friendlyFire) || target.dead || !res.startLayerType) return;
   const mod = bpMod(attacker);
   if (!mod.resistBreak && !mod.greatStatus) return;
   const cMod = chartMod(res.element, res.startLayerType, state.weather, null, false);

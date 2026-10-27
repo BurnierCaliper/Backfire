@@ -23,9 +23,10 @@ function stingLayer(u) {
   }
   return null;
 }
+/** u 的攻击打得到的单位（溅射、导体的额外目标……）：敌我不同的；u 开着友伤（enemies.js · attackFoe，#428）时还有 u 以外的队友 */
 function enemiesOf(u) {
   return (state.units || []).filter(x => x && !x.dead && !x.hidden && !x._removed && x.kit !== "ironwall" &&
-    !!x.isPlayer !== !!u.isPlayer && totalHp(x) > 0);
+    (typeof attackFoe === "function" ? attackFoe(u, x) : !!x.isPlayer !== !!u.isPlayer) && totalHp(x) > 0);
 }
 
 /* ---------- 即时效果：施加 ---------- */
@@ -124,9 +125,11 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
   }
   // 过载：装甲血量受到近距离攻击时，反伤 50% 此次受到攻击伤害的闪电伤害
   // 过载者是玩家：反伤算过载者的伤害，打死算过载者的击杀（#203）；不是玩家照旧（不传 by，算行动中的人 / 不改最后一击）
+  // 打的是开着友伤的队友（ctx.friendlyFire，#428）：反伤照打，同样不计分数
   if (ctx.action && ctx.melee && ctx.attacker && u.instant && u.instant.overload && ctx.startLayerType === "armor" && !ctx.attacker.dead) {
     const back = Math.floor(dealt * 0.5);
-    if (back > 0) applyTypedDot(ctx.attacker, back, "electric", notes, `${u.name} 过载反伤 → ${ctx.attacker.name}`, u.isPlayer ? { by: u.id } : undefined);
+    const ro = Object.assign({}, u.isPlayer ? { by: u.id } : {}, ctx.friendlyFire ? { friendlyFire: true } : {});
+    if (back > 0) applyTypedDot(ctx.attacker, back, "electric", notes, `${u.name} 过载反伤 → ${ctx.attacker.name}`, Object.keys(ro).length ? ro : undefined);
   }
 }
 
@@ -191,8 +194,9 @@ function afterAttackDealt(a, t, element, res, opt, notes) {
   if (a.self === "splash" && element === "acid" && !flags.aoe && !res.blocked && (res.total || 0) > 0) {
     const share = Math.floor((res.total || 0) * 0.25);
     if (share > 0) {
+      // 开着友伤（#428）时同区的队友也被溅到：规则照常，不计分数
       enemiesOf(a).filter(x => x.id !== t.id && Number(x.zone) === Number(t.zone)).forEach(x => {
-        applyTypedDot(x, share, "acid", notes, `${a.name} 溅射 → ${x.name}`);
+        applyTypedDot(x, share, "acid", notes, `${a.name} 溅射 → ${x.name}`, typeof friendlyFireHit === "function" && friendlyFireHit(a, x) ? { friendlyFire: true } : undefined);
       });
     }
   }

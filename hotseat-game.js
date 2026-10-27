@@ -154,6 +154,8 @@
       return;
     }
     if (cmd.type === "chat" || tableTypes.has(cmd.type)) return;   // 小队聊天、检定、属性点申请不受询问、战斗阶段影响
+    // 友伤开关（#428）：每人只改自己的那一个（execute 里按发指令的人填 owner），随时能改，不受询问、行动顺序影响
+    if (cmd.type === "battle.friendlyFire") { if (cmd.owner != null && cmd.owner !== id) fail("只能改自己的友伤开关"); return; }
     // 主持人放弃这场战斗回到探索：等人回答的询问 / 分步选择由它收回（trpg-ui.js · backFromBattle → abandon），不用等（#322）
     const leaving = cmd.type === "trpg.ui" && cmd.action === "backFromBattle";
     if ((choice || session.snapshot().ask) && !leaving) fail("正在等待其他操作者回应");
@@ -185,6 +187,7 @@
     const prev = sender; sender = id; executing++;
     try {
       if (cmd.type === "startCombat") newRoundSpends = [];
+      if (cmd.type === "battle.friendlyFire") cmd = Object.assign({}, cmd, { owner: id });   // 友伤开关记在发指令的人名下
       const context = cmd.type === "endTurn" ? { ...pendingContext, endUnit: c => session.finishUnit(id, c.actor) } : pendingContext || authorityContext;
       return Commands.dispatch(cmd, context);
     }
@@ -464,6 +467,9 @@
     finally { pendingContext = prev; }
   });
   onActionSpend(event => { if (active() && executing && !GAME.sim) { if (newRoundSpends) newRoundSpends.push(event); else session.markSpent([event]); } });
+  // 友伤开关（enemies.js · setFriendlyFireOwner，#428）：热座 / 联机时每个单位归谁操控——每人的开关只管自己的单位（武器人跟着持有者；
+  // 倒地、不在行动顺序名单里的按角色分配，再不行归房主，和 ownedChoice 一样）。没开热座（本机一个人、单人模式）返回 null：规则层按本机那一个开关
+  if (typeof setFriendlyFireOwner === "function") setFriendlyFireOwner(u => (active() && session ? session.ownerOf(u.id) || ownerByKit[u.weaponOf || u.kit] || gm() : null));
   setInterval(() => { if (active() && !(network && root.OnlineGame?.isPaused())) session.tick(); }, 250);
   // Legacy panel handlers were written before the command boundary. Surface an
   // expected authorization rejection in the hotseat bar; unrelated errors keep

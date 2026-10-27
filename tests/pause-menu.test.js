@@ -212,6 +212,39 @@ test("单机：角上的「菜单」按钮也能打开；点「克制表」关�
   assert.deepEqual(o.errors, []);
 });
 
+test("单机：战斗画面的菜单里有「友伤」开关（#428）：默认关，点一下开 / 关、菜单不收起，改的是本机那一个；开着时普通攻击能选队友", { timeout: 60000 }, async t => {
+  const o = await battlePage(t); if (!o) return; const { page } = o;
+  assert.ok((await menuIds(page)).includes("friendlyFire"), "战斗画面的菜单里有友伤开关");
+  await page.click("#g-app .g-top [data-pause-open]");
+  await page.waitForSelector("#pm-overlay", { state: "visible" });
+  const item = '#pm-overlay [data-pause-item="friendlyFire"]';
+  assert.match(await page.locator(item).innerText(), /友伤 关/);
+  assert.equal(await page.locator(item).getAttribute("aria-pressed"), "false", "默认关");
+  await page.click(item);
+  assert.equal(await menuOpen(page), true, "开关这一类：点了菜单不收起");
+  assert.match(await page.locator(item).innerText(), /友伤 开/);
+  assert.equal(await page.locator(item).getAttribute("aria-pressed"), "true");
+  assert.deepEqual(await page.evaluate(() => state.friendlyFire), { local: true }, "本机：一个开关管全队");
+  // 开着：普通攻击的目标名单里有队友（自己除外）
+  const picks = await page.evaluate(() => {
+    const a = state.units.find(u => u.isPlayer && !u.hidden), mate = state.units.find(u => u.isPlayer && !u.hidden && u !== a);
+    a.zone = mate.zone = 1;
+    const sk = GAME.gameSkills(a).find(s => /_aa$/.test(s.id) && (s.id === "tou_aa" || s.id === "kolt_aa" || s.id === "xia_aa" || s.id === "chuan_aa" || s.id === "hiaki_aa" || s.id === "ecmo_bite")) ||
+      { id: "bare_aa", name: "空手攻击", hint: "同区" };
+    const ids = GAME.candidateUnits(a, sk).map(u => u.id);
+    return { self: ids.includes(a.id), mate: ids.includes(mate.id) };
+  });
+  assert.equal(picks.mate, true, "开着：同区的队友能选"); assert.equal(picks.self, false, "不能选自己");
+  await page.click(item);
+  assert.deepEqual(await page.evaluate(() => state.friendlyFire), { local: false }, "再点一下：关");
+  assert.match(await page.locator(item).innerText(), /友伤 关/);
+  // 标题画面不显示（只有战斗中才有）
+  await page.keyboard.press("Escape");
+  await page.evaluate(() => Screens.show("run"));
+  assert.ok(!(await menuIds(page)).includes("friendlyFire"), "不在战斗画面：没有友伤开关");
+  assert.deepEqual(o.errors, []);
+});
+
 /* 联机：和 online-ui.test.js 一样的假房间（不带规则），加上主持人工具、克制表浮层 */
 async function onlinePage(t, mobile) {
   const o = await newPage(t, mobile ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : null); if (!o) return null;
@@ -267,7 +300,7 @@ test("联机：主持人和玩家看到的菜单项不同；标题写「菜单�
   await page.evaluate(() => fixture.set({ screen: "battle" }));
   assert.deepEqual(await menuIds(page), ["gmTools", "room", "lobby", "leave"], "主持人（战斗）：没有角色分配");
   await asPlayer(page);
-  assert.deepEqual(await menuIds(page), ["matchupOnline", "room", "lobby", "leave"], "玩家（战斗）：克制表、消息与成员、大厅；没有主持人工具");
+  assert.deepEqual(await menuIds(page), ["matchupOnline", "friendlyFireOnline", "room", "lobby", "leave"], "玩家（战斗）：克制表、友伤开关（#428）、消息与成员、大厅；没有主持人工具");
   await asPlayer(page, { screen: "exploration" });
   assert.deepEqual(await menuIds(page), ["room", "lobby", "leave"], "玩家（探索）：没有克制表");
   await page.click("#ol-menu-open");
@@ -321,6 +354,34 @@ test("联机：从菜单打开主持人工具、消息与成员、大厅、角�
   await page.waitForSelector("#mu-overlay", { state: "visible" });
   assert.match(await page.locator("#mu-overlay").innerText(), /克制表/);
   assert.doesNotMatch(await page.locator("#mu-overlay").innerText(), /坚毅/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("联机玩家：菜单里的「友伤」改自己的那一个（发给房主）；开没开看房主发来的 state.friendlyFire；主持人用单机那一项", { timeout: 60000 }, async t => {
+  const o = await onlinePage(t); if (!o) return; const { page } = o;
+  await asPlayer(page);
+  await page.click("#ol-menu-open");
+  await page.waitForSelector("#pm-overlay", { state: "visible" });
+  const item = '#pm-overlay [data-pause-item="friendlyFireOnline"]';
+  assert.match(await page.locator(item).innerText(), /友伤 关/, "房主没发过：默认关");
+  await page.click(item);
+  await page.waitForFunction(() => fixture.calls.some(c => c.kind === "submit" && c.args.type === "battle.friendlyFire"));
+  const sent = await page.evaluate(() => fixture.calls.filter(c => c.kind === "submit" && c.args.type === "battle.friendlyFire").map(c => c.args));
+  assert.deepEqual(sent, [{ type: "battle.friendlyFire", on: true }], "只发开 / 关，不带别人的名字（房主按发指令的人记）");
+  assert.equal(await menuOpen(page), true, "开关这一类：菜单不收起");
+  // 房主发来的新状态：自己开着、别人关着
+  await page.evaluate(() => { fixture.view.state = Object.assign({}, fixture.view.state, { friendlyFire: { p1: true, p2: false } }); fixture.emit(); });
+  await page.waitForFunction(sel => /友伤 开/.test((document.querySelector(sel) || {}).textContent || ""), item);
+  assert.equal(await page.locator(item).getAttribute("aria-pressed"), "true");
+  assert.match(await page.locator(item).innerText(), /现在开着友伤的：你/, "说明里写谁开着");
+  await page.evaluate(() => { fixture.view.state = Object.assign({}, fixture.view.state, { friendlyFire: { p1: false, p2: true } }); fixture.emit(); });
+  await page.waitForFunction(sel => /友伤 关/.test((document.querySelector(sel) || {}).textContent || ""), item);
+  assert.match(await page.locator(item).innerText(), /现在开着友伤的：乙/, "别人开着也看得到");
+  await page.keyboard.press("Escape");
+  await asPlayer(page, { screen: "exploration" });
+  assert.ok(!(await menuIds(page)).includes("friendlyFireOnline"), "战斗外没有");
+  await asHost(page, { screen: "battle" });
+  assert.ok(!(await menuIds(page)).includes("friendlyFireOnline"), "主持人用单机那一项（game.js 登记），这里不重复");
   assert.deepEqual(o.errors, []);
 });
 

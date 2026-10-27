@@ -436,7 +436,9 @@
   function undoRules() {
     if (!canUndo()) return;
     const u = G.undo.pop();
+    const ff = state.friendlyFire;   // 友伤开关（#428）是设置：撤销一次行动不把它改回去
     restoreState(u.st);
+    if (ff !== undefined) state.friendlyFire = ff;
     foldLogPages(u.logPages);
     if (u.ledger && typeof LEDGER !== "undefined") {
       const water = ledgerWater();
@@ -450,6 +452,16 @@
     return { label: u.label };
   }
 
+  /** 友伤（#428）：预演里打到队友的那一击排进了格挡队列（等队友回答）——按「没人格挡」落下再看结果
+   *  （和敌人攻击时「不格挡」的预演一样，格挡这类随机判定都按失败预演），不然看不到打到队友的伤害，队友也会被当成「没有效果」选不了。
+   *  只在预演开始时队列是空的才做，只结算排在队首的友伤那几击（不碰敌人攻击的格挡） */
+  function settleFriendlyBlocks() {
+    for (let guard = 0; guard < 30; guard++) {
+      const job = (state.blockQueue || [])[0];
+      if (!job || !(job.opt && job.opt.flags && job.opt.flags.friendlyFire)) return;
+      finishBlock(null);
+    }
+  }
   function simulate(thunk, diceMode) {
     const saved = saveState();
     // 队伍档案（LEDGER）里战斗中会动的东西不在 state 里：预演完也要还原，不然悬停一下就真的用掉了——
@@ -472,7 +484,8 @@
     };
     const before = snapAll();
     let err = null;
-    try { thunk(); } catch (e) { err = e; }
+    const queued = (state.blockQueue || []).length;
+    try { thunk(); if (!queued) settleFriendlyBlocks(); } catch (e) { err = e; }
     const after = snapAll();
     const tape = G.tape;
     Math.random = rnd;
@@ -1935,7 +1948,7 @@
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
         if (!attacker || !target) { systemCommand({ type: "battle.cleanQueues", queue: "block" }); continue; }
         const helpers = eligibleBlockers(target, job);
-        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : [];   // 以身作盾（feats.js）
+        const walls = typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target, attacker) : [];   // 以身作盾（feats.js）；打的人自己不算（友伤，#428）
         let choice = null;
         if (helpers.length || walls.length) {
           // 问要不要格挡时，战场上画出这一击从谁打向谁（红色虚线 + 准星）
@@ -2184,7 +2197,7 @@
   function promptBlock(job, attacker, target, helpers, walls) {
     walls = walls || [];
     // 以身作盾（feats.js）：选项带 extra.ironwall，回答时换成 "ironwall:单位"
-    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target) : []);
+    const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target, attacker) : []);
     if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` }))
         .concat(walls.map(h => ({ helper: h.id, label: `${h.name} 以身作盾`, sub: "专长 · 必定挡住，击破由自己承担 · 每次短休一次", extra: { ironwall: true } }))),
@@ -2961,7 +2974,8 @@
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
     let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf" || side === "anySelf"));
     if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
-    else if (side === "enemy") all = all.filter(u => !u.isPlayer);
+    // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428）时自己以外的队友也能选（自己已经在上面去掉了）
+    else if (side === "enemy") all = all.filter(u => !u.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(actor, u)));
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
     const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
     // 抵近射击（专长）：写着距离 1 的攻击也能打同区
@@ -5381,6 +5395,14 @@
     });
     // 暂停页面（pause-menu.js，#298）：选着技能 / 正在选目标、弹着选项、在播演出时，Esc 留给上面取消，不开菜单
     if (window.PauseMenu) PauseMenu.addBlocker(() => document.body.dataset.screen === "battle" && (!!G.arm || !!choiceResolve || G.depth > 0));
+    // 友伤开关（#428，文字在 pause-menu.js · PAUSE_MENU.items.friendlyFire）：战斗画面里才有；联机玩家用 online-ui.js 那一项。
+    // 点一下开 / 关，菜单不收起，改了立刻生效；改的是自己的那一个（热座 / 联机房主按这台电脑当前的操作者，本机一个人管全队）
+    if (window.PauseMenu) PauseMenu.register({ id: "friendlyFire", stay: true,
+      visible: () => document.body.dataset.screen === "battle" && !document.body.classList.contains("online-player"),
+      pressed: () => friendlyFireMine(),
+      label: () => { const c = PauseMenu.CONFIG.items.friendlyFire; return friendlyFireMine() ? c.on : c.off; },
+      hint: () => { const c = PauseMenu.CONFIG.items.friendlyFire, on = friendlyFireNames(); return on.length ? `${c.hint}。${c.who(on.join("、"))}` : c.hint; },
+      run: () => toggleFriendlyFire() });
     document.addEventListener("contextmenu", (e) => {
       if (G.arm) { e.preventDefault(); disarm(); }
     });
@@ -5604,6 +5626,24 @@
     $("g-fast").setAttribute("aria-pressed", G.fast ? "true" : "false");
     $("g-fast").textContent = G.fast ? "演出 2×" : "演出 1×";
   }
+  /* 友伤开关（#428，规则在 enemies.js · FRIENDLY_FIRE）：这台电脑上的操作者——热座 / 联机房主按当前操作者（HotseatGame 的 playerId），
+   * 本机（单局、单人、跑团）null = 一个人管全队的那一个开关 */
+  function friendlyFireOwnerHere() { return hotseat() ? HotseatGame.getView().playerId : null; }
+  function friendlyFireMine() { return typeof friendlyFireSetting === "function" && friendlyFireSetting(friendlyFireOwnerHere()); }
+  /** 热座 / 联机：现在开着友伤的人（名字按操作者；这台电脑上的写「你」）。本机一个人就不列 */
+  function friendlyFireNames() {
+    if (!hotseat()) return [];
+    const v = HotseatGame.getView(), map = state.friendlyFire || {};
+    return (v.players || []).filter(p => map[p.id] === true).map(p => (p.id === v.playerId ? "你" : p.name || p.id));
+  }
+  function toggleFriendlyFire() {
+    const on = !friendlyFireMine();
+    try { dispatch({ type: "battle.friendlyFire", on }); } catch (e) { flashHint(e.message); return; }
+    disarm();      // 正在选目标：名单按新的开关重新排
+    G.version++;   // 技能悬停的预演按新的开关重算
+    refreshAll();
+    flashHint(on ? "友伤 开：你的攻击能选中自己以外的队友，范围攻击也会打到队友；打队友不计分数。" : "友伤 关：攻击只打敌人。");
+  }
 
   BattleCommands.configure({ game: G, applyCampaignToField, undo: undoRules, writeSlot, loadSlot, clearSlot, rememberCampaign: rememberCampaignRules, loadCampaignMem: loadCampaignMemRules });
 
@@ -5646,6 +5686,8 @@
   G.abandonBattle = abandonBattle;
   G.refresh = refreshAll;
   G.flashHint = flashHint;   // 新画面（hd2d/hd2d-field.js）打不开时在提示栏说一声
+  G.toggleFriendlyFire = toggleFriendlyFire;   // 友伤开关（菜单里那一项，#428）
+  G.friendlyFireMine = friendlyFireMine;
   G.fitZones = fitZones;
   G.act = act;
   G.actSystem = (cmd, meta, context) => act(cmd, meta, context);
