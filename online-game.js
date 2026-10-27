@@ -9,6 +9,8 @@
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
+  // dirty（#340 第 9 条）：上一次 publish 之后又有 broadcast（状态变了），行动结算完要不要再发一包看它
+  let dirty = false;
   let screen = "lobby", seq = 0, lastSeq = -1, requestNo = Date.now() * 100, messageNo = 0, messages = [], publicLogs = [];
   let remote = null, notice = "", systemNotice = "", readying = false, restoring = false, started = false, settledResult = null;
   let queue = Promise.resolve(), gmQueue = Promise.resolve(), animation = Promise.resolve(), actionMenu = null, manualResolve = null, manualPhase = false;
@@ -129,7 +131,7 @@
     if (!isHost() || !HotseatGame.isActive()) return;
     if (manualResolve && GAME.ended) { const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
     if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== roster().map(p => p.id).join("|")) setupOperators();
-    seq++;
+    seq++; dirty = false;
     for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result, fx));
     save(); notify();
   }
@@ -312,6 +314,8 @@
     else notify();
   }
   function enqueue(fn) { const next = queue.then(fn, fn); queue = next.catch(() => {}); return next; }
+  /** 行动结算完（game.js 已经经 onActionSettled 发过一包）：之后状态没再变就不重复整包 publish（#340 第 9 条：一次行动发两个完整包） */
+  function settled(before) { if (seq === before || dirty) publish(); }
   async function execute(cmd, sender) {
     if (isPaused()) error("房主离线，房间暂停");
     if (!cmd || typeof cmd.type !== "string") error("无效指令");
@@ -344,22 +348,24 @@
       if (["gm.enemyAct", "gm.enemyEndTurn"].includes(cmd.type) && !manualPhase) error("当前不是主持人敌人行动阶段");
       GMCommands.validate(cmd, gmContext);
       if (cmd.type === "gm.enemyEndTurn") { HotseatGame.system(cmd, gmContext); publish(); return { ok: true }; }
+      const before = seq;
       const meta = { unitName: state.units.find(u => u.id === cmd.actor)?.name, propName: state.props.find(p => p.id === cmd.id)?.name };
       await GAME.actSystem(cmd, meta, gmContext);
       if (cmd.type === "gm.setManual" && !cmd.enabled && manualResolve) { resumeAI = true; const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
-      publish(); return { ok: true };
+      settled(before); return { ok: true };
     }
     if (controls.has(cmd.type) || cmd.type === "orderStart") {
       const ack = HotseatGame.receiveFrom(sender, cmd); if (!ack.ok) error(ack.error); publish(); return { ok: true };
     }
     if (!["skill", "move", "standUp", "useItem", "endTurn"].includes(cmd.type)) error("只有主持人可以执行此操作");
     HotseatGame.validateFrom(sender, cmd);
+    const before = seq;
     if (cmd.type === "endTurn") await HotseatGame.withOperator(sender, () => GAME.endTurn());
     else {
       const result = await HotseatGame.withOperator(sender, () => GAME.act(cmd, { actorId: cmd.actor, skillName: actionLabel(cmd) }));
       if (result === false) error("规则不允许这个行动");
     }
-    publish(); return { ok: true };
+    settled(before); return { ok: true };
   }
   function recordMessage(cmd, context) {
       const sender = messageContexts.get(context);
@@ -590,7 +596,11 @@
       const row = rows.get(u.id) || { name: u.name, dmg: 0, brk: 0, heal: 0, words: [], aliveBefore: !(snap && (snap.dead || snap._removed)) };
       const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
       const n = Math.floor(Number(ev.value) || 0);
-      if (ev.kind === "dmg" && hpVisible) row.dmg += n;
+      // #340 第 15 条：打进坚毅的伤害不写数字，战场日志只记「坚毅受创」
+      // grit：主机标的「打进坚毅」（致命的那一下快照里已经不是起身中了，也要认）
+      if (ev.kind === "dmg" && (ev.grit === true || snap && snap.upOnShp)) {
+        if (!row.words.includes("坚毅受创")) row.words.push("坚毅受创");
+      } else if (ev.kind === "dmg" && hpVisible) row.dmg += n;
       else if (ev.kind === "heal" && hpVisible) row.heal += n;
       else if (ev.kind === "break") row.brk += n;
       if (ev.text && !row.words.includes(ev.text)) row.words.push(String(ev.text));
@@ -664,8 +674,11 @@
     } finally { commandDepth--; }
   });
   HotseatGame.onPacket(() => {
-    if (!isHost() || restoring || GAME.tape || scheduled) return;
-    scheduled = true; queueMicrotask(() => { scheduled = false; publish(); });
+    if (!isHost() || restoring) return;
+    dirty = true;   // 有新变化：已经排了的、或者行动结算完那一次 publish 会带上
+    if (GAME.tape || scheduled) return;
+    // 同一轮里已经有人 publish 过（指令处理完的那一次），这里就不再整包重发一遍（#340 第 9 条）
+    scheduled = true; queueMicrotask(() => { scheduled = false; if (dirty) publish(); });
   });
   setInterval(offlineTick, 250);
   root.addEventListener("pagehide", save);

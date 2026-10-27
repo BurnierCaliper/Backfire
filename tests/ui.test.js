@@ -1525,6 +1525,25 @@ test("训练场：标题选角色和等级进场；对假人打一下记进本�
   assert.deepEqual(o.errors, []);
 });
 
+test("训练场：顶栏「后台」和队伍面板的「打开后台」都看不见，硬点也打不开后台（#340 第 14 条，新）", async (t) => {
+  const o = await open(t); if (!o) return;
+  const { page } = o;
+  await page.click("#t-local"); await page.click("#t-training");
+  await page.selectOption("#g-train-kit", "ras");
+  await page.click("#g-train-go");
+  await page.waitForFunction(() => state.training && GAME.depth === 0);
+  assert.equal(await page.evaluate(() => document.body.classList.contains("training-battle")), true);
+  for (const sel of ["#g-bs", "#g-party-backstage"]) {
+    assert.equal(await page.isVisible(sel), false, sel + " 在训练场里要藏起来");
+  }
+  // 绕过 CSS 直接触发按钮：openBackstage 在训练中直接返回，后台面板不打开
+  await page.evaluate(() => { document.getElementById("g-bs").click(); document.getElementById("g-party-backstage").click(); });
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => !!document.querySelector("#g-bs-sheet.show")), false, "后台面板不能打开");
+  assert.equal(await page.evaluate(() => !!GAME.bsOpen), false);
+  assert.deepEqual(o.errors, []);
+});
+
 test("训练场：可以换假人的血量层、天气、两个区的场地和高地；改了会自动勾上「算属性克制」", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;

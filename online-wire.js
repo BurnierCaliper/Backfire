@@ -157,17 +157,41 @@
     for (const id of Object.keys(unitsDiff)) units[id] = own(unitsDiff[id], "value") ? unitsDiff[id].value : applyNode(top, unitsDiff[id]);
     return { ...top, units };
   }
+  // 克制表逐单位差量：顶层（除 units）只发变了的键（top），单位只发新增 / 变了的（按新顶层 diffNode 压过）和去掉的单位 id（#340 第 9 条）。
+  // 不发单位的先后顺序：玩家端（matchup-ui.js）只按 id 取 m.units[unitId]，新单位接在最后
+  function matchupDelta(sentJson, m) {
+    let prev; try { prev = JSON.parse(sentJson); } catch (_) { return null; }
+    if (!plain(prev) || !plain(prev.units) || !plain(m) || !plain(m.units)) return null;
+    const { units: pu, ...ptop } = prev, { units, ...top } = m;
+    const changed = {}, removed = [];
+    for (const id of Object.keys(units)) if (!own(pu, id) || !equal(pu[id], units[id])) changed[id] = plain(units[id]) ? diffNode(top, units[id]) : { value: units[id] };
+    for (const id of Object.keys(pu)) if (!own(units, id)) removed.push(id);
+    const out = { changed };
+    if (!equal(ptop, top)) out.top = diffNode(ptop, top);
+    if (removed.length) out.removed = removed;
+    return out;
+  }
+  function applyMatchupDelta(base, d) {
+    if (!plain(d) || !plain(d.changed) || own(d, "removed") && !Array.isArray(d.removed) || own(d, "order") || !plain(base.units)) fail("invalid matchup delta");
+    const { units: bu, ...oldTop } = base, units = clone(bu), top = own(d, "top") ? applyNode(oldTop, d.top) : oldTop;
+    // 去掉的单位必须是上一张里有的（和 applySnap 一样严）：写错了就让玩家端要 resync
+    for (const id of d.removed || []) { if (typeof id !== "string" || forbidden(id) || !own(units, id) || own(d.changed, id)) fail("invalid matchup delta"); delete units[id]; }
+    for (const id of Object.keys(d.changed)) { if (forbidden(id)) fail("invalid matchup delta"); units[id] = own(d.changed[id], "value") ? clone(d.changed[id].value) : applyNode(top, d.changed[id]); }
+    return { ...clone(top), units };
+  }
   function create() {
     let encoded = {}, decoded = {}, hasEncoded = false, hasDecoded = false;
     let sentMatchup = null, hasSentMatchup = false, gotMatchup = null, hasGotMatchup = false;
     let sentRest = null, hasSentRest = false, gotRest = null, hasGotRest = false;
     let sentLore = null, hasSentLore = false, gotLore = null, hasGotLore = false;
     let sentChat = null, hasSentChat = false, gotChat = null, hasGotChat = false;
-    function reset() { encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = sentChat = gotChat = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = hasSentChat = hasGotChat = false; }
+    // 克制表逐单位（#340 第 9 条）、state.units 按 id（第 9 条）的上一份
+    let sentUnits = null, gotUnits = null;
+    function reset() { sentUnits = gotUnits = null; encoded = {}; decoded = {}; hasEncoded = hasDecoded = false; sentMatchup = gotMatchup = sentRest = gotRest = sentLore = gotLore = sentChat = gotChat = null; hasSentMatchup = hasGotMatchup = hasSentRest = hasGotRest = hasSentLore = hasGotLore = hasSentChat = hasGotChat = false; }
     function pack(input) {
       const packet = packetData(input);
       if (!["result", "resync"].includes(packet.type)) return packet;
-      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta") || own(packet, "chatLength")) fail("packet is already packed");
+      if (own(packet, "wireFormat") || own(packet, "historyFull") || own(packet, "historyLengths") || own(packet, "matchupUnchanged") || own(packet, "restUnchanged") || own(packet, "loreUnchanged") || own(packet, "loreDelta") || own(packet, "matchupDelta") || own(packet, "unitsDelta") || own(packet, "chatLength")) fail("packet is already packed");
       let full = !hasEncoded || packet.type === "resync";
       // 小队聊天（view.chat，最近 300 条；#340 第 8 条：以前每包整份带着，300 条聊天光这一项就 40 KB）：和 messages 一样只发新增的那一截，
       // 总条数写在 chatLength。不放进 historyLengths——旧版玩家页面只认 messages / publicLogs，多一个键整包解不开；单独一个字段，旧页面只是少看到前面的聊天
@@ -191,7 +215,13 @@
       if (own(packet, "matchup")) {
         const json = JSON.stringify(packet.matchup);
         if (hasSentMatchup && packet.type !== "resync" && json === sentMatchup) { delete result.matchup; result.matchupUnchanged = true; }
-        else result.matchup = packMatchup(packet.matchup);
+        else {
+          // 顶层（环境）没变、只有几名单位的表变了（移动、失衡、濒死……）：只发变了的单位（matchupDelta，#340 第 9 条），比整张短才用
+          const delta = hasSentMatchup && packet.type !== "resync" ? matchupDelta(sentMatchup, packet.matchup) : null;
+          const packed = packMatchup(packet.matchup);
+          if (delta && JSON.stringify(delta).length < JSON.stringify(packed).length) { delete result.matchup; result.matchupDelta = delta; }
+          else result.matchup = packed;
+        }
         nextMatchup = json; nextHasMatchup = true;
       }
       sentMatchup = nextMatchup; hasSentMatchup = nextHasMatchup;
@@ -216,7 +246,18 @@
         }
         nextLore = clone(lore); nextHasLore = true;
       }
+      // state.units（#340 第 9 条）：按 id 只发变了的字段（和演出快照同一套 snapDelta）；比整份短才用，resync 一律整份
+      let nextUnits = sentUnits;
+      if (own(packet, "state") && object(packet.state) && Array.isArray(packet.state.units)) {
+        const units = packet.state.units;
+        if (!full && Array.isArray(sentUnits)) {
+          let delta = null; try { delta = snapDelta(sentUnits, units); } catch (_) { delta = null; }
+          if (delta && JSON.stringify(delta).length < JSON.stringify(units).length) { const { units: _u, ...rest } = packet.state; result.state = rest; result.unitsDelta = delta; }
+        }
+        try { unitsById(units); nextUnits = clone(units); } catch (_) { nextUnits = null; }
+      } else nextUnits = null;
       // Commit only after every field was checked and encoded successfully.
+      sentUnits = nextUnits;
       encoded = full ? Object.fromEntries(histories.filter(key => own(packet, key)).map(key => [key, next[key]])) : next;
       sentLore = nextLore; hasSentLore = nextHasLore;
       if (chat !== undefined) { sentChat = clone(chat); hasSentChat = true; } else if (full) { sentChat = null; hasSentChat = false; }
@@ -261,10 +302,22 @@
       if (own(packet, "tape")) result.tape = unpackTape(packet.tape);
       let nextGot = gotMatchup, nextHasGot = hasGotMatchup;
       if (own(packet, "matchupUnchanged")) {
-        if (packet.matchupUnchanged !== true || own(packet, "matchup") || !packed) fail("invalid matchup metadata");
+        if (packet.matchupUnchanged !== true || own(packet, "matchup") || own(packet, "matchupDelta") || !packed) fail("invalid matchup metadata");
         if (!hasGotMatchup || packet.type === "resync") fail("matchup omission requires a baseline");
         result.matchup = clone(gotMatchup); delete result.matchupUnchanged;
+      } else if (own(packet, "matchupDelta")) {
+        if (!packed || own(packet, "matchup")) fail("invalid matchup metadata");
+        if (!hasGotMatchup || !plain(gotMatchup) || packet.type === "resync") fail("matchup delta requires a baseline");
+        result.matchup = applyMatchupDelta(gotMatchup, packet.matchupDelta); delete result.matchupDelta; nextGot = clone(result.matchup);
       } else if (own(packet, "matchup")) { result.matchup = unpackMatchup(packet.matchup); nextGot = clone(result.matchup); nextHasGot = true; }
+      // state.units 差量：在上一包的单位上按 id 改
+      let nextGotUnits = null;
+      if (own(packet, "unitsDelta")) {
+        if (!packed || !object(packet.state) || own(packet.state, "units")) fail("invalid units delta");
+        if (!Array.isArray(gotUnits) || packet.type === "resync") fail("units delta requires a baseline");
+        result.state = { ...packet.state, units: applySnap(gotUnits, packet.unitsDelta) }; delete result.unitsDelta;
+        nextGotUnits = clone(result.state.units);
+      } else if (object(packet.state) && Array.isArray(packet.state.units)) { try { unitsById(packet.state.units); nextGotUnits = clone(packet.state.units); } catch (_) { nextGotUnits = null; } }
       // 长休结算：restUnchanged 用上一次收到的那份还原（玩家端看到的 packet.rest 和整份发时一模一样）
       let nextRest = gotRest, nextHasRest = hasGotRest;
       if (own(packet, "restUnchanged")) {
@@ -282,7 +335,7 @@
         nextLore = clone(result.lore);
       } else if (own(packet, "lore")) { nextLore = clone(packet.lore); nextHasLore = true; }
       delete result.wireFormat; delete result.historyFull; delete result.historyLengths;
-      decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore;
+      gotUnits = nextGotUnits; decoded = next; hasDecoded = true; gotMatchup = nextGot; hasGotMatchup = nextHasGot; gotRest = nextRest; hasGotRest = nextHasRest; gotLore = nextLore; hasGotLore = nextHasLore;
       gotChat = nextChat; hasGotChat = nextHasChat; return result;
     }
     return { pack, unpack, reset };
