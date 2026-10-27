@@ -407,6 +407,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **没改的**：协助「捏碎颅骨」、数值栏现算、其它敌人的图鉴。
   - **测试**：tests/giant-bestiary.test.js（新，2 条）：巨人两条主动招式都写「等级颗 d8」，不再写「1d8」（在没改的代码上失败）；4 级巨人真的打一次近距砸击（同区）、远距能量（隔一区），每颗 d8 掷 8，记录里是「掷骰 4d8 → 32」（锁住实际骰数，文字和代码哪边单独变了都会报出来）。
 
+
+
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
