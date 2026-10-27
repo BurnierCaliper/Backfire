@@ -576,6 +576,8 @@ function vehicleRollEncounter(spec) {
  *  picks = 抽到的先后（finishEncounter 排站位之前记下的：三区制的站位会把敌人拆成一只一行再打乱）。从最后抽到的往前退，
  *  这台车的阵营至少留一个人（开局要有驾驶员，vehicleEncounterSetup）；退掉的是 2 枚代币的精英、多退了的，
  *  从同一个池子补抽回去（pool = rollEncounter 抽敌人用的池子；没给就用这场遭遇里有的阵营）——和一开始就少抽这么多代币一样。
+ *  补抽走 pickByTokens 的单位上限：剩余名额 = ENCOUNTER_UNIT_CAP − 已有敌人单位 − 1（车本身算 1 个单位；
+ *  车是配置物，有驾驶员时和驾驶员合并成一张卡，但补抽时按「车已在场」预留，避免敌人+车超过上限）。
  *  实际退掉几枚记在 spec.vehicles[0].tokens，也是返回值 */
 function vehiclePayTokens(spec, picks, pool) {
   const v = ((spec && spec.vehicles) || [])[0];
@@ -603,7 +605,11 @@ function vehiclePayTokens(spec, picks, pool) {
   if (paid > want) {
     const have = new Set(rows.map(r => info(r.preset).faction));
     const from = pool && pool.length ? pool : regionPool(spec.region).filter(k => have.has(info(k).faction));
-    pickByTokens(from, paid - want).forEach(e => {
+    // 补抽也受 ENCOUNTER_UNIT_CAP 约束：名额 = 上限 − 已有敌人 − 车本身（车算 1 个单位，见下）
+    const present = rows.reduce((n, r) => n + size(r), 0);
+    const cap = typeof ENCOUNTER_UNIT_CAP === "number" ? ENCOUNTER_UNIT_CAP : 12;
+    const room = Math.max(0, cap - present - 1);   // −1：车本身占 1 个名额（配置物；有驾驶员时和驾驶员合并成一张卡，补抽仍按「车已在场」预留）
+    pickByTokens(from, paid - want, room).forEach(e => {
       if (zone != null) e.zone = zone;
       rows.push(e);
       paid -= enemyTokens(e.preset);
