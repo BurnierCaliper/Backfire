@@ -26,7 +26,9 @@ test("unchanged matchup is omitted; client keeps the last one; changes and resyn
   const got = client.unpack(same);
   assert.deepEqual(got.matchup, m); assert.equal("matchupUnchanged" in got, false);
   const changed = matchup(); changed.weather = "snow";
-  const w3 = host.pack(packet(3, changed)); assert.ok(w3.matchup);
+  const w3 = host.pack(packet(3, changed));
+  // #340 第 9 条：顶层变了也可以走 matchupDelta（比整张短），解包后仍和整包一样
+  assert.ok(w3.matchup || w3.matchupDelta, "变化时要么整张要么差量");
   assert.deepEqual(client.unpack(w3).matchup, changed);
   const w4 = host.pack(packet(4, changed, "resync")); assert.ok(w4.matchup, "resync always carries the full matchup");
   assert.deepEqual(client.unpack(w4).matchup, changed);
@@ -38,4 +40,33 @@ test("an omitted matchup without a baseline is rejected (forces a resync)", () =
   const host = OnlineWire.create(), m = matchup();
   host.pack(packet(1, m)); const w = host.pack(packet(2, m));
   assert.throws(() => OnlineWire.create().unpack(w), /baseline/);
+});
+
+test("#340 第 9 条：只有个别单位克制表变了时发 matchupDelta，解包后和整包一样", () => {
+  const host = OnlineWire.create(), client = OnlineWire.create(), m = matchup();
+  assert.deepEqual(client.unpack(host.pack(packet(1, m))).matchup, m);
+  const changed = matchup();
+  changed.units.a.zone = 3;
+  const wire = host.pack(packet(2, changed));
+  assert.equal(wire.matchup, undefined, "应走差量而不是整张");
+  assert.ok(wire.matchupDelta, "带 matchupDelta");
+  assert.ok(wire.matchupDelta.changed.a);
+  assert.equal(wire.matchupDelta.changed.b, undefined, "没变的单位不发");
+  assert.deepEqual(client.unpack(wire).matchup, changed);
+});
+
+test("#340 第 9 条：state.units 按 id 发 unitsDelta，解包后和整包一样", () => {
+  const host = OnlineWire.create(), client = OnlineWire.create();
+  const units = (zoneA) => [
+    { id: "a", name: "A", zone: zoneA, isPlayer: true },
+    { id: "b", name: "B", zone: 2, isPlayer: false }
+  ];
+  const packState = (seq, list) => host.pack({ displayOnly: true, protocol: 1, type: "result", seq, messages: [], publicLogs: [], state: { units: list, turnNo: 1 } });
+  const first = packState(1, units(1));
+  assert.ok(first.state.units);
+  assert.deepEqual(client.unpack(first).state.units, units(1));
+  const wire = packState(2, units(2));
+  assert.ok(wire.unitsDelta, "第二包应走 unitsDelta");
+  assert.equal(wire.state.units, undefined);
+  assert.deepEqual(client.unpack(wire).state.units, units(2));
 });

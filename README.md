@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机大战场包体：克制表 / 单位按差量发，一次行动只发一个结算包**（#340 第 9 条；online-wire.js · `matchupDelta` / `unitsDelta`；online-game.js · `settled` / `dirty`；测试 tests/online-packet-budget.test.js、tests/online-wire-matchup.test.js）
+  - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，一次行动两名玩家各收两个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步合计约 64 KB，超过每名玩家 51,200 B 上限。
+  - **现在**：克制表只发和上一包相比变了的单位（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`）；`state.units` 按 id 发差量（`unitsDelta`）；行动结算完若已经发过包且中间没新变化，就不再整包重发。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家都在上限内，且一次行动只收一个结算包。
+  - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限。
+  - **测试**：tests/online-packet-budget.test.js（一次行动一包；大战场四类行动 < 51,200 B）；tests/online-wire-matchup.test.js 加 matchupDelta / unitsDelta 往返。在没改的代码上失败。
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
