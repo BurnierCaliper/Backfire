@@ -368,7 +368,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **打进坚毅生命的伤害，玩家只看到「坚毅受创」，任何界面不写数字**（#340 第 15 条；app.js · `spawnShpHit`（新）、`spawnPopup`、`dealTo` / `applyTypedDotIn` / `pulseResonanceDamage` / `tickSelfBurn` / `applyAbyssFall` / `gapFall` / `tickQuicksandFor` / `formatHitLines`；game.js · 演出带 `spawnPopup`、伤害弹字、预览 `previewOf`、预览标签、行动预测 `predictTurn`；hd2d/hd2d-fx.js · `numberOf`；online-view.js · `projectTape`；online-ui.js 演出气泡；online-game.js · `hitSummary`；测试 tests/shp-dmg-340-15.test.js（新）、tests/shp-dmg-340-15-review.test.js（新）、tests/hd2d-field-fx.test.js）
+- **打进坚毅生命的伤害，玩家只看到「坚毅受创」，任何界面不写数字**（#340 第 15 条；app.js · `spawnShpHit`（新）、`spawnPopup`、`dealTo` / `applyTypedDotIn` / `pulseResonanceDamage` / `tickSelfBurn` / `applyAbyssFall` / `gapFall` / `tickQuicksandFor` / `formatHitLines`；game.js · 演出带 `spawnPopup`、伤害弹字、预览 `previewOf`、预览标签、行动预测 `predictTurn`；hd2d/hd2d-fx.js · `numberOf`；online-view.js · `projectTape` / `popupWords` / `projectLogs`；online-ui.js 演出气泡；online-game.js · `hitSummary`；测试 tests/shp-dmg-340-15.test.js（新）、tests/shp-dmg-340-15-review.test.js（新）、tests/hd2d-field-fx.test.js）
   - **以前**：起身中挨打，战斗日志写「→ 瑞比：7 伤害」和整段计算过程，回合结束灼烧写「瑞比 灼烧2层分别掷骰 1d4〔3〕=3 + 1d4〔4〕=4 = 7 → 实伤 7」，旧画面弹出伤害数字，预览写伤害数，行动预测写「预计受到 N 伤害」；联机投影把坚毅上的伤害数字丢掉、也不给替代字。README #52 还写着「受伤时伤害数字照常显示」。
   - **现在**（作者定）：游戏版里打进坚毅的伤害，单机 / 联机玩家看到的浮字、战斗日志、预览、行动预测、联机演出和联机战场日志摘要一律只显示「坚毅受创」，不写任何数字。
     - 弹字照旧是一下伤害（`kind: "dmg"`，打中、受击、攻击演出、新画面的打中那一段都照旧），另带标记 `grit: true`：画面看到标记就写「坚毅受创」、不写数字、不按数字放大；预览不把带标记的弹字算进伤害数。
@@ -380,8 +380,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **没改的**：主持人 / 计算器（不是游戏版）照旧：多段攻击每段一个数字，谐波追加、出血各弹各的数字，日志写实伤。道具 / 效果说明里的固定花费照常写；剩余坚毅仍永不显示。共振分享给队友的那一下照旧弹队友自己扣的血（是队友看得见的血）。预览里的「击倒 / 可能击倒」照旧（要不要也藏是规则问题，留给作者）。
   - **作废**：#52「受伤时伤害数字照常显示」那一句（与 CLAUDE.md「实际扣了多少也不能给」对齐）。
   - **守卫放宽**：tests/hd2d-field-fx.test.js「坚毅生命绝不显示」以前要求打在坚毅生命上什么都不弹、新画面的 DOM 里不能有「坚毅」字样，现在有意改成只放行「坚毅受创」这一个确切的词（数值仍不许出现）。
-  - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。合并时 `tickSelfBurn` 那一行保留 #415 的 `Math.floor`、弹字用本条的 `spawnShpHit(u, "fire", { value: loss })`（仍无数字）。
-  - **测试**：tests/shp-dmg-340-15.test.js（新，5 条，在没改的代码上都失败）：起身中挨打日志 / 弹字只有「坚毅受创」；灼烧、自焚同理；联机投影带标记不带数；计算器照旧弹数字、README 有本条。tests/shp-dmg-340-15-review.test.js（新，7 条）：致命的一下、真实的回合结束灼烧（含致命）、拉斯缪尔不稳态、坠落、联机投影 + 演出（打中照演、数字只写「坚毅受创」）、联机战场日志摘要；计算器两段攻击各弹一个数字。第 1–3、6、7 条在 main 和本 PR 改之前（9170cc2）都失败，坠落在 main 上失败，计算器两段那条在 9170cc2 上失败。
+  - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。本分支 `tickSelfBurn` 已按 #415 用 `Math.floor` 扣量（与 `applyTrueDamage` 一致），弹字用本条的 `spawnShpHit(u, "fire", { value: loss })`（仍无数字）。
+  - **联机日志白名单**：`online-view.js` · `popupWords` 补进「坚毅受创」；`projectLogs` 才放行该词。以前缺这一词时，纯坚毅命中（`dmg` 为 0）整行摘要会被丢掉。
+  - **测试**：tests/shp-dmg-340-15.test.js（新，5 条，在没改的代码上都失败）：起身中挨打日志 / 弹字只有「坚毅受创」；灼烧、自焚同理；联机投影带标记不带数；计算器照旧弹数字、README 有本条。tests/shp-dmg-340-15-review.test.js（新，8 条）：致命的一下、真实的回合结束灼烧（含致命）、拉斯缪尔不稳态、坠落、联机投影 + 演出（打中照演、数字只写「坚毅受创」）、联机战场日志摘要（改用真实 `OnlineView.projectLogs`，不再透传 mock）、另加一条直接打 `projectLogs` 确认「坚毅受创」留下且不漏坚毅数字；计算器两段攻击各弹一个数字。第 1–3、6、7 条在 main 和本 PR 改之前（9170cc2）都失败，坠落在 main 上失败，计算器两段那条在 9170cc2 上失败。
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。

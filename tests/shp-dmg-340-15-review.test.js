@@ -1,5 +1,5 @@
 // （新）issue #340 第 15 条（按 #417 审查补的）：致命的一下、真实的回合结束灼烧、拉斯缪尔不稳态、坠落、
-// 联机演出（HD2DFx · cues / numberOf）和联机战场日志摘要（online-game.js · hitSummary），玩家都只看到「坚毅受创」、看不到数字；
+// 联机演出（HD2DFx · cues / numberOf）和联机战场日志摘要（online-game.js · hitSummary / online-view.js · projectLogs），玩家都只看到「坚毅受创」、看不到数字；
 // 主持人 / 计算器照旧：多段攻击每段一个数字
 "use strict";
 const test = require("node:test");
@@ -105,7 +105,7 @@ test("第 15 条：联机投影——主机标了 grit 的一下（致命：快�
   assert.deepEqual(cue.numbers.map(n => n.text), ["坚毅受创"]);
 });
 
-test("第 15 条：联机战场日志摘要（hitSummary）认主机的 grit 标记：致命的一下也只记「坚毅受创」，不记伤害数", async () => {
+test("第 15 条：联机战场日志摘要（hitSummary）认主机的 grit 标记：致命的一下也只记「坚毅受创」，不记伤害数；真实 projectLogs 放行该词、不漏数字", async () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], seed: "SHP-15H" });
   const hero = c.S.state.units.find(u => u.isPlayer && !u.weaponOf);
@@ -123,7 +123,8 @@ test("第 15 条：联机战场日志摘要（hitSummary）认主机的 grit 标
   c.TrpgFlow = { enter() {}, onlineCheckpoint: () => ({}), restoreOnline() {} };
   c.trpgReadSlots = () => [{ name: "已有团" }, null, null];
   c.HotseatUI = { mount() {} };
-  c.OnlineView = { projectPacket: p => plain(p), projectLogs: rows => plain(rows) };
+  // 用真实 OnlineView.projectLogs（以前 mock 成透传，白名单缺「坚毅受创」时测不到整行被丢掉）
+  c.OnlineView = { projectPacket: p => plain(p), projectLogs: OV.projectLogs };
   c.OnlineActions = { create: () => ({ menu() { return {}; } }) };
   const ep = { identity: { id: "host", name: "主持人", role: "host", roomCode: "AAAAAA" },
     credentials: () => ({ roomCode: "AAAAAA", role: "host", token: "test", build: "backfire-d3-v1", protocol: 1 }),
@@ -136,10 +137,31 @@ test("第 15 条：联机战场日志摘要（hitSummary）认主机的 grit 标
   const snap = [{ id: hero.id, name: hero.name, isPlayer: true, upOnShp: false, dying: false, dead: true }];
   const tape = [{ type: "pop", unitId: hero.id, kind: "dmg", value: 7, grit: true, element: "physical", main: true, snap }];
   c.OnlineGame.onActionSettled({ type: "battle.endEnemyTurn" }, {}, tape, {});
+  // getView 已经走真实 projectLogs：hits 折进 text，dmg=0 且只有「坚毅受创」时整行必须还在
   const logs = plain(c.OnlineGame.getView().packet.publicLogs);
   const round = logs.filter(l => l.kind === "round").pop();
   assert.ok(round, JSON.stringify(logs));
-  const row = round.hits.find(h => h.name === hero.name);
-  assert.ok(row && row.words.includes("坚毅受创"), "摘要里记「坚毅受创」：" + JSON.stringify(round.hits));
-  assert.equal(row.dmg, 0, "不记伤害数");
+  assert.match(round.text, new RegExp(hero.name + "：坚毅受创"), "投影后仍见「坚毅受创」：" + round.text);
+  assert.doesNotMatch(round.text, /\d+\s*伤害/, "投影后不能写伤害数：" + round.text);
+  assert.doesNotMatch(round.text, /\b7\b/, "投影后不能漏出这一下的 7：" + round.text);
+  assert.doesNotMatch(JSON.stringify(logs), /"shp"|坚毅\s*\d|\d+\s*坚毅/, "投影包不能带坚毅数字");
+});
+
+test("第 15 条：真实 OnlineView.projectLogs 放行「坚毅受创」；纯坚毅命中不整行消失，也不漏坚毅数字", () => {
+  const logs = OV.projectLogs([
+    { kind: "round", turn: 3, hits: [
+      { name: "瑞比", dmg: 0, brk: 0, heal: 0, words: ["坚毅受创"] },
+      { name: "狂徒", dmg: 12, brk: 1, words: ["失衡"] }
+    ] },
+    { kind: "action", actorName: "刀客", actionName: "普通攻击", hits: [
+      { name: "瑞比", dmg: 0, words: ["坚毅受创"], shp: 37 }
+    ] }
+  ]);
+  const texts = logs.map(r => r.text);
+  const gritLines = texts.filter(t => t.includes("瑞比"));
+  assert.ok(gritLines.some(t => /瑞比：坚毅受创/.test(t)), "纯坚毅命中必须留下这一行：" + texts.join(" | "));
+  assert.ok(texts.some(t => /狂徒：12 伤害，击破 1，失衡/.test(t)));
+  assert.ok(texts.some(t => /刀客 · 普通攻击 → 瑞比：坚毅受创/.test(t)));
+  assert.ok(gritLines.every(t => !/瑞比：[^；]*\d/.test(t)), "瑞比坚毅段不能带数字：" + gritLines.join(" | "));
+  assert.doesNotMatch(JSON.stringify(logs), /37|"shp"/i, "投影不能带 shp / 37");
 });

@@ -6045,7 +6045,8 @@ function tickSelfBurn(u, growStacks) {
   const maxPool = onShp ? (Number(u.shpMax) || Number(u.shp) || 0) : totalMaxHp(u);
   const cur = onShp ? (Number(u.shp) || 0) : totalHp(u);
   const cap = Math.max(0, cur - 1);
-  const loss = Math.min(maxPool * 0.1 * stacks, cap);
+  // #340 第 13/15 条：自焚扣量向下取整（与 applyTrueDamage / #415 一致，合并时不回退成小数）
+  const loss = Math.floor(Math.min(maxPool * 0.1 * stacks, cap));
   if (onShp) {
     u.shp = Math.max(1, (Number(u.shp) || 0) - loss);
     // #340 第 15 条：起身中自焚只弹「坚毅受创」（与 #415 重叠：那边不弹字；合并后以本条为准）
