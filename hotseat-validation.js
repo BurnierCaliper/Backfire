@@ -185,7 +185,11 @@
   }
   function checkMove(actor, cmd) {
     const from = Number(actor.zone), dest = cmd.dest;
-    if (!Number.isInteger(dest) || dest < 1 || dest > Number(state.zoneMode) || Math.abs(dest - from) !== 1) fail("一次只能移动到相邻的有效区域", "invalid_move");
+    // 相邻按棋盘真实的连接算（engine.js · zonesAdjacent / boardZoneIds），和单机一致：
+    // 十字 / 2×2 棋盘上区号差 1 不等于相邻（#340 第 10 条）；没有棋盘函数时（极简环境）才退回一排区的「区号差 1」
+    const ids = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 0 }, (_, i) => i + 1);
+    const adjacent = typeof zonesAdjacent === "function" ? zonesAdjacent(from, dest) : Math.abs(dest - from) === 1;
+    if (!Number.isInteger(dest) || !ids.includes(dest) || dest === from || !adjacent) fail("一次只能移动到相邻的有效区域", "invalid_move");
     if (typeof isCrushing === "function" && isCrushing(actor)) fail("正抓在敌人身上，无法主动移动", "invalid_move");
     if (typeof touDuelVictim === "function" && touDuelVictim(actor)) fail("决一死战中不能移动", "invalid_move");
     if (actor.self === "frost") fail("霜结：无法自行移动", "invalid_move");

@@ -229,3 +229,21 @@ test("被沙珊瑚缠住、流沙下陷 2 层以上：校验就拒绝并写出�
   assert.ok(f.c.sinkStuck(f.a), "测试没造出流沙下陷");
   untouched(f, { type: "move", actor: f.a.id, dest: 2 }, /下陷 2 层/);
 });
+
+test("#340 第 10 条：特殊棋盘上的移动按真实相邻校验，不再看区编号差 1", () => {
+  const f = fixture();
+  const move = (board, from, dest) => {
+    f.c.applyBoard(board); f.a.zone = from;
+    return () => f.validate({ type: "move", actor: f.a.id, dest });
+  };
+  // 四区方形：1-2、1-3、2-4、3-4 相邻；3→2 编号差 1 却是对角
+  assert.doesNotThrow(move("square4", 3, 1));
+  assert.doesNotThrow(move("square4", 3, 4));
+  assert.throws(move("square4", 3, 2), /相邻|区/);
+  assert.throws(move("square4", 1, 4), /相邻|区/);
+  // 五区十字：3 在中心，5→3、3→1 相邻（编号差 2），4→5 不相邻（编号差 1）
+  assert.doesNotThrow(move("cross5", 5, 3));
+  assert.doesNotThrow(move("cross5", 3, 1));
+  assert.throws(move("cross5", 4, 5), /相邻|区/);
+  assert.throws(move("cross5", 3, 9), /相邻|区/);
+});
