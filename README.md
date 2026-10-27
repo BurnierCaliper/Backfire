@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **强化注射剂 / 全队集结·直伤的 ATK 加成算进出手**（修复 #340 第 16 条；party.js · `effectiveAtk`；app.js · `applyRallyBuff` / `resetBattleFlags`、`RALLY_BUFF`（新配置）；测试 tests/atk-buffs.test.js（新））
+  - **以前**：强化注射剂写「ATK +3 至战斗结束」，代码给 `u.atk` 和 `u.itemAtkBonus` 各加 3；全队集结·直伤给 `u.atk` +15。出手按 `effectiveAtk` 算，它不读这两个字段，伤害一点不加（坚毅照扣）。
+  - **现在**：`effectiveAtk` 加上 `itemAtkBonus` 和 `rallyAtk`。直伤集结另记 `rallyAtk`（数值放在配置 `RALLY_BUFF = { atk: 15 }`，`rallyAtk`、`u.atk` 和日志「ATK +15」都读它；下一场 `resetBattleFlags` 清掉）；注射剂本来就写了 `itemAtkBonus`，现在真的进伤害。
+  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结的「持续到自己晕眩或濒死」**没做**：现在 +15 整场有效，濒死起身、晕眩恢复后都还在；「自己」是指施放者还是每个拿到加成的队员没写清楚，待主人确认后再补。
+  - **测试**：tests/atk-buffs.test.js（新，3 条；前 2 条在没改的代码上都失败，第 3 条在加配置前失败）：打针后 `effectiveAtk` +3；直伤集结后 +15，下一场清零；把 `RALLY_BUFF.atk` 改成 7，出手和日志都跟着变成 +7。
+
 - **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
   - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
   - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
@@ -379,6 +385,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **现在**：近距砸击、远距能量都改成「atk + 等级颗 d8」（写「颗」，免得和蚁卫的「等级 + 1d6」看混）。代码（enemies.js / engine.js）不动，作者定的：按等级掷。
   - **没改的**：协助「捏碎颅骨」、数值栏现算、其它敌人的图鉴。
   - **测试**：tests/giant-bestiary.test.js（新，2 条）：巨人两条主动招式都写「等级颗 d8」，不再写「1d8」（在没改的代码上失败）；4 级巨人真的打一次近距砸击（同区）、远距能量（隔一区），每颗 d8 掷 8，记录里是「掷骰 4d8 → 32」（锁住实际骰数，文字和代码哪边单独变了都会报出来）。
+
 
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
