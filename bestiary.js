@@ -330,7 +330,7 @@ function bestiaryStageOf(u) {
 }
 /** 一场战斗结束：场上出现过的敌人都记为遭遇过（次数、见过的等级、打倒几只） */
 function bestiaryRecordBattle(outcome) {
-  const units = (state.units || []).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
+  const units = (typeof battleFoesSeen === "function" ? battleFoesSeen() : (state.units || [])).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
   if (!units.length) return [];
   const d = bestiaryLoad();
   const now = Date.now();
@@ -344,7 +344,8 @@ function bestiaryRecordBattle(outcome) {
     const lv = Number(u.level) || 1;
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
-    if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
+    // 下潜逃走的（只有 _removed）不是击杀；飞碟触灵的机械足也记在飞碟名下，但击倒只算本体那一次（#340 第 18 条）
+    if (u.dead && u.kit !== "ufo_leg") e.kills += 1;
     // 种族（enemies.js）：随机种族的敌人记下见过哪些
     const rl = typeof raceText === "function" ? raceText(u) : "";
     if (rl) { e.races = Array.isArray(e.races) ? e.races : []; if (!e.races.includes(rl)) e.races.push(rl); }

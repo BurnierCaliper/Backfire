@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
+  - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
+  - **现在**：敌人被打倒时（`removeEnemyFromField` 当下，不等 3 秒后移出场）就登记到 `state.goneFoes`，同一个 id 只留一份，每场开战清空；掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。打倒后 3 秒内点了预演 / 看了行动预测 / 撤销（state 被换成拷贝），或者连续战斗换了区域，都照样算得到。图鉴里飞碟触灵的「击倒」只算本体那一次，机械足不另算（以前打掉 5 条腿会多记）。
+  - **没改的**：3 秒淡出、撤销复活、中立 / 召唤物 / 铁壁 / 机械足不掉的规则；机械足照旧记在飞碟触灵名下的「遭遇过」和等级。
+  - **测试**：tests/removed-foe-drops.test.js（新，8 条，在没改的代码上都失败）：跑团 `trpgEnemyMaterials`、单局 `Rogue.finishBattle` 掷掉落时收到的名单里有先移出场的那只（把 `rollEnemyDrops` 换成记名单的函数，走真实调用方）；打倒后、计时器到点前 state 被换成深拷贝，照样算到；连续战斗第 1 场最后一只没等计时器就换区域，照样算到；同一只被打倒两次只留一份；图鉴记遭遇过、击倒 1；飞碟 5 条机械足一条条打掉，「击倒」只 +1；新的一场不带上上一场的 goneFoes。
+
 - **空投蜂群、下水道清扫机的架势改成 1–10 级 1、11–20 级 2、21 级起 3**（下水道清扫机照抄空投蜂群，两个一起改；engine.js · `SWARM_STANCE`（新）/ `swarmStance`（新）、`enemyPresets` 的 `swarm` / `sewer_sweeper`、`SEWER_STATS.sweeper`；docs/sewer-maintenance.md；测试 tests/swarm-stance.test.js（新）、tests/sewer-maintenance.test.js）
   - **以前**：架势 1 + ⌊等级/2⌋，最多 3——1 级 1、2–3 级 2、4 级起就是 3，前期太硬。
   - **现在**：1–10 级 1、11–20 级 2、21 级起 3；不随人数加（2 / 3 / 4 人队一样，图鉴一样）。曲线放在配置 `SWARM_STANCE = { base: 1, steps: [11, 21] }`（1 级的架势、每升 1 点的等级），两种敌人生成时直接按 `swarmStance(等级)` 给架势。`SEWER_STATS.sweeper` 里不再起作用的 `def` / `defCap` 去掉，docs/sewer-maintenance.md 的表和公式一起改。额外幕敌人可到 25 级（`rogue-data.js · extraActLevels`），21 级起给 3。
@@ -391,6 +397,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **现在**：近距砸击、远距能量都改成「atk + 等级颗 d8」（写「颗」，免得和蚁卫的「等级 + 1d6」看混）。代码（enemies.js / engine.js）不动，作者定的：按等级掷。
   - **没改的**：协助「捏碎颅骨」、数值栏现算、其它敌人的图鉴。
   - **测试**：tests/giant-bestiary.test.js（新，2 条）：巨人两条主动招式都写「等级颗 d8」，不再写「1d8」（在没改的代码上失败）；4 级巨人真的打一次近距砸击（同区）、远距能量（隔一区），每颗 d8 掷 8，记录里是「掷骰 4d8 → 32」（锁住实际骰数，文字和代码哪边单独变了都会报出来）。
+
 
 
 
