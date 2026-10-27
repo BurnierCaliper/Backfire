@@ -7845,14 +7845,17 @@ function triggerOneStatus(t, src, key) {
   return notes;
 }
 
+// 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
+const RALLY_BUFF = { atk: 15 };
+
 function applyRallyBuff(u, lines) {
   if (!u || !u.roles) return;
   const p = u.roles.primary;
   u.rallyBuff = p;
   if (p === "直伤") {
-    u.rallyAtk = 15;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
-    u.atk = (u.atk || 0) + 15;
-    lines.push(`${u.name} 直伤集结：ATK +15。`);
+    u.rallyAtk = RALLY_BUFF.atk;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
+    u.atk = (u.atk || 0) + RALLY_BUFF.atk;
+    lines.push(`${u.name} 直伤集结：ATK +${RALLY_BUFF.atk}。`);
   } else if (p === "异常") {
     u.bonus = (u.bonus || 0) + 1;
     lines.push(`${u.name} 异常集结：附赠 +1。`);

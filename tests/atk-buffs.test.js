@@ -31,3 +31,17 @@ test("全队集结·直伤：ATK +15 真的加到出手的攻击力上；下一�
   c.resetBattleFlags(h);
   assert.equal(c.effectiveAtk(h, c.S.state.units), before);
 });
+
+test("全队集结·直伤：加成读配置 RALLY_BUFF.atk（出手和日志都跟着变）", () => {
+  const c = field();
+  const vm = require("node:vm");
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext("RALLY_BUFF", c))), { atk: 15 });
+  vm.runInContext("RALLY_BUFF.atk = 7", c);
+  const h = hero(c, "helu");
+  h.roles = Object.assign({}, h.roles, { primary: "直伤" });
+  const before = c.effectiveAtk(h, c.S.state.units);
+  const lines = [];
+  c.applyRallyBuff(h, lines);
+  assert.equal(c.effectiveAtk(h, c.S.state.units), before + 7);
+  assert.ok(lines.some(s => /直伤集结：ATK \+7。/.test(s)), lines.join("\n"));
+});
