@@ -368,6 +368,10 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **空投蜂群、下水道清扫机的架势改成 1–10 级 1、11–20 级 2、21 级起 3**（`engine.js · swarmStance / SWARM_STANCE_STEPS`；下水道清扫机照抄空投蜂群，两个一起改）：
+  - **以前**：架势 1 + ⌊等级/2⌋，最多 3——1 级 1、2–3 级 2、4 级起就是 3，前期太硬。
+  - **现在**：1–10 级 1、11–20 级 2、21 级起 3；不随人数加（2 / 3 / 4 人队一样，图鉴一样）。`SEWER_STATS.sweeper.defCap` 去掉，docs/sewer-maintenance.md 的表和公式一起改。额外幕敌人可到 25 级（`rogue-data.js · extraActLevels`），21 级起给 3。
+  - 测试：新增 tests/swarm-stance.test.js（两种敌人各查 1 / 10 / 11 / 20 / 21 级 × 2 / 3 / 4 人队，生成、图鉴都看）；tests/sewer-maintenance.test.js 的数值表和公式跟着改。
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：

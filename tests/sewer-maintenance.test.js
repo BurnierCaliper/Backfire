@@ -38,7 +38,7 @@ test("数值：1 / 5 / 10 / 15 / 20 级（2 人队）的护盾 / 装甲、架势
   const c = H.load();
   get(c, "ENEMY_IV.off++");   // 个体值不波动
   // [护盾, 装甲, 架势, ATK]
-  const TABLE = { 1: [4, 1, 1, 4], 5: [12, 1, 3, 6], 10: [22, 1, 3, 9], 15: [32, 1, 3, 11], 20: [42, 1, 3, 14] };
+  const TABLE = { 1: [4, 1, 1, 4], 5: [12, 1, 1, 6], 10: [22, 1, 1, 9], 15: [32, 1, 2, 11], 20: [42, 1, 2, 14] };
   Object.keys(TABLE).forEach(lvs => {
     const lv = Number(lvs), [sh, ar, def, atk] = TABLE[lvs];
     const u = c.spawnEnemyGroup("sewer_sweeper", lv, 2, 2)[0];
@@ -50,7 +50,7 @@ test("数值：1 / 5 / 10 / 15 / 20 级（2 人队）的护盾 / 装甲、架势
   });
 });
 
-test("数值：血量照空投蜂群（护盾 4 + 2×(等级−1)、装甲 1，3、4 人队按 scaleHp 放大；架势 1 + ⌊等级/2⌋ 最多 3），ATK 照机器人看守（剑）；远程 1d4 谐波；数值在配置表里", () => {
+test("数值：血量照空投蜂群（护盾 4 + 2×(等级−1)、装甲 1，3、4 人队按 scaleHp 放大；架势 1–10 级 1、11–20 级 2、21 级起 3），ATK 照机器人看守（剑）；远程 1d4 谐波；数值在配置表里", () => {
   const c = H.load();
   const build = (id, lv, p) => c.enemyPresets().find(x => x.id === id).build(lv, p);
   for (let lv = 1; lv <= 25; lv++) for (const p of [2, 3, 4]) {
@@ -58,13 +58,13 @@ test("数值：血量照空投蜂群（护盾 4 + 2×(等级−1)、装甲 1，3
     const tag = `${lv} 级 ${p} 人队`;
     assert.deepEqual(plain(u.layers.map(l => [l.type, l.max])), plain(swarm.layers.map(l => [l.type, l.max])), tag + "：血量同空投蜂群");
     assert.equal(u.layers[0].max, c.scaleHp(4 + 2 * (lv - 1), p), tag);
-    assert.equal(u.defMax, Math.min(3, 1 + Math.floor(lv / 2)), tag + "：架势最多 3");
+    assert.equal(u.defMax, (lv >= 21 ? 3 : lv >= 11 ? 2 : 1), tag + "：架势 1–10 级 1、11–20 级 2、21 级起 3");
     assert.equal(u.defMax, swarm.defMax, tag);
     assert.equal(u.atk, 4 + Math.floor(lv / 2), tag);
     assert.equal(u.atk, guard.atk, tag + "：ATK 同机器人看守（剑）");
     assert.deepEqual([u.range, u.flying, u.suggest.element, plain(u.suggest.dice)], ["ranged", false, "harmonic", [1, 4]], tag);
   }
-  assert.deepEqual(plain(get(c, "SEWER_STATS").sweeper), { shield: [4, 2], armor: 1, def: 1, defCap: 3, atk: 4, dice: 4 });
+  assert.deepEqual(plain(get(c, "SEWER_STATS").sweeper), { shield: [4, 2], armor: 1, def: 1, atk: 4, dice: 4 });
   assert.deepEqual(plain(get(c, "SEWER_CFG").sweeper), { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 });
 });
 
