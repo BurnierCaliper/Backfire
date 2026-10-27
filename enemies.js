@@ -219,7 +219,6 @@ function kingExecutionGrab(king, m, notes) {
   if (Math.random() < KING_CFG.exec.grab) {
     t.stunned = true;
     notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`);
-    if (typeof endSelfOnStun === "function") endSelfOnStun(t, notes);
     if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, notes);
   }
   else notes.push(`${boss.name} 擒拿 ${t.name} 失败。`);
@@ -2401,7 +2400,6 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       if (t.def <= 0) {
         t.stunned = true;
         lines.push(imbalanceLine(t));
-        if (typeof endSelfOnStun === "function") endSelfOnStun(t, lines);
         if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);
       }
       lines.push(`成功：自身架势至少留 1，反击 1 击破 → ${t.name} 架势 ${t.def}`);
@@ -2502,7 +2500,6 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       if (!enemyHitLanded(out) || u.dead || u.dying) return;
       u.stunned = true;
       lines.push(`${u.name} 被流沙困住，无法行动。`);
-      if (typeof endSelfOnStun === "function") endSelfOnStun(u, lines);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, lines);
     });
     return true;
@@ -2600,7 +2597,6 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (boss && Math.random() < 0.5) {
       t.stunned = true;
       lines.push("强盗头子擒拿成功，目标失去下回合行动。");
-      if (typeof endSelfOnStun === "function") endSelfOnStun(t, lines);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);
     } else if (boss) lines.push("强盗头子擒拿失败。");
     return true;

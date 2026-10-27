@@ -126,13 +126,7 @@ test("闪光震撼弹：施放者被 itemStun → 集结立刻结束", () => {
 test("捏碎颅骨：力竭 3 施放者直接死亡 → 集结结束（beginRound 也能兜住）", () => {
   const { c, y, h } = field();
   castRally(c, y);
-  // 力竭 3：被击倒即死
-  c.S.state.exhaustTier = 3;
-  if (typeof c.exhaustTierOf === "function") {
-    // exhaustTierOf 可能读单位或 state；直接挂在单位上兜底
-  }
-  y._exhaustTier = 3;
-  // 覆盖 exhaustTierOf 返回值：许多实现读 state.exhaustTier
+  c.S.state.exhaustTier = 3;   // exhaustTierOf 读 state.exhaustTier
   const notes = [];
   c.crushSkullDown(y, notes);
   assert.equal(!!y.dead, true, "力竭 3 捏碎颅骨直接死亡");
@@ -199,4 +193,37 @@ test("载具驾驶员标记没攒满：stunShrugged 时集结不结束", () => {
   assert.equal(!!y.resources.rallyOn, true);
   assert.equal(h.rallyAtk, 15);
   assert.ok(!notes.some(s => /全队集结结束/.test(s)));
+});
+
+test("直伤集结结束：召唤武器重算 atk 后再清，不把 atk 扣到基础以下", () => {
+  // 旧 clearRallyBuff 做 u.atk − rallyAtk：柯尔特 10→25→召唤扭矩重算成 6→再 −15 = −9
+  const c = H.load();
+  c.BattleSim.setup({ party: ["yuito", "kolt"], enemies: [{ id: "thug_knife", lv: 3, zone: 1 }], seed: "RALLY-ATK-FLOOR" });
+  c.startCombat();
+  const S = c.S.state;
+  const y = kit(S, "yuito");
+  const k = kit(S, "kolt");
+  y.zone = 1; k.zone = 1;
+  y.roles = { primary: "辅助", secondary: "辅助" }; y.level = 15;
+  c.resetBattleFlags(y); y.ap = 3; y.bonus = 3;
+  k.roles = Object.assign({}, k.roles, { primary: "直伤" });
+  const personal = Number(k.personalAtk) || 0;
+  assert.equal(k.atk, personal + (Number(k.weaponAtk) || 0));
+  castRally(c, y);
+  assert.equal(k.rallyAtk, 15);
+  assert.equal(k.atk, personal + (Number(k.weaponAtk) || 0) + 15);
+  // 召唤扭矩：owner.atk = personalAtk，集结的 +15 从字段里消失，但 rallyAtk 还在
+  cmd(c, { actor: k.id, skill: "kolt_summon" });
+  assert.equal(k.atk, personal, "召唤后 atk 被重算成 personalAtk");
+  assert.equal(k.rallyAtk, 15);
+  const notes = [];
+  c.dealBreak(y, 99, "physical", notes, "测试");
+  assert.equal(!!y.resources.rallyOn, false);
+  assert.equal(k.rallyAtk || 0, 0);
+  assert.ok(k.atk >= personal, `atk 不应低于 personalAtk（实际 ${k.atk}）`);
+  assert.equal(k.atk, personal);
+  assert.equal(c.effectiveAtk(k, S.units), personal);
+  // 再清一次应幂等
+  c.clearRallyBuff(k, []);
+  assert.equal(k.atk, personal);
 });

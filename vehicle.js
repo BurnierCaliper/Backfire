@@ -380,7 +380,6 @@ function vehicleDestroy(p, notes) {
     if (!u.stunned && u.def > 0) dealBreak(u, u.def, "fire", notes, "殉爆");
     else {
       u.stunned = true;
-      if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
     }
     if (typeof isBossUnit === "function" && isBossUnit(u)) { u.stunMarks = maxMarks; u._bossRefill = false; }

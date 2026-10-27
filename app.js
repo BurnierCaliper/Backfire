@@ -2332,7 +2332,6 @@ function turnEnd() {
           caster.stunned = true;
           notes.push(`击破预告失败：${caster.name} 架势被击破。`);
           notes.push(imbalanceLine(caster));
-          if (typeof endSelfOnStun === "function") endSelfOnStun(caster, notes);
           if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(caster, notes);
         }
       }
@@ -5077,7 +5076,6 @@ function applyCombat(target, result, attacker) {
     notes.push(`牵挂：结人代为承受 ${taken} 击破（结人架势 ${yuito.def}）`);
     if (yuito.def <= 0) {
       notes.push(imbalanceLine(yuito));
-      if (typeof endSelfOnStun === "function") endSelfOnStun(yuito, notes);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(yuito, notes);
       queueAssistAttack(attacker, yuito);
     }
@@ -5168,7 +5166,6 @@ function applyCombat(target, result, attacker) {
       if (c.def <= 0) {
         c.stunned = true;
         notes.push(imbalanceLine(c));
-        if (typeof endSelfOnStun === "function") endSelfOnStun(c, notes);
         if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(c, notes);
         queueAssistAttack(null, c);
       }
@@ -5691,9 +5688,7 @@ function refreshEconomy(u) {
   }
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof featAlertBonus === "function") bonus += featAlertBonus(u);   // 警戒（feats.js）：每场第一回合 +1 附赠
-  // Q1 待主人确认（PR #418）：异常集结 +1 附赠是否在集结期间每回合都有。
-  // 当前行为 = 只在施放当回合有（applyRallyBuff 加一次；这里不按 rallyBuff 再加）。若改成每回合都有，打开下一行。
-  // if (u.rallyBuff === "异常") bonus += 1;
+  // Q1 待主人确认（PR #418）：异常集结 +1 附赠目前只在施放当回合有（这里不按 rallyBuff 再加）。
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
   // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）；也是加成，在扣之前加
   const carry = u.resources && u.resources.stanceCarry;
@@ -7938,21 +7933,25 @@ function triggerOneStatus(t, src, key) {
 
 // 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
 const RALLY_BUFF = { atk: 15 };
-// Q2 待主人确认（PR #418）：两人先后施放是叠加还是刷新；倒下的施放者是只清自己那份还是全清。
-// 当前行为 = 单 rallyOn（后放的覆盖标记）、倒下时清掉全队所有集结增益、再施放可再叠直伤 atk。
-// 改成「只清自己那份」时给队员记 rallyBy = 施放者 id，clear 时按 rallyBy 过滤；改成刷新时 apply 前先 clear。
-const RALLY_END_SCOPE = "all";   // "all" = 当前；以后可改 "own"
+// Q1 / Q2 待主人确认（PR #418）：异常 +1 附赠持续几回合；两人先后施放叠加还是刷新、倒下是否只清自己那份。
+// 当前：+1 只施放当回合；单 rallyOn、倒下清全队增益。
 
 /** 清掉一名队员身上的全队集结增益（施放者晕眩 / 濒死时对所有拿到加成的队员调用） */
 function clearRallyBuff(u, lines) {
   if (!u || !u.rallyBuff) return;
   const p = u.rallyBuff;
   if (p === "直伤") {
-    const n = Number(u.rallyAtk) || 0;
-    if (n) u.atk = (u.atk || 0) - n;
+    // 记下本单位被授予的量；清零后再按 effectiveAtk 重算 u.atk（与 enterMecha 相同）。
+    // 召唤/收回武器、解除机甲等会从头重算 u.atk，集结的 +N 可能已不在字段里——不能再盲目 −N（会扣到基础以下）。
+    // 幂等：rallyAtk 已是 0 时 effectiveAtk 不含集结，再 clear 因 !rallyBuff 直接返回。
+    const granted = Number(u.rallyAtk) || 0;
     u.rallyAtk = 0;
+    if (typeof effectiveAtk === "function") {
+      u.atk = effectiveAtk(u, state.units);
+    } else if (granted) {
+      u.atk = Math.max(0, (Number(u.atk) || 0) - granted);
+    }
   } else if (p === "异常") {
-    // Q1：异常 +1 附赠只在施放当回合（refreshEconomy 每回合重算、不看 rallyBuff）。
     // 清增益时绝不能再扣 u.bonus——否则会吃掉队员正常附赠（协助格挡等）。只删标记。
   } else if (p === "击破") {
     u.rallyBreak = 0;
@@ -7968,7 +7967,6 @@ function clearRallyBuff(u, lines) {
     u.rallyMove = false;
   }
   delete u.rallyBuff;
-  if (u.rallyBy) delete u.rallyBy;   // Q2 预留：只清自己那份时用
   if (lines) lines.push(`${u.name} 的全队集结增益结束。`);
 }
 
@@ -7982,9 +7980,7 @@ function endRallyIfCasterDown(u, notes) {
   if (!u.dying && !u.dead && typeof stunShrugged === "function" && stunShrugged(u)) return false;
   u.resources.rallyOn = false;
   const lines = notes || [];
-  // Q2：RALLY_END_SCOPE === "own" 时按 rallyBy === u.id 过滤；当前 "all" 清全队
-  const mine = (x) => RALLY_END_SCOPE !== "own" || x.rallyBy === u.id;
-  fieldUnits().filter(x => x && x.isPlayer && mine(x)).forEach(x => clearRallyBuff(x, lines));
+  fieldUnits().filter(x => x && x.isPlayer).forEach(x => clearRallyBuff(x, lines));
   const why = u.dead ? "死亡" : (u.dying ? "濒死" : "晕眩");
   lines.push(`全队集结结束：施放者${why}。`);
   return true;
@@ -7993,16 +7989,12 @@ function endRallyIfCasterDown(u, notes) {
 function applyRallyBuff(u, lines) {
   if (!u || !u.roles) return;
   const p = u.roles.primary;
-  // Q2：若改成「刷新」，这里先 clearRallyBuff(u) 再挂；当前可叠（直伤再 +15）。
   u.rallyBuff = p;
-  // Q2 预留：记下施放者，RALLY_END_SCOPE === "own" 时只用
-  // u.rallyBy = (arguments.length > 2 ? arguments[2] : null);
   if (p === "直伤") {
-    u.rallyAtk = RALLY_BUFF.atk;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
+    u.rallyAtk = RALLY_BUFF.atk;   // 授予量；出手按 effectiveAtk 读它。同步改 u.atk 供计算器预填（#340 第 16 条）
     u.atk = (u.atk || 0) + RALLY_BUFF.atk;
     lines.push(`${u.name} 直伤集结：ATK +${RALLY_BUFF.atk}。`);
   } else if (p === "异常") {
-    // Q1 当前：只在施放当回合 +1；refreshEconomy 不按 rallyBuff 再加
     u.bonus = (u.bonus || 0) + 1;
     lines.push(`${u.name} 异常集结：附赠 +1。`);
   } else if (p === "击破") {
@@ -9396,7 +9388,6 @@ function exitMecha(ruby, reason) {
     mint.def = mechaStunned ? 0 : Math.min(Number(mint.defMax) || 0, mechaDef);
     if (mechaStunned) {
       mint.stunned = true;
-      if (typeof endSelfOnStun === "function") endSelfOnStun(mint, notes);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(mint, notes);
     }
     // 坠落伤害只在被击落时算一次（通用的「飞行被击落扣 20%」对机甲不再先扣一遍，见 engine.js · resolveAttack）
@@ -14896,7 +14887,6 @@ function dmForceStun(u) {
   if (u.trainingDummy) return;   // 训练假人不会失衡
   u.def = 0;
   u.stunned = true;
-  if (typeof endSelfOnStun === "function") endSelfOnStun(u);
   if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u);
 }
 

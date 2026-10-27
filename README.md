@@ -369,14 +369,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 ## 规则改动记录
 
 - **全队集结：施放者晕眩 / 濒死 / 死亡时全体增益结束；扭矩自保模式不受不稳影响**（主人 夕夏 确认；接 #340 第 16 / 17 条；审查修正 PR #418；app.js · `clearRallyBuff` / `endRallyIfCasterDown`（新）/ `applyRallyBuff` / `beginRound` 全体兜底 / `maybeUnstableTrip` / `resetBattleFlags` / `applyKnockdown` / 牵挂；items.js · `itemStun`；enemies.js · `crushSkullDown` 等；engine.js 坦克减伤不再在自己失衡时清掉；matchup.js 克制表与结算一致；skill-text.js / party.js 文案改成「施放者」；测试 tests/rally-caster-end.test.js、tests/divert-guard.test.js、tests/matchup.test.js）
-  - **以前**：全队集结·直伤的 ATK +15（及其他职责增益）整场有效——施放者晕眩恢复、濒死起身后加成还在；「自己」是施放者还是每个拿到加成的队员没写清楚。扭矩自保模式架势可留 1，但不稳仍会在架势剩 1 时直接失衡（坚挺不会）。坦克自己失衡时 engine 仍给减伤、克制表却藏掉「全队集结 −15%」。
+  - **以前**：全队集结·直伤的 ATK +15（及其他职责增益）整场有效——施放者晕眩恢复、濒死起身后加成还在；「自己」是施放者还是每个拿到加成的队员没写清楚。扭矩自保模式架势可留 1，但不稳仍会在架势剩 1 时直接失衡（坚挺不会）。坦克集结在坦克**自己**失衡 / 濒死后就丢掉减伤（engine 删 `rallyDr`、克制表也不显示），两边一致，但和其他职责「整场有效」也不统一。
   - **现在**：
-    - 全队集结增益**持续到施放者晕眩或濒死 / 死亡**：施放者挂 `resources.rallyOn`（`role_rally` 原先就会设；本条开始真正读取）；他晕眩 / 陷入濒死 / 死亡时 `endRallyIfCasterDown` 清掉所有队员的集结增益。中央钩子：直接写 `stunned` / `dying` / `dead` 的路径都调它（牵挂代扛、闪光震撼弹、捏碎颅骨、强盗擒拿、牛反击、流沙漩涡、GM 强制失衡、载具殉爆等）；`beginRound` 在 `offField` 过滤**之前**对全体（含已死）再兜一次，避免施放者直接死亡后整场都不结束。
-    - 异常集结清增益时**不再** `u.bonus − 1`（`refreshEconomy` 每回合重算附赠、不看集结，扣回去会吃掉队员正常附赠）。Q1（+1 附赠是否集结期间每回合都有）与 Q2（两人集结叠加 vs 刷新、倒下是否只清自己那份）待主人确认；当前 = 只施放当回合 +1、单 `rallyOn`、倒下全清，代码里用注释 / `RALLY_END_SCOPE` 隔离，方便改。
+    - 全队集结增益**持续到施放者晕眩或濒死 / 死亡**：施放者挂 `resources.rallyOn`（`role_rally` 原先就会设；本条开始真正读取）；他晕眩 / 陷入濒死 / 死亡时 `endRallyIfCasterDown` 清掉所有队员的集结增益。中央钩子：直接写 `stunned` / `dying` / `dead` 的路径都调它（牵挂代扛、闪光震撼弹、捏碎颅骨、强盗擒拿、牛反击、流沙漩涡、GM 强制失衡、载具殉爆等）；`beginRound` 在 `offField` 过滤**之前**对全体（含已死）再兜一次，避免施放者直接死亡后整场都不结束。自我效果仍按原规则在 `beginRound`（及原先已有的几条路径）结束，本 PR **不**顺手改成当场结束。
+    - 异常集结清增益时**不再** `u.bonus − 1`（`refreshEconomy` 每回合重算附赠、不看集结，扣回去会吃掉队员正常附赠）。直伤清增益时**不再**盲目 `u.atk − rallyAtk`：召唤/收回武器、解除机甲会从头重算 `u.atk`，再减会扣到基础以下（实测柯尔特 −9）；改为先清零 `rallyAtk`，再按 `effectiveAtk` 重算（与 `enterMecha` 相同，幂等）。Q1（+1 附赠是否集结期间每回合都有）与 Q2（两人集结叠加 vs 刷新、倒下是否只清自己那份）待主人确认；当前 = 只施放当回合 +1、单 `rallyOn`、倒下全清。
     - 扭矩自保模式（`resources.divertGuard`）在 `maybeUnstableTrip` 里和坚挺一样：架势剩 ≤1 且身上有不稳时**不**直接失衡。
-    - 克制表 `matchup.js` 与 `engine.js` 一致：坦克自己失衡 / 濒死时仍显示「全队集结 −15%」（只看施放者是否倒下）。载具驾驶员标记没攒满的那次失衡（`stunShrugged`）不算真晕眩，集结不结束。
-  - **没改的**：集结怎么施放、各职责加成数值、`RALLY_BUFF`、自保模式的架势保底与 25% 减伤、坚挺本身、不稳叠两次转晕眩。Q1 / Q2 规则未改（见上）。
-  - **测试**：tests/rally-caster-end.test.js（施放者晕眩 / 濒死 / 死亡 / 牵挂 / 闪光弹 / 捏碎颅骨 / 异常附赠不误扣 / 坦克队员自己失衡仍减伤 / 载具 shrug；若干条在旧代码上失败）；tests/divert-guard.test.js 加 2 条（自保 + 不稳不失衡，及没有自保的对照）；tests/matchup.test.js 加失衡坦克仍显示集结减伤。
+    - 克制表 `matchup.js` 与 `engine.js` 一致：坦克自己失衡 / 濒死时仍显示并结算「全队集结 −15%」（只看施放者是否倒下）。载具驾驶员标记没攒满的那次失衡（`stunShrugged`）不算真晕眩，集结不结束。
+  - **没改的**：集结怎么施放、各职责加成数值、`RALLY_BUFF`、自保模式的架势保底与 25% 减伤、坚挺本身、不稳叠两次转晕眩。失衡路径上的自我效果结束时机（仍多半等到 `beginRound`）。Q1 / Q2 规则未改（见上）。
+  - **测试**：tests/rally-caster-end.test.js（施放者晕眩 / 濒死 / 死亡 / 牵挂 / 闪光弹 / 捏碎颅骨 / 异常附赠不误扣 / 直伤清增益不把 atk 扣到基础以下 / 坦克队员自己失衡仍减伤 / 载具 shrug；在 main 上约 11 条失败）；tests/divert-guard.test.js 加 2 条（自保 + 不稳不失衡，及没有自保的对照）；tests/matchup.test.js 加失衡坦克仍显示集结减伤。
 
 - **联机大战场包体：克制表 / 单位按差量发，一次行动不再重复发整包**（#340 第 9 条；online-wire.js · `matchupDelta`（新）/ `applyMatchupDelta`（新）/ `unitsDelta`；online-game.js · `settled`（新）/ `dirty`（新）；测试 tests/online-packet-budget.test.js（新）、tests/online-packet-budget.helper.js（新）、tests/online-wire-matchup.test.js）
   - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，`act()` 收尾的 `checkEnd()`（`battle.checkSolo` 的 broadcast）也会再发，按真实流程一次行动每名玩家收 4 个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步每名玩家合计约 110 KB，超过 51,200 B 上限。
