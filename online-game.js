@@ -9,6 +9,8 @@
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
+  // dirty（#340 第 9 条）：上一次 publish 之后又有 broadcast（状态变了），行动结算完要不要再发一包看它
+  let dirty = false;
   let screen = "lobby", seq = 0, lastSeq = -1, requestNo = Date.now() * 100, messageNo = 0, messages = [], publicLogs = [];
   let remote = null, notice = "", systemNotice = "", readying = false, restoring = false, started = false, settledResult = null;
   let queue = Promise.resolve(), gmQueue = Promise.resolve(), animation = Promise.resolve(), actionMenu = null, manualResolve = null, manualPhase = false;
@@ -644,7 +646,7 @@
     if (!offlineWait || offlineWait.actor !== unit.actor) { offlineWait = { actor: unit.actor, name: unit.name, owner: unit.owner, deadline: Date.now() + 60000 }; publish(); }
     if (Date.now() >= offlineWait.deadline && GAME.depth === 0 && !HotseatGame.hasAsk()) { offlineWait = null; HotseatGame.withOperator(unit.owner, () => GAME.endTurn()).catch(reportError); }
   }
-  let scheduled = false, dirty = false;
+  let scheduled = false;
   let commandDepth = 0;
   Commands.intercept((cmd, context, next) => {
     if (!isHost() || GAME.sim || restoring) return next();

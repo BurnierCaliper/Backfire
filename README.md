@@ -368,11 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **联机大战场包体：克制表 / 单位按差量发，一次行动只发一个结算包**（#340 第 9 条；online-wire.js · `matchupDelta` / `unitsDelta`；online-game.js · `settled` / `dirty`；测试 tests/online-packet-budget.test.js、tests/online-wire-matchup.test.js）
-  - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，一次行动两名玩家各收两个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步合计约 64 KB，超过每名玩家 51,200 B 上限。
-  - **现在**：克制表只发和上一包相比变了的单位（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`）；`state.units` 按 id 发差量（`unitsDelta`）；行动结算完若已经发过包且中间没新变化，就不再整包重发。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家都在上限内，且一次行动只收一个结算包。
-  - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限。
-  - **测试**：tests/online-packet-budget.test.js（一次行动一包；大战场四类行动 < 51,200 B）；tests/online-wire-matchup.test.js 加 matchupDelta / unitsDelta 往返。在没改的代码上失败。
+- **联机大战场包体：克制表 / 单位按差量发，一次行动不再重复发整包**（#340 第 9 条；online-wire.js · `matchupDelta`（新）/ `applyMatchupDelta`（新）/ `unitsDelta`；online-game.js · `settled`（新）/ `dirty`（新）；测试 tests/online-packet-budget.test.js（新）、tests/online-packet-budget.helper.js（新）、tests/online-wire-matchup.test.js）
+  - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，`act()` 收尾的 `checkEnd()`（`battle.checkSolo` 的 broadcast）也会再发，按真实流程一次行动每名玩家收 4 个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步每名玩家合计约 110 KB，超过 51,200 B 上限。
+  - **现在**：克制表只发和上一包相比变了的单位和去掉的单位 id（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`；不发单位顺序，玩家端只按 id 取）；`state.units` 按 id 发差量（`unitsDelta`）；`execute` 末尾只在中间又有新变化时才 publish。一次行动每名玩家收 2 个结算包：`onActionSettled` 那包带演出带子，`act()` 收尾之后那包不带带子、带着收尾时的真实变化（热座自动选人改的 `GAME.actorId` 影响克制表顶层、战斗结束的结果），所以不能压掉。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家两包合计约 10–14 KB。玩家端收到格式不对的 `matchupDelta`（去掉不存在的单位、带 `order`、和 `matchupUnchanged` 同时出现）一律拒收、去要 resync。
+  - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限；收尾那一包没有合并进第一包（要合并得按投影内容比较，留给以后）。
+  - **测试**：tests/online-packet-budget.test.js（新）：夹具按真的 `act()` 走（结算时 `GAME.tape` 是数组，结算完再派发 `battle.checkSolo`），一次行动最多两包、只有一包带演出带子；大战场四类行动每名玩家合计 < 51,200 B，第二包起真的用上 `matchupDelta` 和 `unitsDelta`。在没改的代码上失败（4 包、约 110 KB）。tests/online-wire-matchup.test.js 加 `matchupDelta` / `unitsDelta` 往返、增删单位、顶层和单位一起变、`{ value }` 条目、没有基线报错、resync 一律整份、格式不对的包拒收（最后这条在这次审查修改前的代码上失败）。
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。

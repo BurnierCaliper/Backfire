@@ -157,7 +157,8 @@
     for (const id of Object.keys(unitsDiff)) units[id] = own(unitsDiff[id], "value") ? unitsDiff[id].value : applyNode(top, unitsDiff[id]);
     return { ...top, units };
   }
-  // 克制表逐单位差量：顶层（除 units）只发变了的键（top），单位只发新增 / 变了的（按新顶层 diffNode 压过）和去掉的单位 id（#340 第 9 条）
+  // 克制表逐单位差量：顶层（除 units）只发变了的键（top），单位只发新增 / 变了的（按新顶层 diffNode 压过）和去掉的单位 id（#340 第 9 条）。
+  // 不发单位的先后顺序：玩家端（matchup-ui.js）只按 id 取 m.units[unitId]，新单位接在最后
   function matchupDelta(sentJson, m) {
     let prev; try { prev = JSON.parse(sentJson); } catch (_) { return null; }
     if (!plain(prev) || !plain(prev.units) || !plain(m) || !plain(m.units)) return null;
@@ -168,17 +169,15 @@
     const out = { changed };
     if (!equal(ptop, top)) out.top = diffNode(ptop, top);
     if (removed.length) out.removed = removed;
-    if (!equal(Object.keys(pu).filter(id => own(units, id)), Object.keys(units).filter(id => own(pu, id)))) out.order = Object.keys(units);
     return out;
   }
   function applyMatchupDelta(base, d) {
-    if (!plain(d) || !plain(d.changed) || own(d, "removed") && !Array.isArray(d.removed) || !plain(base.units)) fail("invalid matchup delta");
+    if (!plain(d) || !plain(d.changed) || own(d, "removed") && !Array.isArray(d.removed) || own(d, "order") || !plain(base.units)) fail("invalid matchup delta");
     const { units: bu, ...oldTop } = base, units = clone(bu), top = own(d, "top") ? applyNode(oldTop, d.top) : oldTop;
-    for (const id of d.removed || []) { if (typeof id !== "string" || forbidden(id)) fail("invalid matchup delta"); delete units[id]; }
+    // 去掉的单位必须是上一张里有的（和 applySnap 一样严）：写错了就让玩家端要 resync
+    for (const id of d.removed || []) { if (typeof id !== "string" || forbidden(id) || !own(units, id) || own(d.changed, id)) fail("invalid matchup delta"); delete units[id]; }
     for (const id of Object.keys(d.changed)) { if (forbidden(id)) fail("invalid matchup delta"); units[id] = own(d.changed[id], "value") ? clone(d.changed[id].value) : applyNode(top, d.changed[id]); }
-    let order = Object.keys(units);
-    if (own(d, "order")) { if (!Array.isArray(d.order) || d.order.length !== order.length || d.order.some(id => !own(units, id))) fail("invalid matchup delta"); order = d.order; }
-    return { ...clone(top), units: Object.fromEntries(order.map(id => [id, units[id]])) };
+    return { ...clone(top), units };
   }
   function create() {
     let encoded = {}, decoded = {}, hasEncoded = false, hasDecoded = false;
@@ -277,7 +276,7 @@
       if (own(packet, "tape")) result.tape = unpackTape(packet.tape);
       let nextGot = gotMatchup, nextHasGot = hasGotMatchup;
       if (own(packet, "matchupUnchanged")) {
-        if (packet.matchupUnchanged !== true || own(packet, "matchup") || !packed) fail("invalid matchup metadata");
+        if (packet.matchupUnchanged !== true || own(packet, "matchup") || own(packet, "matchupDelta") || !packed) fail("invalid matchup metadata");
         if (!hasGotMatchup || packet.type === "resync") fail("matchup omission requires a baseline");
         result.matchup = clone(gotMatchup); delete result.matchupUnchanged;
       } else if (own(packet, "matchupDelta")) {

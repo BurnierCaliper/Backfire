@@ -30,11 +30,15 @@ async function fixture({ party = ["ruby", "kolt", "helu", "nora"], enemies, seed
     const tape = [{ type: "log", text: "结算" }, { type: "pop", kind: "dmg", unitId: state.units[0].id, value: 1, snap: plain(state.units.slice(0, 2)) }];
     c.OnlineGame.onActionSettled(cmd, value, tape, meta || {});
   };
+  // （新）act() 的 finally：演出播完（这里等一拍）以后 checkEnd() 派发 battle.checkSolo
+  const afterAct = async () => { await new Promise(r => setTimeout(r, 0)); c.Commands.dispatch({ type: "battle.checkSolo" }); };
   c.GAME = { depth: 0, sim: false, tape: null, ended: false, level: 1, undo: [], onlineEditWindow: false,
     refresh() {}, disarm() {}, resumeHotseat() {}, onlineCheckpoint: () => plain({ state }),
     restoreOnline() {}, resumeOnline: async () => {},
-    async actSystem(cmd, meta, context) { const v = c.HotseatGame.system(cmd, context); settle(cmd, v, meta); return v; },
-    async act(cmd, meta) { const v = c.Commands.dispatch(cmd); settle(cmd, v, meta); return v; },
+    // 和 game.js 的 act() / perform() 一样：结算时 GAME.tape 是数组（期间的 broadcast 不单独发包），结算完 onActionSettled 发一包，
+    // 之后 act() 的 finally 还会 checkEnd() → battle.checkSolo（经 HotseatGame.system 再 broadcast 一次）
+    async actSystem(cmd, meta, context) { c.GAME.tape = []; let v; try { v = c.HotseatGame.system(cmd, context); } finally { c.GAME.tape = null; } settle(cmd, v, meta); await afterAct(); return v; },
+    async act(cmd, meta) { c.GAME.tape = []; let v; try { v = c.Commands.dispatch(cmd); } finally { c.GAME.tape = null; } settle(cmd, v, meta); await afterAct(); return v; },
     async endTurn() { return c.HotseatGame.submit({ type: "endTurn" }); }
   };
   c.Screens = { current: () => "battle", is: s => s === "battle" };
@@ -78,11 +82,11 @@ async function fixture({ party = ["ruby", "kolt", "helu", "nora"], enemies, seed
   await new Promise(r => setTimeout(r, 0));
   let requestId = 0;
   const cmd = (sender, command) => message({ type: "cmd", protocol: 1, build: "backfire-d3-v1", requestId: ++requestId, command }, sender);
-  /** 测一次：fn 期间每名玩家收到的结算包（result）字节数 */
+  /** 测一次：fn 期间每名玩家收到的结算包（result）个数、其中带演出带子的个数（withTape）、字节数 */
   async function measure(fn) {
     const from = sends.length; await fn(); await new Promise(r => setTimeout(r, 0));
     const rows = sends.slice(from).filter(s => s.packet.type === "result");
-    return Object.fromEntries(players.map(p => { const mine = rows.filter(r => r.recipient === p); return [p, { packets: mine.length, total: mine.reduce((n, r) => n + r.bytes, 0), max: Math.max(0, ...mine.map(r => r.bytes)) }]; }));
+    return Object.fromEntries(players.map(p => { const mine = rows.filter(r => r.recipient === p); return [p, { packets: mine.length, withTape: mine.filter(r => Array.isArray(r.packet.tape) && r.packet.tape.length).length, total: mine.reduce((n, r) => n + r.bytes, 0), max: Math.max(0, ...mine.map(r => r.bytes)) }]; }));
   }
   return { c, state, sends, errors, players, heroes, cmd, measure, LIMIT };
 }
