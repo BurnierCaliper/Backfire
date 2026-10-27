@@ -91,7 +91,8 @@ const FEATS = {
     skill: { name: "挑衅", hint: "附赠 · 敌人下次攻击必须打自己", cost: { bonus: 1 }, uses: 1, side: "enemy", range: { min: 0, max: 1 },
       run(a, ctx) {
         const t = ctx.t;
-        if (!t || t.isPlayer) { ctx.lines.push("先选挑衅的敌人。"); return false; }
+        // 开着友伤（enemies.js · attackFoe，#428）时也能挑衅自己以外的队友
+        if (!t || !(typeof attackFoe === "function" ? attackFoe(a, t) : !t.isPlayer)) { ctx.lines.push("先选挑衅的敌人。"); return false; }
         t.tauntTo = a.id;
         ctx.lines.push(`挑衅：${t.name} 下次攻击必须打${a.name}。`);
       } } },
@@ -550,7 +551,8 @@ function featSkillTargetWhy(a, skillId, t, picks) {
   if (side && t && t.id) {
     if ((side === "ally" || side === "allySelf") && !t.isPlayer) return "只能对友方使用";
     if (side === "ally" && t.id === a.id) return "要选其他友方";
-    if (side === "enemy" && t.isPlayer) return "只能对敌人使用";
+    // 开着友伤（#428）时敌人那一边的技能也能对自己以外的队友用
+    if (side === "enemy" && t.isPlayer && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return "只能对敌人使用";
   }
   // 兼修后走原技能：目标判断只看原技能（勾索自己的「拉不动首领」不再拦；原技能「拉拽」没有首领限制）
   if (base) return null;
@@ -681,10 +683,12 @@ function featUnbowedReset(u) {
 }
 
 /** 以身作盾（id 仍是 ironwall，旧存档照读）：这一击（敌人打 target）可以宣布的人 */
-function featIronwallDeclarers(target) {
+/** attacker（可不传）：打这一击的人不能为自己的攻击宣布（开着友伤打队友时他也在我方，app.js · dealTo，#428） */
+function featIronwallDeclarers(target, attacker) {
   if (!target || !target.isPlayer || typeof state === "undefined") return [];
+  const self = attacker ? [attacker.id, attacker.creditTo].filter(Boolean) : [];
   return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !u.stunned && !(u.dying && !u.upOnShp) &&   // 失衡中不能宣布
-    Number(u.zone) === Number(target.zone) && featOnceLeft(u, "ironwall"));
+    Number(u.zone) === Number(target.zone) && featOnceLeft(u, "ironwall") && !self.includes(u.id));
 }
 
 /** 冲阵 / 硬骨头 / 无可阻挡：一击的击破加成（app.js · dealTo）。isMelee：这一击是近距离（同区）攻击 */
@@ -712,9 +716,9 @@ function featArmAttack(attacker, target, opt) {
   fl.block = "none";
 }
 
-/** 一击打完（app.js · dealTo）：冲阵的不稳、乘势、荒原行者击落飞行 */
+/** 一击打完（app.js · dealTo）：冲阵的不稳、乘势、荒原行者击落飞行。开着友伤打队友（flags.friendlyFire，#428）也一样触发 */
 function featAfterHit(attacker, target, res, flags, extra, stunnedNow, wasFlying) {
-  if (!attacker || !attacker.isPlayer || !target || target.isPlayer || !stunnedNow || target.dead) return;
+  if (!attacker || !attacker.isPlayer || !target || (target.isPlayer && !(flags && flags.friendlyFire)) || !stunnedNow || target.dead) return;
   if (featHas(attacker, "charge") && typeof applyUnstable === "function") {
     if (applyUnstable(target, extra)) extra.push(`冲阵：${target.name} 额外获得 1 层不稳。`);
   }
@@ -725,17 +729,17 @@ function featAfterHit(attacker, target, res, flags, extra, stunnedNow, wasFlying
     if (Number(target.zone) !== Number(attacker.zone) && canDisplace(target)) displaceTo(target, attacker.zone, extra, "被击落");
   }
   if (featHas(attacker, "momentum") && !(flags && flags.momentum)) {
-    // 只对和攻击者敌对的单位生效（中立生物、友军不算；visibleEnemies 只看 !isPlayer，不够）
-    const others = visibleEnemies(target.zone).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1 &&
-      (typeof hostileTo !== "function" || hostileTo(attacker, u)));
+    // 只对和攻击者敌对的单位生效（中立生物、友军不算；visibleEnemies 只看 !isPlayer，不够）；开着友伤（#428）时也算同区他以外的队友
+    const others = visibleEnemies(target.zone, attacker).filter(u => u.id !== target.id && !u.dead && !u.fused && !u.stunned && Number(u.def) === 1 &&
+      (typeof hostileTo !== "function" || hostileTo(attacker, u) || (typeof friendlyFireHit === "function" && friendlyFireHit(attacker, u))));
     others.forEach(u => dealBreak(u, 1, "none", extra, "乘势", { by: attacker }));
     if (others.length) extra.push(`乘势：${others.map(u => u.name).join("、")} 各受 1 点无属性击破。`);
   }
 }
 
-/** 协助格挡成功之后（app.js · dealTo）：推搡把攻击者推开 */
-function featAfterBlock(helper, attacker, target, extra) {
-  if (!helper || !attacker || attacker.dead || attacker.isPlayer || !featHas(helper, "shove")) return;
+/** 协助格挡成功之后（app.js · dealTo）：推搡把攻击者推开。挡下的是开着友伤的队友（flags.friendlyFire，#428）也一样推开他 */
+function featAfterBlock(helper, attacker, target, extra, flags) {
+  if (!helper || !attacker || attacker.dead || (attacker.isPlayer && !(flags && flags.friendlyFire)) || !featHas(helper, "shove")) return;
   if (typeof enemyRankOf === "function" && enemyRankOf(attacker) === "boss") return;
   if (!canDisplace(attacker)) return;
   const dest = otherZone(attacker.zone, helper.zone);
