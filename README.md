@@ -374,6 +374,28 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限；收尾那一包没有合并进第一包（要合并得按投影内容比较，留给以后）。
   - **测试**：tests/online-packet-budget.test.js（新）：夹具按真的 `act()` 走（结算时 `GAME.tape` 是数组，结算完再派发 `battle.checkSolo`），一次行动最多两包、只有一包带演出带子；大战场四类行动每名玩家合计 < 51,200 B，第二包起真的用上 `matchupDelta` 和 `unitsDelta`。在没改的代码上失败（4 包、约 110 KB）。tests/online-wire-matchup.test.js 加 `matchupDelta` / `unitsDelta` 往返、增删单位、顶层和单位一起变、`{ value }` 条目、没有基线报错、resync 一律整份、格式不对的包拒收（最后这条在这次审查修改前的代码上失败）。
 
+- **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js、tests/online-actions.test.js）
+  - **以前**：联机校验移动只看「目的区编号 − 所在区编号」是不是 1，和单机的 `zonesAdjacent`（按棋盘连接）不一致。四区方形 3→1（相连）被拒、3→2（对角）放行；五区十字玩家起点 5 只连着 3，编号差 2，联机完全走不动。
+  - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。走一步只看直连的那条连接：直连是危墙或关着的机关门就拒绝（和单机 `canCross` 一致）——2×2 方形四条连接围成环，以前 `zoneReachable` 会绕另一边放行（例如 1-3 是危墙时 3→1 绕 3→4→2→1），执行时单位却不动；玩家端移动菜单也跟着不再列出这种区。
+  - **没改的**：单机移动、位移技能、深渊 / 缠绕 / 下陷等其它移动限制；主持人移动敌人（`gm-commands.js` 同样是 `zonesAdjacent` + `zoneReachable`）和主持人面板「移动到 N 区」按钮（`online-gm-ui.js` 仍按区号差 1 列）不在这一条里，另行处理。
+  - **测试**：tests/hotseat-validation.test.js 加「特殊棋盘上的移动按真实相邻校验」：square4 的 3→1 / 3→4 放行、3→2 / 1→4 拒绝；cross5 的 5→3 / 3→1 放行、4→5 / 3→9 拒绝（拒绝的都只认「相邻」那句，并检查校验没改 state）；「2×2 方形上直连被危墙 / 关着的机关门挡住」（新）：1-3 危墙 / 关门时 3→1 拒绝，3-4 危墙时 3→4 拒绝，门开着放行。tests/online-actions.test.js 加玩家端移动菜单（新）：square4 站 3 区是 [1, 4]、cross5 站 5 区是 [3]、1-3 危墙时只剩 [4]。都在没改的代码上失败。
+
+- **打进坚毅生命的伤害，玩家只看到「坚毅受创」，任何界面不写数字**（#340 第 15 条；app.js · `spawnShpHit`（新）、`spawnPopup`、`dealTo` / `applyTypedDotIn` / `pulseResonanceDamage` / `tickSelfBurn` / `applyAbyssFall` / `gapFall` / `tickQuicksandFor` / `formatHitLines`；game.js · 演出带 `spawnPopup`、伤害弹字、预览 `previewOf`、预览标签、行动预测 `predictTurn`；hd2d/hd2d-fx.js · `numberOf`；online-view.js · `projectTape` / `popupWords` / `projectLogs`；online-ui.js 演出气泡；online-game.js · `hitSummary`；测试 tests/shp-dmg-340-15.test.js（新）、tests/shp-dmg-340-15-review.test.js（新）、tests/hd2d-field-fx.test.js）
+  - **以前**：起身中挨打，战斗日志写「→ 瑞比：7 伤害」和整段计算过程，回合结束灼烧写「瑞比 灼烧2层分别掷骰 1d4〔3〕=3 + 1d4〔4〕=4 = 7 → 实伤 7」，旧画面弹出伤害数字，预览写伤害数，行动预测写「预计受到 N 伤害」；联机投影把坚毅上的伤害数字丢掉、也不给替代字。README #52 还写着「受伤时伤害数字照常显示」。
+  - **现在**（作者定）：游戏版里打进坚毅的伤害，单机 / 联机玩家看到的浮字、战斗日志、预览、行动预测、联机演出和联机战场日志摘要一律只显示「坚毅受创」，不写任何数字。
+    - 弹字照旧是一下伤害（`kind: "dmg"`，打中、受击、攻击演出、新画面的打中那一段都照旧），另带标记 `grit: true`：画面看到标记就写「坚毅受创」、不写数字、不按数字放大；预览不把带标记的弹字算进伤害数。
+    - 联机：`projectTape` 遇到带标记的伤害（或者挨打的人还在起身中）去掉数值、只留 `grit: true`（包里仍然没有「坚毅」字样）；`HD2DFx.numberOf` 和联机气泡看到标记写「坚毅受创」；`hitSummary` 认标记，记字不记数。
+    - 是不是打进坚毅，在结算之前就记下（`dealTo`、`applyTypedDotIn`）：致命的那一下、拉斯缪尔不稳态结算后 `upOnShp` 已经清掉，也照样只写「坚毅受创」；`formatHitLines` 按这一下的 `shpDealt` 判断。
+    - 持续伤害打进坚毅：日志整句换成固定写法「瑞比 灼烧 → 坚毅受创」（调用方的标签里本来就写着掷骰和伤害）；共振分享写「受到的伤害分享给…」，不写分享了多少。
+    - 战斗日志打进坚毅时不写掷骰、计算过程和带数字的附带句。
+    - 预览标签「伤到坚毅」改成「坚毅受创」（仍不写数量）。
+  - **没改的**：主持人 / 计算器（不是游戏版）照旧：多段攻击每段一个数字，谐波追加、出血各弹各的数字，日志写实伤。道具 / 效果说明里的固定花费照常写；剩余坚毅仍永不显示。共振分享给队友的那一下照旧弹队友自己扣的血（是队友看得见的血）。预览里的「击倒 / 可能击倒」照旧（要不要也藏是规则问题，留给作者）。
+  - **作废**：#52「受伤时伤害数字照常显示」那一句（与 CLAUDE.md「实际扣了多少也不能给」对齐）。
+  - **守卫放宽**：tests/hd2d-field-fx.test.js「坚毅生命绝不显示」以前要求打在坚毅生命上什么都不弹、新画面的 DOM 里不能有「坚毅」字样，现在有意改成只放行「坚毅受创」这一个确切的词（数值仍不许出现）。
+  - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。本分支 `tickSelfBurn` 已按 #415 用 `Math.floor` 扣量（与 `applyTrueDamage` 一致），弹字用本条的 `spawnShpHit(u, "fire", { value: loss })`（仍无数字）。
+  - **联机日志白名单**：`online-view.js` · `popupWords` 补进「坚毅受创」；`projectLogs` 才放行该词。以前缺这一词时，纯坚毅命中（`dmg` 为 0）整行摘要会被丢掉。
+  - **测试**：tests/shp-dmg-340-15.test.js（新，5 条，在没改的代码上都失败）：起身中挨打日志 / 弹字只有「坚毅受创」；灼烧、自焚同理；联机投影带标记不带数；计算器照旧弹数字、README 有本条。tests/shp-dmg-340-15-review.test.js（新，8 条）：致命的一下、真实的回合结束灼烧（含致命）、拉斯缪尔不稳态、坠落、联机投影 + 演出（打中照演、数字只写「坚毅受创」）、联机战场日志摘要（改用真实 `OnlineView.projectLogs`，不再透传 mock）、另加一条直接打 `projectLogs` 确认「坚毅受创」留下且不漏坚毅数字；计算器两段攻击各弹一个数字。第 1–3、6、7 条在 main 和本 PR 改之前（9170cc2）都失败，坠落在 main 上失败，计算器两段那条在 9170cc2 上失败。
+
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
   - **现在**：敌人被打倒时（`removeEnemyFromField` 当下，不等 3 秒后移出场）就登记到 `state.goneFoes`，同一个 id 只留一份，每场开战清空；掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。打倒后 3 秒内点了预演 / 看了行动预测 / 撤销（state 被换成拷贝），或者连续战斗换了区域，都照样算得到。图鉴里飞碟触灵的「击倒」只算本体那一次，机械足不另算（以前打掉 5 条腿会多记）。
@@ -1617,7 +1639,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - 注射剂的物品说明改成「消耗一些坚毅生命」；
     - 休息时食物、睡袋的说明不写「坚毅 +X」。
   - #52 定的四档、每档 5 句的休息提示已经放进 `SHP_MOOD_LINES`，长休结算画面会用。
-  - 没改的：受伤时伤害数字照常显示（攻击结果），只是不写坚毅剩多少。
+  - ~~没改的：受伤时伤害数字照常显示（攻击结果），只是不写坚毅剩多少。~~ → **已作废**（#340 第 15 条：打进坚毅的伤害只显示「坚毅受创」，见下方规则改动记录）。
 
 - **单局：幕间选择，采矿场进入单局**（作者定；rogue-data.js · `ROGUE_CONFIG.altRegions`；rogue.js · `interludeOptions` / `nextAct(run, region)` / `region(run)` 读 `run.regionPick`；rogue-commands.js；rogue-ui.js 幕间画面、地图路线；online-rogue.js 幕间投票；tests/interlude.test.js、tests/ui.test.js、tests/online-rogue.test.js）
   - 打完一幕的首领，选下一幕去哪：

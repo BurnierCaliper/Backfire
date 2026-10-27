@@ -596,7 +596,11 @@
       const row = rows.get(u.id) || { name: u.name, dmg: 0, brk: 0, heal: 0, words: [], aliveBefore: !(snap && (snap.dead || snap._removed)) };
       const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
       const n = Math.floor(Number(ev.value) || 0);
-      if (ev.kind === "dmg" && hpVisible) row.dmg += n;
+      // #340 第 15 条：打进坚毅的伤害不写数字，战场日志只记「坚毅受创」
+      // grit：主机标的「打进坚毅」（致命的那一下快照里已经不是起身中了，也要认）
+      if (ev.kind === "dmg" && (ev.grit === true || snap && snap.upOnShp)) {
+        if (!row.words.includes("坚毅受创")) row.words.push("坚毅受创");
+      } else if (ev.kind === "dmg" && hpVisible) row.dmg += n;
       else if (ev.kind === "heal" && hpVisible) row.heal += n;
       else if (ev.kind === "break") row.brk += n;
       if (ev.text && !row.words.includes(ev.text)) row.words.push(String(ev.text));
