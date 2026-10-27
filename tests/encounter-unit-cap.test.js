@@ -128,6 +128,80 @@ test("三方混战每一边 3 枚代币：单边最多 9 只（group:3），总�
   }
 });
 
+test("车占代币补抽：退掉精英后补抽也受 ENCOUNTER_UNIT_CAP；车本身算 1 个单位", () => {
+  const c = H.load();
+  const cap = get(c, "ENCOUNTER_UNIT_CAP");
+  // 3 组蜂群 + 1 镇压队员（留作驾驶员）+ 最后是 2 枚代币的精英 → 退精英后要补 1 枚。
+  // 补抽池 1 枚代币选项只有蜂群：没上限时 +3 → 敌人 13、再加车 = 14；
+  // 有上限且车占 1：剩余名额 = 12−10−1 = 1，蜂群要 3 装不下，补抽停，敌人 10 + 车 1 = 11 ≤ 12。
+  const pool = ["swarm", "riot_captain"];
+  const rows = [
+    { preset: "swarm", count: 3 },
+    { preset: "swarm", count: 3 },
+    { preset: "swarm", count: 3 },
+    { preset: "riot_baton", count: 1 },
+    { preset: "riot_captain", count: 1 }
+  ];
+  const picks = rows.map(r => ({ ...r }));
+  const spec = { region: "外城区", enemies: rows.map(r => ({ ...r })), vehicles: [{ kind: "fortress" }] };
+  c.S.RNG.install("CAP-VEH-REFILL");
+  c.vehiclePayTokens(spec, picks, pool);
+  const enemies = unitTotal(spec.enemies);
+  const withVehicle = enemies + 1;
+  assert.ok(!spec.enemies.some(e => e.preset === "riot_captain"), "精英已退");
+  assert.ok(spec.enemies.some(e => e.preset === "riot_baton"), "驾驶员留下");
+  assert.equal(spec.enemies.filter(e => e.preset === "swarm").length, 3, "不应再补一组蜂群：" + JSON.stringify(spec.enemies));
+  assert.equal(enemies, 10, "装不下就停，保持退精英后的 10 只");
+  assert.ok(withVehicle <= cap, `敌人+车 ${withVehicle} > ${cap}`);
+  // 对照：同一局面若补抽不传剩余名额，会抽到蜂群并把敌人+车抬到 14
+  c.S.RNG.install("CAP-VEH-REFILL");
+  const uncapped = c.pickByTokens(pool, 1); // 不传 unitCap，等价于旧补抽
+  assert.equal(unitTotal(uncapped), 3, "旧补抽会抽到一组蜂群");
+  assert.equal(10 + unitTotal(uncapped) + 1, 14, "旧逻辑敌人+车 = 14");
+});
+
+test("带车遭遇：多种子下敌人+车合计 ≤ ENCOUNTER_UNIT_CAP（含成组杂兵池的补抽）", () => {
+  const c = H.load();
+  const cap = get(c, "ENCOUNTER_UNIT_CAP");
+  const V = get(c, "VEHICLES").fortress;
+  const saved = { tokens: V.tokens, appear: V.appear };
+  V.tokens = 1; V.appear = 1; // 场场带车，逼出退代币 / 补抽
+  // 池子里既有镇压队（车要驾驶员）又有空投蜂群（group:3，补抽时最容易超）
+  const info = get(c, "ENEMY_INFO");
+  const riot = ["riot_baton", "riot_rifle", "riot_molotov", "riot_flamer", "riot_captain"];
+  const swarmPool = Object.keys(info).filter(k => {
+    const e = info[k];
+    return e.faction === "安保" && e.regions.includes("外城区") && !e.boss && !e.neutral;
+  });
+  const pool = [...new Set(riot.concat(swarmPool))];
+  assert.ok(pool.includes("swarm"));
+  const N = 500;
+  let withCar = 0;
+  try {
+    for (let i = 0; i < N; i++) {
+      c.S.RNG.install("CAP-VEH-MIX-" + i);
+      let rows = c.pickByTokens(pool, 5);
+      // 没抽到镇压队员时塞一只，否则车不会出现
+      if (!rows.some(r => info[r.preset].faction === "镇压队")) {
+        rows = rows.slice(0, Math.max(0, rows.length - 1)).concat([{ preset: "riot_baton", count: 1 }]);
+      }
+      const enc = c.finishEncounter(
+        { region: "外城区", enemies: rows.map(r => ({ preset: r.preset, count: r.count })) },
+        { zoneMode: 2 },
+        pool
+      );
+      if (!(enc.vehicles && enc.vehicles.length)) continue;
+      withCar++;
+      const enemies = unitTotal(enc.enemies);
+      const total = enemies + 1; // 车算 1
+      assert.ok(total <= cap, `带车 #${i}: 敌人 ${enemies}+车 = ${total} > ${cap} ${JSON.stringify({ e: enc.enemies, v: enc.vehicles })}`);
+    }
+  } finally {
+    V.tokens = saved.tokens; V.appear = saved.appear;
+  }
+  assert.ok(withCar > 300, `带车样本太少：${withCar}/${N}`);
+});
+
 test("README：代币制章节写了单位上限；规则改动记录置顶有本条", () => {
   const fs = require("fs");
   const path = require("path");
