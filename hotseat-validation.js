@@ -185,7 +185,11 @@
   }
   function checkMove(actor, cmd) {
     const from = Number(actor.zone), dest = cmd.dest;
-    if (!Number.isInteger(dest) || dest < 1 || dest > Number(state.zoneMode) || Math.abs(dest - from) !== 1) fail("一次只能移动到相邻的有效区域", "invalid_move");
+    // 相邻按棋盘真实的连接算（engine.js · zonesAdjacent / boardZoneIds），和单机一致：
+    // 十字 / 2×2 棋盘上区号差 1 不等于相邻（#340 第 10 条）；没有棋盘函数时（极简环境）才退回一排区的「区号差 1」
+    const ids = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 0 }, (_, i) => i + 1);
+    const adjacent = typeof zonesAdjacent === "function" ? zonesAdjacent(from, dest) : Math.abs(dest - from) === 1;
+    if (!Number.isInteger(dest) || !ids.includes(dest) || dest === from || !adjacent) fail("一次只能移动到相邻的有效区域", "invalid_move");
     if (typeof isCrushing === "function" && isCrushing(actor)) fail("正抓在敌人身上，无法主动移动", "invalid_move");
     if (typeof touDuelVictim === "function" && touDuelVictim(actor)) fail("决一死战中不能移动", "invalid_move");
     if (actor.self === "frost") fail("霜结：无法自行移动", "invalid_move");
@@ -195,6 +199,11 @@
     // 沙珊瑚缠绕、流沙下陷 2 层起：自己动不了，原因写给玩家
     if (actor.entangled) fail(`${actor.name} 被${actor.entangled.name}缠住了，动不了：先砍断触须（打珊瑚）。`, "invalid_move");
     if (typeof sinkStuck === "function" && sinkStuck(actor)) fail(`${actor.name} 下陷 ${sinkOf(actor)} 层，自己走不出流沙：要等下陷降下来，或者让同伴拉出来、被位移带出去。`, "invalid_move");
+    // 走一步只走直连的那条连接：危墙 / 关着的机关门挡住就走不了（和 app.js · canCross 一致）。
+    // zoneReachable 会沿别的连接绕路，2×2 方形有环，绕得过去也不算（#340 第 10 条）
+    const gap = (state.gaps || {})[gapKey(from, dest)] || {};
+    if (gap.type === "wall") fail("危墙挡住去路。先打掉墙。", "invalid_move");
+    if (gap.type === "door" && !gap.open) fail("机关门关着。先用按钮/拉杆打开。", "invalid_move");
     const why = zoneReachable(actor, dest, true);
     if (why) fail(why, "invalid_move");
     // 酸液地面离开 / 越过空隙的行动点由 assertBase 按 moveBaseCost / voidMoveCost 检查
