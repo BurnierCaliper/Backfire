@@ -42,7 +42,8 @@
       order: "行动顺序", swap: "⇅", swapTitle: "延后 / 换位", empty: "空位", vacated: "已挪走",
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
-    cam: { label: "镜头：远景 / 中景 / 近景" },
+    /* 镜头：label 读屏念的；next 手机竖屏上远 / 中 / 近收成的那一个按钮（#429，写这一刻是哪一段，点一下换下一段）读屏念的 */
+    cam: { label: "镜头：远景 / 中景 / 近景", next: "镜头 {0}：点一下换到 {1}" },
     /* 手机竖屏（#311，让战场更大；电脑上不用）：
      *   media     这么窄算手机竖屏（要和 online-paper.css 里手机那一段的 @media (max-width: 760px) 一样）
      *   dockMax   技能栏展开时最多占屏幕高度的百分之几（写成 --olp-dock-max，online-paper.css 手机上的技能栏用；放不下的是提示栏自己滚）
@@ -705,7 +706,9 @@
      *          sub 标题后面的一小段（单机：遭遇的名字）, turnNo 回合（turnText 给了就写它：单机开打前写「准备中」）, phase { text, enemy } 我方 / 敌人行动,
      *          day / time / period 游戏时间（没有 = 不写）, weather 天气的名字, night 夜晚（天气前面加「夜 · 」）,
      *          cams [{ label, on }] 镜头按钮（新画面的那几个，没有 = 不画）, toolsOpen 「工具」下拉开着没 }
-     * 菜单按钮带 data-pause-open（pause-menu.js 接点击、画新消息的红点）
+     * 菜单按钮带 data-pause-open（pause-menu.js 接点击、画新消息的红点）。
+     * 镜头按钮后面另有一个 .olp-cam-cyc（#429）：手机竖屏上远 / 中 / 近收成它一个（online-paper.css），写这一刻是哪一段，
+     * 点一下换下一段（data-olp-cam-next = 下一段是第几个，点的照旧是新画面原来那个按钮）；电脑上藏着
      */
     function topHtml(info) {
       info = info || {};
@@ -717,8 +720,10 @@
       const phase = info.phase && info.phase.text ? `<span class="olp-meta olp-phase${info.phase.enemy ? " enemy" : ""}">${esc(info.phase.text)}</span>` : "";
       const time = info.time ? `<span class="olp-meta olp-time">${info.day ? esc(fill(T.day, info.day)) + " · " : ""}<b>${esc(info.time)}</b>${info.period ? " " + esc(info.period) : ""}</span>` : "";
       const weather = info.weather ? `<span class="olp-meta olp-weather">${info.night ? esc(T.nightPrefix) : ""}${esc(info.weather)}</span>` : "";
-      const cams = (info.cams || []).length ? `<span class="olp-cam" role="group" aria-label="${esc(P.cam.label)}">${info.cams.map((c, i) =>
-        `<button type="button" class="olp-cam-b${c.on ? " on" : ""}" data-olp-cam="${i}" aria-pressed="${c.on ? "true" : "false"}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}</button>`).join("")}</span>` : "";
+      const list = info.cams || [], at = Math.max(0, list.findIndex(c => c && c.on)), next = list.length ? (at + 1) % list.length : 0;
+      const cycle = list.length ? `<button type="button" class="olp-cam-cyc" data-olp-cam-next="${next}" aria-label="${esc(String(P.cam.next).replace("{0}", list[at].label).replace("{1}", list[next].label))}">${esc(list[at].label)}</button>` : "";
+      const cams = list.length ? `<span class="olp-cam" role="group" aria-label="${esc(P.cam.label)}">${list.map((c, i) =>
+        `<button type="button" class="olp-cam-b${c.on ? " on" : ""}" data-olp-cam="${i}" aria-pressed="${c.on ? "true" : "false"}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}</button>`).join("")}${cycle}</span>` : "";
       return `<div class="olp-top olp-sheet" data-paper="tapebar">` +
         `<span class="olp-title">${esc(title)}</span>` +
         (room ? `<span class="olp-room olp-stamp" title="${esc(T.roomTitle)}">${esc(room)}</span>` : "") + sub +

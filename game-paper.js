@@ -435,8 +435,9 @@
     const t = e.target;
     if (!t || !t.closest || !env.on) return;
     if (t.closest('[data-olp="tools"]')) { setTools(!env.toolsOpen); return; }
-    const cam = t.closest("[data-olp-cam]");
-    if (cam) { UI.pressCam(app(), Number(cam.dataset.olpCam)); return; }
+    // 镜头：远 / 中 / 近，手机上收成的那一个（#429：点下一段）点的都是新画面原来那几个按钮
+    const cam = t.closest("[data-olp-cam], [data-olp-cam-next]");
+    if (cam) { UI.pressCam(app(), Number(cam.dataset.olpCam != null ? cam.dataset.olpCam : cam.dataset.olpCamNext)); return; }
     const sw = t.closest("[data-olp-swap]");
     if (sw) { const i = Number(sw.dataset.olpSwap); env.swapOpen = env.swapOpen === i ? null : i; env.toolsOpen = false; paint(); return; }
     const mv = t.closest("[data-olp-move]");

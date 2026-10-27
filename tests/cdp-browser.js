@@ -2,7 +2,7 @@
 // 只实现测试里用到的那几个 Playwright 接口：
 //   browser.newContext({ viewport, isMobile, hasTouch }) / context.newPage() / context.close() / browser.close()
 //   context.addInitScript(fn) / page.addInitScript(fn)（每次打开页面之前先跑：tests/old-screen.js 用它在页面加载前记着「新画面 关」，#339）
-//   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / hover / mouse.move / focus / fill / keyboard.press /
+//   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / tap（手指点，#429）/ hover / mouse.move / focus / fill / keyboard.press /
 //   waitForFunction / waitForSelector / waitForTimeout / isVisible / locator(sel).count / innerText / evaluate / click / on("pageerror")
 // 只在 Linux（GitHub 上跑测试的机器自带 Chrome）或者用环境变量 CHROME_PATH 指定了 Chrome 时才用；
 // 别的情况（Windows / Mac 没装 Playwright）返回 null，测试照旧跳过。要 Node 22 自带的 WebSocket。
@@ -69,7 +69,8 @@ class Page {
   async init(opt) {
     await this.send("Page.enable"); await this.send("Runtime.enable");
     const vp = this.viewport = opt.viewport || { width: 1280, height: 720 };
-    await this.send("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: !!opt.isMobile });
+    this.mobile = !!opt.isMobile;
+    await this.send("Emulation.setDeviceMetricsOverride", { width: vp.width, height: vp.height, deviceScaleFactor: 1, mobile: this.mobile });
     if (opt.hasTouch) await this.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   }
   on(name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); }
@@ -123,6 +124,19 @@ class Page {
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y });
     await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1 });
     await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount: 1 });
+  }
+  /** 手指点一下元素中心（滚进画面；同 Playwright 的 page.tap，要 newContext 时给 hasTouch）：按下、抬起，click 由浏览器自己合成（#429 手机测试只用点按） */
+  async tap(selector, opt = {}) {
+    const end = Date.now() + (opt.timeout || 5000);
+    let p = null;
+    for (;;) {
+      p = await this.point(selector);
+      if (p && p.hit) break;
+      if (Date.now() > end) throw new Error(`tap：${selector} ${p ? "被别的东西盖住了" : "不存在或看不见"}`);
+      await sleep(50);
+    }
+    await this.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: p.x, y: p.y, radiusX: 1, radiusY: 1, force: 1, id: 1 }] });
+    await this.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   }
   /** 鼠标停到元素中心（滚进画面；同 Playwright 的 page.hover），被别的东西盖住就等一会儿再试 */
   async hover(selector, opt = {}) {
@@ -187,7 +201,8 @@ class Page {
   textContent(selector) { return this.locator(selector).evaluate(el => el.textContent); }
   inputValue(selector) { return this.locator(selector).inputValue(); }
   emulateMedia(opt = {}) { return this.send("Emulation.setEmulatedMedia", { features: opt.reducedMotion ? [{ name: "prefers-reduced-motion", value: opt.reducedMotion }] : [] }); }
-  setViewportSize({ width, height }) { this.viewport = { width, height }; return this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }); }
+  // 换窗口大小（手机横过来，#429）：照旧是不是手机（同 Playwright：isMobile 跟着 context）
+  setViewportSize({ width, height }) { this.viewport = { width, height }; return this.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: !!this.mobile }); }
   viewportSize() { return this.viewport || null; }
   async screenshot(opt = {}) { const { data } = await this.send("Page.captureScreenshot", { format: "png" }); if (opt.path) fs.writeFileSync(opt.path, Buffer.from(data, "base64")); return Buffer.from(data, "base64"); }
   locator(selector) { return new Locator(this, `() => [...document.querySelectorAll(${JSON.stringify(selector)})]`, selector); }
@@ -221,6 +236,7 @@ class Locator {
   count() { return this.page.evaluate(`(${this.find})().length`); }
   async isVisible() { const n = await this.count(); return n ? this.page.isVisible(await this.pick()) : false; }
   async click(opt) { return this.page.click(await this.pick(opt && opt.timeout), opt); }
+  async tap(opt) { return this.page.tap(await this.pick(opt && opt.timeout), opt); }
   async fill(v) { return this.page.fill(await this.pick(), v); }
   async innerText() { return this.evaluate(el => el.innerText); }
   async inputValue() { return this.evaluate(el => el.value); }

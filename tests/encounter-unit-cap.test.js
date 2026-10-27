@@ -202,13 +202,13 @@ test("带车遭遇：多种子下敌人+车合计 ≤ ENCOUNTER_UNIT_CAP（含�
   assert.ok(withCar > 300, `带车样本太少：${withCar}/${N}`);
 });
 
-test("README：代币制章节写了单位上限；规则改动记录置顶有本条", () => {
+test("README：代币制章节写了单位上限；规则改动记录里有本条（在整节里一条条找，不按字数截：后来加在上面的记录再长也不影响，#429）", () => {
   const fs = require("fs");
   const path = require("path");
   const md = fs.readFileSync(path.join(H.ROOT, "README.md"), "utf8");
-  const changelog = md.split("## 规则改动记录")[1] || "";
-  const top = changelog.slice(0, 1200);
-  assert.ok(/ENCOUNTER_UNIT_CAP|上场.*12|单位.*上限|12\s*只/.test(top), "规则改动记录置顶应写单位上限");
+  const changelog = (md.split("## 规则改动记录")[1] || "").split("\n## ")[0];
+  const entries = changelog.split(/\n(?=- \*\*)/);
+  assert.ok(entries.some(s => /ENCOUNTER_UNIT_CAP/.test(s) && /上场.*12|单位.*上限|12\s*只/.test(s)), "规则改动记录应有单位上限这一条");
   const tokenSec = md.split("### 2. 随机遭遇（代币制）")[1]?.split("### 3.")[0] || "";
   assert.ok(/12|单位上限|ENCOUNTER_UNIT_CAP/.test(tokenSec), "代币制章节应提到单位上限");
 });

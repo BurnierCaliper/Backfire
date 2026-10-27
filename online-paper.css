@@ -79,6 +79,11 @@ body.ol-paper .olp-cam-b, body.ol-paper .olp-tools-b, body.ol-paper .olp-menu-b 
 }
 body.ol-paper .olp-cam-b { width: 30px; padding: 0; color: var(--olp-tape-ink); background: transparent; }
 body.ol-paper .olp-cam-b.on { background: var(--olp-hl); }
+/* 远 / 中 / 近收成的那一个（#429，paper-ui.js · topHtml）：写这一刻是哪一段，点一下换下一段。电脑上藏着，手机竖屏那一段才换上它 */
+body.ol-paper .olp-cam-cyc {
+  display: none; min-width: 32px; min-height: 32px; padding: 0 8px; cursor: pointer; font: 400 17px/1 var(--olp-label);
+  color: var(--olp-tape-ink); background: var(--olp-hl); border: 0; border-radius: 2px;
+}
 body.ol-paper .olp-tools-b { padding: 4px 12px; color: var(--olp-board-ink); background: var(--olp-board); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }
 body.ol-paper .olp-tools-b[aria-expanded="true"] { outline: 2px solid var(--olp-tape-ink); outline-offset: 1px; }
 body.ol-paper .olp-menu-b { position: relative; padding: 4px 12px; color: var(--olp-boardy-ink); background: var(--olp-boardy); box-shadow: 1px 2px 0 rgba(0, 0, 0, .35); }   /* 黄纸上深色字（夜里也是） */
@@ -377,10 +382,10 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
   body.ol-paper .olp-top { left: 4px; right: 4px; gap: 6px; padding: 0 6px; }
   body.ol-paper :is(.olp-title, .olp-time) { display: none; }
   body.ol-paper .olp-room { font-size: 12px; padding: 0 4px; }
-  body.ol-paper .olp-top > .olp-weather { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }   /* 放不下时天气省略，菜单不被挤出去 */
   body.ol-paper .olp-right { gap: 6px; flex-shrink: 0; }
-  body.ol-paper :is(.olp-meta, .olp-cam-b, .olp-tools-b, .olp-menu-b) { font-size: 14px; }
-  body.ol-paper .olp-cam-b { width: 24px; }
+  body.ol-paper :is(.olp-meta, .olp-cam-b, .olp-cam-cyc, .olp-tools-b, .olp-menu-b) { font-size: 14px; }
+  body.ol-paper .olp-cam-b { display: none; }   /* 远 / 中 / 近收成一个按钮（#429）：省下地方给「菜单」 */
+  body.ol-paper .olp-cam-cyc { display: inline-block; }
   body.ol-paper :is(.olp-tools-b, .olp-menu-b) { padding: 4px 8px; }
   body.ol-paper .olp-menu-b kbd { display: none; }
   body.ol-paper .olp-tools { right: var(--olp-edge); width: min(300px, calc(100vw - 2 * var(--olp-edge))); }
@@ -451,6 +456,19 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
   body.ol-paper .ol-side.ol-side-collapsed .ol-side-collapse:not([hidden]) { min-height: 140px; font-size: 19px; letter-spacing: 2px; }
   body.ol-paper .ol-side:not(.ol-side-collapsed) { z-index: 60; inset: 0; width: auto; height: auto; min-height: 0; animation: olp-sheet-up .22s ease-out; }
   body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-collapse:not([hidden]) { min-width: 56px; }
+}
+/* ---------- 顶栏放不下（手机竖屏、触屏横屏，#429：房主那一条多了遭遇名、我方 / 敌人行动，「菜单」被挤出屏幕，手机又没有 Esc）----------
+ * 右边的镜头、「工具 ▾」「菜单」不缩，一直完整在屏幕里；回合、我方 / 敌人行动、房间码照原样宽；
+ * 天气、时间、遭遇名、标题只拿剩下的地方（flex-basis 0，最多照原样宽），放不下的省略成「…」，先让给天气，再是时间、遭遇名，标题最后；
+ * 窄到连回合、行动、房间码都放不下时它们才一起缩。电脑（鼠标、宽屏）上一条都套不上，照旧 */
+@media (max-width: 760px), (pointer: coarse) {
+  body.ol-paper .olp-top > :is(.olp-title, .olp-room, .olp-meta) { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  body.ol-paper .olp-top > :is(.olp-title, .olp-sub, .olp-time, .olp-weather) { flex-basis: 0; max-width: max-content; }
+  body.ol-paper .olp-top > .olp-weather { flex-grow: 1000000; }
+  body.ol-paper .olp-top > .olp-time { flex-grow: 10000; }
+  body.ol-paper .olp-top > .olp-sub { flex-grow: 100; }
+  body.ol-paper .olp-top > .olp-title { flex-grow: 1; }
+  body.ol-paper .olp-top > .olp-right { flex-shrink: 0; }
 }
 @keyframes olp-sheet-up { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
