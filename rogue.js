@@ -1161,7 +1161,7 @@ const Rogue = (function () {
    *  中立生物（尘虫、管虫）也按表小概率掉；召唤物、铁壁、飞碟机械足不掉；逃走的（没 dead）不掉 */
   function rollMaterialDrops(run, notes) {
     if (typeof rollEnemyDrops !== "function") return;
-    const foes = enemyDropFoes(state.units);
+    const foes = enemyDropFoes(typeof battleFoesSeen === "function" ? battleFoesSeen() : state.units);
     if (!foes.length) return;
     const key = `${run.seed}:mats:${run.act}:${run.taskNo}:${run.task ? run.task.index : "b"}:${run.day}:${(run.matNo = (run.matNo || 0) + 1)}`;
     const got = withRng(key, () => rollEnemyDrops(foes));

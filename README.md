@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
+  - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
+  - **现在**：被打倒的敌人移出场前登记到 `state.goneFoes`（每场开战清空），掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。
+  - **没改的**：3 秒淡出、撤销复活、中立 / 召唤物 / 铁壁不掉的规则。
+  - **测试**：tests/removed-foe-drops.test.js（新，3 条，在没改的代码上都失败）：先移出匕首狂徒再打倒锤狂徒，掉落名单两只都有；图鉴记遭遇过、击倒 1；新的一场不带上上一场的 goneFoes。
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：

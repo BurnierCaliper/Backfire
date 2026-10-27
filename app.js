@@ -1607,6 +1607,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  state.goneFoes = [];   // 新的一场：移出场的敌人名单从空开始
   // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
   state.apocalypse = false;
   state.phaseClock = state.weather === "phase";
@@ -3099,7 +3100,7 @@ function giveBattleDrops() {
 function trpgEnemyMaterials() {
   if (typeof TRPG === "undefined" || !TRPG.active || typeof rollEnemyDrops !== "function") return null;
   if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode()) return null;
-  const got = rollEnemyDrops(enemyDropFoes(state.units));
+  const got = rollEnemyDrops(enemyDropFoes(battleFoesSeen()));
   if (!got.length) return null;
   got.forEach(m => bagAdd(m.id, m.qty));
   const out = { kuizhi: 0, items: got.map(m => ({ id: m.id, name: (ITEM_CATALOG[m.id] || {}).name || m.id, qty: m.qty })) };
@@ -5308,6 +5309,13 @@ function explodeBoomcar(target, notes) {
   } finally { state.popTag = prevTag || null; }
 }
 
+/** 这场战斗出现过的所有单位：场上的 + 被打倒后已经移出场的（removeEnemyFromField 登记在 state.goneFoes）。
+ *  战后掉落（enemyDropFoes）、图鉴（bestiaryRecordBattle）都读这份 */
+function battleFoesSeen() {
+  const units = state.units || [];
+  const gone = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => !units.some(x => x.id === g.id));
+  return units.concat(gone);
+}
 function removeEnemyFromField(u, notes) {
   if (!u || u.isPlayer || u._removed) return;
   u._removed = true;
@@ -5320,6 +5328,11 @@ function removeEnemyFromField(u, notes) {
   const id = u.id;
   const drop = () => {
     // 只清掉仍处于「已击杀」的那个；中途撤销复活回来的单位不能被这个计时器误删
+    // 移出场前先登记：战后掉落、图鉴还要算到它（#340 第 18 条）。计时器到点时已经换了一场战斗的，不登记
+    if ((state.units || []).includes(u) && u._removed) {
+      state.goneFoes = Array.isArray(state.goneFoes) ? state.goneFoes : [];
+      if (!state.goneFoes.includes(u)) state.goneFoes.push(u);
+    }
     state.units = (state.units || []).filter(x => !(x.id === id && x._removed));
     renderAll();
   };

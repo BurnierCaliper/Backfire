@@ -330,7 +330,7 @@ function bestiaryStageOf(u) {
 }
 /** 一场战斗结束：场上出现过的敌人都记为遭遇过（次数、见过的等级、打倒几只） */
 function bestiaryRecordBattle(outcome) {
-  const units = (state.units || []).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
+  const units = (typeof battleFoesSeen === "function" ? battleFoesSeen() : (state.units || [])).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
   if (!units.length) return [];
   const d = bestiaryLoad();
   const now = Date.now();
