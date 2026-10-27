@@ -278,6 +278,34 @@ test("不计分数：打队友的伤害、击破、打倒都不进评分和战�
   assert.ok((S.battleScore.parts.dmg || 0) > (parts0.dmg || 0));
 });
 
+test("不计分数：被队友友伤打掉的血，先补回来的那部分不算治疗分（打队友再奶回来不能刷分）；补满以后多治的照常记", () => {
+  const { c, S, heroes: [kolt, helu, tou] } = field(["kolt", "helu", "tou"], "FF428-HEAL");
+  ffOn(c);
+  const inner = helu.layers[helu.layers.length - 1];
+  inner.max = 100; inner.current = 100;
+  helu.layers = [inner]; helu.def = helu.defMax;
+  strike(c, kolt, helu, { atk: 30, mult: 1, flat: 0, dice: null, flags: { action: true, blockResolved: true, block: "none" } });
+  const lost = 100 - c.totalHp(helu);
+  assert.ok(lost > 0, "友伤打掉了血");
+  assert.equal(c.ffHurtOf(helu), lost, "记下被友伤打掉的量");
+  const st = c.battleStat(tou), heal0 = Number(S.battleScore.parts.heal) || 0;
+  // 托乌先治回一半：不记治疗量、不加治疗分
+  const half = Math.floor(lost / 2);
+  const heal = n => c.trackHealBy(tou, () => { helu.layers[helu.layers.length - 1].current += n; });   // 打过以后层会换成新的对象，每次现取
+  heal(half);
+  assert.equal(st.heal, 0, "补友伤打掉的部分不记治疗量");
+  assert.equal(Number(S.battleScore.parts.heal) || 0, heal0, "也不加治疗分");
+  assert.equal(c.ffHurtOf(helu), lost - half);
+  // 再治 lost - half + 5：前面补完剩下的友伤，多出来的 5 照常记
+  heal(lost - half + 5);
+  assert.equal(st.heal, 5, "补满友伤以后多治的照常记");
+  assert.ok((Number(S.battleScore.parts.heal) || 0) > heal0);
+  assert.equal(c.ffHurtOf(helu), 0);
+  // 被敌人打掉的血照常算治疗（不受影响）：开新的一场，记录清空
+  c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "FF428-HEAL2" });
+  assert.equal(c.ffHurtOf(c.findKit("helu", c.S.state.units)), 0, "开新的一场：记录清空");
+});
+
 test("敌人不受影响：开着友伤时敌人的敌我判断、范围、AI 全部照旧；同一种子整场自动对打和关着时一模一样", () => {
   const { c, heroes: [kolt], foe } = field(["kolt", "helu"], "FF428-FOES");
   ffOn(c);

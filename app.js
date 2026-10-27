@@ -46,6 +46,7 @@ const state = {
   kuizhi: 0,
   forceVoid: {},
   friendlyFire: {},   // 友伤开关：{ 操控者: true / false }（enemies.js · FRIENDLY_FIRE，#428）
+  ffHurt: {},         // 友伤打掉、还没补回来的血：{ 单位 id: 血量 }（ffHurtOf，#428）
   fields: {
     1: emptyField(),
     2: emptyField(),
@@ -2575,6 +2576,27 @@ function battleStat(u) {
   s.name = u.name;
   return s;
 }
+/** 友伤打掉的血（#428）：state.ffHurt = { 单位 id: 被开着友伤的队友打掉、还没补回来的血量 }，每场开战清空（resetBattleRecords）。
+ *  之后治回来的血先补这一部分，补的这部分不算治疗分（打队友再奶回来不能刷分），补满以后多治的照常记（trackHealBy、废物利用） */
+function ffHurtOf(u) {
+  const m = state.ffHurt || {};
+  return u && u.id != null ? Math.max(0, Math.floor(Number(m[u.id]) || 0)) : 0;
+}
+function noteFriendlyHurt(u, n) {
+  n = Math.floor(Number(n) || 0);
+  if (!u || u.id == null || n <= 0) return;
+  state.ffHurt = state.ffHurt || {};
+  state.ffHurt[u.id] = ffHurtOf(u) + n;
+}
+/** 治回来 gain 点：先补友伤打掉的部分（不计分），返回剩下要计分的量 */
+function healAfterFriendlyHurt(u, gain) {
+  gain = Math.floor(Number(gain) || 0);
+  const owed = ffHurtOf(u);
+  if (gain <= 0 || owed <= 0) return Math.max(0, gain);
+  const fill = Math.min(owed, gain);
+  state.ffHurt[u.id] = owed - fill;
+  return gain - fill;
+}
 /** 战场数据：倒地一次。设 dying = true 的地方都调它：applyKnockdown（攻击、坠落、高能自爆……）、
  *  不稳态（rasUnstableHit）、巨人捏碎颅骨（enemies.js · crushSkullDown）；这几处都先挡掉了已经濒死的，不会重复记 */
 function noteKnockdown(u) {
@@ -2994,6 +3016,7 @@ function resetBattleRecords() {
   state.battleGains = { xp: 0, kuizhi: 0 };
   state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
+  state.ffHurt = {};              // 友伤打掉、还没补回来的血（ffHurtOf，#428）
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
 }
 /** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
@@ -3168,7 +3191,7 @@ function trackHealBy(actor, fn) {
   try { return fn(); } finally {
     (state.units || []).forEach(u => {
       if (before.has(u.id) && u !== actor) {
-        const gain = hpNow(u) - before.get(u.id);
+        const gain = healAfterFriendlyHurt(u, hpNow(u) - before.get(u.id));   // 先补友伤打掉的部分，不计分（#428）
         if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
       }
       // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
@@ -3512,6 +3535,7 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
   if (unit && unit.isPlayer && !opts.friendlyFire) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer && !opts.friendlyFire) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
+  if (unit && unit.isPlayer && opts.friendlyFire) noteFriendlyHurt(unit, res.total);   // 友伤打掉的血：之后治回来不计分
   // #340 第 15 条：游戏版打进坚毅只弹「坚毅受创」；主持人 / 计算器照旧（两个数字都弹）
   if (gritHit) {
     if ((res.intended || res.total || res.shpDealt || 0) > 0) spawnShpHit(unit, element, { value: res.intended || res.total || res.shpDealt });
@@ -8823,6 +8847,7 @@ function dealToInner(attacker, target, opt) {
       const st = battleStat(target);
       // 被开着友伤的队友打的（#428）不计进战场数据（承受伤害）
       if (st && !flags.friendlyFire) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
+      if (flags.friendlyFire) noteFriendlyHurt(target, res.total);   // 友伤打掉的血：之后治回来先补这部分，不计分
       // 减伤得分：敌方（含配置物、环境）的攻击打在我方身上，被减伤减免掉的伤害 ×1.5
       const red = Math.floor(Number(res.reduced) || 0);
       if (st && red > 0 && !(attacker && attacker.isPlayer)) {
@@ -13897,7 +13922,7 @@ function runSkillInner(id, optRun) {
       Object.keys(strip).forEach(type => grant(type, Math.floor(Number(strip[type]) || 0), "拆卸回收"));
       if (a.resources) a.resources.stripStore = {};
       // 废物利用给自己回的血 / 加的层也算治疗（一般的治疗只统计给其他友方的）
-      const gain = totalHp(a) - hp0;
+      const gain = healAfterFriendlyHurt(a, totalHp(a) - hp0);   // 先补友伤打掉的部分，不计分（#428）
       const st = gain > 0 ? battleStat(a) : null;
       if (st) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, a); }
     } else if (id === "kolt_rot") {
