@@ -2399,7 +2399,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_liz") {
     if (!needT()) return true;
-    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 2 });
+    aa(t, { element: "acid", mult: 1, diceN: addedDiceByLevel(a.level), diceS: 6, baseBreak: 2 });
     return true;
   }
   if (id === "en_liz_assist") {

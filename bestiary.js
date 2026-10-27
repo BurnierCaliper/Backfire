@@ -123,7 +123,7 @@ const BESTIARY_TEXT = {
     "冲撞：atk + 1d4 冰，2 击破",
     "队友被打时替他协助格挡（40%），成功仍扣自己架势（最少留 1），并反击 1 击破",
     "协助：仅近距，普通攻击一次"] },
-  captain_lizard: { move: "远距离", abilities: ["酸弹：atk + 1d6 酸，2 击破", "协助：远距 2×atk 酸"] },
+  captain_lizard: { move: "远距离，优先后排（远程角色；同档血量最低）", abilities: ["酸弹：atk + 1d6 酸（骰数每 5 级 +1），2 击破", "协助：远距 2×atk 酸"] },
   // —— 外城区镇压部队（赤牙麾下，武器全是火；固定种族，种族被动另行实装）——
   riot_baton: { move: "近距离，主动贴近", abilities: [
     "火焰警棍：近距 atk + 1d4 火，2 击破，打中施加熔融",
@@ -375,7 +375,7 @@ function bestiaryRank(kit) {
 const BESTIARY_DICE_SCALE = {
   buoy: "每 5 级升一档", dumpdrone: "每 5 级升一档", swarm: "每 5 级升一档", crow: "每 5 级升一档",
   patrolboat: "每 5 级升一档", spreader: "每 5 级升一档", watchcrow: "每 5 级升一档", dustbody: "每 5 级升一档",
-  captain_ox: "骰数每 5 级 +1", captain_wolf: "借机骰数每 5 级 +1"
+  captain_ox: "骰数每 5 级 +1", captain_wolf: "借机骰数每 5 级 +1", captain_lizard: "骰数每 5 级 +1"
 };
 
 /** 按等级、人数算出来的数值（和战斗里一样用 enemyPresets().build） */

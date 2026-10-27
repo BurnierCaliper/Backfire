@@ -1766,7 +1766,7 @@ function swarmStance(level) {
  *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
  *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
  *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
- *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
+ *    ATK atk + (等级−1)（照蜥蜴队长每级 +1）；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
 const SEWER_STATS = {
   sweeper: { shield: [4, 2], armor: 1, atk: 4, dice: 4 },
   elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
@@ -1777,7 +1777,7 @@ function sewerEliteOf(name, lv, p, extra) {
   return unitOf(name, lv, [
     { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1] + milestone(lv, 2) * S.shieldPer2, p) },
     { type: "spirit", hp: scaleHp(S.spirit[0] + (lv - 1) * S.spirit[1], p) }
-  ], S.def, S.atk + milestone(lv, 2) + milestone(lv, 5), Object.assign({ range: "ranged" }, extra));
+  ], S.def, S.atk + (lv - 1), Object.assign({ range: "ranged" }, extra));
 }
 
 function enemyPresets() {
@@ -1899,7 +1899,7 @@ function enemyPresets() {
       return unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
-      ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+      ], 4, 7 + (lv - 1), { kit: "captain_lizard", range: "ranged", dice: [1 + milestone(lv, 5), 6], element: "acid", baseBreak: 2 });
     }},
     // —— 外城区镇压部队（docs/suppression-force.md）：外层护盾、内层肉体，武器全是火；atk 比参照模板低 1 ——
     // 警棍盾：总血量同狂徒（锤），atk 4 → 3
