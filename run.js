@@ -216,9 +216,12 @@ const ENCOUNTERS = [
  * 空投蜂群三只算一组，整组记 1 枚。
  *   5% 概率这场变成 5 枚代币。
  *   5% 概率不受阵营限制，变成混战。
+ * 上场单位数有上限 ENCOUNTER_UNIT_CAP（= 4 枚 × group:3 = 12）：
+ * 五代币若全抽成组杂兵会到 15 只，抽的时候装不下就改抽装得下的。
  * ============================================================== */
 
 const ENCOUNTER_TOKENS = 4;
+const ENCOUNTER_UNIT_CAP = 12;     // 上场敌人数上限（对齐 4 枚代币 × 每组 3 只）
 const CHANCE_EXTRA_TOKEN = 0.05;   // 变 5 代币
 const CHANCE_MIXED = 0.05;         // 混战：无视阵营
 
@@ -383,16 +386,75 @@ function regionFactions(region) {
 
 const pickOne = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-/** 按代币从池子里抽敌人：[{ preset, count }] */
-function pickByTokens(pool, tokens) {
+/** 成组数量的上下限（不掷骰；可变区间 group:[min,max] 取两端） */
+function groupBounds(info) {
+  const g = info && info.group;
+  if (Array.isArray(g)) return [g[0], g[1]];
+  const n = Number(g) || 1;
+  return [n, n];
+}
+
+/** 剩下的代币能不能在单位上限内花完（只看组合，不掷骰；给 pickByTokens 避免抽到死角） */
+function canSpendTokens(pool, tokens, unitsLeft, memo) {
+  if (tokens <= 0) return true;
+  if (unitsLeft <= 0) return false;
+  memo = memo || new Map();
+  const key = tokens + ":" + unitsLeft;
+  if (memo.has(key)) return memo.get(key);
+  let ok = false;
+  for (let i = 0; i < pool.length && !ok; i++) {
+    const t = enemyTokens(pool[i]);
+    if (t <= 0 || t > tokens) continue;
+    const [lo, hi] = groupBounds(ENEMY_INFO[pool[i]]);
+    for (let c = lo; c <= hi && c <= unitsLeft && !ok; c++) {
+      if (canSpendTokens(pool, tokens - t, unitsLeft - c, memo)) ok = true;
+    }
+  }
+  memo.set(key, ok);
+  return ok;
+}
+
+/** 按代币从池子里抽敌人：[{ preset, count }]。
+ *  总单位数不超过 unitCap（默认 ENCOUNTER_UNIT_CAP）：装不下的选项跳过，改抽装得下的；
+ *  能花完代币时优先留下还能花完的组合；实在装不下就停（首领固定随从不走这里）。 */
+function pickByTokens(pool, tokens, unitCap) {
+  const cap = unitCap == null ? ENCOUNTER_UNIT_CAP : Number(unitCap);
   const enemies = [];
   let left = tokens;
+  let unitsLeft = cap;
   for (let guard = 0; guard < 40 && left > 0; guard++) {
-    const ok = pool.filter(k => enemyTokens(k) <= left);
-    if (!ok.length) break;
+    const memo = new Map();
+    const fit = pool.filter(k => {
+      const t = enemyTokens(k);
+      if (t <= 0 || t > left) return false;
+      return groupBounds(ENEMY_INFO[k])[0] <= unitsLeft;
+    });
+    if (!fit.length) break;
+    // 优先留下「还能花完代币」的选项；没有就退而取装得下的（花不完就停）
+    const good = fit.filter(k => {
+      const t = enemyTokens(k);
+      const [lo, hi] = groupBounds(ENEMY_INFO[k]);
+      for (let c = lo; c <= hi && c <= unitsLeft; c++) {
+        if (canSpendTokens(pool, left - t, unitsLeft - c, memo)) return true;
+      }
+      return false;
+    });
+    const ok = good.length ? good : fit;
     const k = pickOne(ok);
-    enemies.push({ preset: k, count: groupCount(ENEMY_INFO[k]) });
+    const info = ENEMY_INFO[k];
+    const [lo, hi] = groupBounds(info);
+    let count = groupCount(info);
+    if (count > unitsLeft) count = unitsLeft;
+    // 可变成组数掷出后若会让代币花不完，改成区间里第一个能花完的
+    if (good.length && !canSpendTokens(pool, left - enemyTokens(k), unitsLeft - count, new Map())) {
+      count = lo;
+      for (let c = lo; c <= hi && c <= unitsLeft; c++) {
+        if (canSpendTokens(pool, left - enemyTokens(k), unitsLeft - c, new Map())) { count = c; break; }
+      }
+    }
+    enemies.push({ preset: k, count });
     left -= enemyTokens(k);
+    unitsLeft -= count;
   }
   return enemies;
 }
