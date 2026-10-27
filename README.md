@@ -375,6 +375,25 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **没改的**：代币数（4 / 5% 变 5）、混战 5%、三方混战概率与两边各 3 枚、首领固定随从（`rollBossEncounter` 不走 `pickByTokens` 的单位上限）、车出现率 / 占几枚代币 / 退谁补谁的规则本身、阵营 / 区域池。
   - **测试**：tests/encounter-unit-cap.test.js（新，在没改的代码上失败）：常量 12；只抽清扫机 5 枚停在 12 只；下水道维护 / 外城区安保池与 `rollEncounter` 多种子 5 枚代币场上 ≤12 且代币花完；4 枚清扫机仍是 12 只；三方混战单边 ≤9、代币花完；带车补抽（场上已有近上限的敌人时退精英补抽）敌人+车 ≤12，镇压队多种子带车遭遇同理；README 代币制章节与规则改动记录置顶有本条。
 
+- **联机大战场包体：克制表 / 单位按差量发，一次行动不再重复发整包**（#340 第 9 条；online-wire.js · `matchupDelta`（新）/ `applyMatchupDelta`（新）/ `unitsDelta`；online-game.js · `settled`（新）/ `dirty`（新）；测试 tests/online-packet-budget.test.js（新）、tests/online-packet-budget.helper.js（新）、tests/online-wire-matchup.test.js）
+  - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，`act()` 收尾的 `checkEnd()`（`battle.checkSolo` 的 broadcast）也会再发，按真实流程一次行动每名玩家收 4 个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步每名玩家合计约 110 KB，超过 51,200 B 上限。
+  - **现在**：克制表只发和上一包相比变了的单位和去掉的单位 id（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`；不发单位顺序，玩家端只按 id 取）；`state.units` 按 id 发差量（`unitsDelta`）；`execute` 末尾只在中间又有新变化时才 publish。一次行动每名玩家收 2 个结算包：`onActionSettled` 那包带演出带子，`act()` 收尾之后那包不带带子、带着收尾时的真实变化（热座自动选人改的 `GAME.actorId` 影响克制表顶层、战斗结束的结果），所以不能压掉。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家两包合计约 10–14 KB。玩家端收到格式不对的 `matchupDelta`（去掉不存在的单位、带 `order`、和 `matchupUnchanged` 同时出现）一律拒收、去要 resync。
+  - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限；收尾那一包没有合并进第一包（要合并得按投影内容比较，留给以后）。
+  - **测试**：tests/online-packet-budget.test.js（新）：夹具按真的 `act()` 走（结算时 `GAME.tape` 是数组，结算完再派发 `battle.checkSolo`），一次行动最多两包、只有一包带演出带子；大战场四类行动每名玩家合计 < 51,200 B，第二包起真的用上 `matchupDelta` 和 `unitsDelta`。在没改的代码上失败（4 包、约 110 KB）。tests/online-wire-matchup.test.js 加 `matchupDelta` / `unitsDelta` 往返、增删单位、顶层和单位一起变、`{ value }` 条目、没有基线报错、resync 一律整份、格式不对的包拒收（最后这条在这次审查修改前的代码上失败）。
+- **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets`（新） / `teamChat`（新）；online-view.js · `hideWallets`（新）/ `projectView` 聊天投影；测试 tests/online-wallet-privacy.test.js（新））
+  - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱（商人、工匠、义体）时带「钱包剩 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
+  - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付。转进 / 转出队伍公账时整段括号一起去掉（公账余额这句也不写了；公账本来就公开，别处照样看得到）。队伍公账的「现有 N」**只在卖东西那一句**（`进队伍公账（现有 N）`）还留着；其它进 / 出公账的说明不再带余额。「进 X 的钱包（现有 N）」只有主持人分钱（`trpgPurseSplit`）会写，它不经小队聊天，`hideWallets` 里那条只是预防。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。房间检查点里这次修复之前存下的旧聊天（最多 300 条）在 `online-view.js` · `projectView` 投影时也会过同一套 `hideWallets`，读档后队友看不到余额。
+  - **没改的**：钱包本身的读写、谁能转、谁能看余额的权限。
+  - **测试**：tests/online-wallet-privacy.test.js（新）：都走真的联机命令（`HotseatGame.receiveFrom`），看队友 p3 过了 `OnlineView.projectView` 白名单的小队聊天——玩家转给队友 / 转进公账、主持人转给玩家后，聊天写「瑞比 转给 Helumica 34 奎支」，没有「剩 N / 现有 N」；玩家在商人处用自己的钱包买医疗包，聊天写「（由 瑞比 付）」，没有「钱包剩」。另有一条：检查点里塞进带「剩 N / 钱包剩 N」的旧消息，投影后被去掉余额（在没加投影过滤的代码上失败）。把 `teamChat` 改成不过滤也会失败。
+- **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `currentLifeForHigh` / `highLifeOnShp`（新） / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js（新）、tests/ui.test.js）
+  - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；自焚扣血量层时实际扣的本来就是整数（`applyTrueDamage` 取整），只是日志写成「失去 3.6」；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
+  - **现在**：
+    - 第 12 条：游戏版起身中，自爆 / 蓄能日志改写「当前坚毅生命」，不写数字。判定仍用 `currentLifeForHigh`。日志和 `currentLifeForHigh` 共用 `highLifeOnShp`（新）：**起身中一律比坚毅**（`!!unit.upOnShp`），临时护盾不参与高能阈值（作者定；与 `fix/shield-overcharge-threshold` 一致）。
+    - 第 13 条：自焚扣量 `Math.floor`（这次修复之后扣的坚毅不再带小数；之前存下来、坚毅已经是 31.7 这类小数的长线存档不会被修正；血量层日志写的扣量和实际一致）。取整方向和 `applyKnockdown` / `applyTrueDamage` 一样向下：**作者接受**坚毅上限 < 10 时 1 层自焚 floor 后一点也不扣（义体能把上限压到 10 以下，少见）。游戏版起身中弹字：合入第 15 条后走 `spawnShpHit`（只写「坚毅受创」、无数字）；本条原先不 `spawnFloater` 的意图保留。日志在游戏版本来就不写数字，照旧。
+    - 第 14 条：训练中给 `body` 挂 `training-battle`，CSS 藏 `#g-bs` 和 `#g-party-backstage`；`openBackstage` 在训练中直接返回。
+  - **没改的**：道具 / 效果说明里的「花费 N 点坚毅」等**固定花费**照常写；单机打进坚毅的伤害数字（第 15 条，另定）；跑团主持人视角（`shpHidden()` 为假）仍看得到数字。
+  - **测试**：tests/shp-leak-340.test.js（新）：起身中自爆 / 蓄能日志无 37；自焚 floor 成整数且游戏版起身中不经 `spawnFloater` 弹数字；血量层自焚日志写「失去 3」这类整数、不写 3.6；源码有 training-battle / openBackstage / CSS 守卫——这几条在没改的代码上失败（第 15 条合入 main 后，自焚 floor / 血量层日志两条在 main 上也会过，标成守卫）。另有守卫：坚毅上限 < 10 时 1 层自焚扣 0（锁作者决定）。另有一条起身中带临时护盾：判定比坚毅 37（高能 20 不爆），蓄能日志写「当前坚毅生命」不写数字、不写护盾 6（在没改的代码上失败：比护盾 6、高能 20 就爆）。tests/ui.test.js「训练场：顶栏「后台」……」（新，需要 Playwright）：真进训练场，`#g-bs` / `#g-party-backstage` 看不见，硬点也打不开后台，在没改的代码上失败。
+
 - **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js、tests/online-actions.test.js）
   - **以前**：联机校验移动只看「目的区编号 − 所在区编号」是不是 1，和单机的 `zonesAdjacent`（按棋盘连接）不一致。四区方形 3→1（相连）被拒、3→2（对角）放行；五区十字玩家起点 5 只连着 3，编号差 2，联机完全走不动。
   - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。走一步只看直连的那条连接：直连是危墙或关着的机关门就拒绝（和单机 `canCross` 一致）——2×2 方形四条连接围成环，以前 `zoneReachable` 会绕另一边放行（例如 1-3 是危墙时 3→1 绕 3→4→2→1），执行时单位却不动；玩家端移动菜单也跟着不再列出这种区。
@@ -396,6 +415,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **与 #415 重叠**：#415 起身中自焚游戏版不弹字；本条改为弹「坚毅受创」。本分支 `tickSelfBurn` 已按 #415 用 `Math.floor` 扣量（与 `applyTrueDamage` 一致），弹字用本条的 `spawnShpHit(u, "fire", { value: loss })`（仍无数字）。
   - **联机日志白名单**：`online-view.js` · `popupWords` 补进「坚毅受创」；`projectLogs` 才放行该词。以前缺这一词时，纯坚毅命中（`dmg` 为 0）整行摘要会被丢掉。
   - **测试**：tests/shp-dmg-340-15.test.js（新，5 条，在没改的代码上都失败）：起身中挨打日志 / 弹字只有「坚毅受创」；灼烧、自焚同理；联机投影带标记不带数；计算器照旧弹数字、README 有本条。tests/shp-dmg-340-15-review.test.js（新，8 条）：致命的一下、真实的回合结束灼烧（含致命）、拉斯缪尔不稳态、坠落、联机投影 + 演出（打中照演、数字只写「坚毅受创」）、联机战场日志摘要（改用真实 `OnlineView.projectLogs`，不再透传 mock）、另加一条直接打 `projectLogs` 确认「坚毅受创」留下且不漏坚毅数字；计算器两段攻击各弹一个数字。第 1–3、6、7 条在 main 和本 PR 改之前（9170cc2）都失败，坠落在 main 上失败，计算器两段那条在 9170cc2 上失败。
+
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
