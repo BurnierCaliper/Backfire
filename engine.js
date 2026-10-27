@@ -1429,10 +1429,11 @@ function applyResultToUnit(target, result, attacker) {
   // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
   const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
   if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
-  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
-  if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
+  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）；扭矩「转移注意」的自保模式同样（和 app.js · dealBreak 一致，#340 第 17 条）
+  const guardFloor = !!(target.resources && target.resources.divertGuard);
+  if (((target.statuses && target.statuses.sturdy) || guardFloor) && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
-    notes.push(`${target.name} 坚挺：架势保留 1。`);
+    notes.push(`${target.name} ${guardFloor ? "自保模式" : "坚挺"}：架势保留 1。`);
   }
   // 决不后退（feats.js）：这一击要把架势打空时，有附赠动作就先 +2 架势
   if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
