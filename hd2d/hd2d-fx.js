@@ -192,7 +192,7 @@
   /**
    * 演出带里的一下（投影过的：OnlineView.projectTape 的一项）要弹的数字 { unitId, kind, text, el }；不弹 = null。
    * o.level = 挨打的人的等级（画面上写着的 Lv），o.bigHit(等级, 伤害) = 规则的 bigHitInfo（大伤害：数字后面加 !!）。
-   * 只认投影里的 value：打在坚毅生命上、濒死的那几下投影不给数，这里就不弹（只演打中）。
+   * 只认投影里的 value：濒死的那几下投影不给数，这里就不弹（只演打中）；打在坚毅生命上的那几下投影带 grit: true、不给数：弹「坚毅受创」（#340 第 15 条）。
    * 原型的 cues 和正式画面（game.js 的新画面，#283）都按这一份挑数字：伤害、击破、治疗、高能自爆、自爆小车的「引爆」、状态字 / 攻击效果字（「无效」算格挡），
    * 登场支援、红弹 / 蓝弹这种投影白名单里的字也当状态字
    */
@@ -203,7 +203,8 @@
     const value = num(e.value), word = typeof e.text === "string" && e.text ? e.text : null;
     const out = (kind, text) => ({ unitId: e.unitId, kind, text, el });
     if (e.kind === "dmg") {
-      if (value === undefined || value <= 0) return null;      // 投影没给数（打在坚毅生命上、濒死）：只演打中，不弹数字
+      if (e.grit === true) return out("word", "坚毅受创");    // #340 第 15 条：打在坚毅生命上：只写字，不写数字
+      if (value === undefined || value <= 0) return null;      // 投影没给数（濒死）：只演打中，不弹数字
       const big = !!(o.bigHit && (o.bigHit(o.level, value) || {}).big);
       return out(big ? "big" : "dmg", big ? value + "!!" : String(value));
     }

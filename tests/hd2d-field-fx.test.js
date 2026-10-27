@@ -299,7 +299,7 @@ test("减少动态效果时不推镜头（场景的 motion 关着，hd2d-play.js
 });
 
 /* ---------- 3. 坚毅生命 ---------- */
-test("坚毅生命绝不显示：打在坚毅生命上、濒死、给濒死的人治疗的那几下不弹数字（和原型一样，过联机演出带的白名单）；新加的 DOM（数字、影子、铭牌、踩塔）里没有坚毅生命的数字", async () => {
+test("坚毅生命绝不显示：打在坚毅生命上的只弹「坚毅受创」（#340 第 15 条），濒死、给濒死的人治疗的那几下不弹数字（和原型一样，过联机演出带的白名单）；新加的 DOM（数字、影子、铭牌、踩塔）里没有坚毅生命的数字", async () => {
   const P = fieldPage({ boss: true });
   const pops = gamePops(P);
   await P.open();
@@ -313,14 +313,15 @@ test("坚毅生命绝不显示：打在坚毅生命上、濒死、给濒死的�
   pops.paperPop(b.id, { type: "pop", kind: "heal", unitId: b.id, value: 6, element: "physical", snap: [snapOf(b)] });
   pops.hit(c, 2, "ice");
   const texts = P.numbers().map(n => n.textContent);
-  assert.deepEqual(texts, ["5", "2"], "打在看得见的血上：照弹；打在坚毅生命上（3）、濒死（4）、给濒死的人治疗（+6）：不弹");
+  // #340 第 15 条（作者定）：打在坚毅生命上的那一下弹「坚毅受创」（不写数字）；以前这里什么都不弹，守卫有意放宽成只放行这一个词
+  assert.deepEqual(texts, ["5", "坚毅受创", "2"], "打在看得见的血上：照弹；打在坚毅生命上（3）：只写「坚毅受创」；濒死（4）、给濒死的人治疗（+6）：不弹");
   assert.equal(pops.fxLayer.childNodes.length, 0, "也不退回去弹旧的 .pop");
   // 新加的 DOM：数字、影子、铭牌数据、踩塔里都没有坚毅生命（数值、字样）
   P.ctx.HD2DField.paper(foe.id);
   const layout = P.log.layouts[P.log.layouts.length - 1];
   const UIX = P.ctx.HD2DUI, UC = P.ctx.UnitCard;
   const added = JSON.stringify(layout) + layout.units.map(u => UIX.mechsHtml(u.plate.mechs, UC)).join("") + layout.zones.map(z => UIX.towersHtml(z.towers, UC)).join("") +
-    P.numbers().map(n => n.textContent + n.style.cssText).join("") +
+    P.numbers().map(n => (n.textContent === "坚毅受创" ? "" : n.textContent) + n.style.cssText).join("") +   // 只放行「坚毅受创」这一个确切的词
     P.log.stage.childNodes.filter(n => n.id === "hd2d-shade").flatMap(n => n.childNodes).map(n => n.style.cssText).join("");
   assert.ok(layout.units.some(u => u.plate.mechs), "铭牌上有首领机制");
   assert.ok(!added.includes(String(SHP_MAX)) && !/shp|坚毅/i.test(added.replace(/"upOnShp":(true|false)/g, "")), "新加的 DOM / 数据里出现了坚毅生命");
