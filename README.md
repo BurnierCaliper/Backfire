@@ -377,6 +377,52 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
   - **测试**：
     - tests/online-wire-chat.test.js（新，7 条；6 条在没改的代码上失败，另外 1 条是和旧版页面混用的照旧行为）：第一包整份、之后只发新增的；满 300 条以后滚动；300 条聊天以后，测试里的普通结算包从整份（聊天一项就 > 30 KB）降到 < 2 KB；重同步 / 重置 / 整份换了时整份发，中间一包没带聊天不动基准，一开始没带聊天的也接得上；旧版页面兼容；坏的元数据解不开、不弄坏基准；投影以后再打包、暗骰不外泄。
     - tests/online-coordinator.test.js 加 1 条（在没改的代码上失败）：用真实的联机协调层（online-game.js）收包，之后每包只带新的一条，玩家端每一包的 `view.chat` 都是整份；掉包先要重同步，重同步整份发。
+
+- **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
+  - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
+  - **现在**：敌人被打倒时（`removeEnemyFromField` 当下，不等 3 秒后移出场）就登记到 `state.goneFoes`，同一个 id 只留一份，每场开战清空；掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。打倒后 3 秒内点了预演 / 看了行动预测 / 撤销（state 被换成拷贝），或者连续战斗换了区域，都照样算得到。图鉴里飞碟触灵的「击倒」只算本体那一次，机械足不另算（以前打掉 5 条腿会多记）。
+  - **没改的**：3 秒淡出、撤销复活、中立 / 召唤物 / 铁壁 / 机械足不掉的规则；机械足照旧记在飞碟触灵名下的「遭遇过」和等级。
+  - **测试**：tests/removed-foe-drops.test.js（新，8 条，在没改的代码上都失败）：跑团 `trpgEnemyMaterials`、单局 `Rogue.finishBattle` 掷掉落时收到的名单里有先移出场的那只（把 `rollEnemyDrops` 换成记名单的函数，走真实调用方）；打倒后、计时器到点前 state 被换成深拷贝，照样算到；连续战斗第 1 场最后一只没等计时器就换区域，照样算到；同一只被打倒两次只留一份；图鉴记遭遇过、击倒 1；飞碟 5 条机械足一条条打掉，「击倒」只 +1；新的一场不带上上一场的 goneFoes。
+
+- **空投蜂群、下水道清扫机的架势改成 1–10 级 1、11–20 级 2、21 级起 3**（下水道清扫机照抄空投蜂群，两个一起改；engine.js · `SWARM_STANCE`（新）/ `swarmStance`（新）、`enemyPresets` 的 `swarm` / `sewer_sweeper`、`SEWER_STATS.sweeper`；docs/sewer-maintenance.md；测试 tests/swarm-stance.test.js（新）、tests/sewer-maintenance.test.js）
+  - **以前**：架势 1 + ⌊等级/2⌋，最多 3——1 级 1、2–3 级 2、4 级起就是 3，前期太硬。
+  - **现在**：1–10 级 1、11–20 级 2、21 级起 3；不随人数加（2 / 3 / 4 人队一样，图鉴一样）。曲线放在配置 `SWARM_STANCE = { base: 1, steps: [11, 21] }`（1 级的架势、每升 1 点的等级），两种敌人生成时直接按 `swarmStance(等级)` 给架势。`SEWER_STATS.sweeper` 里不再起作用的 `def` / `defCap` 去掉，docs/sewer-maintenance.md 的表和公式一起改。额外幕敌人可到 25 级（`rogue-data.js · extraActLevels`），21 级起给 3。
+  - **没改的**：两种敌人的血量、ATK、招式；其它敌人的架势；开战按人数换算（杂兵不加人数加成）。
+  - **测试**：tests/swarm-stance.test.js（新，在没改的代码上失败）：两种敌人各查 1 / 10 / 11 / 20 / 21 级 × 2 / 3 / 4 人队，生成、图鉴都看；改配置 `SWARM_STANCE` 两种敌人跟着变。tests/sewer-maintenance.test.js 的数值表、公式和配置检查跟着改。
+
+- **强化注射剂 / 全队集结·直伤的 ATK 加成算进出手**（修复 #340 第 16 条；party.js · `effectiveAtk`；app.js · `applyRallyBuff` / `resetBattleFlags`、`RALLY_BUFF`（新配置）；测试 tests/atk-buffs.test.js（新））
+  - **以前**：强化注射剂写「ATK +3 至战斗结束」，代码给 `u.atk` 和 `u.itemAtkBonus` 各加 3；全队集结·直伤给 `u.atk` +15。出手按 `effectiveAtk` 算，它不读这两个字段，伤害一点不加（坚毅照扣）。
+  - **现在**：`effectiveAtk` 加上 `itemAtkBonus` 和 `rallyAtk`。直伤集结另记 `rallyAtk`（数值放在配置 `RALLY_BUFF = { atk: 15 }`，`rallyAtk`、`u.atk` 和日志「ATK +15」都读它；下一场 `resetBattleFlags` 清掉）；注射剂本来就写了 `itemAtkBonus`，现在真的进伤害。
+  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结的「持续到自己晕眩或濒死」**没做**：现在 +15 整场有效，濒死起身、晕眩恢复后都还在；「自己」是指施放者还是每个拿到加成的队员没写清楚，待主人确认后再补。
+  - **测试**：tests/atk-buffs.test.js（新，3 条；前 2 条在没改的代码上都失败，第 3 条在加配置前失败）：打针后 `effectiveAtk` +3；直伤集结后 +15，下一场清零；把 `RALLY_BUFF.atk` 改成 7，出手和日志都跟着变成 +7。
+
+- **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
+  - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
+  - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
+  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。不稳照旧——自保模式下架势剩 1 时仍会因不稳直接失衡（坚挺不会），待主人确认是否要改。
+  - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：走真实流程——柯尔特召唤扭矩 → 扭矩转移注意（进自保模式）→ 敌人攻击扭矩（架势 4、这一击 11 击破）→ 架势 1、不进失衡、不算击破，日志有「自保模式：架势保留 1」。
+
+- **巨人招式图鉴文字改成「atk + 等级颗 d8」，和实际骰数一致**（修复 #340 第 19 条；bestiary.js · `BESTIARY_TEXT.giant`；测试 tests/giant-bestiary.test.js（新））
+  - **以前**：图鉴能力写「atk + 1d8」，实际 `diceN: a.level`（等级颗 d8）；数值栏已经是「10d8」一类，能力和数值对不上。巨人 ATK 固定 6，按文字 7–14，10 级实际 16–86（平均 51）。
+  - **现在**：近距砸击、远距能量都改成「atk + 等级颗 d8」（写「颗」，免得和蚁卫的「等级 + 1d6」看混）。代码（enemies.js / engine.js）不动，作者定的：按等级掷。
+  - **没改的**：协助「捏碎颅骨」、数值栏现算、其它敌人的图鉴。
+  - **测试**：tests/giant-bestiary.test.js（新，2 条）：巨人两条主动招式都写「等级颗 d8」，不再写「1d8」（在没改的代码上失败）；4 级巨人真的打一次近距砸击（同区）、远距能量（隔一区），每颗 d8 掷 8，记录里是「掷骰 4d8 → 32」（锁住实际骰数，文字和代码哪边单独变了都会报出来）。
+
+
+
+
+- **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
+  - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
+  - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：
+    - `applyKnockdown`：攻击打到最内层归零，还有坠落、高能自爆、窒息、被击落……都走这里；
+    - 拉斯缪尔不稳态（`rasUnstableHit`）：受到伤害直接倒地；
+    - 巨人协助「捏碎颅骨」（`crushSkullDown`）：直接倒地；起身中被捏倒，算又倒了一次。
+    - 已经濒死的再挨打不重复记。没有陷入濒死的不算倒地：力竭 3 被击倒立刻死亡、起身中坚毅生命打光死亡、武器人倒下、还魂（专长）留 1 点生命。
+    - 战场数据表在「承受伤害」后面多一列「倒地次数」，合计行、「合并武器人」、「复制」出来的文字里都有，面板开着时跟着刷新。和其他战场数据一样记在 `state.battleStats` 上：撤销时一起回退，每场开战清零。
+  - **没改的**：倒地本身的规则；整局数据（`ledger.js · CAREER_KEYS`）、联机玩家看的「最近 10 场战绩」、探索记录里的战斗小结都没有加这一项。
+  - **测试**：
+    - tests/battle-stats-downs.test.js（新，5 条，在没改的代码上都失败）：真的攻击打到最内层归零记 1 次，已经濒死的再挨打、再结算不重复记，没倒地的人是 0；拉斯缪尔不稳态受伤倒地记 1 次，起身后再受伤直接死亡、不再记；巨人协助捏碎颅骨记 1 次，起身后再被捏倒记第 2 次；力竭 3 即死、起身中坚毅生命打光、武器人倒下、还魂救下都不记（还魂用掉以后再倒地记 1 次）；战场数据表（game.js 的 `statRows` / `statsText` / `mergeStatRows`）多一列「倒地次数」、排在「承受伤害」后面，还没有数据的人是 0，合并武器人时加在一起。
+    - tests/battle-stats-downs-ui.test.js（新，要浏览器；没装 Playwright 时用机器自带的 Chrome）：真画面里开一场战斗，一个人倒地后打开「战场数据」：表头有「倒地次数」，这个人 1、其他人 0、合计 1；面板开着时又倒一个，跟着刷新成合计 2；点「合并武器人」以后照样有这一列。在没改的代码上失败（表头没有这一列）。
 - **联机房主在跑团任务战斗里刷新页面，恢复后打完照样推进任务、判护送对象：正在打的任务战斗跟着房间检查点走**（#340 第 7 条；trpg-ui.js · `TrpgFlow.onlineCheckpoint` / `restoreOnline`；trpg-tasks.js · `trpgTaskBattleNormalize`（新）；trpg.js 里 `TRPG.taskBattle` 的注释；测试 tests/task-battle-resume.test.js（新）、tests/task-battle-resume-ui.test.js（新））
   - **以前**：主持人在任务页点「开战」时记下这场是哪个任务的第几站（`TRPG.taskBattle`），战斗结算时按它推进路线、记护送对象的血量。可联机房主的房间检查点（online-game.js 存在房主本机、刷新后用来恢复房间的那一份）里没有它。房主在任务战斗里刷新页面、恢复房间接着打：
     - 打赢了任务不动：还停在这一站，这一站的奖励也不发（探索记录里只有「战斗胜利」那一行）；

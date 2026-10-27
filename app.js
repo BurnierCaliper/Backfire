@@ -1607,6 +1607,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  state.goneFoes = [];   // 新的一场：移出场的敌人名单从空开始
   // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
   state.apocalypse = false;
   state.phaseClock = state.weather === "phase";
@@ -2538,16 +2539,23 @@ function addStatusDmg(key, amount) {
  *   伤害 / 击破：打在敌人身上的每一击，加上自己行动里引发的连带伤害（感电、共振、余波……）
  *   承伤：落在自己身上的所有伤害，含坚毅生命和持续伤害
  *   击杀：最后一击是谁打的算谁
- *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算） */
+ *   治疗：自己的行动让「其他」友方多出来的血量和护盾（新唤出的单位不算）
+ *   倒地：陷入濒死的次数（noteKnockdown；力竭 3 被击倒立刻死亡、起身中坚毅生命打光死亡、武器人倒下都不算） */
 function battleStat(u) {
   if (u && u.creditTo) u = unitById(u.creditTo);   // 碎渣机炮这类代打：记在操控的人身上
   if (!u || !u.isPlayer || !(state.units || []).includes(u)) return null;
   if (u.escort) return null;   // 护送对象（货车 / 委托人）：数据没有参考价值，不记
   state.battleStats = state.battleStats || {};
   const s = state.battleStats[u.id] || (state.battleStats[u.id] = { name: u.name, kit: u.kit || "", weaponOf: u.weaponOf || null, dmg: 0, brk: 0, taken: 0, kills: 0, heal: 0,
-    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0 });
+    assists: 0, blocks: 0, blockOk: 0, avoided: 0, staggers: 0, reduced: 0, downs: 0 });
   s.name = u.name;
   return s;
+}
+/** 战场数据：倒地一次。设 dying = true 的地方都调它：applyKnockdown（攻击、坠落、高能自爆……）、
+ *  不稳态（rasUnstableHit）、巨人捏碎颅骨（enemies.js · crushSkullDown）；这几处都先挡掉了已经濒死的，不会重复记 */
+function noteKnockdown(u) {
+  const st = battleStat(u);
+  if (st) st.downs = (st.downs || 0) + 1;
 }
 /* ===== 单回合最高爆发：每个我方单位一回合（第 N 回合，含敌人回合里的协助 / 借机）里造成的伤害合计，
  * 记下这一回合用了哪些技能（各打了多少）、命中时吃到哪些增益（几次命中）。
@@ -3092,7 +3100,7 @@ function giveBattleDrops() {
 function trpgEnemyMaterials() {
   if (typeof TRPG === "undefined" || !TRPG.active || typeof rollEnemyDrops !== "function") return null;
   if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode()) return null;
-  const got = rollEnemyDrops(enemyDropFoes(state.units));
+  const got = rollEnemyDrops(enemyDropFoes(battleFoesSeen()));
   if (!got.length) return null;
   got.forEach(m => bagAdd(m.id, m.qty));
   const out = { kuizhi: 0, items: got.map(m => ({ id: m.id, name: (ITEM_CATALOG[m.id] || {}).name || m.id, qty: m.qty })) };
@@ -3500,6 +3508,7 @@ function rasUnstableHit(target, res, notes) {
     notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
   } else if (!target.dying) {
     target.dying = true;
+    noteKnockdown(target);   // 战场数据：倒地次数
     if (typeof clearStunOnDown === "function") clearStunOnDown(target);
     notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
   }
@@ -5300,11 +5309,21 @@ function explodeBoomcar(target, notes) {
   } finally { state.popTag = prevTag || null; }
 }
 
+/** 这场战斗出现过的所有单位：场上的 + 被打倒后已经移出场的（removeEnemyFromField 登记在 state.goneFoes）。
+ *  战后掉落（enemyDropFoes）、图鉴（bestiaryRecordBattle）都读这份 */
+function battleFoesSeen() {
+  const units = state.units || [];
+  const gone = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => !units.some(x => x.id === g.id));
+  return units.concat(gone);
+}
 function removeEnemyFromField(u, notes) {
   if (!u || u.isPlayer || u._removed) return;
   u._removed = true;
   u.dead = true;
   u.hidden = false;
+  // 打倒当下就登记（不等 3 秒后移出场）：战后掉落、图鉴还要算到它（#340 第 18 条）。
+  // 这 3 秒里 state 可能被预演 / 撤销换成拷贝、连续战斗换区域时 state.units 也会整份换掉，所以不能放进计时器。同一个 id 只留最新的一份
+  state.goneFoes = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => g.id !== u.id).concat([u]);
   notes.push(`${u.name} 被击杀。`);
   if (state.selectedId === u.id) state.selectedId = null;
   if (state.attackerId === u.id) state.attackerId = null;
@@ -6864,6 +6883,7 @@ function applyKnockdown(unit, notes, opt) {
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
     if (typeof featReviveCheck === "function" && featReviveCheck(unit, notes)) return null;
     unit.dying = true;
+    noteKnockdown(unit);   // 战场数据：倒地次数
     clearStunOnDown(unit);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
@@ -7496,6 +7516,7 @@ function resetBattleFlags(u) {
   u.harshEnv = false;
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
+  u.rallyAtk = 0;
   u.highEnergy = 0;
   u.highFrom = null;
   u._imbalanceLock = false;
@@ -7835,13 +7856,17 @@ function triggerOneStatus(t, src, key) {
   return notes;
 }
 
+// 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
+const RALLY_BUFF = { atk: 15 };
+
 function applyRallyBuff(u, lines) {
   if (!u || !u.roles) return;
   const p = u.roles.primary;
   u.rallyBuff = p;
   if (p === "直伤") {
-    u.atk = (u.atk || 0) + 15;
-    lines.push(`${u.name} 直伤集结：ATK +15。`);
+    u.rallyAtk = RALLY_BUFF.atk;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
+    u.atk = (u.atk || 0) + RALLY_BUFF.atk;
+    lines.push(`${u.name} 直伤集结：ATK +${RALLY_BUFF.atk}。`);
   } else if (p === "异常") {
     u.bonus = (u.bonus || 0) + 1;
     lines.push(`${u.name} 异常集结：附赠 +1。`);
