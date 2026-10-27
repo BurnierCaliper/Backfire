@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
+  - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
+  - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
+  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。不稳照旧——自保模式下架势剩 1 时仍会因不稳直接失衡（坚挺不会），待主人确认是否要改。
+  - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：走真实流程——柯尔特召唤扭矩 → 扭矩转移注意（进自保模式）→ 敌人攻击扭矩（架势 4、这一击 11 击破）→ 架势 1、不进失衡、不算击破，日志有「自保模式：架势保留 1」。
+
 - **巨人招式图鉴文字改成「atk + 等级颗 d8」，和实际骰数一致**（修复 #340 第 19 条；bestiary.js · `BESTIARY_TEXT.giant`；测试 tests/giant-bestiary.test.js（新））
   - **以前**：图鉴能力写「atk + 1d8」，实际 `diceN: a.level`（等级颗 d8）；数值栏已经是「10d8」一类，能力和数值对不上。巨人 ATK 固定 6，按文字 7–14，10 级实际 16–86（平均 51）。
   - **现在**：近距砸击、远距能量都改成「atk + 等级颗 d8」（写「颗」，免得和蚁卫的「等级 + 1d6」看混）。代码（enemies.js / engine.js）不动，作者定的：按等级掷。
