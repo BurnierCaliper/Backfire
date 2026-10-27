@@ -5321,6 +5321,9 @@ function removeEnemyFromField(u, notes) {
   u._removed = true;
   u.dead = true;
   u.hidden = false;
+  // 打倒当下就登记（不等 3 秒后移出场）：战后掉落、图鉴还要算到它（#340 第 18 条）。
+  // 这 3 秒里 state 可能被预演 / 撤销换成拷贝、连续战斗换区域时 state.units 也会整份换掉，所以不能放进计时器。同一个 id 只留最新的一份
+  state.goneFoes = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => g.id !== u.id).concat([u]);
   notes.push(`${u.name} 被击杀。`);
   if (state.selectedId === u.id) state.selectedId = null;
   if (state.attackerId === u.id) state.attackerId = null;
@@ -5328,11 +5331,6 @@ function removeEnemyFromField(u, notes) {
   const id = u.id;
   const drop = () => {
     // 只清掉仍处于「已击杀」的那个；中途撤销复活回来的单位不能被这个计时器误删
-    // 移出场前先登记：战后掉落、图鉴还要算到它（#340 第 18 条）。计时器到点时已经换了一场战斗的，不登记
-    if ((state.units || []).includes(u) && u._removed) {
-      state.goneFoes = Array.isArray(state.goneFoes) ? state.goneFoes : [];
-      if (!state.goneFoes.includes(u)) state.goneFoes.push(u);
-    }
     state.units = (state.units || []).filter(x => !(x.id === id && x._removed));
     renderAll();
   };
