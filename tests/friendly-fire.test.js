@@ -6,7 +6,8 @@
 // 后续（#432，作者 10/27）：对敌人用的道具开着友伤也能对队友用（items.js · itemEnemyOk）；自动挑目标的（无人机、炮台、护送对象的还击……）
 // 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件后面
 // 后续（三）（#437，作者 10/27）：音爆 / 探测模式触发的碎渣机炮开着友伤时在敌人和队友里随机挑（app.js · scrapAutoTarget）；
-// 川川「磁场护盾」、龙哥热能轰击（红弹）也打到范围里施放者以外的队友。测试在文件最后
+// 川川「磁场护盾」、龙哥热能轰击（红弹）也打到范围里施放者以外的队友；借机攻击单元、警戒（反应）和近距离压制单元（光环）
+// 主人开着友伤时对主人以外的队友也起作用（mods.js · bpLeaveOpportunity / bpAtkAdjust、feats.js · featAlertOnEnter）。测试在文件最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -18,10 +19,11 @@ const V = require("../online-view");
 const plain = v => JSON.parse(JSON.stringify(v));
 const run = (c, expr) => vm.runInContext(expr, c);
 
-/** 三名队友 + 一个狂徒，全在 1 区（三区直排）。狂徒血厚、架势高：打不死也打不进失衡 */
-function field(party = ["kolt", "helu", "tou"], seed = "FF428") {
+/** 三名队友 + 一个狂徒，全在 1 区（三区直排）。狂徒血厚、架势高：打不死也打不进失衡。
+ *  before：布置完、放敌人之前调用（装单局图纸这类，同 BattleSim.setup 的 before） */
+function field(party = ["kolt", "helu", "tou"], seed = "FF428", before) {
   const c = H.load();
-  c.BattleSim.setup({ party, enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], zoneMode: 3, seed });
+  c.BattleSim.setup({ party, enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], zoneMode: 3, seed, before });
   c.startCombat();
   const S = c.S.state;
   const heroes = party.map(k => c.findKit(k, S.units));
@@ -760,4 +762,91 @@ test("范围效果（#437）：龙哥热能轰击（霰弹枪 · 红弹）——
   };
   assert.deepEqual(run(false), { foe: true, longge: false, kolt: false, helu: false, healed: true }, "关着：只熔融敌人，同区友方照旧按红弹治疗");
   assert.deepEqual(run(true), { foe: true, longge: false, kolt: true, helu: true, healed: true }, "开着：同区龙哥以外的队友也熔融，红弹治疗照旧；龙哥自己不熔融");
+});
+
+/* 「谁动就打谁」的反应和光环（#437）：主人开着友伤时，主人以外的队友也算；敌人的照旧 */
+/** WAM-56（rogue-data.js：借机攻击单元 + 近距离压制单元，同区敌人 atk −4） */
+const WAM56 = (() => { for (const s of H.load().S.ROGUE_SMITHS) for (const b of s.blueprints) if (b.id === "bp_morma_wam56") return plain(b.mod); })();
+/** field 的 before：柯尔特的扭矩装上 WAM-56（单局图纸要武器 4 级才生效） */
+const wam56 = st => {
+  st.weaponMods = { torque: Object.assign({}, WAM56) };
+  st.units.forEach(u => { if ((u.linkedKits || []).includes("torque")) u.weaponLevels.torque = 4; });
+};
+
+test("反应（#437）：借机攻击单元（图纸）——装着它的人开着友伤时，他以外的队友离开他所在的区也挨 atk+1d6（照常结算、不计分数）；关着照旧只打离开的敌人", () => {
+  const run = on => {
+    const { c, S, heroes: [kolt, helu], foe } = field(["kolt", "helu", "tou"], "FF437-OPP", wam56);
+    if (on) ffOn(c);
+    foe.zone = 3;   // 狂徒（匕首）自己也会借机攻击离开的人：挪开，只看柯尔特的
+    const hp0 = hp(c, helu);
+    S.attackerId = helu.id;
+    c.doMove(helu, 2);   // 我方回合：赫鲁米卡离开柯尔特所在的 1 区
+    return { c, S, kolt, helu, lost: hp0 - hp(c, helu), text: logText(c) };
+  };
+  const off = run(false);
+  assert.equal(Number(off.helu.zone), 2, "照常走过去");
+  assert.equal(off.lost, 0, "关着：队友离开不挨打");
+  assert.doesNotMatch(off.text, /借机攻击单元/);
+  const on = run(true);
+  assert.equal(Number(on.helu.zone), 2, "照常走过去");
+  assert.match(on.text, /借机攻击单元：柯尔特 对离开区域的 Helumica 自动开火/, "开着：离开的队友也挨这一下");
+  assert.ok(on.lost > 0, "照常结算：掉血");
+  assert.equal(on.c.battleStat(on.helu).taken, 0, "不计承受伤害");
+  assert.equal(on.c.battleStat(on.kolt).dmg, 0, "也不算柯尔特打出的伤害");
+  assert.ok(!on.S.battleScore.hurt, "不丢「无伤」奖励");
+});
+
+test("反应（#437）：警戒（专长）——有警戒的人开着友伤时，他以外的队友走进他所在的区也挨 0.5×atk + 1 击破（扣他留着的附赠；照常结算、不计分数；队友在我方回合走，不看是谁的回合）；关着照旧，敌人照旧只在敌方回合", () => {
+  const run = on => {
+    const { c, S, heroes: [kolt, helu], foe } = field(["kolt", "helu"], "FF437-ALERT");
+    if (on) ffOn(c);
+    foe.zone = 3;   // 狂徒（匕首）会借机攻击离开 1 区的人：挪开
+    kolt.feats = ["alert"]; kolt.zone = 2; kolt.bonus = 1;
+    const hp0 = hp(c, helu), def0 = helu.def;
+    S.attackerId = helu.id;
+    c.doMove(helu, 2);   // 我方回合：赫鲁米卡走进柯尔特所在的 2 区
+    return { c, S, kolt, helu, foe, lost: hp0 - hp(c, helu), brk: def0 - helu.def, text: logText(c) };
+  };
+  const off = run(false);
+  assert.equal(Number(off.helu.zone), 2);
+  assert.equal(off.kolt.bonus, 1, "关着：队友走进来不触发");
+  assert.equal(off.lost, 0);
+  const on = run(true);
+  assert.equal(Number(on.helu.zone), 2);
+  assert.equal(on.kolt.bonus, 0, "开着：柯尔特用掉留着的附赠");
+  assert.match(on.text, /柯尔特 警戒：消耗 1 附赠动作，对走进来的 Helumica 出手/);
+  assert.ok(on.lost > 0 && on.brk >= 1, "照常结算：0.5×atk + 1 击破");
+  assert.equal(on.c.battleStat(on.helu).taken, 0, "不计承受伤害");
+  assert.equal(on.c.battleStat(on.kolt).dmg, 0, "也不算柯尔特打出的伤害");
+  assert.ok(!on.S.battleScore.hurt, "不丢「无伤」奖励");
+  // 敌人照旧：我方回合走进来不触发，敌方回合才触发
+  on.kolt.bonus = 1; on.foe.zone = 2;
+  on.c.featAlertOnEnter(on.foe, []);
+  assert.equal(on.kolt.bonus, 1, "我方回合敌人走进来照旧不触发");
+  on.S.combatPhase = "enemy";
+  on.c.featAlertOnEnter(on.foe, []);
+  assert.equal(on.kolt.bonus, 0, "敌方回合敌人走进来照旧触发");
+});
+
+test("光环（#437）：近距离压制单元（图纸）——装着它的人开着友伤时，同区他以外的队友 atk 也 −4（和同区敌人一样），他自己、别区的队友不变；关着照旧只压敌人", () => {
+  const atks = on => {
+    const { c, S, heroes: [kolt, helu, tou], foe } = field(["kolt", "helu", "tou"], "FF437-SUPPRESS", wam56);
+    if (on) ffOn(c);
+    tou.zone = 2;   // 灯在别的区
+    const atk = u => c.effectiveAtk(u, S.units);
+    const near = { kolt: atk(kolt), helu: atk(helu), tou: atk(tou), foe: atk(foe) };
+    helu.zone = 2;   // 赫鲁米卡走开以后
+    return Object.assign(near, { heluAway: atk(helu) });
+  };
+  const n = WAM56.suppress;
+  const bare = (() => { const { c, S, foe } = field(["kolt", "helu", "tou"], "FF437-SUPPRESS"); return c.effectiveAtk(foe, S.units); })();
+  const off = atks(false), on = atks(true);
+  assert.ok(off.helu > n, "赫鲁米卡的 atk 够减");
+  assert.equal(off.foe, Math.max(0, bare - n), `同区敌人 atk −${n}（以前就是这样）`);
+  assert.equal(off.helu, off.heluAway, "关着：同区的队友不受影响");
+  assert.equal(on.helu, off.helu - n, `开着：同区的队友 atk 也 −${n}`);
+  assert.equal(on.heluAway, off.heluAway, "走开就不受影响");
+  assert.equal(on.kolt, off.kolt, "装着它的人自己不受影响");
+  assert.equal(on.tou, off.tou, "别区的队友不受影响");
+  assert.equal(on.foe, off.foe, "同区敌人照旧");
 });
