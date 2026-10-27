@@ -478,7 +478,9 @@ function markdown(report) {
   const tokens = o.tokens || CONFIG.tokens, hypo = hypoText(o);
   l.push(`# 后期敌人实际威胁模拟（issue #401）${hypo ? "· 假设性对照：" + hypo : ""}`, "",
     "只测量，不改任何数值。下面的表由 `tools/enemy-threat.js` 生成，重跑会覆盖到「手写分析」标记为止，标记之后的手写内容保留。", "");
-  if (hypo) l.push(`> **假设性对照：${hypo}**——只在模拟里改（攻击力在开战后乘到敌人的 ${ATK_FIELDS.join(" / ")} 上，中途上场的援军、召唤物也乘；代币是凑满的枚数），游戏里的数值没有动。种子、队伍、区制和站位和正式结果（\`${CONFIG.out}\`）的同一格一样，可以逐格对照。`, "");
+  const how = [(o.atk || CONFIG.atk) !== CONFIG.atk ? `攻击力在开战后乘到敌人的 ${ATK_FIELDS.join(" / ")} 上，中途上场的援军、召唤物也乘；伤害骰、固定加值不乘` : "",
+    tokens !== CONFIG.tokens ? "代币是这种敌人凑满的枚数" : ""].filter(Boolean).join("；");
+  if (hypo) l.push(`> **假设性对照：${hypo}**——只在模拟里改（${how}），游戏里的数值没有动。种子、队伍、区制和站位和正式结果（\`${CONFIG.out}\`）的同一格一样，可以逐格对照。`, "");
   l.push(
     `- 版本：提交 \`${P.commit || "未知"}\`${P.dirty ? "（生成时工作区有未提交改动，见 json 的 sourceHash）" : ""}；规则源码 SHA256 \`${P.sourceHash.slice(0, 16)}…\`；Node ${P.node}；工具 ${CONFIG.version}`,
     `- 命令：\`${P.command}\``,
