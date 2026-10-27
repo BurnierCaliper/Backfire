@@ -264,11 +264,12 @@ RUN.start({ seed: "ABC123" });   // 不给种子就自动生成一个
 
 ### 2. 随机遭遇（代币制）
 
-每场战斗 4 枚代币：**杂兵 1 枚，精英 2 枚**。所以一场是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。空投蜂群、下水道清扫机三只一组，整组记 1 枚。
+普通战代币基线由 `encounterTokenBudget(partySize, level)` 决定：**默认 4 枚**；**4 人队且遭遇敌人等级 ≥ 10 时为 5 枚**。杂兵 1 枚、精英 2 枚，所以 4 枚时是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵，5 枚时多 1 杂兵或半个精英位。空投蜂群、下水道清扫机三只一组，整组记 1 枚。
 
-- **5%** 概率这场变成 5 枚代币
+- **5%** 概率在基线上再 +1（基线 4 → 5；4 人 L10+ 的基线 5 → 6）。上场单位仍受下方上限约束，不会因为多枚代币摆出超过 12 只成组杂兵。
 - **5%** 概率无视阵营限制，变成混战
 - **上场单位上限** `ENCOUNTER_UNIT_CAP = 12`（对齐 4 枚 × 每组 3 只）：抽的时候若再来一组会超过 12 只，就改抽装得下的杂兵 / 精英；能花完代币时尽量花完，实在装不下才停。带车退代币后的补抽也走同一上限（剩余名额还要减去车本身占的 1）。首领的固定随从不走这套。
+- 精英战 / 遭遇战 / 悬赏等写死 `tokens` 的不走人数基线；首领随从规则不变。
 
 敌人数据写在 `ENEMY_INFO`：阵营、出没区域、代币、成组数量。
 
@@ -368,6 +369,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 测试：`tests/effects.test.js` 每条效果一个用例。
 
 ## 规则改动记录
+
+- **4 人队且敌人等级 ≥ 10：普通战代币基线 5（其余仍 4）**（run.js · `encounterTokenBudget` / `ENCOUNTER_TOKENS_4P_L10`、`rollEncounter`；rogue.js 普通战传入 `partySize` / `level`；battle-commands.js / game.js 联机与战斗面板掷遭遇同样传入；测试 tests/token-budget-party.test.js）
+  - **以前**：普通战代币基线固定 `ENCOUNTER_TOKENS = 4`，与队伍人数、敌人等级无关；仅 5% 概率变成 5 枚。
+  - **现在**：`encounterTokenBudget(partySize, level)` —— **恰好 4 人**且**遭遇敌人等级 ≥ 10** 时基线 5，其它情况（3 人 / 2 人 / 1 人、或 4 人但等级 ≤ 9、人数未知）仍是 4。原有 5% 上滚仍是基线 +1：普通 4→5，4 人 L10+ 则 5→6；上场单位继续受 `ENCOUNTER_UNIT_CAP = 12` 约束（六枚全抽成组杂兵也最多 12 只）。依据模拟 PR #425（`docs/balance/token5-forecast-1027.md`）：normal 条件下 4 人队 10 级代币 4→5 胜率约 97%→89%（−8pp）、15 级 −2.5pp、20 级 −4.5pp，可接受；5 级 −11pp 偏紧，故只对 L10+ 开；3 人队掉点更多，维持 4 枚。
+  - **没改的**：精英战写死 5 枚、遭遇战 3 枚、悬赏 / 三方混战两边各 3 枚、首领本体与固定随从（`rollBossEncounter`）、混战 5%、车占代币与补抽、阵营 / 区域池、`ENCOUNTER_UNIT_CAP = 12` 本身。
+  - **测试**：tests/token-budget-party.test.js（新，在没改的代码上失败）：`encounterTokenBudget` 4p L10→5 / 4p L9→4 / 3p L20→4；`rollEncounter` 对应基线；5% 上滚 4→5 与 4p L10 的 5→6；6 枚受单位上限 12；联机 / 面板 / 单局路径传入 `partySize`；README 本章与规则改动记录置顶有本条。
+  - **依赖**：需要 PR #424（`ENCOUNTER_UNIT_CAP = 12`）先合或本分支叠在 `feat/encounter-unit-cap` 上。
 
 - **随机遭遇上场单位上限 12（`ENCOUNTER_UNIT_CAP`）**：五代币的成组杂兵不再摆出 15 只；带车补抽也受同一上限（run.js · `ENCOUNTER_UNIT_CAP`、`groupBounds`、`canSpendTokens`、`pickByTokens`；vehicle.js · `vehiclePayTokens`；测试 tests/encounter-unit-cap.test.js）
   - **以前**：按代币抽满即可。空投蜂群 / 下水道清扫机 `group: 3`，4 枚代币 = 12 只，5 枚（5% 概率）= 15 只，战场挤满。车占代币退掉精英后补抽时，`pickByTokens` 只按新抽的那几只算上限，不管场上已有的敌人和车，补出成组杂兵后敌人+车会超过 12。

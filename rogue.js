@@ -990,18 +990,20 @@ const Rogue = (function () {
         party: partyKits, encounter: enc, level: enemyLevel(run, run.task.diff + C.eliteLevelBonus, C.eliteOverCap), seed: key, before, retreat: true
       };
     }
+    const bonus = run.task.diff + (node.type === "elite" ? C.eliteLevelBonus : 0);
+    const over = node.type === "elite" ? C.eliteOverCap : 0;
+    const lvl = enemyLevel(run, bonus, over);
     const enc = withRng(key, () => {
-      const opt = { region: region(run) };
-      if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;
+      const opt = { region: region(run), partySize: run.party.length, level: lvl };
+      if (NODE[node.type].tokens) opt.tokens = NODE[node.type].tokens;   // 精英战写死 5 枚，不走人数基线
       if (run.task.weather) opt.weather = run.task.weather;   // 带天气的任务：每一场都是这种天气
       return rollEncounter(opt);
     });
     enc.features = withRng(key + ":field", () => rollBattlefield(run, false, enc.zoneMode));
-    const bonus = run.task.diff + (node.type === "elite" ? C.eliteLevelBonus : 0);
     return {
       kind: node.type,
       title: `${run.task.name} · 第 ${run.task.index + 1} 站${node.type === "elite" ? "（精英）" : ""}`,
-      party: partyKits, encounter: enc, level: enemyLevel(run, bonus, node.type === "elite" ? C.eliteOverCap : 0), seed: key, before, retreat: true
+      party: partyKits, encounter: enc, level: lvl, seed: key, before, retreat: true
     };
   }
 

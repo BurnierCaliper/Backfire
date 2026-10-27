@@ -5481,7 +5481,12 @@
     $("g-enc-close").onclick = () => $("g-enc-sheet").classList.remove("show");
     $("g-enc-roll").onclick = () => {
       if (typeof rollEncounter !== "function") { flashHint("遭遇系统未加载"); return; }
-      const spec = dispatch({ type: "battle.panel", action: "rollEncounter", region: $("g-enc-region").value, faction: $("g-enc-faction").value || null }).value;
+      const spec = dispatch({
+        type: "battle.panel", action: "rollEncounter",
+        region: $("g-enc-region").value, faction: $("g-enc-faction").value || null,
+        partySize: Number(state.partySize) || (typeof liveHeroCount === "function" ? liveHeroCount() : 0) || 0,
+        level: Number($("g-level") && $("g-level").value) || Number(G.level) || undefined
+      }).value;
       $("g-enc-preview").textContent = encSummary(spec);
       startEncounter(spec);
     };
