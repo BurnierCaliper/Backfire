@@ -97,7 +97,10 @@ function escortAct(notes) {
       }
     }
     if ((Number(u.atk) || 0) <= 0 || typeof dealTo !== "function") return;
-    const reach = foes.filter(e => !e.dead && (u.range === "any" || zoneDist(u.zone, e.zone, state.zoneMode) === 0));
+    // 还击打谁：射程内血最少的敌人。护送对象的操控者开着友伤（enemies.js · friendlyFirePick，#432；没分配给谁就是本机 / 房主那一个开关）时，
+    // 它以外的队友也在名单里，照样挑血最少的（躲开敌人还是只看敌人）
+    const pick = e => foes.includes(e) || (e.kit !== "ironwall" && !e.untargetable && !e.submerged && typeof friendlyFirePick === "function" && friendlyFirePick(u, e));
+    const reach = (state.units || []).filter(e => pick(e) && !e.dead && (u.range === "any" || zoneDist(u.zone, e.zone, state.zoneMode) === 0));
     if (!reach.length) return;
     const hpOf = (e) => (e.layers || []).reduce((s, l) => s + (Number(l.current) || 0), 0);
     const t = reach.sort((a, b) => hpOf(a) - hpOf(b))[0];

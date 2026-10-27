@@ -463,9 +463,11 @@ function useItemOn(actor, itemId, target, zone) {
     if (why) { notes.push(why); notes.unused = true; return notes; }   // 没用掉：不扣附赠动作（battle-commands.js）
     bagAdd(itemId, -1, notes);
     // 战-M3：道具造成的伤害 / 挂的状态也记使用者（击杀归属 #114），和手榴弹一致
-    const prevUser = state._itemUserId;
+    const prevUser = state._itemUserId, prevFF = ITEM_FF_BY;
     state._itemUserId = actor && actor.isPlayer ? actor.id : null;
-    try { useEffectItem(actor, spec.effect, target, zone, notes); } finally { state._itemUserId = prevUser; }
+    // 友伤（#432）：对敌人用的道具用在队友身上——照常结算，这一下落在我方身上的伤害、倒地不计分数（itemFriendlyFireNow）
+    ITEM_FF_BY = itemFriendlyFire(actor, itemId, target) ? actor.id : null;
+    try { useEffectItem(actor, spec.effect, target, zone, notes); } finally { state._itemUserId = prevUser; ITEM_FF_BY = prevFF; }
     return notes;
   }
   // 投掷类道具（手榴弹、酸液瓶、冲击炸弹）：危墙 / 关着的门倒塌 / 打开之前影响不到对面，扔过去没用，道具不用掉
@@ -537,12 +539,25 @@ function useItemOn(actor, itemId, target, zone) {
 function effectItemOf(itemId) { const spec = ITEM_CATALOG[itemId]; return spec && spec.effect ? spec.effect : null; }
 function itemZoneDist(a, b) { return typeof zoneDist === "function" ? zoneDist(Number(a), Number(b), state.zoneMode) : Math.abs(Number(a) - Number(b)); }
 function itemPresent(u) { return !!u && !u.dead && !u.hidden && !u.fused && !u._removed; }
-/** 能被道具瞄准的敌人：在场、看得见、选得中（下潜、不可选中的不行） */
+/** 能被道具瞄准的敌人：在场、看得见、选得中（下潜、不可选中的不行）。
+ *  用道具的人开着友伤（enemies.js · friendlyFireHit，按他的操控者的开关，#432）时，他以外的队友（含武器人、护送对象）也算 */
 function itemEnemyOk(actor, u) {
-  if (!itemPresent(u) || u.isPlayer || u.untargetable || u.submerged || u.kit === "ironwall") return false;
+  if (!itemPresent(u) || u.untargetable || u.submerged || u.kit === "ironwall") return false;
+  if (u.isPlayer) return typeof friendlyFireHit === "function" && friendlyFireHit(actor, u);
   if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return true;
   return !(typeof playerAllied === "function" && playerAllied(u));
 }
+/* 友伤道具（#432）：开着友伤的人把对敌人用的效果道具用在自己以外的队友身上。和友伤打队友一样照常结算、不计分数：
+ * 这一下结算里落在我方单位身上的伤害、倒地（冰锥弹的刺骨、中和凝胶引爆的状态……）都按友伤算（app.js · applyTypedDotIn /
+ * applyKnockdown 问 itemFriendlyFireNow），让队友血量变多的（超频针翻倍护盾）也不算治疗（battle-commands.js 不包 trackHealBy） */
+let ITEM_FF_BY = null;   // 正在结算的友伤道具是谁用的（useItemOn 里设，结算完还原）
+/** 这次用道具是不是友伤：对敌人用的效果道具，目标是使用者以外的队友，使用者开着友伤 */
+function itemFriendlyFire(actor, itemId, target) {
+  const it = effectItemOf(itemId);
+  return !!(it && it.target === "enemy" && target && target.isPlayer && typeof friendlyFireHit === "function" && friendlyFireHit(actor, target));
+}
+/** 正在结算友伤道具、u 是我方单位：这一下落在 u 身上的伤害、倒地按友伤算（不计分数） */
+function itemFriendlyFireNow(u) { return ITEM_FF_BY != null && !!u && !!u.isPlayer; }
 /** 用这件道具的问题（空 = 可以用）。规则层、游戏界面、联机 / 热座的校验共用 */
 function itemUseError(actor, itemId, target, zone) {
   const it = effectItemOf(itemId);
@@ -573,7 +588,8 @@ function itemTargetUnits(actor, itemId) {
   const list = (state.units || []).filter(itemPresent);
   if (!it) return list.filter(u => u.isPlayer);   // 旧道具（医疗包）：照旧任意友方
   if (it.target === "self") return [actor];
-  return list.filter(u => (it.target === "ally" ? u.isPlayer : !u.isPlayer) && !itemUseError(actor, itemId, u, null));
+  // 对敌人用的：开着友伤（#432）时自己以外的队友也列出来（itemEnemyOk）
+  return list.filter(u => (it.target === "ally" ? u.isPlayer : !u.isPlayer || itemEnemyOk(actor, u)) && !itemUseError(actor, itemId, u, null));
 }
 function itemTargetZones(actor, itemId) {
   const all = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => i + 1);

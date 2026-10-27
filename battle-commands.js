@@ -140,7 +140,9 @@
     if (cmd.type === "move") return doMove(a, cmd.dest);
     if (cmd.type === "standUp") return standUp(a);
     if (cmd.type === "useItem") {
-      const notes = typeof trackHealBy === "function"
+      // 开着友伤把对敌人用的道具用在队友身上（items.js · itemFriendlyFire，#432）：不计分数——超频针翻倍护盾这类让队友血量变多的也不算治疗
+      const ff = typeof itemFriendlyFire === "function" && itemFriendlyFire(a, cmd.item, unitById(cmd.target));
+      const notes = typeof trackHealBy === "function" && !ff
         ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
         : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
       (notes || []).forEach(s => appendLog(s));

@@ -1561,12 +1561,13 @@ function applyPassivePlusAtStart() {
   if (typeof passivePlus !== "function") return;
   const notes = [];
   const hero = (kit) => { const u = findKit(kit, state.units); return u && u.isPlayer && !u.dead && !u.hidden ? u : null; };
-  const foes = () => state.units.filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && (u.layers || []).some(l => l.current > 0));
+  // by 开着友伤（enemies.js · friendlyFirePick，#432；开战前在菜单里打开的）：自动挑的名单里也有 by 以外的队友
+  const foes = (by) => state.units.filter(u => (!u.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(by, u))) && !u.dead && !u.hidden && !u.fused && (u.layers || []).some(l => l.current > 0));
   const helu = hero("helu");
   if (helu && passivePlus(helu, 1)) {   // 频谱分析+：随机一个敌人的外层血量聚焦
-    const pool = foes();
+    const pool = foes(helu);
     const t = pool[Math.floor(Math.random() * pool.length)];
-    if (t) { notes.push("频谱分析+：开局自动聚焦。"); applyFocus(t, ((t.layers || []).find(l => l.current > 0) || {}).type, notes); }
+    if (t) { notes.push("频谱分析+：开局自动聚焦。"); applyFocus(t, ((t.layers || []).find(l => l.current > 0) || {}).type, notes, { by: helu }); }
   }
   if (helu && passivePlus(helu, 2)) {   // 环境监测+：随机一个区域扫描出配置物（不触发）
     const z = 1 + Math.floor(Math.random() * (Number(state.zoneMode) || 2));
@@ -2270,8 +2271,9 @@ function turnEnd() {
       } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
         // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
-        // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣
-        const foes = fieldUnits().filter(x => !x.isPlayer && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
+        // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣。
+        // 瑞比开着友伤（enemies.js · friendlyFirePick，#432）：她以外的队友也在名单里，挑法照旧（高能的优先，再挑血量最少的）
+        const foes = fieldUnits().filter(x => (!x.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(u, x))) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
           zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
           !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
           !(typeof playerAllied === "function" && playerAllied(x)));
@@ -2389,9 +2391,15 @@ function turnEnd() {
 
 /** 防卫自律炮台开一炮：自动攻击 atk 最高的目标（hitPlayers：打我方还是打敌方）。
  *  活着、看得见（不在躲藏）、没倒地（濒死还没起身）、没被危墙 / 关着的门挡住；不限距离，不能协助格挡。
- *  真的打出伤害才挂高能：伤害为 0、被屏障整个挡下都不挂 */
-function turretShot(p, hitPlayers, notes) {
-  const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && !!u.isPlayer === !!hitPlayers && u.kit !== "ironwall";
+ *  真的打出伤害才挂高能：伤害为 0、被屏障整个挡下都不挂。
+ *  我方的炮台（#432）：主人开着友伤（enemies.js · friendlyFirePick）时，主人以外的队友也在名单里，照样挑 atk 最高的。
+ *  主人：by（环境扫描 / 音爆 / 探测模式叫它开这一炮的人）；回合结束自己开炮时是改写它的人（p.hackedBy，hackTurret 记），
+ *  都没有（主持人摆的、单局遇到的我方炮台）就归没分配的那一个开关（本机那一个 / 热座、联机的房主，和护送对象一样） */
+function turretShot(p, hitPlayers, notes, by) {
+  // 我方炮台的主人（友伤开关看他的操控者）：没有主人的拿一个不在场上的我方替身去问，归没分配的那一个开关
+  const owner = hitPlayers ? null : by && by.isPlayer ? by : (p.hackedBy && unitById(p.hackedBy)) || { isPlayer: true, name: p.name };
+  const ff = (u) => !!owner && typeof friendlyFirePick === "function" && friendlyFirePick(owner, u);
+  const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && (!!u.isPlayer === !!hitPlayers || ff(u)) && u.kit !== "ironwall";
   const foes = state.units.filter(u => side(u) && !(u.statuses && u.statuses.hide) && !u.submerged && !(u.dying && !u.upOnShp) &&
     u.kit !== "ufo_body" &&   // 飞碟本体不能被通常手段攻击，锁它就是白打
     !lineBlocked(p.zone, u.zone));
@@ -2407,7 +2415,8 @@ function turretShot(p, hitPlayers, notes) {
     // 炮台这一炮是自己的一次攻击：屏障「已拦截本次行动」只看这一炮（不沿用上一次行动留下的记录）
     const wallBefore = state.actionWallHit;
     state.actionWallHit = {};
-    const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: { action: true, blockResolved: true, propShot: true } });
+    // 打到的是主人开着友伤挑进来的队友：这一炮算友伤（照常结算，不计分数）
+    const out = dealTo(fake, u, { atk: dmg, mult: 1, hits: 2, element: "energy", baseBreak: 0, flags: Object.assign({ action: true, blockResolved: true, propShot: true }, u.isPlayer && ff(u) ? { friendlyFire: true } : {}) });
     const walled = Object.keys(state.actionWallHit || {}).length > 0;
     state.actionWallHit = wallBefore;
     const dealt = walled ? 0 : Math.floor((out && out.res && out.res.total) || 0);
@@ -3462,6 +3471,8 @@ function applyTypedDot(unit, amount, element, notes, label, opts) {
 }
 function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   opts = opts || {};
+  // 友伤道具（items.js · itemFriendlyFireNow，#432）：对敌人用的道具用在队友身上，这一下落在我方身上的伤害按友伤算（不计分数）
+  if (!opts.friendlyFire && typeof itemFriendlyFireNow === "function" && itemFriendlyFireNow(unit)) opts = Object.assign({}, opts, { friendlyFire: true });
   if (ignoresAoe(unit)) {
     notes.push(`${unit.name} 是飞碟触灵本体，不受该范围/余波伤害。`);
     return;
@@ -4210,6 +4221,7 @@ function hackTurret(u, p) {
   const lines = [`${u.name} 尝试改写 ${p.name}：困难「${TURRET_HACK.prof}」检定（${["没有熟练", "一级熟练", "二级熟练", "三级熟练"][odds.level]}，成功率 ${Math.round(odds.chance * 100)}%）${rerolled ? "，失败后重掷" : ""}。`];
   if (ok) {
     p.faction = u.isPlayer ? "player" : "enemy";
+    p.hackedBy = u.isPlayer ? u.id : null;   // 改写它的人是我方炮台的主人：回合结束开炮时按他的友伤开关挑目标（turretShot，#432）
     p.name = propKindName(p.kind);
     lines.push(`成功：${p.name} 改写为${p.faction === "player" ? "我方" : "敌方"}阵营，回合结束时攻击对面。`);
   } else {
@@ -6403,7 +6415,8 @@ function ecmoProbeTrigger(a, notes) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      const t = scrapTargets(p, a).filter(x => !x.isPlayer)[0];   // 自动挑的只挑敌人（友伤开着也不会自动打队友，#428）
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
+      const t = scrapTargets(p, a)[0];
       if (!t) { notes.push(`探测模式触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -6943,7 +6956,8 @@ function clearStunOnDown(u) {
  * opt.shpLoss：起身中的人这次要扣的坚毅生命（攻击已由 applyResultToUnit 扣过，不传）；
  * opt.lethal：秒杀（高能自爆），起身中的人坚毅生命直接扣光；
  * opt.cause：写进记录的原因（「坠落」「高能自爆」…），不传按攻击的说法写。
- * opt.friendlyFire：被开着友伤的队友打倒（#428）——照常濒死 / 扣坚毅，只是不记进战场数据的倒地次数（不计分数）。
+ * opt.friendlyFire：被开着友伤的队友打倒（#428）——照常濒死 / 扣坚毅，只是不记进战场数据的倒地次数（不计分数）；
+ *   正在结算的友伤道具（items.js · itemFriendlyFireNow，#432）打倒的我方单位一样。
  * 返回 "dead" / "dying" / "shp"（起身中，扣了坚毅生命还站着）/ null（没有倒地）。
  * 以前高能自爆、坠入深渊各写一套：绕过力竭 3 即死，起身中的人被炸 / 摔回濒死、坚毅不扣还能再起身。 */
 function applyKnockdown(unit, notes, opt) {
@@ -6977,7 +6991,8 @@ function applyKnockdown(unit, notes, opt) {
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
     if (typeof featReviveCheck === "function" && featReviveCheck(unit, notes)) return null;
     unit.dying = true;
-    if (!opt.friendlyFire) noteKnockdown(unit);   // 战场数据：倒地次数（被队友友伤打倒的不算，#428）
+    // 战场数据：倒地次数（被队友友伤打倒的不算，#428；对敌人用的道具用在队友身上引起的倒地也不算，items.js · itemFriendlyFireNow，#432）
+    if (!opt.friendlyFire && !(typeof itemFriendlyFireNow === "function" && itemFriendlyFireNow(unit))) noteKnockdown(unit);
     clearStunOnDown(unit);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
@@ -9623,7 +9638,8 @@ function ecmoBoomTriggerProps(a, lines) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      const t = scrapTargets(p, a).filter(x => !x.isPlayer)[0];   // 自动挑的只挑敌人（友伤开着也不会自动打队友，#428）
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
+      const t = scrapTargets(p, a)[0];
       if (!t) { lines.push(`音爆触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -9672,7 +9688,7 @@ function heluScanAct(a, picks, lines) {
       lines.push(scrapShot(p, t, a));
     } else if (p.kind === "turret") {
       lines.push(`环境扫描：干扰 ${p.name} 的识别，让它立刻向 Helumica 的敌人开一炮。`);
-      turretShot(p, !a.isPlayer, lines);
+      turretShot(p, !a.isPlayer, lines, a);   // 这一炮算 a 叫的：a 开着友伤（#432）时 a 以外的队友也在名单里
     } else if (p.kind === "button" || p.kind === "lever") {
       toggleDevice(p, "环境扫描");
       lines.push(`环境扫描：远程触发 ${p.name}。`);
@@ -14459,8 +14475,9 @@ function runSkillInner(id, optRun) {
       const redRun = runOf("red"), blueRun = runOf("blue");
       const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
       for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
-        // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）
-        const foes = fieldUnits().filter(u => !u.isPlayer && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) && !u.submerged &&
+        // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）。
+        // 龙哥开着友伤（enemies.js · friendlyFirePick，#432）：他以外的队友也在里面一起随机
+        const foes = fieldUnits().filter(u => (!u.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(a, u))) && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) && !u.submerged &&
           zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
         const f = pickRandom(foes);
         if (!f) { if (k === 0) lines.push("洗牌：连续红弹，但附近没有打得到的敌人。"); break; }

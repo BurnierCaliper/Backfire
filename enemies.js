@@ -1678,6 +1678,13 @@ function attackFoe(a, b) {
   if (!a || !b || a === b || (a.id != null && a.id === b.id)) return false;
   return !!a.isPlayer !== !!b.isPlayer || friendlyFireHit(a, b);
 }
+/** 自动挑目标（#432，作者 10/27）：by 的自动攻击（瑞比的无人机、炮台、护送对象的还击、洗牌的红弹、音爆 / 探测模式触发的碎渣机炮……）
+ *  挑目标时，by 的操控者开着友伤就把 by 以外的队友（武器人、护送对象也算）也放进候选名单；挑法照原来的规则（最近、血最少、随机……），
+ *  只是名单变大了。u 是不是这样加进来的队友：by 以外、还在场上、没倒地（濒死没起身的打了也白打，和炮台 / 碎渣机炮挑我方时一样不挑）。
+ *  召唤物 / 替身本身不在场上的单位里；替身（creditTo）不挑操控它的人（friendlyFireHit）。射程、躲藏、隔墙这些照各处原来的条件另判 */
+function friendlyFirePick(by, u) {
+  return !!u && !!u.isPlayer && !u.dead && !u.hidden && !u.fused && !u._removed && !(u.dying && !u.upOnShp) && friendlyFireHit(by, u);
+}
 
 /* ===== 第三采矿场 ===== */
 /** 身上有高能状态（#52：蓄能攒的高能值不算） */
