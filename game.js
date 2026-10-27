@@ -55,6 +55,17 @@
   const systemCommand = (cmd, context) => hotseat() ? HotseatGame.system(cmd, context) : dispatch(cmd, context);
   /** 从 gen 那一刻起这场战斗被放弃了（abandonBattle）：半路的流程醒过来先看这个，是就直接退出，不再结算、不碰之后摆的新战场 */
   const abandoned = (gen) => gen !== G.battleGen;
+  /* 触屏（没有悬停：手机、平板，touchUI，#429）的说法：键盘才有的操作都有看得见的按钮，提示里不写按键（Tab、空格、Esc、右键……），换成点哪里。
+   *   pick / stunned  默认提示（defaultHint）：「Tab 切换角色，空格结束回合」换成点头像换人、点技能栏右下角的按钮结束（{0} = 按钮上的字）
+   *   giveUp          选目标时按钮条上的「放弃」（电脑上写「放弃（Esc）」）
+   *   tapCancel       触屏点了一下不用选目标的技能、正在预演时，按钮条上的「取消」（电脑上没有：鼠标移开预演就收起）
+   * 按键的小字（技能右下角的数字、唤出的「· Q」、开始 / 结束按钮的「空格」、问答框选项前的数字和 Esc）触屏上不画。电脑上的字一个不改 */
+  const TOUCH_TEXT = {
+    pick: "选择技能。点头像换人，点「{0}」结束。",
+    stunned: "失衡中，本回合无法行动。点头像换人。",
+    giveUp: "放弃",
+    tapCancel: "取消"
+  };
 
   function wait(ms) {
     if (G.instant) return Promise.resolve();
@@ -2470,30 +2481,33 @@
       if (b.isConnected) showSkillPv(sk);   // 技能栏重画过就不算了
     }, SKILL_PV_DELAY);
   }
-  /** 取消等着的预演；clear：画着的悬停预演也收起（回到默认说明） */
+  /** 取消等着的预演；clear：画着的悬停预演也收起（回到默认说明），触屏预演时的「取消」那一条也收起（#429） */
   function stopSkillPv(clear) {
     if (skHover.timer) { clearTimeout(skHover.timer); skHover.timer = 0; }
     if (clear && skHover.shown) clearPreview();
+    if (clear && !G.skillTap) { const bar = $("g-pick-bar"); if (bar && bar.dataset.tap) showPickBar(null); }
   }
   /** 触屏：不用选目标、也没有分步的技能第一下先预演（和悬停一样），再点同一个按钮才放出去。处理了（只预演）返回 true */
   function skillTapPv(sk, b) {
     const actor = skillPvActor();
     if (!actor || blockReason(actor, sk)) { G.skillTap = null; return false; }
     const key = skillPvStampNow() + "|" + actor.id + "|" + sk.id;
-    if (G.skillTap && G.skillTap.key === key) { G.skillTap = null; return false; }   // 第二下：放出去
+    if (G.skillTap && G.skillTap.key === key) { G.skillTap = null; stopSkillPv(true); return false; }   // 第二下：放出去（「取消」那一条收起）
     let info = null;
     try { info = skillPvInfo(actor, sk); } catch (e) { info = null; }
     if (!info || info.kind !== "self") { G.skillTap = null; return false; }   // 要选目标 / 分步：照旧直接进入选择
     paintSkillPv(unitById(actor.id) || actor, sk, info);
     G.skillTap = { key, skillId: sk.id };
     b.classList.add("armed");
-    setHint(`<b>${esc(sk.name)}</b>：预演在上面。再点一下放出去，点别的地方取消。`);
+    setHint(`<b>${esc(sk.name)}</b>：预演在上面。再点一下放出去，点「${esc(TOUCH_TEXT.tapCancel)}」或别的地方收起。`);
+    // 看得见的「取消」（#429：和电脑上 Esc / 鼠标移开一样，收起预演、什么都没扣）
+    showPickBar([{ label: TOUCH_TEXT.tapCancel, tapCancel: true }], false, true);
     return true;
   }
   function cancelSkillTap() {
     if (!G.skillTap) return;
     G.skillTap = null;
-    document.querySelectorAll("#g-skills .sk.armed").forEach(x => { if (!(G.arm && G.arm.skillId === x.dataset.skill)) x.classList.remove("armed"); });
+    document.querySelectorAll("#g-skills .sk.armed, #g-summon.armed").forEach(x => { if (!(G.arm && G.arm.skillId === x.dataset.skill)) x.classList.remove("armed"); });
     stopSkillPv(true);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
   }
@@ -2739,11 +2753,11 @@
     try { return await pickUnit(cands, labelFn, buttons); }
     finally { choiceResolve = null; G.arm = null; unmarkTargets(); clearPreview(); setHint(defaultHint()); refreshHud(); }
   }
-  /** 选目标时的额外按钮条（在提示栏下面） */
-  function showPickBar(buttons, giveUp) {
+  /** 选目标时的额外按钮条（在提示栏下面）；tap = 触屏预演时的「取消」那一条（#429：cancelSkillTap 收起的只是它，选目标的那一条不动） */
+  function showPickBar(buttons, giveUp, tap) {
     let bar = $("g-pick-bar");
-    if (giveUp) buttons = (buttons || []).concat([{ label: "放弃（Esc）", giveUp: true }]);
-    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; } return; }
+    if (giveUp) buttons = (buttons || []).concat([{ label: touchUI() ? TOUCH_TEXT.giveUp : "放弃（Esc）", giveUp: true }]);   // 触屏没有 Esc（#429）
+    if (!buttons || !buttons.length) { if (bar) { bar.classList.remove("show"); bar.innerHTML = ""; delete bar.dataset.tap; } return; }
     if (!bar) {
       bar = el("div", "g-pick-bar");
       bar.id = "g-pick-bar";
@@ -2751,10 +2765,12 @@
       if (row && row.parentNode) row.parentNode.insertBefore(bar, row); else document.body.appendChild(bar);
     }
     bar.innerHTML = "";
+    if (tap) bar.dataset.tap = "1"; else delete bar.dataset.tap;
     buttons.forEach(b => {
       const x = el("button", "g-btn", `${esc(b.label)}${b.sub ? `<small>${esc(b.sub)}</small>` : ""}`);
-      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改
+      // 放弃：和 Esc / 右键一样，还没打出去，什么都没扣没改；触屏预演时的「取消」：收起预演（和点别的地方一样）
       if (b.giveUp) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); disarm(); }; }
+      else if (b.tapCancel) { x.classList.add("danger"); x.onclick = (e) => { e.stopPropagation(); cancelSkillTap(); }; }
       else x.onclick = (e) => { e.stopPropagation(); if (G.arm && G.arm.mode === "unit") G.arm.resolve({ button: b.value }); };
       bar.appendChild(x);
     });
@@ -4012,7 +4028,7 @@
         const cost = [];
         if (summonSk.cost.ap) cost.push(`行动 ${summonSk.cost.ap}`);
         if (summonSk.cost.bonus) cost.push(`附赠 ${summonSk.cost.bonus}`);
-        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")} · Q</small>`);
+        hudInner(sb, `${summonIcon(back)}<span class="sm-nm">${esc(summonSk.name)}</span><small>${esc(cost.join(" · ") || "不耗行动")}${touchUI() ? "" : " · Q"}</small>`);   // 触屏没有 Q 键（#429）
         hudAttr(sb, "aria-label", `${summonSk.name}${why ? "：" + why : ""}`);
         wireSkill(sb, summonSk, why);
       }
@@ -4064,15 +4080,15 @@
       hudAttr(gauge, "aria-label", actor ? actor.name + "的角色仪表" : "角色仪表");
     }
 
-    // 开始战斗 / 结束回合：字没变就不碰（#317）
-    const et = $("g-endturn");
+    // 开始战斗 / 结束回合：字没变就不碰（#317）；触屏没有空格键，不写「空格」（#429）
+    const et = $("g-endturn"), spaceKey = touchUI() ? "" : "<small>空格</small>";
     let etText;
     if (!state.combatStarted) {
       et.disabled = G.depth > 0 || G.ended;
-      etText = "开始战斗<small>空格</small>";
+      etText = "开始战斗" + spaceKey;
     } else {
       et.disabled = G.depth > 0 || G.ended || state.combatPhase !== "player";
-      etText = "结束回合<small>空格</small>";
+      etText = "结束回合" + spaceKey;
     }
     if ($("g-start")) {
       $("g-start").disabled = !!state.combatStarted || G.ended;
@@ -4081,7 +4097,7 @@
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
-      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动<small>空格</small>"; }
+      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动" + spaceKey; }
     }
     hudInner(et, etText);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
@@ -4114,6 +4130,8 @@
     if (!state.combatStarted) return "摆好队伍和敌人后，点「开始战斗」。回合开始效果会在此时结算。";
     if (state.combatPhase !== "player") return "敌人行动中。点击战场可以跳过演出。";
     if (!a) return "选择一名角色。";
+    // 触屏（#429）：没有 Tab、空格，写点哪里（按钮上的字照 refreshHud：热座 / 联机里结束的是这一个单位的行动）
+    if (touchUI()) return `<b>${esc(a.name)}</b>　${esc(a.stunned ? TOUCH_TEXT.stunned : TOUCH_TEXT.pick.replace("{0}", window.HotseatGame && HotseatGame.isRequested() && hotseat() ? "结束单位行动" : "结束回合"))}`;
     if (a.stunned) return `<b>${esc(a.name)}</b> 失衡中，本回合无法行动。Tab 切换角色。`;
     return `<b>${esc(a.name)}</b>　选择技能。Tab 切换角色，空格结束回合。`;
   }
@@ -5384,10 +5402,10 @@
     document.addEventListener("contextmenu", (e) => {
       if (G.arm) { e.preventDefault(); disarm(); }
     });
-    // 触屏：不用选目标的技能点了一下正在预演，点别的地方就取消（再点同一个技能按钮才放出去）
+    // 触屏：不用选目标的技能点了一下正在预演，点别的地方就取消（再点同一个技能按钮才放出去；唤出武器人的大按钮也算，#429：以前第二下被这里当成点了别处，永远放不出去）
     document.addEventListener("click", (e) => {
       if (!G.skillTap) return;
-      const b = e.target && e.target.closest ? e.target.closest("#g-skills .sk") : null;
+      const b = e.target && e.target.closest ? e.target.closest("#g-skills .sk, #g-summon") : null;
       if (b && b.dataset.skill === G.skillTap.skillId) return;
       cancelSkillTap();
     }, true);

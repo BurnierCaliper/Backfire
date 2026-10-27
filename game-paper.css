@@ -139,6 +139,7 @@ body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn {
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn:hover { background: color-mix(in srgb, var(--olp-card) 80%, var(--olp-ring)); }
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn small { color: var(--olp-muted); }
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn.danger { color: var(--olp-stamp); border-color: var(--olp-stamp); }
+@media (pointer: coarse) { body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn { min-height: 40px; } }   /* 触屏：手指点的按钮至少 40 高（#429） */
 
 /* ---------- 天气换色不串（第 3 步）----------
  * 旧皮肤按 #g-app[data-weather] 给顶栏、技能栏、记录栏、预演框和里面的按钮 / 字换的底色、渐变、描边、呼吸发光、沙雾那一层（game.css、weather-fx.css），

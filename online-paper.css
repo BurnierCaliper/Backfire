@@ -470,6 +470,38 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
   body.ol-paper .olp-top > .olp-title { flex-grow: 1; }
   body.ol-paper .olp-top > .olp-right { flex-shrink: 0; }
 }
+/* ---------- 触屏（#429）：没有键盘、用手指点 ----------
+ * 没有悬停（和 game.js · touchUI 同一条）：「菜单」上不写「Esc」。
+ * 手指点（pointer: coarse）：点按目标至少 40 × 40——镜头、「工具 ▾」「菜单」、吊牌上的 ⇅ 和「延后 / 换位」、「技能 ▲」「队伍 ▶」、队伍的头像、
+ * 角色资料 / 武器 / 背包、技能、选目标的按钮条、抽屉的标签；胶带跟着高一点（按钮 40 高），吊牌、队伍、抽屉往下挪同样多。
+ * 行动顺序吊牌放不下就横着滑（paper-ui.js · revealTag 把轮到的 / 点开 ⇅ 的那一张滑进来），名字至少留两个字（以前竖屏上挤成「瑞.」「结.」）。
+ * 电脑（鼠标）上一条都套不上 */
+@media (hover: none) {
+  body.ol-paper .olp-menu-b kbd { display: none; }
+}
+@media (pointer: coarse) {
+  body.ol-paper { --olp-bar: 52px; --olp-under: 112px; }
+  body.ol-paper :is(.olp-cam-b, .olp-cam-cyc, .olp-tools-b, .olp-menu-b) { min-width: 40px; min-height: 40px; }
+  body.ol-paper .olp-tags { justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  body.ol-paper .olp-tags::-webkit-scrollbar { display: none; }
+  body.ol-paper .olp-tag { flex: none; }
+  body.ol-paper .olp-tag-card { height: 44px; max-width: 176px; }
+  body.ol-paper :is(.olp-tag-nm, .olp-tag-nm b) { min-width: 2em; }   /* 名字至少两个字（吊牌上 15px 的字）：更长的照旧省略成「…」 */
+  body.ol-paper .olp-swap { flex: none; display: grid; place-items: center; width: 40px; height: 40px; margin-right: -6px; padding: 0; font-size: 18px; }
+  body.ol-paper .olp-move { min-height: 40px; padding: 4px 12px; font-size: 13px; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell .hd2d-toggle, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .hd2d-toggle { min-width: 40px; min-height: 40px; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party > .party > .pm, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > .pm { min-height: 40px; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm { min-width: 40px; justify-content: center; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party { padding-bottom: 2px; }   /* 头像按钮高了：下面少留一点，一列还是只有头像那么长 */
+  body.online-player.ol-paper .olp-party-tools .ol-button, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party > .party > .pc-sheet { min-height: 40px; }
+  body.ol-paper .g-hud.hd2d-shell .skills .sk, body.ol-paper .g-hud.hd2d-shell .skills .sk[data-olp-tex] { min-height: 40px; }
+  body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hint button { min-height: 40px; }   /* 联机玩家选目标时的「取消」、分步的选项（单机的按钮条在 game-paper.css） */
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed) > .gp-drawer-tab { top: -38px; height: 40px; }
+}
+@media (pointer: coarse) and (max-width: 760px) {
+  body.ol-paper { --olp-bar: 48px; --olp-under: 106px; }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed) > .gp-drawer-tab { top: 6px; height: auto; min-height: 40px; }   /* 拉开盖满屏幕时的「收起 ▸」 */
+}
 @keyframes olp-sheet-up { from { transform: translateY(40%); opacity: .4; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   body.ol-paper .olp-tools, body.ol-paper .ol-side, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party,

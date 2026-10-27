@@ -20,6 +20,7 @@
  *   页面：
  *     readMoves(root) / pressMove(root, index, n)   热座栏里每一格现在的按钮 / 点原来那一个
  *     readCam(root) / pressCam(root, i)             新画面的镜头按钮（远 / 中 / 近）现在哪个亮着 / 点第 i 个
+ *     revealTag(host)                               吊牌放不下横着滑时（触屏，#429）：重画完把点开 ⇅ 的 / 轮到的那一张滑进来，不然回到原来滑到的位置
  *     coverRects(doc, selectors) / make(…).cover(doc)   浮在战场上、3D 白卡要让开的面板这一刻的矩形（#339；交给 hd2d-field.js · cover）
  *     dockHeight(hud)                               技能栏这一刻多高（--olp-dock-h）；选中技能以后先收着的这一段照旧用收起之前的（#362） */
 (function (root, factory) {
@@ -638,6 +639,27 @@
     b.click();
     return true;
   }
+  /**
+   * 行动顺序吊牌放不下、横着滑的时候（触屏，#429：不再把名字挤成一个字）：吊牌每次整条重画（滑的位置会回到最左），各家重画完叫一次——
+   * 点开了 ⇅ 的那一张、不然是轮到的那一张（.olp-tag.on）换了，就把它滑到中间；没换就滑回重画之前的位置（手指滑过去看别的，不被重画打断）。
+   * host = 放吊牌的那一块（.olp-tags-host）。放得下（没有横着滑）的不动。返回这一下有没有滑
+   */
+  function revealTag(host) {
+    const strip = host && typeof host.querySelector === "function" ? host.querySelector(".olp-tags") : null;
+    if (!strip) return false;
+    const memo = host.__olpTags || null, open = strip.querySelector('[data-olp-swap][aria-expanded="true"]');
+    const want = (open && open.closest(".olp-tag")) || strip.querySelector(".olp-tag.on");
+    const key = want ? (open ? "open:" : "on:") + want.getAttribute("data-olp-slot") : "";
+    let moved = false;
+    if (strip.scrollWidth > strip.clientWidth + 1) {
+      if (want && (!memo || memo.key !== key)) { strip.scrollLeft = Math.max(0, want.offsetLeft + want.offsetWidth / 2 - strip.clientWidth / 2); moved = true; }
+      else if (memo && memo.strip !== strip) { strip.scrollLeft = memo.left; moved = true; }
+    }
+    const next = { key, strip, left: strip.scrollLeft };
+    if (!memo || memo.strip !== strip) strip.addEventListener("scroll", () => { if (host.__olpTags && host.__olpTags.strip === strip) host.__olpTags.left = strip.scrollLeft; }, { passive: true });
+    host.__olpTags = next;
+    return moved;
+  }
 
   /* ---------- 3D 白卡让开浮在战场上的面板（#339 第 4 步）---------- */
   /** 这块是不是选中技能以后先收着的技能栏（hd2d-shell.js · fold / held，#362） */
@@ -794,6 +816,6 @@
   }
 
   const SHARED = { dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, tileSpec, fits, tornClip, texture, grit, flush, pending, undress, toolsHtml,
-    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, coverRects, dockHeight };
+    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, revealTag, coverRects, dockHeight };
   return Object.assign({ BASE, make, dress: dressWith, readOpen, writeOpen }, SHARED);
 });

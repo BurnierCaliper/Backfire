@@ -292,9 +292,12 @@ async function launch() {
   const exe = chromePath();
   if (!exe || typeof WebSocket !== "function") return null;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backfire-cdp-"));
-  // --no-sandbox：和 Playwright 默认一样（新版 Ubuntu 不让普通用户开沙箱）；只打开本地文件
+  // --no-sandbox：和 Playwright 默认一样（新版 Ubuntu 不让普通用户开沙箱）；只打开本地文件。
+  // --blink-settings：和 Playwright 的无界面 Chromium 一样当成有鼠标（hover: hover、pointer: fine）——不然没有鼠标的机器上电脑那一份也算「没有悬停」，
+  // 游戏按触屏的说法画（#429）；newContext 给了 hasTouch 的照旧是手指（setTouchEmulationEnabled 换成 coarse / none）
   const proc = spawn(exe, ["--headless=new", "--no-sandbox", "--disable-gpu", "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-    "--disable-background-networking", "--allow-file-access-from-files", "--remote-debugging-port=0", "--user-data-dir=" + dir, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+    "--disable-background-networking", "--allow-file-access-from-files", "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+    "--remote-debugging-port=0", "--user-data-dir=" + dir, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   const url = await new Promise((resolve, reject) => {
     let buf = "";
     const timer = setTimeout(() => reject(new Error("Chrome 15 秒内没有启动")), 15000);

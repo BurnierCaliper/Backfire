@@ -940,6 +940,7 @@
         if (checkReq) checkReq.sync();
       }
       html(q(".olp-tags-host"), OP.tagsHtml(paperSlots(data, moves), { open: swapOpen, moving }), "paperTags");
+      if (OP.revealTag) OP.revealTag(q(".olp-tags-host"));   // 触屏上吊牌放不下横着滑（#429）：轮到的 / 点开 ⇅ 的那一张滑进来
       const hn = document.getElementById("hs-notice"), note = hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = q(".olp-note");
       noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note;
       watchPaper(true);

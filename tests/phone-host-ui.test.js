@@ -285,3 +285,173 @@ test("#429 电脑上照旧：胶带上还是远 / 中 / 近三个按钮（收成
   await menuReachable(page, "电脑");
   assert.deepEqual(o.errors, []);
 });
+
+/* ---------- 第 2 步：触屏上键盘才有的操作都有看得见的按钮，提示不写按键 ---------- */
+/** 技能栏展开（手机上没记过时默认收着）：点「技能 ▲」 */
+async function openDock(page) {
+  if (await page.evaluate(() => document.querySelector("#g-app > .g-hud").classList.contains("dock-closed"))) await page.tap("#g-app > .g-hud .hd2d-dock-toggle");
+  await page.waitForFunction(() => !document.querySelector("#g-app > .g-hud").classList.contains("dock-closed") && !!document.querySelector("#g-skills .sk"));
+  await settle(page);
+}
+/** 这一刻看得见的元素（有大小、没被藏起来） */
+const shownText = (page, sel) => page.evaluate(sel => [...document.querySelectorAll(sel)].filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden").map(el => el.innerText.replace(/\s+/g, " ").trim()), sel);
+const KEYS = /Tab|空格|Esc|右键|数字键|（Q）|· Q/;
+
+test("#429 触屏（412×915，只用点按）：提示、按钮上不写按键（Tab、空格、Esc、数字键、Q）——默认提示写点头像换人、点「结束单位行动」结束", { timeout: 120000 }, async t => {
+  const o = await hostPage(t); if (!o) return; const { page } = o;
+  await toActing(page);
+  await openDock(page);
+  const look = await page.evaluate(() => {
+    const shown = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).display !== "none";
+    return { hint: document.getElementById("g-hint").innerText, end: document.getElementById("g-endturn").innerText.replace(/\s+/g, " "),
+      keys: [...document.querySelectorAll("#g-skills .sk .key")].filter(shown).map(k => k.textContent), summon: (document.querySelector("#g-summon:not([hidden]) small") || {}).textContent || "",
+      menuKbd: shown(document.querySelector("#g-paper .olp-menu-b kbd")) };
+  });
+  assert.doesNotMatch(look.hint, KEYS, "默认提示：" + look.hint);
+  assert.match(look.hint, /点头像换人.*点「结束单位行动」结束/, "写点哪里：" + look.hint);
+  assert.doesNotMatch(look.end, /空格/, "开始 / 结束按钮：" + look.end);
+  assert.deepEqual(look.keys, [], "技能按钮上不画数字键");
+  assert.ok(look.summon && !/Q/.test(look.summon), "唤出的小字不写 Q：" + look.summon);
+  assert.equal(look.menuKbd, false, "「菜单」不写 Esc");
+  // 暂停页面的「继续」也不写 Esc（「继续」就是关菜单的按钮）
+  await page.tap(MENU);
+  await page.waitForSelector("#pm-overlay", { state: "visible" });
+  assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector("#pm-overlay .pm-resume kbd")).display), "none");
+  await page.tap("#pm-overlay [data-pause-resume]");
+  await page.waitForSelector("#pm-overlay", { state: "hidden" });
+  assert.deepEqual(o.errors, []);
+});
+
+test("#429 触屏（只用点按）：选目标时按钮条上有「放弃」（不写 Esc），点了取消技能；点了不用选目标的技能先预演时有「取消」，点了收起；唤出武器人点两下放得出去（以前第二下被当成点了别处，永远放不出去）；「结束单位行动」点了就结束；问答框（使用道具）的选项不带数字、Esc，点「取消」关掉", { timeout: 120000 }, async t => {
+  const o = await hostPage(t); if (!o) return; const { page } = o;
+  await toActing(page);
+  await openDock(page);
+  // 要选目标的技能（普通攻击）：按钮条上的「放弃」
+  await page.tap('#g-skills .sk[data-skill="ruby_aa"]');
+  await page.waitForFunction(() => GAME.arm && GAME.arm.mode === "unit");
+  await page.waitForSelector("#g-pick-bar.show .g-btn.danger", { state: "visible" });
+  assert.deepEqual(await shownText(page, "#g-pick-bar .g-btn"), ["放弃"]);
+  assert.doesNotMatch(await page.evaluate(() => document.getElementById("g-hint").innerText), KEYS, "选目标时的提示");
+  await page.tap("#g-pick-bar .g-btn.danger");
+  await page.waitForFunction(() => !GAME.arm);
+  // 唤出武器人（不用选目标）：第一下预演，按钮条上的「取消」收起
+  await page.waitForFunction(() => !document.querySelector("#g-app > .g-hud").classList.contains("dock-closed"));
+  await page.tap("#g-summon");
+  await page.waitForFunction(() => !!GAME.skillTap);
+  assert.deepEqual(await shownText(page, "#g-pick-bar .g-btn"), ["取消"]);
+  await page.tap("#g-pick-bar .g-btn");
+  await page.waitForFunction(() => !GAME.skillTap && !document.querySelector("#g-pick-bar.show"));
+  // 再来：点两下放出去
+  const minte = () => page.evaluate(() => state.units.filter(u => u.weaponOf && !u.hidden && !u.fused).length);
+  const before = await minte();
+  await page.tap("#g-summon");
+  await page.waitForFunction(() => !!GAME.skillTap);
+  await page.tap("#g-summon");
+  await page.waitForFunction(n => GAME.depth === 0 && !GAME.skillTap && state.units.filter(u => u.weaponOf && !u.hidden && !u.fused).length > n, before, { timeout: 15000 });
+  assert.equal(await page.evaluate(() => !!document.querySelector("#g-pick-bar.show")), false, "「取消」那一条收起了");
+  // 问答框：背包里放一个医疗包，点「使用道具」
+  await page.evaluate(() => { bagAdd("medkit", 1); GAME.refresh(); });
+  await page.waitForFunction(() => GAME.depth === 0 && !!document.querySelector('#g-skills .sk[data-skill="__item"]:not([disabled])'));
+  await page.tap('#g-skills .sk[data-skill="__item"]');
+  await page.waitForSelector("#g-choice.show", { state: "visible" });
+  const choice = await page.evaluate(() => ({ keys: [...document.querySelectorAll("#g-choice .opts button .key")].map(k => getComputedStyle(k).display), btns: [...document.querySelectorAll("#g-choice .opts button")].map(b => b.innerText.replace(/\s+/g, " ").trim()) }));
+  assert.ok(choice.keys.length >= 2 && choice.keys.every(d => d === "none"), "选项前的数字、Esc 不画：" + JSON.stringify(choice));
+  assert.ok(choice.btns.every(b => !KEYS.test(b) && !/^\d/.test(b)), "选项上没有按键：" + JSON.stringify(choice.btns));
+  await page.tap("#g-choice .opts button:last-child");
+  await page.waitForSelector("#g-choice.show", { state: "detached" });
+  // 「结束单位行动」：点了就结束这个人的行动（以前只有空格的说法）
+  const cur = await page.evaluate(() => HotseatGame.getView().currentUnitId);
+  await page.tap("#g-endturn");
+  await page.waitForFunction(id => GAME.depth === 0 && HotseatGame.getView().currentUnitId !== id, cur, { timeout: 15000 });
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- 第 3 步：触屏时点按目标至少 40×40；吊牌上的名字至少两个字 ---------- */
+/** 这一刻看得见的那几个按钮的大小：[[说明, 宽, 高]] */
+const boxes = (page, sel) => page.evaluate(sel => [...document.querySelectorAll(sel)].filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden")
+  .map(el => { const r = el.getBoundingClientRect(); return [(el.getAttribute("aria-label") || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 12), Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10]; }), sel);
+const tooSmall = list => list.filter(([, w, h]) => w < 39.5 || h < 39.5);
+
+test("#429 触屏 412×915（只用点按）：点按目标都至少 40×40——镜头、「工具 ▾」「菜单」、吊牌上的 ⇅ 和点开的「延后 / 换位」、「技能 ▲」「队伍 ▶」、左边队伍的头像（收起 / 展开）、角色资料 / 武器工坊、技能、唤出、结束、选目标的按钮条", { timeout: 120000 }, async t => {
+  const o = await hostPage(t); if (!o) return; const { page } = o;
+  await toActing(page);
+  const groups = {
+    胶带: "#g-paper .olp-top :is(.olp-cam-cyc, [data-olp=tools], [data-pause-open])", "⇅": "#g-paper .olp-swap",
+    收起按钮: "#g-app > .g-hud .hd2d-toggle", 队伍头像: "#g-app > .g-hud .hd2d-party .party > .pm"
+  };
+  for (const [k, sel] of Object.entries(groups)) {
+    const list = await boxes(page, sel);
+    assert.ok(list.length > 0, k + "：看得见");
+    assert.deepEqual(tooSmall(list), [], k + " 至少 40×40：" + JSON.stringify(list));
+  }
+  assert.equal(await page.evaluate(() => document.querySelector("#g-app > .g-hud .hd2d-party").classList.contains("collapsed")), true, "手机上队伍默认收着（只剩头像一列）");
+  // ⇅ 点开：「延后 / 换位」
+  await page.tap("#g-paper .olp-tag.on [data-olp-swap]");
+  await page.waitForSelector("#g-paper .olp-moves .olp-move", { state: "visible" });
+  assert.deepEqual(tooSmall(await boxes(page, "#g-paper .olp-move")), [], "「延后 / 换位」至少 40 高、40 宽");
+  await page.tap("#g-paper .olp-tag.on [data-olp-swap]");
+  await page.waitForSelector("#g-paper .olp-moves", { state: "detached" });
+  // 展开队伍：每一行、角色资料 / 武器工坊
+  await page.tap("#g-app > .g-hud .hd2d-party-toggle");
+  await page.waitForFunction(() => !document.querySelector("#g-app > .g-hud .hd2d-party").classList.contains("collapsed"));
+  await settle(page);
+  assert.deepEqual(tooSmall(await boxes(page, "#g-app > .g-hud .hd2d-party .party > :is(.pm, .pc-sheet)")), [], "展开的队伍");
+  await page.tap("#g-app > .g-hud .hd2d-party-toggle");
+  await page.waitForFunction(() => document.querySelector("#g-app > .g-hud .hd2d-party").classList.contains("collapsed"));
+  // 技能栏：技能、唤出、结束；选目标的按钮条
+  await openDock(page);
+  assert.deepEqual(tooSmall(await boxes(page, "#g-app > .g-hud :is(.skills .sk, .summonbtn, .endturn)")), [], "技能栏");
+  await page.tap('#g-skills .sk[data-skill="ruby_aa"]');
+  await page.waitForSelector("#g-pick-bar.show .g-btn", { state: "visible" });
+  assert.deepEqual(tooSmall(await boxes(page, "#g-pick-bar .g-btn")), [], "选目标的按钮条");
+  await page.tap("#g-pick-bar .g-btn.danger");
+  await page.waitForFunction(() => !GAME.arm);
+  await shot(page, "429-phone-targets");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#429 触屏 412×915：行动顺序吊牌上的名字至少留两个字（以前挤成「瑞.」「结.」）；放不下就横着滑，轮到的那一张在屏幕里，点开 ⇅ 的那一张滑进来", { timeout: 120000 }, async t => {
+  const o = await hostPage(t); if (!o) return; const { page } = o;
+  await toActing(page);
+  const names = () => page.evaluate(() => [...document.querySelectorAll("#g-paper .olp-tag-nm b")].map(b => {
+    const fs = parseFloat(getComputedStyle(b).fontSize);
+    return { name: b.textContent, w: b.clientWidth, two: b.clientWidth >= 2 * fs - 1, full: b.scrollWidth <= b.clientWidth + 0.5 };
+  }));
+  const list = await names();
+  assert.ok(list.length >= 4, "四个人：" + JSON.stringify(list));
+  assert.deepEqual(list.filter(n => !n.two), [], "每个名字至少两个字宽：" + JSON.stringify(list));
+  assert.deepEqual(list.filter(n => [...n.name].length <= 2 && !n.full), [], "两个字以内的名字完整：" + JSON.stringify(list));
+  // 放不下：横着滑；轮到的那一张在屏幕里
+  const strip = await page.evaluate(() => { const s = document.querySelector("#g-paper .olp-tags"), on = s.querySelector(".olp-tag.on").getBoundingClientRect(); return { scroll: s.scrollWidth > s.clientWidth, overflowX: getComputedStyle(s).overflowX, onIn: on.left >= 0 && on.right <= innerWidth }; });
+  assert.deepEqual(strip, { scroll: true, overflowX: "auto", onIn: true }, "横着滑、轮到的在屏幕里");
+  // 最后一张（在屏幕外）：点它的 ⇅（滑进来再点），「延后 / 换位」在屏幕里
+  await page.tap("#g-paper .olp-tag:last-child [data-olp-swap]");
+  await page.waitForSelector("#g-paper .olp-tag:last-child .olp-move", { state: "visible" });
+  await settle(page);
+  const last = await page.evaluate(() => { const r = document.querySelector("#g-paper .olp-tag:last-child .olp-moves").getBoundingClientRect(); return { left: r.left, right: r.right, vw: innerWidth }; });
+  assert.ok(last.left >= 0 && last.right <= last.vw, "点开的那一张在屏幕里：" + JSON.stringify(last));
+  await shot(page, "429-phone-tags");
+  assert.deepEqual(o.errors, []);
+});
+
+test("#429 电脑上照旧（1440×900、鼠标）：提示写「Tab 切换角色，空格结束回合」、按钮上有「空格」「· Q」、技能有数字键、选目标时是「放弃（Esc）」；按钮大小、胶带高度、吊牌不横着滑都和以前一样", { timeout: 120000 }, async t => {
+  const o = await hostPage(t, DESK); if (!o) return; const { page } = o;
+  await toActing(page);
+  const d = await page.evaluate(() => {
+    const shown = el => !!el && el.getClientRects().length > 0 && getComputedStyle(el).display !== "none", r = sel => { const b = document.querySelector(sel).getBoundingClientRect(); return [Math.round(b.width), Math.round(b.height)]; };
+    return { hint: document.getElementById("g-hint").innerText, end: document.getElementById("g-endturn").innerText.replace(/\s+/g, " "),
+      keys: [...document.querySelectorAll("#g-skills .sk .key")].filter(shown).length, summon: (document.querySelector("#g-summon small") || {}).textContent || "",
+      bar: getComputedStyle(document.body).getPropertyValue("--olp-bar").trim(), cam: r("#g-paper .olp-cam-b"), dockToggle: r("#g-app > .g-hud .hd2d-dock-toggle")[1],
+      swap: r("#g-paper .olp-swap")[1], tags: getComputedStyle(document.querySelector("#g-paper .olp-tags")).overflowX };
+  });
+  assert.match(d.hint, /Tab 切换角色，空格结束回合/);
+  assert.match(d.end, /空格/);
+  assert.ok(d.keys >= 3, "技能有数字键：" + d.keys);
+  assert.match(d.summon, /· Q$/);
+  assert.deepEqual([d.bar, d.cam, d.tags], ["46px", [30, 32], "visible"]);
+  assert.ok(d.dockToggle < 30 && d.swap < 30, "收起按钮、⇅ 照旧小：" + JSON.stringify(d));
+  await page.click('#g-skills .sk[data-skill="ruby_aa"]');
+  await page.waitForSelector("#g-pick-bar.show .g-btn.danger", { state: "visible" });
+  assert.deepEqual(await shownText(page, "#g-pick-bar .g-btn"), ["放弃（Esc）"]);
+  assert.deepEqual(o.errors, []);
+});

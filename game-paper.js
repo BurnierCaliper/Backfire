@@ -361,6 +361,7 @@
     const moves = UI.readMoves(env.doc);
     const moving = [...moves.values()].some(list => list.some(m => m.hs === "moveCancel"));
     html(env.box.querySelector(".olp-tags-host"), P.tagsHtml(slots(mode, moves), { open: env.swapOpen, moving }), "tags");
+    UI.revealTag(env.box.querySelector(".olp-tags-host"));   // 触屏上吊牌放不下横着滑（#429）：轮到的 / 点开 ⇅ 的那一张滑进来
     const hn = q("#hs-notice"), note = mode.hotseat && hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = env.box.querySelector(".olp-note");
     if (noteEl) { noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note; }
     paintDrawer();
