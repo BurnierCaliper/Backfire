@@ -15,8 +15,8 @@ test("--mixed 从 enemy-threat 入口可进；参数拼错报错", () => {
   assert.throws(() => M.parseArgs(["--kits", "nope"]), /Unknown mixed kit/);
   assert.throws(() => M.parseArgs(["--sizes", "5"]), /Sizes/);
   const jobs = M.planMixed({ samples: 1, levels: [15], sizes: [2], kits: ["livesand", "boomcar"] });
-  // livesand 1 变体 × keep/drop；boomcar 1 × keep/drop → 4
-  assert.equal(jobs.length, 4);
+  // livesand 3 变体(day/night/sand) × keep/drop；boomcar 1 × keep/drop → 8
+  assert.equal(jobs.length, 8);
   assert.ok(jobs.every(j => j.mode === "mixed" && (j.arm === "keep" || j.arm === "drop")));
 });
 
@@ -60,4 +60,20 @@ test("陨体弦蚣 + 微光：追打或分裂计数路径可走", () => {
   assert.notEqual(r.outcome, "error", r.error);
   assert.equal(r.weather, "glow");
   assert.ok(r.enemies.includes("meteor_centipede"));
+});
+
+test("巨型活沙探针：变巨快照与每回合伤害字段齐全", () => {
+  const r = M.runMixedJob({ kit: "livesand", level: 15, size: 2, index: 0, arm: "keep", variant: "day" });
+  assert.notEqual(r.outcome, "error", r.error);
+  assert.ok(r.giant, "有 giant 探针对象");
+  assert.ok(Array.isArray(r.giant.snapshots));
+  if (r.giant.transformed) {
+    const s = r.giant.snapshots[0];
+    assert.ok(s.hp > 0 && s.atk > 0, "变巨后有 HP/ATK");
+    assert.equal(s.shield, 0);
+    assert.equal(s.armor, 0);
+    assert.ok(r.giant.absorbedUnits >= 1);
+  }
+  const g = M.summarizeGiant([r]);
+  assert.ok(g["day|15|2"] || g["day|15|all"]);
 });

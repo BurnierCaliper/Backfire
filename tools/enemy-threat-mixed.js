@@ -32,6 +32,7 @@ const MIXED = {
 const TARGETS = [
   { kit: "livesand", regions: ["沙漠"], mech: "absorb",
     wantAllies: ["sand_beast", "sand_human", "bigsand", "dustbody", "sandfish_drive", "sandfish_ambush", "sandfish_lead"],
+    variants: ["day", "night", "sand"],
     note: "死亡吸收沙灵/沙漠生物成巨型活沙；不吸收其他活沙" },
   { kit: "sandfish_drive", regions: ["沙漠"], mech: "push",
     wantAllies: ["sandfish_ambush", "sandfish_lead"],
@@ -106,19 +107,67 @@ function instrumentMech(c, job, m) {
     followUps: 0, splits: 0, spiderRevives: 0,
     cleanses: 0, guards: 0, sweeperBooms: 0
   };
+  // 巨型活沙探针（只在 keep 臂、目标为 livesand 时填）
+  m.giant = {
+    transformed: 0, absorbAttempts: 0, diedWithoutFeed: 0,
+    absorbedUnits: 0, absorbNames: [],
+    snapshots: [], // 变巨瞬间属性
+    giantEnemyTurns: 0, // 变巨后活着的敌人回合数
+    giantDmg: 0, // 变巨后对英雄造成的伤害合计
+    giantPhaseDmgs: [], // 每个敌人回合的伤害
+    skillsUsed: { melee: 0, vortex: 0, pulse: 0 },
+    survivedToPulse: 0
+  };
   const wrap = (name, fn) => {
     const orig = c[name];
     if (typeof orig !== "function") return;
     c[name] = (...args) => fn(orig, args);
   };
   wrap("absorbSandsInto", (orig, args) => {
+    const livesand = args[0];
+    m.giant.absorbAttempts++;
     const notes = orig(...args);
     const text = (notes || []).join("\n");
     if (text.includes("吸收")) {
       m.mech.absorbs++;
       m.mech.absorbedUnits += (notes || []).filter(n => String(n).startsWith("吸收 ")).length;
     }
-    if (text.includes("巨型") || text.includes("吸收后复活")) m.mech.giant++;
+    if (text.includes("巨型") || text.includes("吸收后复活")) {
+      m.mech.giant++;
+      m.giant.transformed = 1;
+      if (livesand) {
+        const layers = (livesand.layers || []).map(l => ({
+          type: l.type, current: Number(l.current) || 0, max: Number(l.max) || 0
+        }));
+        const sand = layers.find(l => l.type === "sand") || layers[0] || { current: 0, max: 0 };
+        const shield = layers.filter(l => l.type === "shield").reduce((s, l) => s + l.current, 0);
+        const armor = layers.filter(l => l.type === "armor").reduce((s, l) => s + l.current, 0);
+        const absN = (notes || []).filter(n => String(n).startsWith("吸收 "));
+        m.giant.absorbedUnits = absN.length;
+        m.giant.absorbNames = absN.map(n => {
+          const m2 = String(n).match(/^吸收 ([^：:]+)/);
+          return m2 ? m2[1].trim() : "?";
+        });
+        const dice = livesand.dice || [0, 0];
+        m.giant.snapshots.push({
+          hp: layers.reduce((s, l) => s + l.current, 0),
+          hpMax: layers.reduce((s, l) => s + l.max, 0),
+          sandHp: sand.current, sandMax: sand.max,
+          shield, armor,
+          layers,
+          atk: Number(livesand.atk) || 0,
+          def: Number(livesand.def) || 0,
+          defMax: Number(livesand.defMax) || 0,
+          dice: Array.isArray(dice) ? [...dice] : [0, 0],
+          skills: ["en_giant_sand_melee", "en_giant_sand_vortex", "en_giant_sand_pulse@3"],
+          absorbedUnits: absN.length,
+          absorbNames: m.giant.absorbNames.slice()
+        });
+        livesand._etGiantTracked = true;
+      }
+    } else if (text.includes("没有可吸收")) {
+      m.giant.diedWithoutFeed++;
+    }
     return notes;
   });
   wrap("runOnConnect", (orig, args) => {
@@ -169,6 +218,19 @@ function instrumentMech(c, job, m) {
   });
   // 下水道：清扫机自爆 / 代挡 / 净化
   wrap("sweeperSelfDestruct", (orig, args) => { m.mech.sweeperBooms++; return orig(...args); });
+  // 巨型技能使用次数（runSkill 全局入口）
+  wrap("runSkill", (orig, args) => {
+    const id = args[0];
+    const out = orig(...args);
+    const aid = c.S.state && c.S.state.attackerId;
+    const actor = aid && (c.S.state.units || []).find(u => u.id === aid);
+    if (actor && actor.kit === "livesand" && actor.resources && actor.resources.giant) {
+      if (id === "en_giant_sand_melee") m.giant.skillsUsed.melee++;
+      if (id === "en_giant_sand_vortex") m.giant.skillsUsed.vortex++;
+      if (id === "en_giant_sand_pulse") m.giant.skillsUsed.pulse++;
+    }
+    return out;
+  });
   // 标定榴弹：资源写入
   const origApply = c.applyCombat;
   if (typeof origApply === "function") {
@@ -227,6 +289,13 @@ function instrument(c, job) {
     m.dmg += dmg; m.brk += brk; m.staggers += stg;
     if (isTarget(key)) { if (a) m.targetDmg += dmg; else m.targetDot += dmg; m.targetBrk += brk; m.targetStaggers += stg; }
     if (now.phase) m.phaseDmg[now.phase - 1] = (m.phaseDmg[now.phase - 1] || 0) + dmg;
+    // 巨型活沙：变巨后对英雄的伤害
+    if (a && a.kit === "livesand" && a.resources && a.resources.giant && a._etGiantTracked && dmg > 0) {
+      m.giant.giantDmg += dmg;
+      if (now._giantPhaseIdx != null) {
+        m.giant.giantPhaseDmgs[now._giantPhaseIdx] = (m.giant.giantPhaseDmgs[now._giantPhaseIdx] || 0) + dmg;
+      }
+    }
     // mecha mark hit heuristic: attacker mecha_gl damaging hero while gl was armed
     if (a && a.kit === "mecha_gl" && a.resources && (a.resources.glReady || a.resources._firedGl)) {
       m.mech && (m.mech.markHits++);
@@ -282,6 +351,19 @@ function instrument(c, job) {
       }
       if (u.resources && u.resources.glReady) u.resources._firedGl = true;
     });
+    // 巨型活沙存活敌人回合
+    now._giantPhaseIdx = null;
+    const giants = (c.S.state.units || []).filter(u =>
+      u.kit === "livesand" && u._etGiantTracked && u.resources && u.resources.giant && !u.dead && !u.hidden && !u._removed
+    );
+    if (giants.length) {
+      now._giantPhaseIdx = m.giant.giantPhaseDmgs.length;
+      m.giant.giantPhaseDmgs.push(0);
+      m.giant.giantEnemyTurns += giants.length;
+      giants.forEach(g => {
+        if ((g.resources.giantTurns || 0) >= 3) m.giant.survivedToPulse = 1;
+      });
+    }
     return orig(...args);
   });
   wrap("endEnemyTurn", (orig, args) => {
@@ -375,7 +457,8 @@ function craftEncounter(c, job) {
   const add = (preset, count, zone) => rows.push({ preset, count: count || 1, zone: zone || 2 });
   add(job.kit, 1, 2);
   if (job.kit === "livesand") {
-    add("sand_beast", 1, 2); add("sand_human", 1, 2); add("sandfish_drive", 1, 2);
+    add("sand_beast", 1, 2); add("sand_human", 1, 2); add("bigsand", 1, 2);
+    add("dustbody", 1, 2); add("sandfish_drive", 1, 2);
   } else if (job.kit === "sandfish_drive") {
     add("sandfish_ambush", 1, 3); add("sandfish_lead", 1, 2); add("sandfish_drive", 1, 2);
   } else if (job.kit === "sewer_cleaner" || job.kit === "sewer_keeper") {
@@ -625,6 +708,119 @@ const f1 = x => x == null ? "—" : Number(x).toFixed(1);
 const f2 = x => x == null ? "—" : Number(x).toFixed(2);
 const MARK = "<!-- 手写分析：重跑工具时，这一行以下的内容保留 -->";
 
+
+/** 巨型活沙变巨瞬间属性 + 变巨后每敌人回合伤害（只看 keep 臂） */
+function summarizeGiant(rows) {
+  const keep = rows.filter(r => r.arm === "keep" && r.outcome !== "error" && r.giant);
+  const by = new Map();
+  const add = (k, r) => { if (!by.has(k)) by.set(k, []); by.get(k).push(r); };
+  keep.forEach(r => {
+    add([r.variant, r.level, r.size].join("|"), r);
+    add([r.variant, r.level, "all"].join("|"), r);
+    add(["all", r.level, r.size].join("|"), r);
+    add(["all", r.level, "all"].join("|"), r);
+  });
+  const out = {};
+  by.forEach((list, k) => {
+    const n = list.length;
+    const xf = list.filter(r => r.giant.transformed);
+    const snaps = xf.flatMap(r => r.giant.snapshots || []);
+    const avg = (xs, f) => xs.length ? xs.reduce((a, x) => a + (Number(f(x)) || 0), 0) / xs.length : null;
+    const heroHpEach = avg(list, r => r.heroHp && (r.party || []).length ? r.heroHp / r.party.length : 0);
+    // 每敌人回合伤害：只对变巨成功且至少活过 1 敌人回合的场
+    const perTurn = [];
+    xf.forEach(r => {
+      const turns = r.giant.giantEnemyTurns || 0;
+      if (turns > 0) perTurn.push(r.giant.giantDmg / turns);
+      else perTurn.push(0);
+    });
+    const dmgPerTurn = perTurn.length ? perTurn.reduce((a, x) => a + x, 0) / perTurn.length : null;
+    const skills = { melee: 0, vortex: 0, pulse: 0 };
+    xf.forEach(r => {
+      const s = r.giant.skillsUsed || {};
+      skills.melee += s.melee || 0; skills.vortex += s.vortex || 0; skills.pulse += s.pulse || 0;
+    });
+    Object.keys(skills).forEach(key => { skills[key] = xf.length ? skills[key] / xf.length : 0; });
+    out[k] = {
+      n, transformed: xf.length, transformRate: n ? xf.length / n : 0,
+      diedWithoutFeed: avg(list, r => r.giant.diedWithoutFeed),
+      absorbAttempts: avg(list, r => r.giant.absorbAttempts),
+      absorbedUnits: avg(xf, r => r.giant.absorbedUnits), // 变巨时吸了几只
+      absorbedUnitsAll: avg(list, r => r.giant.absorbedUnits),
+      // 变巨瞬间
+      hp: avg(snaps, s => s.hp), hpMax: avg(snaps, s => s.hpMax),
+      sandHp: avg(snaps, s => s.sandHp), sandMax: avg(snaps, s => s.sandMax),
+      shield: avg(snaps, s => s.shield), armor: avg(snaps, s => s.armor),
+      atk: avg(snaps, s => s.atk), def: avg(snaps, s => s.def), defMax: avg(snaps, s => s.defMax),
+      dice: snaps.length ? [
+        avg(snaps, s => (s.dice && s.dice[0]) || 0),
+        avg(snaps, s => (s.dice && s.dice[1]) || 0)
+      ] : [0, 0],
+      // 变巨后
+      giantEnemyTurns: avg(xf, r => r.giant.giantEnemyTurns),
+      giantDmg: avg(xf, r => r.giant.giantDmg),
+      dmgPerEnemyTurn: dmgPerTurn,
+      dmgPerTurnShareOfHero: (dmgPerTurn != null && heroHpEach) ? dmgPerTurn / heroHpEach : null,
+      heroHpEach,
+      survivedToPulseRate: xf.length ? xf.filter(r => r.giant.survivedToPulse).length / xf.length : 0,
+      skillsPerBattle: skills,
+      skills: ["en_giant_sand_melee（近·至多2目标·atk物理1击破）", "en_giant_sand_vortex（远·区内全员·atk物理2击破+失去行动）", "en_giant_sand_pulse（存活≥3敌人回合后·全域atk物理）"]
+    };
+  });
+  return out;
+}
+
+function markdownGiant(report) {
+  const g = report.giantProbe;
+  if (!g) return "";
+  const l = [];
+  const f1 = x => x == null ? "—" : Number(x).toFixed(1);
+  const f2 = x => x == null ? "—" : Number(x).toFixed(2);
+  const pct = x => x == null ? "—" : (x * 100).toFixed(1) + "%";
+  l.push("## 4. 巨型活沙变巨瞬间属性与变巨后每回合伤害", "",
+    "只测量，不改数值。探针 `--probe-livesand-giant`：沙漠 keep 臂，变体 day / night / sand；等级 15 / 20；人数 2 / 3 / 4。", "",
+    "### 代码公式（`enemies.js` · `absorbSandsInto`）", "",
+    "- 饲料：`LIVESAND_FEED_KITS` = 沙灵四足/人形、大沙灵、扬尘体；`LIVESAND_FEED_FACTIONS` = 沙漠生物（沙鱼）。**不吸收其他活沙**、尘虫/管虫。",
+    "- 活沙本体预设（`engine.js`）：沙尘 `scaleHp(20+(lv-1), p)`，架势 4（再经 `unitOf`/`scaleDef`），ATK **固定 7**，骰子 `[0,0]`（技能不掷骰，纯 `mult×atk`）。",
+    "- 变巨时对每只饲料：沙尘层 `current/max += totalHp(饲料)`；`atk += 饲料.atk`；`def`/`defMax` **各 +1**；饲料当场死亡。",
+    "- 复活：`resources.giant=true`，`giantTurns=0`，改名「巨型活沙」，`dead=false`。无护盾/护甲层（仍是单层 sand）。",
+    "- 技能：近距穿刺（至多 2 目标，各 atk 物理 1 击破）；远距流沙漩涡（区内全员 atk 物理 2 击破+失去行动）；**存活满 3 个敌人回合**后解锁全域沙暴（全场 atk 物理）。", "",
+    "### 变巨率 / 吸收数 / 存活（keep，人数合并）", "",
+    "|变体|等级|变巨率|吸单位/次变巨|无饲料死亡/场|巨型存活敌人回合|撑到脉冲率|变巨后总伤|每敌人回合伤|占单角色满血%|",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+  for (const v of ["day", "night", "sand"]) {
+    for (const L of (report.options && report.options.levels) || [15, 20]) {
+      const s = g[`${v}|${L}|all`];
+      if (!s) continue;
+      l.push(`|${v}|${L}|${pct(s.transformRate)}|${f2(s.absorbedUnits)}|${f2(s.diedWithoutFeed)}|${f2(s.giantEnemyTurns)}|${pct(s.survivedToPulseRate)}|${f1(s.giantDmg)}|${f1(s.dmgPerEnemyTurn)}|${pct(s.dmgPerTurnShareOfHero)}|`);
+    }
+  }
+  l.push("", "### 变巨瞬间平均属性（成功变巨的场）", "",
+    "|变体|等级|人数|HP(当前/max)|盾|甲|架势|ATK|骰子|吸单位|",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---|---:|");
+  for (const v of ["day", "night", "sand"]) {
+    for (const L of (report.options && report.options.levels) || [15, 20]) {
+      for (const sz of (report.options && report.options.sizes) || [2, 3, 4]) {
+        const s = g[`${v}|${L}|${sz}`];
+        if (!s || !s.transformed) continue;
+        l.push(`|${v}|${L}|${sz}|${f1(s.hp)}/${f1(s.hpMax)}|${f1(s.shield)}|${f1(s.armor)}|${f1(s.def)}/${f1(s.defMax)}|${f1(s.atk)}|${f1(s.dice[0])}d${f1(s.dice[1])}|${f2(s.absorbedUnits)}|`);
+      }
+    }
+  }
+  l.push("", "### 按人数的每回合伤害（变体合并 all）", "",
+    "|等级|人数|变巨率|HP|ATK|架势|存活回合|每回合伤|占单角色满血%|角色满血|",
+    "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+  for (const L of (report.options && report.options.levels) || [15, 20]) {
+    for (const sz of (report.options && report.options.sizes) || [2, 3, 4]) {
+      const s = g[`all|${L}|${sz}`];
+      if (!s) continue;
+      l.push(`|${L}|${sz}|${pct(s.transformRate)}|${f1(s.hp)}|${f1(s.atk)}|${f1(s.def)}/${f1(s.defMax)}|${f2(s.giantEnemyTurns)}|${f1(s.dmgPerEnemyTurn)}|${pct(s.dmgPerTurnShareOfHero)}|${f1(s.heroHpEach)}|`);
+    }
+  }
+  l.push("");
+  return l.join("\n");
+}
+
 function aloneLookup(alone, kit, level) {
   if (!alone || !alone.summary) return null;
   return alone.summary[`${kit}|${level}|all`] || null;
@@ -641,7 +837,7 @@ function markdownMixed(report) {
     `- 种子前缀 \`${MIXED.seedPrefix}\`。遭遇用游戏 \`rollEncounter\` 拒绝抽样（含目标）；抽不到时用合成编队兜底（json 里 \`crafted\`）。`,
     "- **keep**：原遭遇（保留天气 / 配置物 / 载具 / 昼夜）。**drop**：去掉目标，按被去掉代币数塞入等量中立 \`dust_bug\` 占位。",
     "- **贡献 Δ**：同种子 keep − drop 的整场伤害占比、胜率、失衡、失去行动。机制计数只看 keep 臂。",
-    "- 变体：赶潮沙鱼 day/night/sand；弦蚣 natural/glow；警戒 natural/threeWay。修 #416：不再把 clock 卡在白天、天气清空。",
+    "- 变体：活沙 / 赶潮沙鱼 day/night/sand；弦蚣 natural/glow；警戒 natural/threeWay。修 #416：不再把 clock 卡在白天、天气清空。",
     "- 对照「单独 4 代币」数字来自 \`enemy-threat-1026.json\`（同等级 all 人数）。", "");
 
   l.push("## 1. 总表（15 / 20 级，人数合并）", "");
@@ -684,6 +880,9 @@ function markdownMixed(report) {
     report.boomcarLayers.forEach(x => l.push(`- 等级 ${x.level} 人数 ${x.size}：${x.layers.map(L => `${L.type} ${L.max}`).join(" + ")}`));
     l.push("");
   }
+  if (report.giantProbe) {
+    l.push(markdownGiant(report));
+  }
   return l.join("\n");
 }
 function formatMech(mech, kind) {
@@ -712,11 +911,12 @@ function provenance(argv) {
 
 function parseArgs(argv) {
   const out = {}, allowed = ["samples", "levels", "sizes", "kits", "out", "workers", "smoke"];
-  // --smoke is flag
+  // --smoke / --probe-livesand-giant are flags
   const flags = new Set();
   const args = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--smoke") { flags.add("smoke"); continue; }
+    if (argv[i] === "--probe-livesand-giant") { flags.add("probeLivesandGiant"); continue; }
     if (argv[i] === "--mixed") continue;
     args.push(argv[i]);
   }
@@ -742,7 +942,8 @@ function parseArgs(argv) {
     workers: out.workers ? B.positiveInt(out.workers, "workers") : MIXED.workers,
     out: out.out || MIXED.out,
     _outSet: !!out.out,
-    smoke: flags.has("smoke")
+    smoke: flags.has("smoke"),
+    probeLivesandGiant: flags.has("probeLivesandGiant")
   };
 }
 
@@ -822,6 +1023,53 @@ async function main(argv = process.argv.slice(2)) {
     opt.workers = 1;
     if (!opt._outSet) opt.out = "docs/balance/enemy-threat-mixed-smoke";
   }
+  if (opt.probeLivesandGiant) {
+    opt.kits = ["livesand"];
+    // 只要 keep 臂（巨型探针不需要 drop）
+    const file = outPath(opt.out || MIXED.out);
+    const meta = provenance(argv.concat(["--probe-livesand-giant"]));
+    let jobs = planMixed(opt).filter(j => j.arm === "keep");
+    let done = 0;
+    const rows = await runJobs(jobs, opt.workers, () => {
+      if (++done % 50 === 0 || done === jobs.length) console.error(`GiantProbe ${done}/${jobs.length}`);
+    });
+    const giantProbe = summarizeGiant(rows);
+    // 合并进已有报告（保留总表与手写分析）
+    let report;
+    try {
+      report = JSON.parse(fs.readFileSync(file + ".json", "utf8"));
+    } catch (_) {
+      report = buildMixedReport(rows, opt, meta);
+    }
+    report.giantProbe = giantProbe;
+    report.giantProbeMeta = {
+      samples: opt.samples, levels: opt.levels, sizes: opt.sizes,
+      variants: ["day", "night", "sand"], rows: rows.length,
+      errors: rows.filter(r => r.outcome === "error").length,
+      provenance: meta, formula: "enemies.js:absorbSandsInto / livingSandAllies"
+    };
+    // 选项里记下探针等级人数，供 markdownGiant 用
+    report.options = report.options || {};
+    report.options.levels = opt.levels;
+    report.options.sizes = opt.sizes;
+    // 写 json；md：在 MARK 前插入/替换 §4，保留手写分析
+    fs.writeFileSync(file + ".json", JSON.stringify(report, (k, v) => typeof v === "number" && !Number.isInteger(v) ? Math.round(v * 1e4) / 1e4 : v) + "\n");
+    const old = fs.existsSync(file + ".md") ? fs.readFileSync(file + ".md", "utf8") : "";
+    const giantMd = markdownGiant(report);
+    let body, tail;
+    if (old.includes(MARK)) {
+      body = old.slice(0, old.indexOf(MARK)).trimEnd();
+      tail = old.slice(old.indexOf(MARK));
+    } else {
+      body = old.trimEnd();
+      tail = "\n" + MARK + "\n";
+    }
+    // 去掉旧 §4（若有）
+    body = body.replace(/\n## 4\. 巨型活沙[\s\S]*$/m, "");
+    fs.writeFileSync(file + ".md", body + "\n\n" + giantMd + "\n" + tail);
+    console.log(`${report.giantProbeMeta.errors ? "ERRORS" : "OK"}: giant probe → ${file}.md（${rows.length} 场，异常 ${report.giantProbeMeta.errors}）`);
+    return report.giantProbeMeta.errors ? 1 : 0;
+  }
   const file = outPath(opt.out);
   const meta = provenance(argv);
   const jobs = planMixed(opt);
@@ -837,7 +1085,7 @@ async function main(argv = process.argv.slice(2)) {
 
 module.exports = {
   MIXED, TARGETS, TARGET_BY, planMixed, runMixedJob, runJobs, summarizeMixed,
-  buildMixedReport, markdownMixed, parseArgs, main, sampleEncounter, dropTarget, craftEncounter
+  buildMixedReport, markdownMixed, parseArgs, main, sampleEncounter, dropTarget, craftEncounter, summarizeGiant, markdownGiant
 };
 
 if (isMainThread && require.main === module) {
