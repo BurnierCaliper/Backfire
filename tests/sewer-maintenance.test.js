@@ -64,7 +64,8 @@ test("数值：血量照空投蜂群（护盾 4 + 2×(等级−1)、装甲 1，3
     assert.equal(u.atk, guard.atk, tag + "：ATK 同机器人看守（剑）");
     assert.deepEqual([u.range, u.flying, u.suggest.element, plain(u.suggest.dice)], ["ranged", false, "harmonic", [1, 4]], tag);
   }
-  assert.deepEqual(plain(get(c, "SEWER_STATS").sweeper), { shield: [4, 2], armor: 1, def: 1, atk: 4, dice: 4 });
+  assert.deepEqual(plain(get(c, "SEWER_STATS").sweeper), { shield: [4, 2], armor: 1, atk: 4, dice: 4 });   // 架势不在这里：照空投蜂群读 SWARM_STANCE
+  assert.deepEqual(plain(get(c, "SWARM_STANCE")), { base: 1, steps: [11, 21] });
   assert.deepEqual(plain(get(c, "SEWER_CFG").sweeper), { shotMult: 1, shotBreak: 1, blastMult: 1, blastBreak: 1 });
 });
 
