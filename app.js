@@ -1607,6 +1607,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  state.goneFoes = [];   // 新的一场：移出场的敌人名单从空开始
   // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
   state.apocalypse = false;
   state.phaseClock = state.weather === "phase";
@@ -3099,7 +3100,7 @@ function giveBattleDrops() {
 function trpgEnemyMaterials() {
   if (typeof TRPG === "undefined" || !TRPG.active || typeof rollEnemyDrops !== "function") return null;
   if (typeof Rogue !== "undefined" && Rogue.inRunMode && Rogue.inRunMode()) return null;
-  const got = rollEnemyDrops(enemyDropFoes(state.units));
+  const got = rollEnemyDrops(enemyDropFoes(battleFoesSeen()));
   if (!got.length) return null;
   got.forEach(m => bagAdd(m.id, m.qty));
   const out = { kuizhi: 0, items: got.map(m => ({ id: m.id, name: (ITEM_CATALOG[m.id] || {}).name || m.id, qty: m.qty })) };
@@ -5308,11 +5309,21 @@ function explodeBoomcar(target, notes) {
   } finally { state.popTag = prevTag || null; }
 }
 
+/** 这场战斗出现过的所有单位：场上的 + 被打倒后已经移出场的（removeEnemyFromField 登记在 state.goneFoes）。
+ *  战后掉落（enemyDropFoes）、图鉴（bestiaryRecordBattle）都读这份 */
+function battleFoesSeen() {
+  const units = state.units || [];
+  const gone = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => !units.some(x => x.id === g.id));
+  return units.concat(gone);
+}
 function removeEnemyFromField(u, notes) {
   if (!u || u.isPlayer || u._removed) return;
   u._removed = true;
   u.dead = true;
   u.hidden = false;
+  // 打倒当下就登记（不等 3 秒后移出场）：战后掉落、图鉴还要算到它（#340 第 18 条）。
+  // 这 3 秒里 state 可能被预演 / 撤销换成拷贝、连续战斗换区域时 state.units 也会整份换掉，所以不能放进计时器。同一个 id 只留最新的一份
+  state.goneFoes = (Array.isArray(state.goneFoes) ? state.goneFoes : []).filter(g => g.id !== u.id).concat([u]);
   notes.push(`${u.name} 被击杀。`);
   if (state.selectedId === u.id) state.selectedId = null;
   if (state.attackerId === u.id) state.attackerId = null;
@@ -7505,6 +7516,7 @@ function resetBattleFlags(u) {
   u.harshEnv = false;
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
+  u.rallyAtk = 0;
   u.highEnergy = 0;
   u.highFrom = null;
   u._imbalanceLock = false;
@@ -7844,13 +7856,17 @@ function triggerOneStatus(t, src, key) {
   return notes;
 }
 
+// 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
+const RALLY_BUFF = { atk: 15 };
+
 function applyRallyBuff(u, lines) {
   if (!u || !u.roles) return;
   const p = u.roles.primary;
   u.rallyBuff = p;
   if (p === "直伤") {
-    u.atk = (u.atk || 0) + 15;
-    lines.push(`${u.name} 直伤集结：ATK +15。`);
+    u.rallyAtk = RALLY_BUFF.atk;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
+    u.atk = (u.atk || 0) + RALLY_BUFF.atk;
+    lines.push(`${u.name} 直伤集结：ATK +${RALLY_BUFF.atk}。`);
   } else if (p === "异常") {
     u.bonus = (u.bonus || 0) + 1;
     lines.push(`${u.name} 异常集结：附赠 +1。`);

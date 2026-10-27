@@ -216,8 +216,8 @@ const BESTIARY_TEXT = {
     "巨型活沙三回合内没被打死：每回合对所有区域的所有单位打一次 atk 物理",
     "可以对自己协助：对被击破单位所在区打一次 atk 物理"] },
   giant: { move: "远近皆可", abilities: [
-    "近距砸击：atk + 1d8 物理，2 击破",
-    "远距能量：atk + 1d8 能量，1 击破",
+    "近距砸击：atk + 等级颗 d8 物理，2 击破",
+    "远距能量：atk + 等级颗 d8 能量，1 击破",
     "协助：近距捏碎颅骨，让目标倒地"] },
   patrolboat: { move: "飞行", abilities: [
     "电弧扫射：距离 1 的所有敌人 1d6 + atk 电，并可对其中一人施加感电",
@@ -330,7 +330,7 @@ function bestiaryStageOf(u) {
 }
 /** 一场战斗结束：场上出现过的敌人都记为遭遇过（次数、见过的等级、打倒几只） */
 function bestiaryRecordBattle(outcome) {
-  const units = (state.units || []).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
+  const units = (typeof battleFoesSeen === "function" ? battleFoesSeen() : (state.units || [])).filter(u => !u.isPlayer && !u.isProp && (!u.hidden || u.dead));
   if (!units.length) return [];
   const d = bestiaryLoad();
   const now = Date.now();
@@ -344,7 +344,8 @@ function bestiaryRecordBattle(outcome) {
     const lv = Number(u.level) || 1;
     e.minLv = e.minLv == null ? lv : Math.min(e.minLv, lv);
     e.maxLv = e.maxLv == null ? lv : Math.max(e.maxLv, lv);
-    if (u.dead) e.kills += 1;   // 下潜逃走的（只有 _removed）不是击杀
+    // 下潜逃走的（只有 _removed）不是击杀；飞碟触灵的机械足也记在飞碟名下，但击倒只算本体那一次（#340 第 18 条）
+    if (u.dead && u.kit !== "ufo_leg") e.kills += 1;
     // 种族（enemies.js）：随机种族的敌人记下见过哪些
     const rl = typeof raceText === "function" ? raceText(u) : "";
     if (rl) { e.races = Array.isArray(e.races) ? e.races : []; if (!e.races.includes(rl)) e.races.push(rl); }
