@@ -548,10 +548,19 @@ function addHighEnergy(unit, reason) {
 }
 
 function currentLifeForHigh(unit) {
+  if (highLifeOnShp(unit)) return Math.max(0, Number(unit.shp) || 0);
   let hp = 0;
   (unit.layers || []).forEach(l => { hp += Math.max(0, Number(l.current) || 0); });
-  if (hp <= 0 && unit.upOnShp) hp = Math.max(0, Number(unit.shp) || 0);
   return hp;
+}
+
+/** （新）高能自爆 / 微光蓄能拿来比的是不是坚毅剩余：起身中、而且血量层（含临时护盾）合计已经是 0。
+ *  currentLifeForHigh 和两处日志共用这一个判断（#340 第 12 条），免得日志写「坚毅」实际比的是护盾。 */
+function highLifeOnShp(unit) {
+  if (!unit || !unit.upOnShp) return false;
+  let hp = 0;
+  (unit.layers || []).forEach(l => { hp += Math.max(0, Number(l.current) || 0); });
+  return hp <= 0;
 }
 
 /** 判定自爆用的高能值：自身高能值，带高能状态的再加上所在能量场的场地高能（保释中的不算场地） */
@@ -610,7 +619,7 @@ function glowStoreTurnEnd(notes) {
     u._glowStoreOver = (Number(u._glowStoreOver) || 0) + 1;
     if (u._glowStoreOver < 2) {
       // #340 第 12 条：起身中 currentLifeForHigh 读的是坚毅剩余；游戏版不写这个数字
-      const hpText = u.upOnShp && typeof shpHidden === "function" && shpHidden() ? "当前坚毅生命" : `血量 ${hp}`;
+      const hpText = highLifeOnShp(u) && shpHidden() ? "当前坚毅生命" : `血量 ${hp}`;
       notes.push(`${u.name} 微光 · 蓄能：高能值 ${val} 超过${hpText}（第 1 个回合结束；下个回合结束还超过就自爆）。`);
       return;
     }
@@ -650,7 +659,7 @@ function explodeHigh(unit, total, opt) {
   const aoe = Math.floor(he / 2);
   const lifeBefore = currentLifeForHigh(unit);
   // #340 第 12 条：起身中 lifeBefore 就是坚毅剩余；游戏版日志不写这个数字（判定仍用 currentLifeForHigh）
-  const lifeText = unit.upOnShp && typeof shpHidden === "function" && shpHidden() ? "当前坚毅生命" : `当前生命 ${lifeBefore}`;
+  const lifeText = highLifeOnShp(unit) && shpHidden() ? "当前坚毅生命" : `当前生命 ${lifeBefore}`;
   appendLog(`【高能自爆】${unit.name} 高能值 ${he} ≥ ${lifeText}，立即秒杀。余波只打同阵营与无阵营配置物，${aoe} 能量。`);
   // 画面：专门的「高能自爆」演出（大字、震屏、爆炸声、大号数字），溢出部分显示成负血量
   spawnPopup(unit, { kind: "highboom", value: he, text: String(aoe), element: "energy" });

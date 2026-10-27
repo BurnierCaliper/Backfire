@@ -3576,7 +3576,7 @@
     G.rogue = rogue;
     document.body.classList.toggle("rogue-battle", !!rogue);
     // #340 第 14 条：训练场不走 rogue-battle，以前后台按钮露出来；训练中挂 training-battle 藏后台
-    document.body.classList.toggle("training-battle", !rogue && typeof trainingActive === "function" && trainingActive());
+    document.body.classList.toggle("training-battle", !rogue && trainingActive());
   }
 
   /**

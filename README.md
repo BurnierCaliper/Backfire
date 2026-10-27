@@ -368,14 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js）
-  - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
+- **坚毅生命：起身中高能/微光日志与自焚弹字不再泄露剩余值；自焚扣量向下取整；训练场不能开后台**（#340 第 12、13、14 条；app.js · `explodeHigh` / `glowStoreTurnEnd` / `currentLifeForHigh` / `highLifeOnShp`（新） / `tickSelfBurn`；game.js · `setRogueMode` / `openBackstage`；game.css · `training-battle`；测试 tests/shp-leak-340.test.js（新）、tests/ui.test.js）
+  - **以前**：起身中血量层全是 0，`currentLifeForHigh` 读的是坚毅剩余，高能自爆日志写「当前生命 37」、微光蓄能写「超过血量 37」；自焚扣坚毅时旧画面弹出「26!!」之类的数字（能推出上限或剩余 −1），而且扣量不取整，坚毅会变成 31.7；自焚扣血量层时实际扣的本来就是整数（`applyTrueDamage` 取整），只是日志写成「失去 3.6」；训练场 `setRogueMode(null)` 不挂 `rogue-battle`，顶栏「后台」露出来，后台写着「坚毅生命 37」「SHP上限 53」和公式。
   - **现在**：
-    - 第 12 条：游戏版起身中，自爆 / 蓄能日志改写「当前坚毅生命」，不写数字。判定仍用 `currentLifeForHigh`（规则没动）。
-    - 第 13 条：自焚扣量 `Math.floor`（坚毅 / 血量层都不再出小数）；游戏版起身中不 `spawnFloater`。日志在游戏版本来就不写数字，照旧。
+    - 第 12 条：游戏版起身中，自爆 / 蓄能日志改写「当前坚毅生命」，不写数字。判定仍用 `currentLifeForHigh`（规则没动）。日志和 `currentLifeForHigh` 共用 `highLifeOnShp`（新）：起身中、血量层（含临时护盾）合计为 0 时才算「比的是坚毅」；起身中带着护盾时比的是护盾，日志照写护盾的数字。
+    - 第 13 条：自焚扣量 `Math.floor`（这次修复之后扣的坚毅不再带小数；之前存下来、坚毅已经是 31.7 这类小数的长线存档不会被修正；血量层日志写的扣量和实际一致）；游戏版起身中不 `spawnFloater`。日志在游戏版本来就不写数字，照旧。取整方向和 `applyKnockdown` / `applyTrueDamage` 一样向下：坚毅上限 < 10 时 1 层自焚一点也不扣（义体能把上限压到 10 以下，少见）。
     - 第 14 条：训练中给 `body` 挂 `training-battle`，CSS 藏 `#g-bs` 和 `#g-party-backstage`；`openBackstage` 在训练中直接返回。
   - **没改的**：道具 / 效果说明里的「花费 N 点坚毅」等**固定花费**照常写；单机打进坚毅的伤害数字（第 15 条，另定）；跑团主持人视角（`shpHidden()` 为假）仍看得到数字。
-  - **测试**：tests/shp-leak-340.test.js（新）：起身中自爆 / 蓄能日志无 37；自焚 floor 成整数且游戏版不弹字；血量层自焚也取整；源码有 training-battle / openBackstage 守卫。在没改的代码上失败。
+  - **测试**：tests/shp-leak-340.test.js（新）：起身中自爆 / 蓄能日志无 37；自焚 floor 成整数且游戏版起身中不弹伤害数字；血量层自焚日志写「失去 3」这类整数、不写 3.6；源码有 training-battle / openBackstage / CSS 守卫——这几条在没改的代码上失败。另有一条起身中带临时护盾：判定比护盾 6，日志写「血量 6」「当前生命 6」、不写「坚毅」（防本 PR 初版的写错，main 上本来就写护盾数字）。tests/ui.test.js「训练场：顶栏「后台」……」（新，需要 Playwright）：真进训练场，`#g-bs` / `#g-party-backstage` 看不见，硬点也打不开后台，在没改的代码上失败。
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。

@@ -53,7 +53,7 @@ test("第 12 条：起身中高能自爆 / 微光蓄能日志不写坚毅剩余�
   assert.match(text, /当前坚毅生命/);
 });
 
-test("第 13 条：自焚扣坚毅向下取整，游戏版不起身弹字", () => {
+test("第 13 条：自焚扣坚毅向下取整，游戏版起身中不弹伤害数字", () => {
   const { c, hero } = gameField();
   hero.layers.forEach(l => { l.current = 0; });
   hero.upOnShp = true;
@@ -73,25 +73,63 @@ test("第 13 条：自焚扣坚毅向下取整，游戏版不起身弹字", () =
   assert.equal(floats2.length, 0, "游戏版起身中自焚不弹数字：" + JSON.stringify(floats2));
 });
 
-test("第 13 条：自焚扣血量层也向下取整", () => {
+test("第 13 条：自焚扣血量层，日志写的扣量和实际扣的一致（整数）", () => {
+  // 血量层实际扣的本来就是整数（applyTrueDamage 会取整），以前只是日志写成「失去 3.6」这类小数
   const { c, hero } = gameField();
   hero.upOnShp = false;
   hero.self = "burn";
   hero.selfBurnStacks = 3;
   const before = c.totalHp(hero);
-  c.tickSelfBurn(hero, false);
-  const after = c.totalHp(hero);
-  assert.equal(Number.isInteger(after), true);
-  assert.equal(before - after, Math.floor(Math.min(c.totalMaxHp(hero) * 0.1 * 3, before - 1)));
+  const raw = Math.min(c.totalMaxHp(hero) * 0.1 * 3, before - 1);
+  assert.equal(Number.isInteger(raw), false, "这条要拿会算出小数的情况测：" + raw);
+  const notes = c.tickSelfBurn(hero, false).join("\n");
+  const lost = before - c.totalHp(hero);
+  assert.equal(lost, Math.floor(raw));
+  assert.match(notes, new RegExp("失去 " + lost + "（"), "日志写实际扣的整数：" + notes);
+  assert.doesNotMatch(notes, /失去 \d+\.\d/, "日志不能写小数：" + notes);
 });
 
-test("第 14 条：训练场挂 training-battle、openBackstage 直接返回；源码藏 #g-bs", () => {
+test("第 12 条：起身中带临时护盾时，自爆 / 蓄能比的是护盾，日志照写护盾数字、不写「坚毅」", () => {
+  const { c, hero } = gameField();
+  hero.layers.forEach(l => { l.current = 0; });
+  hero.upOnShp = true;
+  hero.shp = 37;
+  hero.shpMax = 53;
+  c.addTempShield(hero, 6);
+  assert.equal(c.currentLifeForHigh(hero), 6, "判定拿护盾 6 比（规则没动）");
+  hero.highEnergy = 20;
+  hero.self = "store";
+  hero._glowStoreOver = 0;
+  c.S.state.weather = "glow";
+  const notes = [];
+  c.glowStoreTurnEnd(notes);
+  const text = notes.join("\n");
+  assert.match(text, /超过血量 6/, "蓄能日志写的是实际比的护盾：" + text);
+  assert.doesNotMatch(text, /坚毅/);
+  assert.doesNotMatch(text, /\b37\b/);
+
+  const { c: c2, hero: h2 } = gameField();
+  h2.layers.forEach(l => { l.current = 0; });
+  h2.upOnShp = true;
+  h2.shp = 37;
+  h2.shpMax = 53;
+  c2.addTempShield(h2, 6);
+  h2.highEnergy = 20;
+  c2.explodeHigh(h2, 20);
+  const boomLog = allLogText(c2);
+  assert.match(boomLog, /当前生命 6/, "自爆日志写的是实际比的护盾：" + boomLog);
+  assert.doesNotMatch(boomLog, /当前坚毅生命/);
+  assert.doesNotMatch(boomLog, /\b37\b/);
+});
+
+// 真正进训练场看后台按钮藏没藏的浏览器测试在 tests/ui.test.js（需要 Playwright）；这里只做不开浏览器也能跑的源码守卫
+test("第 14 条（源码守卫）：训练场挂 training-battle、openBackstage 直接返回、CSS 藏 #g-bs / #g-party-backstage", () => {
   const gameJs = fs.readFileSync(path.join(__dirname, "..", "game.js"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "..", "game.css"), "utf8");
   assert.match(gameJs, /training-battle/);
   assert.match(gameJs, /if \(trainingActive\(\)\) return;/);
-  assert.match(css, /body\.training-battle[\s\S]*#g-bs/);
-  assert.match(css, /#g-party-backstage/);
+  assert.match(css, /body\.training-battle :is\([^)]*#g-bs[^)]*\)\s*\{\s*display:\s*none/);
+  assert.match(css, /body\.training-battle :is\([^)]*#g-party-backstage[^)]*\)\s*\{\s*display:\s*none/);
 });
 
 test("README 规则改动记录写了 #340 第 12–14 条", () => {
