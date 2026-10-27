@@ -1429,16 +1429,17 @@ function applyResultToUnit(target, result, attacker) {
   // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
   const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
   if (dexCap != null) spent = Math.min(spent, Math.max(0, dexCap - (target.lostDefThisTurn || 0)));
-  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）
-  if (target.statuses && target.statuses.sturdy && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
+  // 坚挺：架势不会被打到 1 以下（不倒战意给的，本回合有效）；扭矩「转移注意」的自保模式同样（和 app.js · dealBreak 一致，#340 第 17 条）
+  const guardFloor = !!(target.resources && target.resources.divertGuard);
+  if (((target.statuses && target.statuses.sturdy) || guardFloor) && (Number(target.def) || 0) >= 1 && spent > (Number(target.def) || 0) - 1) {
     spent = Math.max(0, (Number(target.def) || 0) - 1);
-    notes.push(`${target.name} 坚挺：架势保留 1。`);
+    notes.push(`${target.name} ${guardFloor ? "自保模式" : "坚挺"}：架势保留 1。`);
   }
   // 决不后退（feats.js）：这一击要把架势打空时，有附赠动作就先 +2 架势
   if (spent > 0 && typeof featUnbowedAuto === "function") featUnbowedAuto(target, spent, notes);
   target.lostDefThisTurn = (target.lostDefThisTurn || 0) + spent;
   const defBeforeHit = Math.max(0, Number(target.def) || 0);
-  // 决不后退 / 坚挺 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
+  // 决不后退 / 坚挺 / 自保模式 / 背水一战挡下了这一击的失衡：不算被击破——机甲不解除、飞行单位不被击落（不吃击落真伤）
   if (result.broke && defBeforeHit - spent > 0) {
     result.broke = false;
     result.knockdownHp = 0;
@@ -1449,7 +1450,7 @@ function applyResultToUnit(target, result, attacker) {
     target.flying = false;
   }
   const wasStunned = !!target.stunned;
-  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、已失衡都会让它比名义击破小）
+  // 战-M5：击破分 / 击破统计按实际扣掉的架势算（假人、背水一战、猫的灵巧、坚挺、自保模式、已失衡都会让它比名义击破小）
   result.breakSpent = Math.max(0, Math.min(spent, defBeforeHit));
   target.def = Math.max(0, (Number(target.def) || 0) - spent);
   if (spent > 0 && typeof registerZoneBreak === "function" && target.kit !== "ufo_leg" && !target.noPosture) {
