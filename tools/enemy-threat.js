@@ -43,7 +43,9 @@ const CONFIG = {
   // 自动标记：整场伤害占我方血量低于同等级中位数的这么多倍，列进「后期偏弱」
   lowVsMedian: 0.5,
   // 自动标记：最低 → 最高等级「每代币·回合伤害占角色血量」只剩这么多，列进「后期掉得多」
-  dropRatio: 0.6
+  dropRatio: 0.6,
+  // 单局各幕表：测过的等级离这一幕普通战的等级范围超过这么多级就不列（只测 20 级的对照不列前几幕）
+  actNear: 4
 };
 const GROUPS = ["unit", "boss"];
 // 区制 / 站位按序号轮流：0–2 两区，3 全员 3 区，4 2 / 3 区对半，5 夹击（run.js · applyEncounterLayout）
@@ -400,7 +402,7 @@ function actTable(l, report) {
   l.push("|幕|区域|普通战等级|抽得到几种|测的等级|整场伤害占比 中位数|最低的三种|最高的一种|");
   l.push("|---:|---|---|---:|---:|---:|---|---|");
   [...places.values()].sort((a, b) => a.act - b.act || order[a.kind] - order[b.kind]).forEach(p => {
-    const tested = p.range ? [...new Set([near(p.range[0]), near(p.range[1])])] : [];
+    const tested = p.range ? [...new Set([near(p.range[0]), near(p.range[1])])].filter(L => L >= p.range[0] - CONFIG.actNear && L <= p.range[1] + CONFIG.actNear) : [];
     tested.forEach(L => {
       const xs = p.kits.filter(k => S[`${k}|${L}|all`]).sort((a, b) => S[`${a}|${L}|all`].share - S[`${b}|${L}|all`].share);
       if (!xs.length) return;
@@ -507,7 +509,7 @@ function markdown(report) {
     overviewTable(l, report);
     l.push("");
     l.push(`## ${++n}. 单局各幕：抽得到的敌人在这一幕的等级附近打得多重`, "",
-      "每一幕的每个区域（本幕区域、幕间可选的采矿场、带地图去的下水道）抽得到哪些敌人；「测的等级」取测过的等级里离这一幕普通战起、止最近的。只看单一兵种，真实遭遇是几种混着来的。", "");
+      `每一幕的每个区域（本幕区域、幕间可选的采矿场、带地图去的下水道）抽得到哪些敌人；「测的等级」取测过的等级里离这一幕普通战起、止最近的（离这一幕的等级范围超过 ${CONFIG.actNear} 级的不列）。只看单一兵种，真实遭遇是几种混着来的。`, "");
     actTable(l, report);
     l.push("");
     levels.slice().sort((a, b) => b - a).forEach(L => {
