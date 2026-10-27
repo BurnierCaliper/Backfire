@@ -368,11 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets` / `teamChat`；测试 tests/online-wallet-privacy.test.js）
-  - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱时带「钱包剩 N」；钱进某人钱包时带「现有 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
-  - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付、进谁的钱包。队伍公账的「现有 N」照旧。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。
-  - **没改的**：钱包本身的读写、谁能转、谁能看余额的权限。
-  - **测试**：tests/online-wallet-privacy.test.js：`hideWallets` 去掉三种余额写法、公账不动；转账后聊天文本无余额；源码走 `teamChat`。在没改的代码上失败。
+- **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets`（新） / `teamChat`（新）；测试 tests/online-wallet-privacy.test.js（新））
+  - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱（商人、工匠、义体）时带「钱包剩 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
+  - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付。转进 / 转出队伍公账时整段括号一起去掉（公账余额这句也不写了；公账本来就公开，别处照样看得到）；公账加减钱那句「奎支 +N（…），现有 N。」照旧。「进 X 的钱包（现有 N）」只有主持人分钱（`trpgPurseSplit`）会写，它不经小队聊天，`hideWallets` 里那条只是预防。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。
+  - **没改的**：钱包本身的读写、谁能转、谁能看余额的权限；这次之前已经存进房间检查点的旧聊天（可能带余额）读档后照样会发，没有在 `online-view.js` 再过滤一遍。
+  - **测试**：tests/online-wallet-privacy.test.js（新）：都走真的联机命令（`HotseatGame.receiveFrom`），看队友 p3 过了 `OnlineView.projectView` 白名单的小队聊天——玩家转给队友 / 转进公账、主持人转给玩家后，聊天写「瑞比 转给 Helumica 34 奎支」，没有「剩 N / 现有 N」；玩家在商人处用自己的钱包买医疗包，聊天写「（由 瑞比 付）」，没有「钱包剩」。在没改的代码上失败；把 `teamChat` 改成不过滤也会失败。
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。

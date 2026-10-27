@@ -19,12 +19,15 @@
   const heroes = () => (state.units || []).filter(u => u.isPlayer && !u.weaponOf && !u.isPartner && livePartyCards().some(c => c.kit === u.kit && !c.weaponOf));
   const gm = () => (config.players.find(p => p.gm) || config.players[0]).id;
   const fail = text => { throw new Error(text); };
-  // #340 第 11 条：小队聊天所有人都看得到，私人钱包余额只能本人和主持人看（README「队友……看不到余额」）。
-  // 写进聊天的说明去掉「剩 N / 现有 N / 钱包剩 N」，只留谁付、付多少
+  // （新）#340 第 11 条：小队聊天所有人都看得到，私人钱包余额只能本人和主持人看（README「队友……看不到余额」）。
+  // 写进聊天的说明去掉「剩 N / 现有 N / 钱包剩 N」，只留谁付、付多少。
+  // 按 trpg.js 的原句删：转账 trpgPurseTransfer「（A 剩 N，B 现有 N）」、代付 trpgPayWith「（由 X 付，钱包剩 N）」；
+  // 第三条「进 X 的钱包（现有 N）」只有 trpgPurseSplit 会写，它现在不经小队聊天，留着只是预防
   const hideWallets = text => String(text)
     .replace(/（([^（）]*?) 剩 \d+，([^（）]*?) 现有 \d+）/g, "")
     .replace(/（由 ([^（），]+?) 付，钱包剩 \d+）/g, "（由 $1 付）")
     .replace(/进 ([^（）]+?) 的钱包（现有 \d+）/g, "进 $1 的钱包");
+  // （新）商业相关的说明写进小队聊天都走这里
   const teamChat = (sender, text) => session.chat(sender, hideWallets(text));
   function notify() { for (const fn of [...listeners]) fn(); }
   function refresh() { notify(); if (root.GAME && document.getElementById("g-party")) GAME.refresh(); }
