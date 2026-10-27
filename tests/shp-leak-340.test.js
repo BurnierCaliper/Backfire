@@ -53,7 +53,7 @@ test("第 12 条：起身中高能自爆 / 微光蓄能日志不写坚毅剩余�
   assert.match(text, /当前坚毅生命/);
 });
 
-test("第 13 条：自焚扣坚毅向下取整，游戏版起身中不弹伤害数字", () => {
+test("第 13 条：自焚扣坚毅向下取整（守卫 Math.floor），游戏版起身中不经 spawnFloater 弹数字", () => {
   const { c, hero } = gameField();
   hero.layers.forEach(l => { l.current = 0; });
   hero.upOnShp = true;
@@ -73,6 +73,21 @@ test("第 13 条：自焚扣坚毅向下取整，游戏版起身中不弹伤害�
   assert.equal(floats2.length, 0, "游戏版起身中自焚不弹数字：" + JSON.stringify(floats2));
 });
 
+test("第 13 条（守卫）：坚毅上限 < 10 时 1 层自焚向下取整可为 0（作者接受）", () => {
+  // 义体能把坚毅上限压到 10 以下；floor(上限×10%×1) = 0。这条在修了 Math.floor 的代码上通过，
+  // 用来锁住「向下取整、可为 0」的作者决定，不是用来证明相对 main 的回归。
+  const { c, hero } = gameField();
+  hero.layers.forEach(l => { l.current = 0; });
+  hero.upOnShp = true;
+  hero.shp = 8;
+  hero.shpMax = 8;
+  hero.self = "burn";
+  hero.selfBurnStacks = 1;
+  const notes = c.tickSelfBurn(hero, false);
+  assert.equal(hero.shp, 8, "1 层自焚 floor 后一点不扣");
+  assert.match(notes.join("\n"), /灼烧着坚毅生命|自焚/);
+});
+
 test("第 13 条：自焚扣血量层，日志写的扣量和实际扣的一致（整数）", () => {
   // 血量层实际扣的本来就是整数（applyTrueDamage 会取整），以前只是日志写成「失去 3.6」这类小数
   const { c, hero } = gameField();
@@ -89,25 +104,31 @@ test("第 13 条：自焚扣血量层，日志写的扣量和实际扣的一致�
   assert.doesNotMatch(notes, /失去 \d+\.\d/, "日志不能写小数：" + notes);
 });
 
-test("第 12 条：起身中带临时护盾时，自爆 / 蓄能比的是护盾，日志照写护盾数字、不写「坚毅」", () => {
+test("第 12 条：起身中带临时护盾时，高能阈值仍比坚毅（作者定：护盾不参与）", () => {
+  // 旧逻辑拿护盾 6 比：高能 20 就爆致死；修后比坚毅 37
   const { c, hero } = gameField();
   hero.layers.forEach(l => { l.current = 0; });
   hero.upOnShp = true;
   hero.shp = 37;
   hero.shpMax = 53;
   c.addTempShield(hero, 6);
-  assert.equal(c.currentLifeForHigh(hero), 6, "判定拿护盾 6 比（规则没动）");
-  hero.highEnergy = 20;
+  assert.equal(c.currentLifeForHigh(hero), 37, "起身中判定拿坚毅，不拿护盾");
+  assert.equal(c.highLifeOnShp(hero), true);
+
+  // 蓄能预警：高能必须超过比的那一项才会写日志；用 40>37，日志应写「当前坚毅生命」不写 6/37
+  hero.highEnergy = 40;
   hero.self = "store";
   hero._glowStoreOver = 0;
   c.S.state.weather = "glow";
   const notes = [];
   c.glowStoreTurnEnd(notes);
   const text = notes.join("\n");
-  assert.match(text, /超过血量 6/, "蓄能日志写的是实际比的护盾：" + text);
-  assert.doesNotMatch(text, /坚毅/);
+  assert.match(text, /当前坚毅生命/, "蓄能日志写坚毅、不写护盾数字：" + text);
+  assert.doesNotMatch(text, /\b6\b/);
   assert.doesNotMatch(text, /\b37\b/);
+  assert.equal(hero.dead, false, "第一次回合结束只预警，不爆");
 
+  // checkHighBoom：高能 20 < 坚毅 37 不爆（旧逻辑 20>6 会爆）
   const { c: c2, hero: h2 } = gameField();
   h2.layers.forEach(l => { l.current = 0; });
   h2.upOnShp = true;
@@ -115,11 +136,10 @@ test("第 12 条：起身中带临时护盾时，自爆 / 蓄能比的是护盾�
   h2.shpMax = 53;
   c2.addTempShield(h2, 6);
   h2.highEnergy = 20;
-  c2.explodeHigh(h2, 20);
-  const boomLog = allLogText(c2);
-  assert.match(boomLog, /当前生命 6/, "自爆日志写的是实际比的护盾：" + boomLog);
-  assert.doesNotMatch(boomLog, /当前坚毅生命/);
-  assert.doesNotMatch(boomLog, /\b37\b/);
+  const beforeShp = h2.shp;
+  c2.checkHighBoom(h2);
+  assert.equal(h2.dead, false, "阈值按坚毅，高能 20 不应致死");
+  assert.equal(h2.shp, beforeShp, "没爆就不要扣坚毅");
 });
 
 // 真正进训练场看后台按钮藏没藏的浏览器测试在 tests/ui.test.js（需要 Playwright）；这里只做不开浏览器也能跑的源码守卫
