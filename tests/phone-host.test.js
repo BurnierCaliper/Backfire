@@ -1,7 +1,8 @@
 // #429 安卓手机（Chrome）当联机跑团主持人：战斗画面（纸片画面 + 新画面）在手机上能用——不用浏览器的那部分
-// （要浏览器的在 tests/phone-host-ui.test.js）。
+// （要浏览器的在 tests/phone-host-ui.test.js、tests/phone-host-gm-ui.test.js）。
 //   第 1 步：顶栏胶带（paper-ui.js · topHtml，单机 / 联机玩家同一份）在手机竖屏上远 / 中 / 近收成一个按钮；
 //            放不下时右边的镜头、「工具 ▾」「菜单」不缩，左边的字按先后省略（online-paper.css；电脑上一条都套不上）
+//   第 4 步：单机 / 房主手机上轮到这台机器出手时技能栏自己展开（game.js · refreshHud / localTurn / localReason）；「检定申请 · N」挂到技能栏上面（game-paper.css）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -88,9 +89,10 @@ test("#429 game.js · defaultHint：触屏（touchUI）不写 Tab、空格，写
   const hint = (o) => vm.runInNewContext(`(function () {
     const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
     const G = { ended: false, actorId: "a" }, state = { combatStarted: true, combatPhase: "player" };
-    const HotseatGame = { reason: () => "", isRequested: () => O.hotseat }, window = { HotseatGame };
+    const HotseatGame = { reason: () => "", isRequested: () => O.hotseat, getView: () => ({ playerId: "gm" }), withOperator: (id, fn) => fn() }, window = { HotseatGame };
     const hotseat = () => O.hotseat, touchUI = () => O.touch, unitById = id => ({ id, name: "瑞比", stunned: O.stunned });
     ${constSrc(GAME_JS, "TOUCH_TEXT")}
+    ${fnSrc(GAME_JS, "localReason")}
     ${fnSrc(GAME_JS, "defaultHint")}
     return defaultHint();
   })()`, { O: o });
@@ -188,4 +190,60 @@ test("#429 CSS：手指点（pointer: coarse）时点按目标至少 40×40（�
   // 电脑上：基础那几条照旧
   assert.match(css, /body\.ol-paper \{\s*--olp-top: 6px;[^}]*--olp-bar: 46px;[^}]*--olp-under: 100px;/);
   assert.match(css, /body\.ol-paper \.olp-swap \{ margin-left: auto; padding: 2px 4px; font-size: 14px;/);
+});
+
+/* ---------- 第 4 步：单机 / 房主手机上轮到这台机器出手时技能栏自己展开；「检定申请 · N」挂到技能栏上面 ---------- */
+/** game.js 的 localReason / localTurn 抠出来跑：HotseatGame 换成假的——reason 照「这一刻按谁问」（commandOperator：执行玩家发来的指令时是发指令的人）给原因 */
+function turnFns(o) {
+  return vm.runInNewContext(`(function () {
+    const G = { ended: !!O.ended }, state = { combatStarted: O.started !== false, combatPhase: O.phase || "player" };
+    let op = null;
+    const HotseatGame = {
+      getView: () => ({ playerId: "gm", currentUnitId: "u1" }), currentUnit: () => "u1",
+      withOperator(id, fn) { const prev = op; op = id; try { return fn(); } finally { op = prev; } },
+      reason: (u) => ((op || "gm") === (O.owner || "gm") ? "" : "不是你的角色或武器人")
+    };
+    const hotseat = () => !!O.hotseat, unitById = id => ({ id });
+    ${fnSrc(GAME_JS, "localReason")}
+    ${fnSrc(GAME_JS, "localTurn")}
+    return { localReason, localTurn, HotseatGame };
+  })()`, { O: o });
+}
+test("#429 game.js · localTurn：开打了、我方回合、没结束才算轮到这台机器；热座 / 联机还要轮到的那个人这台机器的操作者能动——执行玩家「甲」发来的指令时（reason 按甲问）也按这台机器的操作者问（以前「结束单位行动」灰着、技能栏不展开）", () => {
+  assert.equal(turnFns({}).localTurn(null), true, "一个人打：我方回合");
+  assert.equal(turnFns({ started: false }).localTurn(null), false, "开战前");
+  assert.equal(turnFns({ phase: "enemy" }).localTurn(null), false, "敌人回合");
+  assert.equal(turnFns({ ended: true }).localTurn(null), false, "打完了");
+  const mine = turnFns({ hotseat: true, owner: "gm" }), theirs = turnFns({ hotseat: true, owner: "p-1" });
+  assert.equal(mine.localTurn(), true, "轮到主持人的英雄");
+  assert.equal(theirs.localTurn(), false, "轮到甲的英雄");
+  // 甲发来「结束单位行动」，执行到一半画技能栏：HotseatGame.reason 按甲问会说「不是你的角色」，localReason 照旧按主持人问
+  assert.equal(mine.HotseatGame.withOperator("p-1", () => mine.HotseatGame.reason({ id: "u1" })), "不是你的角色或武器人", "（假的 reason 照发指令的人问）");
+  assert.equal(mine.HotseatGame.withOperator("p-1", () => mine.localReason({ id: "u1" })), "");
+  assert.equal(mine.HotseatGame.withOperator("p-1", () => mine.localTurn()), true);
+  assert.equal(theirs.HotseatGame.withOperator("p-1", () => theirs.localTurn()), false, "甲的英雄：这台机器照旧不算");
+  assert.equal(turnFns({ hotseat: false }).localReason({ id: "u1" }), "", "不是热座：没有原因");
+});
+
+test("#429 game.js · refreshHud：手机竖屏（paper-ui.js · BASE.phone.media）上技能栏没手动点过时，照联机玩家（#311，dockAuto）轮到这台机器出手（演出播完）展开、不是就收起；「结束单位行动」灰不灰、提示都按这台机器的操作者问", () => {
+  const hud = fnSrc(GAME_JS, "refreshHud");
+  assert.match(hud, /PaperUI\.dockAuto\(\{ phone: phonePaper\(\), manual: shell\.manual\(hudEl, "dock"\), mine: localTurn\(hsView\), busy: G\.depth > 0 \}\)/);
+  assert.match(hud, /if \(want != null\) shell\.setPanel\(hudEl, "dock", want\);/);
+  assert.ok(hud.indexOf("shell.fold(hudEl, true)") < hud.indexOf("PaperUI.dockAuto"), "先收 / 放开选中技能那一段（#362），再看轮到谁：先收着的那一段 setPanel 不展开");
+  assert.match(hud, /et\.disabled = et\.disabled \|\| !!localReason\(unitById\(HotseatGame\.currentUnit\(\)\), hsView\)/);
+  assert.match(fnSrc(GAME_JS, "defaultHint"), /const why = localReason\(a\);/);
+  assert.match(fnSrc(GAME_JS, "phonePaper"), /matchMedia\(PaperUI\.BASE\.phone\.media\)/, "多窄算手机：和联机玩家、online-paper.css 手机那一段同一个");
+  assert.equal(UI.BASE.phone.media, "(max-width: 760px)");
+});
+
+test("#429 game-paper.css：联机房主的「检定申请 · N」手机竖屏 / 手指点时挂在技能栏上面（--olp-dock-h），不压住「技能 ▲」；战斗记录抽屉切到「小队」时「收起 ▸」也留着；电脑上照旧（online.css 那两条没动）", () => {
+  const css = read("game-paper.css"), fit = mediaBody(css, "(max-width: 760px), (pointer: coarse)");
+  assert.ok(fit, "手机竖屏或手指点的那一段");
+  assert.match(fit, /body\.ol-paper\.g-paper \.crq-pill \{ bottom: calc\(var\(--olp-dock-h, 190px\) \+ 12px\); \}/);
+  assert.match(fit, /body\.ol-paper\.g-paper \.g-app > \.g-log\.gp-drawer\.ol-chat-mode > \.gp-drawer-tab \{ display: block !important; \}/);
+  const rest = css.replace(/\/\*[\s\S]*?\*\//g, "").replace(fit, "");
+  assert.doesNotMatch(rest, /\.crq-pill|\.ol-chat-mode/, "别处（电脑上）不碰它们");
+  const online = read("online.css");
+  assert.match(online, /\.crq-pill \{ position: fixed; inset: auto auto 12px 12px; z-index: 95; min-height: 44px; \}/);
+  assert.match(online, /\.ol-chat-mode > :not\(\.ol-host-tabs\):not\(\.ol-host-chat\) \{ display: none !important; \}/, "切到小队只留标签和聊天：那一条照旧（抽屉的标签在这里另外留着）");
 });

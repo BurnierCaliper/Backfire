@@ -2889,6 +2889,24 @@
   }
   /** 触屏没有悬停：第一下点目标先预览，再点一下才出手 */
   function touchUI() { return !!(window.matchMedia && window.matchMedia("(hover: none)").matches); }
+  /** 这一刻算不算手机竖屏（paper-ui.js · BASE.phone.media，和 online-paper.css 手机那一段一样宽；#429 手机上技能栏什么时候自己展开） */
+  function phonePaper() {
+    try { return !!(window.matchMedia && window.PaperUI && window.matchMedia(PaperUI.BASE.phone.media).matches); } catch (e) { return false; }
+  }
+  /** 热座 / 联机：这台机器的操作者现在为什么不能操作 u（空 = 能；画按钮、提示、技能栏要不要展开用，#429）。
+   *  HotseatGame.reason 在执行玩家发来的指令时按发指令的人问（online-game.js · withOperator）：玩家「结束单位行动」后轮到主持人的那一下，
+   *  画出来的「结束单位行动」灰着、提示写「不是你的角色或武器人」，之后没有别的事就一直这样（电脑上空格照样能结束，手机上没有空格就点不了）。
+   *  这里按这台机器的操作者（HotseatGame.getView().playerId）问；hsView 有就直接用 */
+  function localReason(u, hsView) {
+    if (!hotseat()) return "";
+    const id = (hsView || HotseatGame.getView()).playerId;
+    try { return HotseatGame.withOperator(id, () => HotseatGame.reason(u)); } catch (e) { return HotseatGame.reason(u); }
+  }
+  /** 这一刻轮到这台机器出手（#429）：开打了、我方回合、没结束；热座 / 联机房主还要轮到的那个人这台机器的操作者能动（和「结束单位行动」能不能点同一条） */
+  function localTurn(hsView) {
+    if (!state.combatStarted || G.ended || state.combatPhase !== "player") return false;
+    return !hotseat() || !localReason(unitById(HotseatGame.currentUnit()), hsView);
+  }
   /** 选区域时点中某个区（点区里的空白，或者点区里的单位 / 配置物卡片都算）。处理了返回 true */
   function pickZoneByClick(zone) {
     if (!(G.arm && G.arm.mode === "zone" && zone && G.arm.zones.has(Number(zone.dataset.num)))) return false;
@@ -4071,6 +4089,12 @@
     // 新画面：选中技能以后技能栏先收起（选目标时提示栏、按钮条不再把它撑高挡住战场），演完这一下、回到选技能时再展开（#362，hd2d-shell.js · fold；
     // 收着的这一段取景照收起之前的技能栏让开，镜头不重新取景）。不用选目标的技能直接出手，不收
     if (shell) { if (G.arm && G.arm.skillId) shell.fold(hudEl, true); else if (G.depth === 0) shell.fold(hudEl, false); }
+    // 手机竖屏（#429，照联机玩家 #311）：技能栏没手动点过「技能 ▼ / ▲」时，轮到这台机器出手（演出播完）展开、不是就收起，让出战场
+    // （paper-ui.js · dockAuto；不记在本机，选中技能以后先收着的那一段不在这里展开）。手动点过的照本机记着的（hd2d-shell.js · manual）；电脑上不动
+    if (shell && window.PaperUI) {
+      const want = PaperUI.dockAuto({ phone: phonePaper(), manual: shell.manual(hudEl, "dock"), mine: localTurn(hsView), busy: G.depth > 0 });
+      if (want != null) shell.setPanel(hudEl, "dock", want);
+    }
     // 角色仪表：当前角色独有的资源和状态，画成图标（hud-icons.js），放在技能栏左边
     const gauge = $("g-gauge");
     if (gauge) {
@@ -4097,7 +4121,7 @@
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
-      else if (hotseat()) { et.disabled = et.disabled || !!HotseatGame.reason(unitById(HotseatGame.currentUnit())); etText = "结束单位行动" + spaceKey; }
+      else if (hotseat()) { et.disabled = et.disabled || !!localReason(unitById(HotseatGame.currentUnit()), hsView); etText = "结束单位行动" + spaceKey; }
     }
     hudInner(et, etText);
     if (!G.arm && G.depth === 0 && !$("g-hint").dataset.flash) setHint(defaultHint());
@@ -4126,7 +4150,7 @@
   function defaultHint() {
     const a = unitById(G.actorId);
     if (G.ended) return "";
-    if (hotseat() && state.combatStarted) { const why = HotseatGame.reason(a); if (why) return esc(why); }
+    if (hotseat() && state.combatStarted) { const why = localReason(a); if (why) return esc(why); }
     if (!state.combatStarted) return "摆好队伍和敌人后，点「开始战斗」。回合开始效果会在此时结算。";
     if (state.combatPhase !== "player") return "敌人行动中。点击战场可以跳过演出。";
     if (!a) return "选择一名角色。";
