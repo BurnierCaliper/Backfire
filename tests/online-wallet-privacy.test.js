@@ -58,6 +58,25 @@ test("第 11 条：玩家用自己的钱包在商人处买东西，队友看到�
   assert.doesNotMatch(chat, new RegExp("\\b" + c.trpgPurse("ruby") + "\\b"));
 });
 
+
+test("第 11 条：房间检查点里的旧聊天带余额，projectView 投影后队友看不到", () => {
+  // 模拟这次修复之前已经存进检查点的消息（teamChat 当时还没过滤）
+  const { teammateChat, c } = online();
+  const snap = c.HotseatGame.getViewFor("p3");
+  snap.chat = [
+    { id: "old1", operatorId: "p2", name: "玩家", text: "瑞比 转给 Helumica 34 奎支（瑞比 剩 1200，Helumica 现有 5712）。", at: 1 },
+    { id: "old2", operatorId: "p2", name: "玩家", text: "🛒 买了医疗包，花掉 600 奎支。 （由 瑞比 付，钱包剩 595）", at: 2 },
+    { id: "old3", operatorId: "host", name: "主持人", text: "卖掉 罐头 ×1，得 10 奎支，进队伍公账（现有 310）。", at: 3 },
+  ];
+  const projected = V.projectView(plain(snap), { recipientId: "p3" }).chat.map(m => m.text).join("\n");
+  assert.match(projected, /瑞比 转给 Helumica 34 奎支/);
+  assert.doesNotMatch(projected, /剩 \d|钱包剩/, "旧转账 / 代付余额应被投影去掉：" + projected);
+  assert.doesNotMatch(projected, /1200|5712|595/);
+  assert.match(projected, /（由 瑞比 付）/);
+  // 卖东西那句的公账「现有 N」照留（公账本来公开；hideWallets 不碰「进队伍公账（现有 N）」）
+  assert.match(projected, /进队伍公账（现有 310）/);
+});
+
 test("README 规则改动记录写了 #340 第 11 条", () => {
   const md = fs.readFileSync(path.join(__dirname, "..", "README.md"), "utf8");
   const sec = md.slice(md.indexOf("## 规则改动记录"));
