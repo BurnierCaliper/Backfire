@@ -311,7 +311,7 @@
           : (m.options || []).map((o, i) => o.value == null ? `<button type="button" class="g-btn small" data-ob-opt="${i}"${ui.busy ? " disabled" : ""}>${esc(o.label)}</button>` : "").join("");
         const what = ui.rule && m.kind === "unit" ? "点战场上亮起的单位，或者" : m.kind === "unit" ? "点战场上亮起的单位" : m.kind === "zone" ? "点亮起的区域" : "选一项";
         const empty = (m.kind === "unit" || m.kind === "zone") && !(m.options || []).some(o => o.value != null && !o.disabled) ? `<span style="color:var(--foe)">没有能选的${m.kind === "zone" ? "区域" : "目标"}</span>` : "";
-        hint = `<b>${esc(m.title || "")}</b>　${what}${empty ? "　" + empty : ""}　${extra}${ui.rule ? "" : '<button type="button" class="g-btn small" data-ob="cancel">取消（Esc）</button>'}`;
+        hint = `<b>${esc(m.title || "")}</b>　${what}${empty ? "　" + empty : ""}　${extra}${ui.rule ? "" : `<button type="button" class="g-btn small" data-ob="cancel">${isTouch() ? "取消" : "取消（Esc）"}</button>`}`;   // 触屏没有 Esc（#429）
       }
       // 限时的询问（战场点选的规则询问）：倒计时，online-ui.js 每半秒刷新 data-ol-deadline 的文字
       if (Number(ui.deadline) > 0) hint += `　<span class="ol-countdown" role="timer" aria-live="off" data-ol-deadline="${Number(ui.deadline)}"></span>`;

@@ -361,6 +361,7 @@
     const moves = UI.readMoves(env.doc);
     const moving = [...moves.values()].some(list => list.some(m => m.hs === "moveCancel"));
     html(env.box.querySelector(".olp-tags-host"), P.tagsHtml(slots(mode, moves), { open: env.swapOpen, moving }), "tags");
+    UI.revealTag(env.box.querySelector(".olp-tags-host"));   // 触屏上吊牌放不下横着滑（#429）：轮到的 / 点开 ⇅ 的那一张滑进来
     const hn = q("#hs-notice"), note = mode.hotseat && hn && !hn.hidden ? String(hn.textContent || "").trim() : "", noteEl = env.box.querySelector(".olp-note");
     if (noteEl) { noteEl.hidden = !note; if (noteEl.textContent !== note) noteEl.textContent = note; }
     paintDrawer();
@@ -435,8 +436,9 @@
     const t = e.target;
     if (!t || !t.closest || !env.on) return;
     if (t.closest('[data-olp="tools"]')) { setTools(!env.toolsOpen); return; }
-    const cam = t.closest("[data-olp-cam]");
-    if (cam) { UI.pressCam(app(), Number(cam.dataset.olpCam)); return; }
+    // 镜头：远 / 中 / 近，手机上收成的那一个（#429：点下一段）点的都是新画面原来那几个按钮
+    const cam = t.closest("[data-olp-cam], [data-olp-cam-next]");
+    if (cam) { UI.pressCam(app(), Number(cam.dataset.olpCam != null ? cam.dataset.olpCam : cam.dataset.olpCamNext)); return; }
     const sw = t.closest("[data-olp-swap]");
     if (sw) { const i = Number(sw.dataset.olpSwap); env.swapOpen = env.swapOpen === i ? null : i; env.toolsOpen = false; paint(); return; }
     const mv = t.closest("[data-olp-move]");

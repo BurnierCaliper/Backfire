@@ -20,6 +20,7 @@
  *   页面：
  *     readMoves(root) / pressMove(root, index, n)   热座栏里每一格现在的按钮 / 点原来那一个
  *     readCam(root) / pressCam(root, i)             新画面的镜头按钮（远 / 中 / 近）现在哪个亮着 / 点第 i 个
+ *     revealTag(host)                               吊牌放不下横着滑时（触屏，#429）：重画完把点开 ⇅ 的 / 轮到的那一张滑进来，不然回到原来滑到的位置
  *     coverRects(doc, selectors) / make(…).cover(doc)   浮在战场上、3D 白卡要让开的面板这一刻的矩形（#339；交给 hd2d-field.js · cover）
  *     dockHeight(hud)                               技能栏这一刻多高（--olp-dock-h）；选中技能以后先收着的这一段照旧用收起之前的（#362） */
 (function (root, factory) {
@@ -42,7 +43,8 @@
       order: "行动顺序", swap: "⇅", swapTitle: "延后 / 换位", empty: "空位", vacated: "已挪走",
       party: "我方队伍", you: "你", yourTurn: "轮到你了"
     },
-    cam: { label: "镜头：远景 / 中景 / 近景" },
+    /* 镜头：label 读屏念的；next 手机竖屏上远 / 中 / 近收成的那一个按钮（#429，写这一刻是哪一段，点一下换下一段）读屏念的 */
+    cam: { label: "镜头：远景 / 中景 / 近景", next: "镜头 {0}：点一下换到 {1}" },
     /* 手机竖屏（#311，让战场更大；电脑上不用）：
      *   media     这么窄算手机竖屏（要和 online-paper.css 里手机那一段的 @media (max-width: 760px) 一样）
      *   dockMax   技能栏展开时最多占屏幕高度的百分之几（写成 --olp-dock-max，online-paper.css 手机上的技能栏用；放不下的是提示栏自己滚）
@@ -637,6 +639,27 @@
     b.click();
     return true;
   }
+  /**
+   * 行动顺序吊牌放不下、横着滑的时候（触屏，#429：不再把名字挤成一个字）：吊牌每次整条重画（滑的位置会回到最左），各家重画完叫一次——
+   * 点开了 ⇅ 的那一张、不然是轮到的那一张（.olp-tag.on）换了，就把它滑到中间；没换就滑回重画之前的位置（手指滑过去看别的，不被重画打断）。
+   * host = 放吊牌的那一块（.olp-tags-host）。放得下（没有横着滑）的不动。返回这一下有没有滑
+   */
+  function revealTag(host) {
+    const strip = host && typeof host.querySelector === "function" ? host.querySelector(".olp-tags") : null;
+    if (!strip) return false;
+    const memo = host.__olpTags || null, open = strip.querySelector('[data-olp-swap][aria-expanded="true"]');
+    const want = (open && open.closest(".olp-tag")) || strip.querySelector(".olp-tag.on");
+    const key = want ? (open ? "open:" : "on:") + want.getAttribute("data-olp-slot") : "";
+    let moved = false;
+    if (strip.scrollWidth > strip.clientWidth + 1) {
+      if (want && (!memo || memo.key !== key)) { strip.scrollLeft = Math.max(0, want.offsetLeft + want.offsetWidth / 2 - strip.clientWidth / 2); moved = true; }
+      else if (memo && memo.strip !== strip) { strip.scrollLeft = memo.left; moved = true; }
+    }
+    const next = { key, strip, left: strip.scrollLeft };
+    if (!memo || memo.strip !== strip) strip.addEventListener("scroll", () => { if (host.__olpTags && host.__olpTags.strip === strip) host.__olpTags.left = strip.scrollLeft; }, { passive: true });
+    host.__olpTags = next;
+    return moved;
+  }
 
   /* ---------- 3D 白卡让开浮在战场上的面板（#339 第 4 步）---------- */
   /** 这块是不是选中技能以后先收着的技能栏（hd2d-shell.js · fold / held，#362） */
@@ -705,7 +728,9 @@
      *          sub 标题后面的一小段（单机：遭遇的名字）, turnNo 回合（turnText 给了就写它：单机开打前写「准备中」）, phase { text, enemy } 我方 / 敌人行动,
      *          day / time / period 游戏时间（没有 = 不写）, weather 天气的名字, night 夜晚（天气前面加「夜 · 」）,
      *          cams [{ label, on }] 镜头按钮（新画面的那几个，没有 = 不画）, toolsOpen 「工具」下拉开着没 }
-     * 菜单按钮带 data-pause-open（pause-menu.js 接点击、画新消息的红点）
+     * 菜单按钮带 data-pause-open（pause-menu.js 接点击、画新消息的红点）。
+     * 镜头按钮后面另有一个 .olp-cam-cyc（#429）：手机竖屏上远 / 中 / 近收成它一个（online-paper.css），写这一刻是哪一段，
+     * 点一下换下一段（data-olp-cam-next = 下一段是第几个，点的照旧是新画面原来那个按钮）；电脑上藏着
      */
     function topHtml(info) {
       info = info || {};
@@ -717,8 +742,10 @@
       const phase = info.phase && info.phase.text ? `<span class="olp-meta olp-phase${info.phase.enemy ? " enemy" : ""}">${esc(info.phase.text)}</span>` : "";
       const time = info.time ? `<span class="olp-meta olp-time">${info.day ? esc(fill(T.day, info.day)) + " · " : ""}<b>${esc(info.time)}</b>${info.period ? " " + esc(info.period) : ""}</span>` : "";
       const weather = info.weather ? `<span class="olp-meta olp-weather">${info.night ? esc(T.nightPrefix) : ""}${esc(info.weather)}</span>` : "";
-      const cams = (info.cams || []).length ? `<span class="olp-cam" role="group" aria-label="${esc(P.cam.label)}">${info.cams.map((c, i) =>
-        `<button type="button" class="olp-cam-b${c.on ? " on" : ""}" data-olp-cam="${i}" aria-pressed="${c.on ? "true" : "false"}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}</button>`).join("")}</span>` : "";
+      const list = info.cams || [], at = Math.max(0, list.findIndex(c => c && c.on)), next = list.length ? (at + 1) % list.length : 0;
+      const cycle = list.length ? `<button type="button" class="olp-cam-cyc" data-olp-cam-next="${next}" aria-label="${esc(String(P.cam.next).replace("{0}", list[at].label).replace("{1}", list[next].label))}">${esc(list[at].label)}</button>` : "";
+      const cams = list.length ? `<span class="olp-cam" role="group" aria-label="${esc(P.cam.label)}">${list.map((c, i) =>
+        `<button type="button" class="olp-cam-b${c.on ? " on" : ""}" data-olp-cam="${i}" aria-pressed="${c.on ? "true" : "false"}"${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}</button>`).join("")}${cycle}</span>` : "";
       return `<div class="olp-top olp-sheet" data-paper="tapebar">` +
         `<span class="olp-title">${esc(title)}</span>` +
         (room ? `<span class="olp-room olp-stamp" title="${esc(T.roomTitle)}">${esc(room)}</span>` : "") + sub +
@@ -789,6 +816,6 @@
   }
 
   const SHARED = { dockAuto, phoneVars, themeOf, themeVars, mix, rng, roughPath, facetCount, nearest2, bucket, tileSpec, fits, tornClip, texture, grit, flush, pending, undress, toolsHtml,
-    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, coverRects, dockHeight };
+    receiptLine, receiptGroups, noteColor, readMoves, pressMove, readCam, pressCam, revealTag, coverRects, dockHeight };
   return Object.assign({ BASE, make, dress: dressWith, readOpen, writeOpen }, SHARED);
 });
