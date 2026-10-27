@@ -139,6 +139,7 @@ body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn {
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn:hover { background: color-mix(in srgb, var(--olp-card) 80%, var(--olp-ring)); }
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn small { color: var(--olp-muted); }
 body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn.danger { color: var(--olp-stamp); border-color: var(--olp-stamp); }
+@media (pointer: coarse) { body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell .g-pick-bar .g-btn { min-height: 40px; } }   /* 触屏：手指点的按钮至少 40 高（#429） */
 
 /* ---------- 天气换色不串（第 3 步）----------
  * 旧皮肤按 #g-app[data-weather] 给顶栏、技能栏、记录栏、预演框和里面的按钮 / 字换的底色、渐变、描边、呼吸发光、沙雾那一层（game.css、weather-fx.css），
@@ -172,6 +173,14 @@ body.ol-paper.g-paper #hs-bar :is(label, .hs-phase) { color: var(--olp-muted); }
 body.ol-paper.g-paper #hs-bar .hs-tag { font-size: 18px; }
 body.ol-paper.g-paper #hs-bar select { min-height: 32px; padding: 3px 6px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); }
 body.ol-paper.g-paper #hs-bar .hs-button { min-height: 32px; padding: 3px 10px; color: var(--olp-paper-ink); background: var(--olp-card); border: 1.5px solid rgba(0, 0, 0, .35); box-shadow: 1px 2px 0 rgba(0, 0, 0, .3); }
+/* 联机房主（#429，手机竖屏 / 手指点；电脑上照旧）：
+ *   · 「检定申请 · N」（check-request-ui.js · .crq-pill，平时贴在左下角，online.css）：手机上技能栏横贯屏幕底下，左下角正是「技能 ▲」——
+ *     挂到技能栏上面（--olp-dock-h：game-paper.js 量的实际高度），不再压住它
+ *   · 战斗记录抽屉切到「小队」（online.css · .ol-chat-mode 只留标签和聊天）时「收起 ▸」也留着：手机上抽屉盖满屏幕，以前切到小队就没有收起的按钮，要先切回「战斗」 */
+@media (max-width: 760px), (pointer: coarse) {
+  body.ol-paper.g-paper .crq-pill { bottom: calc(var(--olp-dock-h, 190px) + 12px); }
+  body.ol-paper.g-paper .g-app > .g-log.gp-drawer.ol-chat-mode > .gp-drawer-tab { display: block !important; }
+}
 
 /* ---------- 浮在战场上的：悬停预演只在预演时出来（挂在技能栏右上方）；评分、横幅、回合大字让开顶栏和抽屉 ---------- */
 body.ol-paper.g-paper .g-app > .pvbox { display: none; }

@@ -425,6 +425,10 @@
   .hd2d-cam-b { width: 26px; height: 24px; font-size: 13px; }
   .hd2d-zone-nav { padding: 8px 9px; font-size: 12px; }
 }
+/* 手指点（#429）：镜头按钮、中景 / 近景两边的换区箭头、技能栏 / 队伍栏的收起按钮至少 40 × 40；电脑（鼠标）上照旧 */
+@media (pointer: coarse) {
+  .hd2d-cam-b, .hd2d-zone-nav, .hd2d-toggle { min-width: 40px; min-height: 40px; }
+}
 /* 新旧画面之间的云雾转场（#261 追加，hd2d/hd2d-field.js · MIST / mistLayer）：一层铺满战场那一格，在新画面、首领横幅上面。
  * 转场一开始就铺上（还透明，挡住点击、cursor 转圈）；.in 一团团白雾从四边涌进来、合拢（--mist-in 秒，一团比一团晚一点 --d），后半段整片柔边的蒙层跟上，
  * 保证切画面的那一下看不见；.out 散开（--mist-out 秒）：各团往外飘、放大、淡掉。颜色 --mist-c（r, g, b）、最浓 --mist-o；每团的位置、大小、

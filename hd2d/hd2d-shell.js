@@ -4,7 +4,7 @@
  *   · 技能栏能收起 / 展开（「技能 ▼ / ▲」）；技能按钮照旧技能栏的样子，加上左上角的属性、右上角的攻击 / 技能角标（hd2d-ui.js · skillInner）
  *   · 唤出 / 收回武器人是单独的大按钮，和「结束回合」放在一起
  *   · 队伍栏能收起（「队伍 ◀ / ▶」）：每个人前面是主职责图标头像（主属性 → 副属性的渐变），名字右边是身上的效果（hd2d-ui.js · partyInner）
- * 收起 / 展开记在这台电脑上（localStorage，读写都包 try/catch）；没记过时手机上默认收起（同原型页）。
+ * 收起 / 展开记在这台电脑上（localStorage，读写都包 try/catch）；没记过时手机上默认收起（同原型页；手机横过来也是，#429）。
  * 只换样子不换操作：正式画面的按钮还是 game.js / online-battle.js 自己建、自己接点击 / 悬停 / 快捷键（出手流程只有原来那一份），
  * 开着新画面时它们画按钮里面的东西改用这里给的；队伍栏的单位只用投影过的（online-view.js 的白名单），坚毅生命压根不读。
  *
@@ -38,12 +38,14 @@
    *   keys      本机记住收起 / 展开的键（存 "open" / "closed"）：技能栏 dock、队伍栏 party；原型页和正式画面同一个键（同一台电脑一个习惯）
    *   labels    收起 / 展开按钮上的字（照原型页：技能栏往下收、队伍栏往左收）
    *   phone     这么窄算手机：没记过时技能栏、队伍栏默认收起（同原型页）
+   *   short     手机横过来（#429）：这么矮、又是手指点的，没记过时也默认收起（横屏 915×412 时队伍栏和技能栏把战场整个盖住）；电脑上的矮窗口（鼠标）不算
    *   text      面板上的字：队伍栏的胶带标签、技能栏上面那一行「行动中」、两个按钮读屏念的
    *   summonKey 唤出 / 收回武器人的快捷键（单机 game.js 本来就是 Q；联机的新外壳也用它） */
   const SHELL = {
     keys: { dock: "backfire-hd2d-dock", party: "backfire-hd2d-party" },
     labels: { dock: { open: "技能 ▼", closed: "技能 ▲" }, party: { open: "队伍 ◀", closed: "队伍 ▶" } },
     phone: "(max-width: 720px)",
+    short: "(max-height: 499px) and (pointer: coarse)",
     text: { party: "我方队伍", acting: "行动中", dock: "收起 / 展开技能栏", partyBtn: "收起 / 展开队伍栏" },
     summonKey: "Q"
   };
@@ -79,9 +81,9 @@
     } catch (e) { return false; }
   }
   const labelOf = (name, open) => ((SHELL.labels[name] || {})[open ? "open" : "closed"]) || "";
-  /** 这台电脑现在算不算手机（没有 matchMedia 就不算） */
+  /** 这台电脑现在算不算手机（没有 matchMedia 就不算）：窄屏，或者横过来的手机（矮、手指点：SHELL.short，#429） */
   function phoneNow() {
-    try { return !!(root.matchMedia && root.matchMedia(SHELL.phone).matches); } catch (e) { return false; }
+    try { return !!(root.matchMedia && (root.matchMedia(SHELL.phone).matches || root.matchMedia(SHELL.short).matches)); } catch (e) { return false; }
   }
   function storageOf() { try { return root.localStorage || null; } catch (e) { return null; } }
 
@@ -228,7 +230,7 @@
    *   · 最上面加一行：「技能 ▼ / ▲」收起 / 展开（收起 = .g-hud 加 dock-closed，技能那一排藏起来，提示栏照旧）、谁在行动
    *   · 旧的队伍栏（.party：game.js / online-battle.js 照旧往里画、照旧接点击，Tab 照旧按它切人）原样挪进一块浮在战场左下角的面板，
    *     面板上「队伍 ◀ / ▶」收起
-   * o = { storage（默认本机的 localStorage）, phone（窄屏：没记过时默认收起；默认按 SHELL.phone 量）}。已经换上了 / 没有 .g-hud：返回 false
+   * o = { storage（默认本机的 localStorage）, phone（手机：没记过时默认收起；默认按 SHELL.phone / SHELL.short 量，phoneNow）}。已经换上了 / 没有 .g-hud：返回 false
    */
   function attach(hud, o) {
     if (!hud || hud[STATE] || !hud.ownerDocument) return false;

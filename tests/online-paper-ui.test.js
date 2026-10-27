@@ -517,6 +517,29 @@ test("手机竖屏（390 × 844）：顶栏放得下；队伍只显示头像；�
   assert.deepEqual(o.errors, []);
 });
 
+test("#429 安卓手机（412×915 竖屏、915×412 横屏，只用点按）：联机玩家胶带上的「菜单」也完整在屏幕里、点得开（和单机同一套顶栏：放不下时左边的字省略，右边那一组不缩）；竖屏上远 / 中 / 近收成一个按钮；页面不横向溢出", { timeout: 90000 }, async t => {
+  for (const viewport of [{ width: 412, height: 915 }, { width: 915, height: 412 }]) {
+    const o = await paperPage(t, { context: { viewport, isMobile: true, hasTouch: true } }); if (!o) return; const { page } = o;
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await asPlayer(page);
+    await page.waitForSelector("#online-paper .olp-top", { state: "visible" });
+    // 字多一点：第 12 回合、夜里、沙暴
+    await page.evaluate(() => { const s = fixture.view.packet.state; s.turnNo = 12; s.weather = "sand"; s.light = "night"; fixture.emit(); });
+    await page.waitForFunction(() => /第 12 回合/.test(document.querySelector("#online-paper .olp-top").textContent));
+    await settle(page);
+    const m = await page.evaluate(() => {
+      const el = document.querySelector("#online-paper [data-pause-open]"), r = el.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      const shown = s => [...document.querySelectorAll("#online-paper " + s)].filter(b => b.getClientRects().length > 0).length;
+      return { inside: r.left >= 0 && r.right <= innerWidth && r.top >= 0, hit: !!at && el.contains(at), side: document.documentElement.scrollWidth <= innerWidth, three: shown(".olp-cam-b"), cyc: shown(".olp-cam-cyc") };
+    });
+    const phone = viewport.width < 760;
+    assert.deepEqual(m, { inside: true, hit: true, side: true, three: phone ? 0 : 3, cyc: phone ? 1 : 0 }, viewport.width + "×" + viewport.height);
+    await page.tap("#online-paper [data-pause-open]");
+    await page.waitForSelector("#pm-overlay", { state: "visible" });
+    assert.deepEqual(o.errors, []);
+  }
+});
+
 /* ---------- 审查（10/22）之后补的：收据、技能吊牌、收起的队伍、竖标签、纸板按钮、便利贴、手机上不挤 ---------- */
 /** 两个颜色（rgb(…) / #rrggbb）的对比度（WCAG） */
 const contrast = (a, b) => {
