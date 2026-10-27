@@ -8942,7 +8942,8 @@ function triggerMagnetShield(broken) {
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
   const dest = magnetPushDest(c.zone);
   notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
-  visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
+  // 川川开着友伤（enemies.js · friendlyFireHit，#437）：同区川川以外的队友也被推开、各受 1 击破（照常结算，不计分数）
+  visibleEnemies(c.zone, c).filter(u => !ignoresAoe(u)).forEach(u => {
     if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
@@ -14449,7 +14450,8 @@ function runSkillInner(id, optRun) {
         const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
         if (c === "red") {
           lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
-          visibleEnemies(z).forEach(u => applyInstantEffect(u, "melt", lines));
+          // 龙哥开着友伤（enemies.js · friendlyFireHit，#437）：同区龙哥以外的队友也熔融；红弹治疗照旧给同区全部友方
+          visibleEnemies(z, a).forEach(u => applyInstantEffect(u, "melt", lines));
           allies.forEach(u => longgeBulletHeal("red", u, lines));
         } else {
           lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");

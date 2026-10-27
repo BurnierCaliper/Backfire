@@ -5,7 +5,8 @@
 // hotseat-validation.js · checkTarget、hotseat-game.js（按发指令的人记开关）、online-view.js · projectState（白名单）
 // 后续（#432，作者 10/27）：对敌人用的道具开着友伤也能对队友用（items.js · itemEnemyOk）；自动挑目标的（无人机、炮台、护送对象的还击……）
 // 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件后面
-// 后续（三）（#437，作者 10/27）：音爆 / 探测模式触发的碎渣机炮开着友伤时在敌人和队友里随机挑（app.js · scrapAutoTarget）。测试在文件最后
+// 后续（三）（#437，作者 10/27）：音爆 / 探测模式触发的碎渣机炮开着友伤时在敌人和队友里随机挑（app.js · scrapAutoTarget）；
+// 川川「磁场护盾」、龙哥热能轰击（红弹）也打到范围里施放者以外的队友。测试在文件最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -712,4 +713,51 @@ test("碎渣机炮（#437）：音爆 / 探测模式触发时，Ecmo 开着友�
     assert.ok(foes > 0, `${how}：开着友伤时敌人也挑得到（${foes} / 12）`);
     assert.ok(allies > 0, `${how}：队友也挑得到（${allies} / 12）`);
   }
+});
+
+test("范围效果（#437）：川川「磁场护盾」——川川开着友伤时同区她以外的队友也被推开、各受 1 击破（照常结算、不计分数），川川自己不挨；关着照旧只推敌人", () => {
+  const run = on => {
+    const { c, S, heroes: [chuan, kolt, helu], foe } = field(["chuan", "kolt", "helu"], "FF437-MAGNET");
+    if (on) ffOn(c);
+    const def0 = new Map([chuan, kolt, helu, foe].map(u => [u.id, u.def]));
+    const parts0 = plain(S.battleScore.parts);
+    kolt.shieldFromChuan = true;   // 柯尔特身上川川给的护盾被打破（三区直排的 1 区只和 2 区相邻：推向 2 区）
+    c.triggerMagnetShield(kolt);
+    const brk = u => def0.get(u.id) - u.def;
+    return { S, chuan, kolt, helu, foe, brk, parts0 };
+  };
+  const off = run(false);
+  assert.equal(Number(off.foe.zone), 2, "关着：敌人照旧被推开");
+  assert.equal(off.brk(off.foe), 1, "敌人受 1 击破");
+  for (const u of [off.kolt, off.helu]) {
+    assert.equal(Number(u.zone), 1, `关着：${u.name} 不动`);
+    assert.equal(off.brk(u), 0, `关着：${u.name} 不受击破`);
+  }
+  const on = run(true);
+  assert.equal(Number(on.foe.zone), 2, "开着：敌人照旧被推开");
+  assert.equal(on.brk(on.foe), 1);
+  for (const u of [on.kolt, on.helu]) {   // 护盾被打破的柯尔特自己也在同区：一样被推
+    assert.equal(Number(u.zone), 2, `开着：同区的队友 ${u.name} 也被推开`);
+    assert.equal(on.brk(u), 1, `${u.name} 受 1 击破`);
+  }
+  assert.equal(Number(on.chuan.zone), 1, "川川自己不被推");
+  assert.equal(on.brk(on.chuan), 0, "也不受击破");
+  assert.deepEqual(plain(on.S.battleScore.parts), on.parts0, "不计分数");
+  assert.ok(!on.S.battleScore.hurt, "不丢「无伤」奖励");
+});
+
+test("范围效果（#437）：龙哥热能轰击（霰弹枪 · 红弹）——龙哥开着友伤时同区他以外的队友也熔融（红弹治疗照旧给同区友方），龙哥自己不熔融；关着照旧只熔融敌人", () => {
+  const run = on => {
+    const { c, heroes: [lg, kolt, helu], foe } = field(["longge", "kolt", "helu"], "FF437-HEAT");
+    if (on) ffOn(c);
+    lg.level = 11;
+    Object.assign(lg.resources, { trigger: true, ammo: ["red", "blue", "blue"], seen: [true, true, true], known: 3 });   // 扳机解锁，下一发是红弹
+    leaveHp(kolt, 1);   // 柯尔特掉了血：看红弹治疗还给不给
+    const hp0 = hp(c, kolt);
+    c.Commands.dispatch({ type: "skill", actor: lg.id, skill: "longge_heat", target: foe.id, picks: { mode: "gun", target: foe.id } });
+    const melt = u => !!(u.instant && u.instant.melt);
+    return { foe: melt(foe), longge: melt(lg), kolt: melt(kolt), helu: melt(helu), healed: hp(c, kolt) > hp0 };
+  };
+  assert.deepEqual(run(false), { foe: true, longge: false, kolt: false, helu: false, healed: true }, "关着：只熔融敌人，同区友方照旧按红弹治疗");
+  assert.deepEqual(run(true), { foe: true, longge: false, kolt: true, helu: true, healed: true }, "开着：同区龙哥以外的队友也熔融，红弹治疗照旧；龙哥自己不熔融");
 });
