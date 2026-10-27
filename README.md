@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机大战场包体：克制表 / 单位按差量发，一次行动不再重复发整包**（#340 第 9 条；online-wire.js · `matchupDelta`（新）/ `applyMatchupDelta`（新）/ `unitsDelta`；online-game.js · `settled`（新）/ `dirty`（新）；测试 tests/online-packet-budget.test.js（新）、tests/online-packet-budget.helper.js（新）、tests/online-wire-matchup.test.js）
+  - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，`act()` 收尾的 `checkEnd()`（`battle.checkSolo` 的 broadcast）也会再发，按真实流程一次行动每名玩家收 4 个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步每名玩家合计约 110 KB，超过 51,200 B 上限。
+  - **现在**：克制表只发和上一包相比变了的单位和去掉的单位 id（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`；不发单位顺序，玩家端只按 id 取）；`state.units` 按 id 发差量（`unitsDelta`）；`execute` 末尾只在中间又有新变化时才 publish。一次行动每名玩家收 2 个结算包：`onActionSettled` 那包带演出带子，`act()` 收尾之后那包不带带子、带着收尾时的真实变化（热座自动选人改的 `GAME.actorId` 影响克制表顶层、战斗结束的结果），所以不能压掉。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家两包合计约 10–14 KB。玩家端收到格式不对的 `matchupDelta`（去掉不存在的单位、带 `order`、和 `matchupUnchanged` 同时出现）一律拒收、去要 resync。
+  - **没改的**：小队聊天仍整份带最近 300 条（第 8 条另修，见 PR #393）；长休 / 角色资料差量；包的投影与权限；收尾那一包没有合并进第一包（要合并得按投影内容比较，留给以后）。
+  - **测试**：tests/online-packet-budget.test.js（新）：夹具按真的 `act()` 走（结算时 `GAME.tape` 是数组，结算完再派发 `battle.checkSolo`），一次行动最多两包、只有一包带演出带子；大战场四类行动每名玩家合计 < 51,200 B，第二包起真的用上 `matchupDelta` 和 `unitsDelta`。在没改的代码上失败（4 包、约 110 KB）。tests/online-wire-matchup.test.js 加 `matchupDelta` / `unitsDelta` 往返、增删单位、顶层和单位一起变、`{ value }` 条目、没有基线报错、resync 一律整份、格式不对的包拒收（最后这条在这次审查修改前的代码上失败）。
 - **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets`（新） / `teamChat`（新）；online-view.js · `hideWallets`（新）/ `projectView` 聊天投影；测试 tests/online-wallet-privacy.test.js（新））
   - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱（商人、工匠、义体）时带「钱包剩 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
   - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付。转进 / 转出队伍公账时整段括号一起去掉（公账余额这句也不写了；公账本来就公开，别处照样看得到）。队伍公账的「现有 N」**只在卖东西那一句**（`进队伍公账（现有 N）`）还留着；其它进 / 出公账的说明不再带余额。「进 X 的钱包（现有 N）」只有主持人分钱（`trpgPurseSplit`）会写，它不经小队聊天，`hideWallets` 里那条只是预防。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。房间检查点里这次修复之前存下的旧聊天（最多 300 条）在 `online-view.js` · `projectView` 投影时也会过同一套 `hideWallets`，读档后队友看不到余额。
