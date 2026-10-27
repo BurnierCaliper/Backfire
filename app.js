@@ -1867,6 +1867,7 @@ function beginRound(notes) {
     convertUnstableInHv(u, notes);
     // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）
     if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
     if (u.self === "burn") {
       notes.push(...tickSelfBurn(u, true));
     }
@@ -3401,6 +3402,7 @@ function convertUnstableInHv(u, notes) {
     u.stunned = true;
     if (notes) notes.push(`${u.name} 在高压场地：不稳直接转为晕眩。`);
     if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
   }
 }
 
@@ -3505,11 +3507,13 @@ function rasUnstableHit(target, res, notes) {
     target.upOnShp = false;
     target.dying = false;
     target.dead = true;
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
     notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
   } else if (!target.dying) {
     target.dying = true;
     noteKnockdown(target);   // 战场数据：倒地次数
     if (typeof clearStunOnDown === "function") clearStunOnDown(target);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
     notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
   }
 }
@@ -5117,6 +5121,8 @@ function applyCombat(target, result, attacker) {
       if (c.def <= 0) {
         c.stunned = true;
         notes.push(imbalanceLine(c));
+        if (typeof endSelfOnStun === "function") endSelfOnStun(c, notes);
+        if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(c, notes);
         queueAssistAttack(null, c);
       }
     }
@@ -5184,6 +5190,7 @@ function applyCombat(target, result, attacker) {
   }
   // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）。攻击者被猛击反震打进失衡的，在 dealTo 结算完这一击后结束
   if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
   if (typeof raceAfterHurt === "function") raceAfterHurt(target, result, attacker, notes);   // 易怒蛮牛（enemies.js）
@@ -6870,6 +6877,7 @@ function applyKnockdown(unit, notes, opt) {
       unit.dead = true;
       unit.upOnShp = false;
       unit.dying = false;
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       notes.push(`${unit.name} 起身中，${opt.cause ? opt.cause + "打光了坚毅生命" : "坚毅生命耗尽"}，死亡。`);
       return "dead";
     }
@@ -6877,6 +6885,7 @@ function applyKnockdown(unit, notes, opt) {
     if (exhaustTierOf(unit) >= 3) {
       unit.dead = true;
       unit.dying = false;
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       notes.push(`${unit.name} 力竭 3：被击倒后立刻死亡。`);
       return "dead";
     }
@@ -6885,6 +6894,7 @@ function applyKnockdown(unit, notes, opt) {
     unit.dying = true;
     noteKnockdown(unit);   // 战场数据：倒地次数
     clearStunOnDown(unit);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
     return "dying";
@@ -7517,6 +7527,11 @@ function resetBattleFlags(u) {
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
   u.rallyAtk = 0;
+  u.rallyBreak = 0;
+  u.rallyBlock = 0;
+  u.rallyHeal = false;
+  u.rallyMove = false;
+  delete u.rallyBuff;
   u.highEnergy = 0;
   u.highFrom = null;
   u._imbalanceLock = false;
@@ -7529,6 +7544,7 @@ function resetBattleFlags(u) {
   u.instant = {};
   const r = u.resources = u.resources || {};
   delete r.rallyDr;   // 全队集结的坦克减伤只在那一场有效
+  delete r.rallyOn;   // 施放者标记：晕眩 / 濒死时全体增益一起结束
   r.stance = "draw";
   r.smashOnce = true;
   r.smashNext = false;
@@ -7858,6 +7874,44 @@ function triggerOneStatus(t, src, key) {
 
 // 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
 const RALLY_BUFF = { atk: 15 };
+
+/** 清掉一名队员身上的全队集结增益（施放者晕眩 / 濒死时对所有拿到加成的队员调用） */
+function clearRallyBuff(u, lines) {
+  if (!u || !u.rallyBuff) return;
+  const p = u.rallyBuff;
+  if (p === "直伤") {
+    const n = Number(u.rallyAtk) || 0;
+    if (n) u.atk = (u.atk || 0) - n;
+    u.rallyAtk = 0;
+  } else if (p === "异常") {
+    u.bonus = Math.max(0, (u.bonus || 0) - 1);
+  } else if (p === "击破") {
+    u.rallyBreak = 0;
+  } else if (p === "坦克") {
+    if (u.resources) delete u.resources.rallyDr;
+  } else if (p === "护卫") {
+    u.rallyBlock = 0;
+  } else if (p === "生存") {
+    u.rallyHeal = false;
+  } else if (p === "环境手") {
+    if (state.weatherLock && /集结锁定$/.test(String(state.weatherLock))) state.weatherLock = null;
+  } else if (p === "控场") {
+    u.rallyMove = false;
+  }
+  delete u.rallyBuff;
+  if (lines) lines.push(`${u.name} 的全队集结增益结束。`);
+}
+
+/** 施放者晕眩或濒死（或直接死亡）时：全体队员的集结增益一起结束（主人确认：看施放者，不是每个拿到加成的人） */
+function endRallyIfCasterDown(u, notes) {
+  if (!u || !u.resources || !u.resources.rallyOn) return false;
+  if (!(u.stunned || u.dying || u.dead)) return false;
+  u.resources.rallyOn = false;
+  const lines = notes || [];
+  fieldUnits().filter(x => x && x.isPlayer).forEach(x => clearRallyBuff(x, lines));
+  lines.push(`全队集结结束：施放者${u.dying || u.dead ? "濒死" : "晕眩"}。`);
+  return true;
+}
 
 function applyRallyBuff(u, lines) {
   if (!u || !u.roles) return;
@@ -8643,6 +8697,7 @@ function dealToInner(attacker, target, opt) {
   if (typeof ratfolkAfterHit === "function") ratfolkAfterHit(attacker, target, res, flags, extra, { dist, wasDown: wasDownForRat, wasStunned: wasStunnedT });
   // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
   if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
+  if (attacker && attacker !== target && typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(attacker, extra);
   if ((res.total || 0) > 0 && layersBeforeHit) {
     // 只认敌人、只认这一击之前还有血、这一击之后归零（或被移除）的那一层；已经碎掉的层不会被后来的攻击反复记录
     const now = target.layers || [];
@@ -10809,6 +10864,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     // 飞行单位被击破：和攻击打空架势一样强制击落，扣 20% 最大生命（engine.js · resolveAttack 的击落）
     if (before > 0) knockdownByBreak(sink, notes);
     if (typeof endSelfOnStun === "function" && !opt.keepSelf) endSelfOnStun(sink, notes);   // keepSelf：猛击反震，留给 dealTo 结算完这一击再结束
+    if (typeof endRallyIfCasterDown === "function" && !opt.keepSelf) endRallyIfCasterDown(sink, notes);
     queueAssistAttack(opt.by || null, sink);
     if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
@@ -10855,6 +10911,7 @@ function applyUnstable(u, notes) {
       u.stunned = true;
       if (notes) { notes.push(`${u.name} 叠加两个不稳：转为晕眩。`); notes.push(imbalanceLine(u)); }
       if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);   // 晕眩后自我效果结束
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
       queueAssistAttack(null, u);
     }
     return false;
@@ -10867,6 +10924,7 @@ function applyUnstable(u, notes) {
 function maybeUnstableTrip(u, notes, by) {
   if (!u || u.stunned || u.dead || u.noPosture) return;
   if (u.statuses && u.statuses.sturdy) return;   // 坚挺：剩 1 架势也站得住
+  if (u.resources && u.resources.divertGuard) return;   // 扭矩自保模式：和不稳面对坚挺一样（主人确认）
   if (!u.statuses || !u.statuses.unstable) return;
   if ((Number(u.def) || 0) > 1) return;
   u.stunned = true;
@@ -10875,6 +10933,7 @@ function maybeUnstableTrip(u, notes, by) {
   notes.push(`${u.name} 不稳：架势只剩 ${u.def}，直接失衡。`);
   notes.push(imbalanceLine(u));
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
   queueAssistAttack(by || null, u);
 }
 

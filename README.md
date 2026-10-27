@@ -368,6 +368,14 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **全队集结：施放者晕眩 / 濒死时全体增益结束；扭矩自保模式不受不稳影响**（主人 夕夏 确认；接 #340 第 16 / 17 条；app.js · `clearRallyBuff` / `endRallyIfCasterDown`（新）/ `applyRallyBuff` / `maybeUnstableTrip` / `resetBattleFlags` / `applyKnockdown`；engine.js 坦克减伤不再在自己失衡时清掉；skill-text.js / party.js 文案改成「施放者」；测试 tests/rally-caster-end.test.js（新）、tests/divert-guard.test.js）
+  - **以前**：全队集结·直伤的 ATK +15（及其他职责增益）整场有效——施放者晕眩恢复、濒死起身后加成还在；「自己」是施放者还是每个拿到加成的队员没写清楚（README 写着待主人确认）。扭矩自保模式架势可留 1，但不稳仍会在架势剩 1 时直接失衡（坚挺不会）。
+  - **现在**：
+    - 全队集结增益**持续到施放者晕眩或濒死**：施放者挂 `resources.rallyOn`；他晕眩 / 陷入濒死 / 死亡时 `endRallyIfCasterDown` 清掉所有队员的集结增益（直伤扣回 `rallyAtk` 与 `u.atk`，坦克清 `rallyDr`，异常附赠 −1，击破 / 护卫 / 生存 / 控场 / 环境手集结锁定一并清）。队员自己晕眩或濒死**不会**因此丢掉集结（坦克减伤也不再在自己失衡时被 engine.js 删掉）。
+    - 扭矩自保模式（`resources.divertGuard`）在 `maybeUnstableTrip` 里和坚挺一样：架势剩 ≤1 且身上有不稳时**不**直接失衡。
+  - **没改的**：集结怎么施放、各职责加成数值、`RALLY_BUFF`、自保模式的架势保底与 25% 减伤、坚挺本身、不稳叠两次转晕眩。
+  - **测试**：tests/rally-caster-end.test.js（新，走真实 `role_rally` / `dealBreak` / `applyKnockdown`）：施放者晕眩 → 全队直伤 +15 没了；队员自己晕眩 → 加成还在；施放者濒死 → 加成没了。tests/divert-guard.test.js 加 1 条：自保模式下架势 1 + 不稳，不进失衡（没有自保会失衡）。
+
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
   - **现在**：敌人被打倒时（`removeEnemyFromField` 当下，不等 3 秒后移出场）就登记到 `state.goneFoes`，同一个 id 只留一份，每场开战清空；掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。打倒后 3 秒内点了预演 / 看了行动预测 / 撤销（state 被换成拷贝），或者连续战斗换了区域，都照样算得到。图鉴里飞碟触灵的「击倒」只算本体那一次，机械足不另算（以前打掉 5 条腿会多记）。
@@ -383,13 +391,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **强化注射剂 / 全队集结·直伤的 ATK 加成算进出手**（修复 #340 第 16 条；party.js · `effectiveAtk`；app.js · `applyRallyBuff` / `resetBattleFlags`、`RALLY_BUFF`（新配置）；测试 tests/atk-buffs.test.js（新））
   - **以前**：强化注射剂写「ATK +3 至战斗结束」，代码给 `u.atk` 和 `u.itemAtkBonus` 各加 3；全队集结·直伤给 `u.atk` +15。出手按 `effectiveAtk` 算，它不读这两个字段，伤害一点不加（坚毅照扣）。
   - **现在**：`effectiveAtk` 加上 `itemAtkBonus` 和 `rallyAtk`。直伤集结另记 `rallyAtk`（数值放在配置 `RALLY_BUFF = { atk: 15 }`，`rallyAtk`、`u.atk` 和日志「ATK +15」都读它；下一场 `resetBattleFlags` 清掉）；注射剂本来就写了 `itemAtkBonus`，现在真的进伤害。
-  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结的「持续到自己晕眩或濒死」**没做**：现在 +15 整场有效，濒死起身、晕眩恢复后都还在；「自己」是指施放者还是每个拿到加成的队员没写清楚，待主人确认后再补。
+  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结「持续到施放者晕眩或濒死」后来已补（见本节最上面一条）。
   - **测试**：tests/atk-buffs.test.js（新，3 条；前 2 条在没改的代码上都失败，第 3 条在加配置前失败）：打针后 `effectiveAtk` +3；直伤集结后 +15，下一场清零；把 `RALLY_BUFF.atk` 改成 7，出手和日志都跟着变成 +7。
 
 - **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
   - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
   - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
-  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。不稳照旧——自保模式下架势剩 1 时仍会因不稳直接失衡（坚挺不会），待主人确认是否要改。
+  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。自保模式不受不稳影响后来已补（见本节最上面一条）。
   - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：走真实流程——柯尔特召唤扭矩 → 扭矩转移注意（进自保模式）→ 敌人攻击扭矩（架势 4、这一击 11 击破）→ 架势 1、不进失衡、不算击破，日志有「自保模式：架势保留 1」。
 
 - **巨人招式图鉴文字改成「atk + 等级颗 d8」，和实际骰数一致**（修复 #340 第 19 条；bestiary.js · `BESTIARY_TEXT.giant`；测试 tests/giant-bestiary.test.js（新））

@@ -1028,8 +1028,7 @@ function resolveAttack(ctx) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
       pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
-    // 集结持续到自己失衡或濒死
-    if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
+    // 全队集结（坦克）：减伤持续到施放者晕眩 / 濒死（app.js · endRallyIfCasterDown 清掉），不是自己失衡就没
     if (t.resources && t.resources.rallyDr && !noDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
     if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
       pct += 0.5;
