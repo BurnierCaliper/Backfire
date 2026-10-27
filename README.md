@@ -264,10 +264,11 @@ RUN.start({ seed: "ABC123" });   // 不给种子就自动生成一个
 
 ### 2. 随机遭遇（代币制）
 
-每场战斗 4 枚代币：**杂兵 1 枚，精英 2 枚**。所以一场是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。空投蜂群三只一组，整组记 1 枚。
+每场战斗 4 枚代币：**杂兵 1 枚，精英 2 枚**。所以一场是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。空投蜂群、下水道清扫机三只一组，整组记 1 枚。
 
 - **5%** 概率这场变成 5 枚代币
 - **5%** 概率无视阵营限制，变成混战
+- **上场单位上限** `ENCOUNTER_UNIT_CAP = 12`（对齐 4 枚 × 每组 3 只）：抽的时候若再来一组会超过 12 只，就改抽装得下的杂兵 / 精英；能花完代币时尽量花完，实在装不下才停。带车退代币后的补抽也走同一上限（剩余名额还要减去车本身占的 1）。首领的固定随从不走这套。
 
 敌人数据写在 `ENEMY_INFO`：阵营、出没区域、代币、成组数量。
 
@@ -368,16 +369,16 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **全队集结：施放者晕眩 / 濒死 / 死亡时全体增益结束；扭矩自保模式不受不稳影响**（主人 夕夏 确认；接 #340 第 16 / 17 条；审查修正 PR #418；app.js · `clearRallyBuff` / `endRallyIfCasterDown`（新）/ `applyRallyBuff` / `beginRound` 全体兜底 / `maybeUnstableTrip` / `resetBattleFlags` / `applyKnockdown` / 牵挂；items.js · `itemStun`；enemies.js · `crushSkullDown` 等；engine.js 坦克减伤不再在自己失衡时清掉；matchup.js 克制表与结算一致；skill-text.js / party.js 文案改成「施放者」；测试 tests/rally-caster-end.test.js、tests/divert-guard.test.js、tests/matchup.test.js）
-  - **以前**：全队集结·直伤的 ATK +15（及其他职责增益）整场有效——施放者晕眩恢复、濒死起身后加成还在；「自己」是施放者还是每个拿到加成的队员没写清楚。扭矩自保模式架势可留 1，但不稳仍会在架势剩 1 时直接失衡（坚挺不会）。坦克集结在坦克**自己**失衡 / 濒死后就丢掉减伤（engine 删 `rallyDr`、克制表也不显示），两边一致，但和其他职责「整场有效」也不统一。
-  - **现在**：
-    - 全队集结增益**持续到施放者晕眩或濒死 / 死亡**：施放者挂 `resources.rallyOn`（`role_rally` 原先就会设；本条开始真正读取）；他晕眩 / 陷入濒死 / 死亡时 `endRallyIfCasterDown` 清掉所有队员的集结增益。中央钩子：直接写 `stunned` / `dying` / `dead` 的路径都调它（牵挂代扛、闪光震撼弹、捏碎颅骨、强盗擒拿、牛反击、流沙漩涡、GM 强制失衡、载具殉爆等）；`beginRound` 在 `offField` 过滤**之前**对全体（含已死）再兜一次，避免施放者直接死亡后整场都不结束。自我效果仍按原规则在 `beginRound`（及原先已有的几条路径）结束，本 PR **不**顺手改成当场结束。
-    - 异常集结清增益时**不再** `u.bonus − 1`（`refreshEconomy` 每回合重算附赠、不看集结，扣回去会吃掉队员正常附赠）。直伤清增益时**不再**盲目 `u.atk − rallyAtk`：召唤/收回武器、解除机甲会从头重算 `u.atk`，再减会扣到基础以下（实测柯尔特 −9）；改为先清零 `rallyAtk`，再按 `effectiveAtk` 重算（与 `enterMecha` 相同，幂等）。Q1（+1 附赠是否集结期间每回合都有）与 Q2（两人集结叠加 vs 刷新、倒下是否只清自己那份）待主人确认；当前 = 只施放当回合 +1、单 `rallyOn`、倒下全清。
-    - 扭矩自保模式（`resources.divertGuard`）在 `maybeUnstableTrip` 里和坚挺一样：架势剩 ≤1 且身上有不稳时**不**直接失衡。
-    - 克制表 `matchup.js` 与 `engine.js` 一致：坦克自己失衡 / 濒死时仍显示并结算「全队集结 −15%」（只看施放者是否倒下）。载具驾驶员标记没攒满的那次失衡（`stunShrugged`）不算真晕眩，集结不结束。
-  - **没改的**：集结怎么施放、各职责加成数值、`RALLY_BUFF`、自保模式的架势保底与 25% 减伤、坚挺本身、不稳叠两次转晕眩。失衡路径上的自我效果结束时机（仍多半等到 `beginRound`）。Q1 / Q2 规则未改（见上）。
-  - **测试**：tests/rally-caster-end.test.js（施放者晕眩 / 濒死 / 死亡 / 牵挂 / 闪光弹 / 捏碎颅骨 / 异常附赠不误扣 / 直伤清增益不把 atk 扣到基础以下 / 坦克队员自己失衡仍减伤 / 载具 shrug；在 main 上约 11 条失败）；tests/divert-guard.test.js 加 2 条（自保 + 不稳不失衡，及没有自保的对照）；tests/matchup.test.js 加失衡坦克仍显示集结减伤。
-
+- **全队集结：施放者晕眩 / 濒死 / 死亡时全体增益结束；扭矩自保模式不受不稳影响**（主人 夕夏 确认；接 #340 第 16 / 17 条；审查修正 PR #418；app.js · `clearRallyBuff` / `endRallyIfCasterDown` / `applyRallyBuff` / `beginRound` 全体兜底 / `maybeUnstableTrip`；items.js · `itemStun`；enemies.js · `crushSkullDown` 等；engine.js / matchup.js 坦克减伤一致；测试 tests/rally-caster-end.test.js、tests/divert-guard.test.js、tests/matchup.test.js）
+  - **以前**：集结增益整场有效（施放者晕眩 / 濒死起身后还在）；「自己」指谁没写清。扭矩自保仍会被不稳直接失衡。坦克集结在坦克**自己**失衡 / 濒死后丢掉减伤（engine 删 `rallyDr`、克制表也不显示）。
+  - **现在**：增益持续到**施放者**晕眩 / 濒死 / 死亡（`rallyOn` + `endRallyIfCasterDown`；牵挂、闪光弹、捏碎颅骨、擒拿、牛反击、流沙、GM、载具殉爆等全路径；`beginRound` 在 `offField` 前对全体含已死再兜）。异常清增益不再 `bonus − 1`；直伤清增益先清 `rallyAtk` 再按 `effectiveAtk` 重算（避免召唤武器后 atk 扣到基础以下）。自保与坚挺一样不受不稳直失衡。坦克自己失衡仍保留 / 显示 −15%。自我效果结束时机**不**顺手改成当场结束（另见 issue #430）。Q1 / Q2 待主人确认；当前 = +1 只施放当回合、单 `rallyOn`、倒下全清。
+  - **没改的**：施放方式与数值、`RALLY_BUFF`、自保架势保底与 25% 减伤、坚挺、不稳叠两次转晕眩；自我效果多半仍等到 `beginRound`。
+  - **测试**：tests/rally-caster-end.test.js（晕眩 / 濒死 / 死亡 / 牵挂 / 闪光弹 / 捏碎颅骨 / 异常附赠不误扣 / 直伤 atk 下限 / 坦克自己失衡仍减伤 / 载具 shrug；main 上约 11 条失败）；divert-guard +2；matchup 失衡坦克仍显示减伤。
+- **随机遭遇上场单位上限 12（`ENCOUNTER_UNIT_CAP`）**：五代币的成组杂兵不再摆出 15 只；带车补抽也受同一上限（run.js · `ENCOUNTER_UNIT_CAP`、`groupBounds`、`canSpendTokens`、`pickByTokens`；vehicle.js · `vehiclePayTokens`；测试 tests/encounter-unit-cap.test.js）
+  - **以前**：按代币抽满即可。空投蜂群 / 下水道清扫机 `group: 3`，4 枚代币 = 12 只，5 枚（5% 概率）= 15 只，战场挤满。车占代币退掉精英后补抽时，`pickByTokens` 只按新抽的那几只算上限，不管场上已有的敌人和车，补出成组杂兵后敌人+车会超过 12。
+  - **现在**：抽的时候累计单位数不超过 `ENCOUNTER_UNIT_CAP = 12`（和 4 枚代币的上限对齐）。若下一抽会超，就只从装得下的选项里再抽（别的杂兵 / 精英）；能花完代币时优先留下还能花完的组合，实在没有装得下的就停。三方混战每一边仍是 3 枚代币，单边最多 9 只，上限约束不到，行为不变；4 枚代币的分布在本来就 ≤12 时也不变。**车占代币补抽**：剩余名额 = `ENCOUNTER_UNIT_CAP − 已有敌人单位 − 1`；**车本身算 1 个单位**（配置物；有驾驶员时和驾驶员合并成一张卡，补抽仍按「车已在场」预留），车上的乘员就是 `enemies` 里的那些人，不另加。
+  - **没改的**：代币数（4 / 5% 变 5）、混战 5%、三方混战概率与两边各 3 枚、首领固定随从（`rollBossEncounter` 不走 `pickByTokens` 的单位上限）、车出现率 / 占几枚代币 / 退谁补谁的规则本身、阵营 / 区域池。
+  - **测试**：tests/encounter-unit-cap.test.js（新，在没改的代码上失败）：常量 12；只抽清扫机 5 枚停在 12 只；下水道维护 / 外城区安保池与 `rollEncounter` 多种子 5 枚代币场上 ≤12 且代币花完；4 枚清扫机仍是 12 只；三方混战单边 ≤9、代币花完；带车补抽（场上已有近上限的敌人时退精英补抽）敌人+车 ≤12，镇压队多种子带车遭遇同理；README 代币制章节与规则改动记录置顶有本条。
 - **联机大战场包体：克制表 / 单位按差量发，一次行动不再重复发整包**（#340 第 9 条；online-wire.js · `matchupDelta`（新）/ `applyMatchupDelta`（新）/ `unitsDelta`；online-game.js · `settled`（新）/ `dirty`（新）；测试 tests/online-packet-budget.test.js（新）、tests/online-packet-budget.helper.js（新）、tests/online-wire-matchup.test.js）
   - **以前**：克制表只要有一点变化就整张重发；`state.units` 每包整份带着；`onActionSettled` 发过一包后，`execute` 末尾再 `publish` 一次，`act()` 收尾的 `checkEnd()`（`battle.checkSolo` 的 broadcast）也会再发，按真实流程一次行动每名玩家收 4 个完整包。4 人 + 14 只敌人（两只首领挂机制）移动一步每名玩家合计约 110 KB，超过 51,200 B 上限。
   - **现在**：克制表只发和上一包相比变了的单位和去掉的单位 id（`matchupDelta`，比整张短才用；完全没变仍走 `matchupUnchanged`；不发单位顺序，玩家端只按 id 取）；`state.units` 按 id 发差量（`unitsDelta`）；`execute` 末尾只在中间又有新变化时才 publish。一次行动每名玩家收 2 个结算包：`onActionSettled` 那包带演出带子，`act()` 收尾之后那包不带带子、带着收尾时的真实变化（热座自动选人改的 `GAME.actorId` 影响克制表顶层、战斗结束的结果），所以不能压掉。同一场景移动 / 单体 / 失衡 / 范围攻击，每名玩家两包合计约 10–14 KB。玩家端收到格式不对的 `matchupDelta`（去掉不存在的单位、带 `order`、和 `matchupUnchanged` 同时出现）一律拒收、去要 resync。
