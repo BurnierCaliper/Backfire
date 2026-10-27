@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **联机跑团：私人钱包余额不再经小队聊天泄露给队友**（#340 第 11 条；hotseat-game.js · `hideWallets` / `teamChat`；测试 tests/online-wallet-privacy.test.js）
+  - **以前**：转账说明带「瑞比 剩 1200，Helumica 现有 5712」；由自己钱包付钱时带「钱包剩 N」；钱进某人钱包时带「现有 N」。这些都写进所有人都看得到的小队聊天，违反「队友看不到余额」。
+  - **现在**：写进小队聊天前去掉私人钱包余额，只留谁转给谁多少、由谁付、进谁的钱包。队伍公账的「现有 N」照旧。规则层（`trpgPurseTransfer` 等）返回给本人 / 主持人的说明仍带余额。
+  - **没改的**：钱包本身的读写、谁能转、谁能看余额的权限。
+  - **测试**：tests/online-wallet-privacy.test.js：`hideWallets` 去掉三种余额写法、公账不动；转账后聊天文本无余额；源码走 `teamChat`。在没改的代码上失败。
+
 - **战场数据加上「倒地次数」：每个我方单位这场倒地（陷入濒死）了几次**（#398；app.js · `battleStat`（多一项 `downs`）、`noteKnockdown`（新）、`applyKnockdown`、`rasUnstableHit`；enemies.js · `crushSkullDown`；game.js · `STAT_COLS` / `statRows` / `STAT_SUM_KEYS`；测试 tests/battle-stats-downs.test.js（新）、tests/battle-stats-downs-ui.test.js（新））
   - **以前**：战场数据记伤害、击破、承伤、击杀、治疗、协助攻击 / 协助格挡、格挡规避、打出失衡、减伤减免、得分，看不出谁这场倒下过、倒了几次。
   - **现在**：我方角色每陷入一次濒死（`dying` 从没有变成有），这个人的战场数据「倒地次数」+1。会让人陷入濒死的三个地方都记：

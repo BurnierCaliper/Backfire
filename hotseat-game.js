@@ -19,6 +19,13 @@
   const heroes = () => (state.units || []).filter(u => u.isPlayer && !u.weaponOf && !u.isPartner && livePartyCards().some(c => c.kit === u.kit && !c.weaponOf));
   const gm = () => (config.players.find(p => p.gm) || config.players[0]).id;
   const fail = text => { throw new Error(text); };
+  // #340 第 11 条：小队聊天所有人都看得到，私人钱包余额只能本人和主持人看（README「队友……看不到余额」）。
+  // 写进聊天的说明去掉「剩 N / 现有 N / 钱包剩 N」，只留谁付、付多少
+  const hideWallets = text => String(text)
+    .replace(/（([^（）]*?) 剩 \d+，([^（）]*?) 现有 \d+）/g, "")
+    .replace(/（由 ([^（），]+?) 付，钱包剩 \d+）/g, "（由 $1 付）")
+    .replace(/进 ([^（）]+?) 的钱包（现有 \d+）/g, "进 $1 的钱包");
+  const teamChat = (sender, text) => session.chat(sender, hideWallets(text));
   function notify() { for (const fn of [...listeners]) fn(); }
   function refresh() { notify(); if (root.GAME && document.getElementById("g-party")) GAME.refresh(); }
   function hostOnly(id) { if (id !== gm()) fail("只有房主可以执行此操作"); }
@@ -329,7 +336,7 @@
       const notes = trpgMerchantBuy(open.id, c.key, c.qty, payer || null);
       if (!trpgMerchantOk(notes)) fail(notes[0] || "买不了");
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "🛒 " + notes.join(" "));
+      teamChat(sender, "🛒 " + notes.join(" "));
       return { notes };
     },
     // 跑团诊所（trpg.js · trpgCyberRequest）：玩家只能给自己操控的角色申请义体改造，主持人在「诊所」页同意后才生效
@@ -353,7 +360,7 @@
       let notes;
       try { notes = false ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "🦾 " + notes.join(" "));
+      teamChat(sender, "🦾 " + notes.join(" "));
       return { notes };
     },
     cyberwareRemove: c => {
@@ -364,7 +371,7 @@
       let notes;
       try { notes = true ? trpgCyberwareRemove(kit, id) : trpgCyberwareInstall(kit, id); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "🦾 " + notes.join(" "));
+      teamChat(sender, "🦾 " + notes.join(" "));
       return { notes };
     },
     // 跑团工匠 / 工坊（trpg.js · trpgSmithUpgrade / trpgWorkshopCraft / trpgWorkshopSalvage）：主持人开了才能用；只能动自己操控的角色，加工费从这名角色的钱包出；主持人哪个都能动
@@ -373,7 +380,7 @@
       let notes;
       try { notes = trpgSmithUpgrade(kit, String(c.weapon || ""), String(c.mode || "")); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "🔨 " + notes.join(" "));
+      teamChat(sender, "🔨 " + notes.join(" "));
       return { notes };
     },
     workshopCraft: c => {
@@ -381,7 +388,7 @@
       let notes;
       try { notes = trpgWorkshopCraft(kit, String(c.item || ""), c.helper ? String(c.helper) : null); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "⚙ " + notes.join(" "));
+      teamChat(sender, "⚙ " + notes.join(" "));
       return { notes };
     },
     workshopSalvage: c => {
@@ -389,7 +396,7 @@
       let notes;
       try { notes = trpgWorkshopSalvage(kit, String(c.item || "")); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "⚙ " + notes.join(" "));
+      teamChat(sender, "⚙ " + notes.join(" "));
       return { notes };
     },
     // 跑团卖东西 / 回购（shop-sell.js）：要有开着的店；玩家只能以自己操控的角色卖（钱进队伍公账）、回购（从自己钱包付）；主持人哪个都能
@@ -400,7 +407,7 @@
       let out;
       try { out = trpgShopSell(kit || null, String(c.id || ""), c.qty, c.owner); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "💰 " + out.msg);
+      teamChat(sender, "💰 " + out.msg);
       return out;
     },
     shopBuyback: c => {
@@ -410,7 +417,7 @@
       let out;
       try { out = trpgShopBuyback(kit || null, String(c.token || "")); } catch (e) { fail(e.message); }
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "💰 " + out.msg);
+      teamChat(sender, "💰 " + out.msg);
       return out;
     },
     shopRedeem: c => {
@@ -420,7 +427,7 @@
       const notes = trpgMerchantRedeem(open.id, c.item);
       if (!trpgMerchantOk(notes)) fail(notes[0] || "换不了");
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "🎟 " + notes.join(" "));
+      teamChat(sender, "🎟 " + notes.join(" "));
       return { notes };
     },
     purseTransfer: c => {
@@ -433,7 +440,7 @@
       const notes = trpgPurseTransfer(from, to, c.amount);
       if (!/^.+ 转给 /.test(notes[0] || "")) fail(notes[0] || "转不了");
       if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
-      session.chat(sender, "💰 " + notes[0]);
+      teamChat(sender, "💰 " + notes[0]);
       return { notes };
     },
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
