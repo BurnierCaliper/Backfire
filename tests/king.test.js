@@ -82,17 +82,69 @@ test("哗变：强盗头子 ≤25% 且同区没有其他狂徒 → 挟持王；�
   assert.ok(dealt >= 1 && dealt <= 6, "反水伤害 " + dealt);
 });
 
-test("王在被挟持时被杀：强盗头子继位，atk / def 翻倍，狂徒不再反水", () => {
-  const { c, king, boss, knife, hammer, kill } = field();
+test("王在被挟持时被杀：强盗头子继位，atk / personalAtk / def 翻倍，狂徒不再反水", () => {
+  const { c, st, king, boss, knife, hammer, kill } = field();
   kill(knife); hammer.zone = 2;
   boss.layers.forEach(l => { l.current = 1; });
   c.mutinyTick([]);
   assert.equal(king.resources.hostage, true);
-  const atk = boss.atk, def = boss.def;
+  const atk = boss.atk, pa = boss.personalAtk, def = boss.def, ea = c.effectiveAtk(boss, st.units);
+  assert.equal(atk, pa, "生成时 atk = personalAtk");
+  assert.equal(ea, atk);
   kill(king);
   assert.equal(boss.atk, atk * 2);
+  assert.equal(boss.personalAtk, pa * 2, "personalAtk 同步翻倍（出手用这个）");
+  assert.equal(c.effectiveAtk(boss, st.units), ea * 2, "effectiveAtk 跟翻倍后的 personalAtk");
   assert.equal(boss.def, def * 2);
+  assert.ok(boss.resources.promoted);
   assert.ok(!c.enemySkillList(hammer).some(s => s.id === "en_thug_mutiny"));
+});
+
+test("继位后能量匕首按翻倍 personalAtk 结算（以前只翻 atk，日志仍写底值）", () => {
+  const { c, st, king, boss, knife, hammer, kolt, helu, kill } = field();
+  kill(knife); hammer.zone = 2;
+  boss.layers.forEach(l => { l.current = 1; });
+  c.mutinyTick([]);
+  const pa = boss.personalAtk;
+  kill(king);
+  kill(hammer);   // 免得失衡后锤狂徒协助，把伤害叠高
+  assert.equal(boss.personalAtk, pa * 2);
+
+  // 关掉柯尔特「过度自信」−25% 受伤；清空架势；Helumica 走开以免协助格挡打断结算
+  kolt.prideMaxHp = Infinity;
+  kolt.def = 0; kolt.defMax = 0; kolt.bonus = 0;
+  kolt.layers.forEach(l => { l.current = 999; l.max = 999; });
+  kolt.zone = 1; boss.zone = 1; helu.zone = 2;
+  st.combatPhase = "enemy";
+  boss.ap = 1;
+  st.attackerId = boss.id;
+  st.targetId = kolt.id;
+  const hp0 = c.totalHp(kolt);
+  const text = c.withLogSink(() => {
+    c.runSkill("en_boss_near");
+    c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: () => null });
+  });
+  const dealt = hp0 - c.totalHp(kolt);
+  const doubled = pa * 2;
+  assert.match(String(text), new RegExp(`ATK ${doubled}`), "日志基础伤害应写翻倍 ATK");
+  // 骰子 1d6 ∈ [1,6]：伤害在 doubled+[1,6]；未修时是底值 pa
+  assert.ok(dealt >= doubled + 1 && dealt <= doubled + 6,
+    `伤害应在 ${doubled}+[1,6]，实际 ${dealt}（未修时约 ${pa}+骰）`);
+});
+
+test("继位时若有 ivBase，atk / personalAtk 基线一并翻倍（与 _raceAdd / absorbSandsInto 一致）", () => {
+  const { c, st, king, boss, knife, hammer, kill } = field();
+  kill(knife); hammer.zone = 2;
+  boss.layers.forEach(l => { l.current = 1; });
+  c.mutinyTick([]);
+  boss.ivBase = { atk: boss.atk, personalAtk: boss.personalAtk, max: (boss.layers || []).map(l => Number(l.max) || 0) };
+  const baseAtk = boss.ivBase.atk, basePa = boss.ivBase.personalAtk;
+  kill(king);
+  assert.equal(boss.ivBase.atk, baseAtk * 2);
+  assert.equal(boss.ivBase.personalAtk, basePa * 2);
+  assert.equal(boss.atk, baseAtk * 2);
+  assert.equal(boss.personalAtk, basePa * 2);
+  assert.equal(c.effectiveAtk(boss, st.units), basePa * 2);
 });
 
 /* ---------- 回防命令：废铁墙（照川川的铁壁做） ---------- */

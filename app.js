@@ -5395,7 +5395,14 @@ function settleEnemyKill(target, notes) {
   if (target.kit === "outlaw_king" && target.resources && target.resources.hostage) {
     const boss = findKit("bandit_boss", state.units);
     if (boss && boss.resources && boss.resources.mutinied && !boss.dead) {
+      // 出手走 effectiveAtk → personalAtk（party.js · baseEffectiveAtk），只翻 atk 卡面涨了伤害仍是继位前的底值
+      // 各自 ×2，不要用已翻倍的 atk 回写 personalAtk（避免和已有差值叠算）
       boss.atk = (Number(boss.atk) || 0) * 2;
+      if (boss.personalAtk != null) boss.personalAtk = (Number(boss.personalAtk) || 0) * 2;
+      if (boss.ivBase) {
+        boss.ivBase.atk = (Number(boss.ivBase.atk) || 0) * 2;
+        if (boss.ivBase.personalAtk != null) boss.ivBase.personalAtk = (Number(boss.ivBase.personalAtk) || 0) * 2;
+      }
       boss.def = (Number(boss.def) || 0) * 2;
       boss.defMax = (Number(boss.defMax) || boss.def) * 2;
       boss.resources.promoted = true;

@@ -368,6 +368,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **亡命之王被挟持时被杀：强盗头子继位同步翻倍 `personalAtk`（及 `ivBase`）**（app.js · `settleEnemyKill`；测试 tests/king.test.js）
+  - **以前**：继位只执行 `boss.atk *= 2`（以及 def / defMax）。卡面 ATK 翻倍，但出手走 `effectiveAtk` → `baseEffectiveAtk`（party.js），敌人只读 `personalAtk + weaponAtk`，**不读 `unit.atk`**。`personalAtk` 仍停在继位前的底值，能量匕首 / 自制火枪每一击仍按旧 ATK 算（与巨型活沙吸收只加 `atk` 未同步 `personalAtk` 同类）。
+  - **现在**：`atk` 与 `personalAtk` 各自 ×2（有 `ivBase` 时基线一并 ×2，和 `_raceAdd` / `absorbSandsInto` 一致）。不用已翻倍的 `atk` 回写 `personalAtk`，避免叠算。继位后 `effectiveAtk` = 翻倍后的 `personalAtk`，技能伤害跟卡面一致。
+  - **没改的**：哗变触发 / 解除、挟持易伤、狂徒反水、def / defMax 翻倍、继位改名与 `promoted` 标记、技能表与 AI。
+  - **测试**：tests/king.test.js「继位」一条改为同时断言 `personalAtk` / `effectiveAtk` 翻倍；新增「能量匕首按翻倍 personalAtk 结算」「有 ivBase 时基线一并翻倍」（在没改的代码上失败）。
+
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。
   - **现在**：敌人被打倒时（`removeEnemyFromField` 当下，不等 3 秒后移出场）就登记到 `state.goneFoes`，同一个 id 只留一份，每场开战清空；掉落和图鉴读「场上的 + 已移出场的」（`battleFoesSeen`）。打倒后 3 秒内点了预演 / 看了行动预测 / 撤销（state 被换成拷贝），或者连续战斗换了区域，都照样算得到。图鉴里飞碟触灵的「击倒」只算本体那一次，机械足不另算（以前打掉 5 条腿会多记）。
