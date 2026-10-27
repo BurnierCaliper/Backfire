@@ -151,6 +151,19 @@ test("move and stand-up menus use actual legal zones and preserve the existing f
   assert.equal(f.actor.upOnShp, false);
 });
 
+test("#340 第 10 条：特殊棋盘上玩家端移动菜单列的是真实相邻的区；直连被危墙挡住就不列（新）", () => {
+  const f = fixture();
+  const opts = (board, zone, prep) => {
+    f.c.applyBoard(board); f.actor.zone = zone; if (prep) prep();
+    return unchanged(f, () => f.menu({ skill: "__move" })).choices.options.map(o => o.value).sort();
+  };
+  assert.deepEqual(opts("square4", 3), [1, 4]);
+  assert.deepEqual(opts("cross5", 5), [3]);
+  assert.deepEqual(opts("square4", 3, () => {
+    const k = f.c.gapKey(1, 3); f.state.gaps[k] = Object.assign({}, f.state.gaps[k], { type: "wall", hp: 10 });
+  }), [4], "1-3 是危墙：菜单不能列出 1 区（以前绕 3→4→2→1 放行）");
+});
+
 test("combat items use host inventory and typed ally/zone/self choices without private hints", () => {
   const f = fixture(); for (const item of ["medkit", "bomb_e", "stim"]) f.c.bagAdd(item, 1);
   const items = unchanged(f, () => f.menu({ skill: "__item" }));

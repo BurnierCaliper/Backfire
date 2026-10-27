@@ -199,6 +199,11 @@
     // 沙珊瑚缠绕、流沙下陷 2 层起：自己动不了，原因写给玩家
     if (actor.entangled) fail(`${actor.name} 被${actor.entangled.name}缠住了，动不了：先砍断触须（打珊瑚）。`, "invalid_move");
     if (typeof sinkStuck === "function" && sinkStuck(actor)) fail(`${actor.name} 下陷 ${sinkOf(actor)} 层，自己走不出流沙：要等下陷降下来，或者让同伴拉出来、被位移带出去。`, "invalid_move");
+    // 走一步只走直连的那条连接：危墙 / 关着的机关门挡住就走不了（和 app.js · canCross 一致）。
+    // zoneReachable 会沿别的连接绕路，2×2 方形有环，绕得过去也不算（#340 第 10 条）
+    const gap = (state.gaps || {})[gapKey(from, dest)] || {};
+    if (gap.type === "wall") fail("危墙挡住去路。先打掉墙。", "invalid_move");
+    if (gap.type === "door" && !gap.open) fail("机关门关着。先用按钮/拉杆打开。", "invalid_move");
     const why = zoneReachable(actor, dest, true);
     if (why) fail(why, "invalid_move");
     // 酸液地面离开 / 越过空隙的行动点由 assertBase 按 moveBaseCost / voidMoveCost 检查

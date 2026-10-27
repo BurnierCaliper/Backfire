@@ -368,11 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js）
+- **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js、tests/online-actions.test.js）
   - **以前**：联机校验移动只看「目的区编号 − 所在区编号」是不是 1，和单机的 `zonesAdjacent`（按棋盘连接）不一致。四区方形 3→1（相连）被拒、3→2（对角）放行；五区十字玩家起点 5 只连着 3，编号差 2，联机完全走不动。
-  - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。
-  - **没改的**：单机移动、位移技能、深渊 / 缠绕 / 下陷等其它移动限制。
-  - **测试**：tests/hotseat-validation.test.js 加「特殊棋盘上的移动按真实相邻校验」：square4 的 3→1 / 3→4 放行、3→2 / 1→4 拒绝；cross5 的 5→3 / 3→1 放行、4→5 / 3→9 拒绝。在没改的代码上失败。
+  - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。走一步只看直连的那条连接：直连是危墙或关着的机关门就拒绝（和单机 `canCross` 一致）——2×2 方形四条连接围成环，以前 `zoneReachable` 会绕另一边放行（例如 1-3 是危墙时 3→1 绕 3→4→2→1），执行时单位却不动；玩家端移动菜单也跟着不再列出这种区。
+  - **没改的**：单机移动、位移技能、深渊 / 缠绕 / 下陷等其它移动限制；主持人移动敌人（`gm-commands.js` 同样是 `zonesAdjacent` + `zoneReachable`）和主持人面板「移动到 N 区」按钮（`online-gm-ui.js` 仍按区号差 1 列）不在这一条里，另行处理。
+  - **测试**：tests/hotseat-validation.test.js 加「特殊棋盘上的移动按真实相邻校验」：square4 的 3→1 / 3→4 放行、3→2 / 1→4 拒绝；cross5 的 5→3 / 3→1 放行、4→5 / 3→9 拒绝（拒绝的都只认「相邻」那句，并检查校验没改 state）；「2×2 方形上直连被危墙 / 关着的机关门挡住」（新）：1-3 危墙 / 关门时 3→1 拒绝，3-4 危墙时 3→4 拒绝，门开着放行。tests/online-actions.test.js 加玩家端移动菜单（新）：square4 站 3 区是 [1, 4]、cross5 站 5 区是 [3]、1-3 危墙时只剩 [4]。都在没改的代码上失败。
 
 - **先打倒、已移出场的敌人照样算进战后掉落和图鉴**（修复 #340 第 18 条；app.js · `battleFoesSeen`（新）/ `removeEnemyFromField` / `startCombat` / `trpgEnemyMaterials`；rogue.js · `rollMaterialDrops`；bestiary.js · `bestiaryRecordBattle`；测试 tests/removed-foe-drops.test.js（新））
   - **以前**：被打倒的敌人 3 秒后从 `state.units` 移出场，战后掉落（单局 `rollMaterialDrops`、跑团 `trpgEnemyMaterials`）和图鉴只读 `state.units`，先打倒的那只不掉材料、图鉴里也「没遇到过、击倒 0」。

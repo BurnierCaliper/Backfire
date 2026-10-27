@@ -232,18 +232,35 @@ test("被沙珊瑚缠住、流沙下陷 2 层以上：校验就拒绝并写出�
 
 test("#340 第 10 条：特殊棋盘上的移动按真实相邻校验，不再看区编号差 1", () => {
   const f = fixture();
-  const move = (board, from, dest) => {
-    f.c.applyBoard(board); f.a.zone = from;
-    return () => f.validate({ type: "move", actor: f.a.id, dest });
-  };
+  const at = (board, from) => { f.c.applyBoard(board); f.a.zone = from; };
+  const ok = (board, from, dest) => { at(board, from); assert.doesNotThrow(() => f.validate({ type: "move", actor: f.a.id, dest }), board + " " + from + "→" + dest); };
+  const no = (board, from, dest) => { at(board, from); untouched(f, { type: "move", actor: f.a.id, dest }, /相邻/); };
   // 四区方形：1-2、1-3、2-4、3-4 相邻；3→2 编号差 1 却是对角
-  assert.doesNotThrow(move("square4", 3, 1));
-  assert.doesNotThrow(move("square4", 3, 4));
-  assert.throws(move("square4", 3, 2), /相邻|区/);
-  assert.throws(move("square4", 1, 4), /相邻|区/);
+  ok("square4", 3, 1);
+  ok("square4", 3, 4);
+  no("square4", 3, 2);
+  no("square4", 1, 4);
   // 五区十字：3 在中心，5→3、3→1 相邻（编号差 2），4→5 不相邻（编号差 1）
-  assert.doesNotThrow(move("cross5", 5, 3));
-  assert.doesNotThrow(move("cross5", 3, 1));
-  assert.throws(move("cross5", 4, 5), /相邻|区/);
-  assert.throws(move("cross5", 3, 9), /相邻|区/);
+  ok("cross5", 5, 3);
+  ok("cross5", 3, 1);
+  no("cross5", 4, 5);
+  no("cross5", 3, 9);
+});
+
+test("#340 第 10 条：2×2 方形上直连被危墙 / 关着的机关门挡住，不能绕另一边放行（新）", () => {
+  const f = fixture();
+  f.c.applyBoard("square4"); f.a.zone = 3;
+  const key = f.c.gapKey(1, 3);
+  f.s.gaps[key] = Object.assign({}, f.s.gaps[key], { type: "wall", hp: 10 });
+  untouched(f, { type: "move", actor: f.a.id, dest: 1 }, /危墙/);
+  f.s.gaps[key] = Object.assign({}, f.s.gaps[key], { type: "door", open: false });
+  untouched(f, { type: "move", actor: f.a.id, dest: 1 }, /机关门/);
+  // 3-4 是危墙时走 4 区也一样（以前绕 3→1→2→4 放行，执行时单位不动）
+  f.s.gaps[key] = Object.assign({}, f.s.gaps[key], { type: "open" });
+  const k34 = f.c.gapKey(3, 4);
+  f.s.gaps[k34] = Object.assign({}, f.s.gaps[k34], { type: "wall", hp: 10 });
+  untouched(f, { type: "move", actor: f.a.id, dest: 4 }, /危墙/);
+  // 门开着就能走
+  f.s.gaps[k34] = Object.assign({}, f.s.gaps[k34], { type: "door", open: true });
+  assert.doesNotThrow(() => f.validate({ type: "move", actor: f.a.id, dest: 4 }));
 });
