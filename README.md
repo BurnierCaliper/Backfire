@@ -368,6 +368,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **起身中高能自爆阈值按坚毅、不按临时护盾**（#340 相关；app.js · `currentLifeForHigh`；测试 tests/shield-overcharge-threshold.test.js（新））
+  - **以前**：`currentLifeForHigh` 先把 layers（含临时护盾）加总，只有合计为 0 才退回坚毅。起身中（`upOnShp`）身上还有护盾时，拿来和高能比的是护盾——例如坚毅 37、护盾 6，高能 20 就满足「生命 < 高能」而自爆，`applyKnockdown({ lethal: true })` 直接扣光坚毅致死。
+  - **现在**：起身中一律用当前坚毅和高能比（上例 37 与 20，不爆）；护盾仍照常挡伤害，只是不参与高能 / 微光蓄能的「血量」比较。
+  - **没改的**：非起身中仍看血量层（含护盾）；玩家界面仍不显示剩余坚毅。
+  - **测试**：tests/shield-overcharge-threshold.test.js（新）：起身中坚毅 37 + 护盾 6、高能 20 时 `currentLifeForHigh` 为 37、`checkHighBoom` 不自爆；高能 40（> 37）仍自爆。在没改的代码上第一条失败（返回 6）。
 - **联机特殊棋盘移动改用真实相邻：十字 / 2×2 不再按「区编号差 1」判断**（#340 第 10 条；hotseat-validation.js · `checkMove`；测试 tests/hotseat-validation.test.js、tests/online-actions.test.js）
   - **以前**：联机校验移动只看「目的区编号 − 所在区编号」是不是 1，和单机的 `zonesAdjacent`（按棋盘连接）不一致。四区方形 3→1（相连）被拒、3→2（对角）放行；五区十字玩家起点 5 只连着 3，编号差 2，联机完全走不动。
   - **现在**：联机和单机一样，用 `boardZoneIds` 认区、用 `zonesAdjacent` 认相邻；不是棋盘上的区、原地不动都拒绝。没有棋盘函数的极简环境才退回「区号差 1」。走一步只看直连的那条连接：直连是危墙或关着的机关门就拒绝（和单机 `canCross` 一致）——2×2 方形四条连接围成环，以前 `zoneReachable` 会绕另一边放行（例如 1-3 是危墙时 3→1 绕 3→4→2→1），执行时单位却不动；玩家端移动菜单也跟着不再列出这种区。

@@ -548,9 +548,11 @@ function addHighEnergy(unit, reason) {
 }
 
 function currentLifeForHigh(unit) {
+  // 起身中高能阈值一律比坚毅：临时护盾在 layers 里，以前会把阈值压成护盾值（例如坚毅 37 + 护盾 6 → 阈值 20），
+  // 高能一到 20 就走 applyKnockdown(lethal) 直接打死。作者定：起身中只看坚毅（#340 / fix/shield-overcharge-threshold）。
+  if (unit && unit.upOnShp) return Math.max(0, Number(unit.shp) || 0);
   let hp = 0;
   (unit.layers || []).forEach(l => { hp += Math.max(0, Number(l.current) || 0); });
-  if (hp <= 0 && unit.upOnShp) hp = Math.max(0, Number(unit.shp) || 0);
   return hp;
 }
 
