@@ -2460,14 +2460,16 @@ function resonanceAllies(u) {
   );
 }
 
-function pulseResonanceDamage(source, amount, element) {
+function pulseResonanceDamage(source, amount, element, opt) {
   const notes = [];
+  const grit = !!(opt && opt.grit);   // #340 第 15 条：分享的是打进坚毅的伤害（游戏版）：日志不写分享了多少
   if (!source || !source.statuses || !source.statuses.reso || source._resoBusy) return notes;
   const share = source._resoFull ? Math.floor(Number(amount) || 0) : Math.floor(Number(amount) / 2);
   if (share <= 0) return notes;
   const others = resonanceAllies(source);
   if (!others.length) return notes;
-  notes.push(`共振：${source.name} 的 ${share} 伤害分享给 ${others.map(o => o.name).join("、")}（不回传）`);
+  notes.push(grit ? `共振：${source.name} 受到的伤害分享给 ${others.map(o => o.name).join("、")}（不回传）`
+    : `共振：${source.name} 的 ${share} 伤害分享给 ${others.map(o => o.name).join("、")}（不回传）`);
   others.forEach(o => {
     o._resoBusy = true;
     // 分享的是能量伤害：带高能的照样累积高能值（applyTypedDotIn）
@@ -3447,6 +3449,8 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
     atkRange: "any"
   });
   const shieldBefore = shieldSum(unit);
+  // #340 第 15 条：这一下是不是打进坚毅，要在结算之前记下——致命的那一下结算后 upOnShp 已经清掉（engine.js · applyResultToUnit）
+  const gritHit = !!(unit && unit.isPlayer && unit.upOnShp) && shpHidden();
   // 腐坏抛射施加的腐蚀：记下这次对每种血量层造成的伤害，下一次废物利用时给柯尔特
   const rotOwner = element === "acid" && unit.rotBy && unit.statuses && unit.statuses.corr && /腐蚀/.test(String(label || "")) ? unitById(unit.rotBy) : null;
   const byType = () => (unit.layers || []).reduce((m, l) => { m[l.type] = (m[l.type] || 0) + Math.max(0, Number(l.current) || 0); return m; }, {});
@@ -3475,15 +3479,15 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
       if (lost > 0) { store[type] = (store[type] || 0) + lost; notes.push(`腐坏抛射记录：${LAYER[type] || type} ${lost}（下一次废物利用领取）。`); }
     });
   }
-  // #340 第 15 条：打进坚毅的持续伤害只写「坚毅受创」，不写实伤数字
-  notes.push(unit && unit.upOnShp && shpHidden()
-    ? label + " → 坚毅受创"
+  // #340 第 15 条：打进坚毅的持续伤害整句换成固定写法——调用方的标签里本来就写着掷骰和伤害（「灼烧2层分别掷骰 … = 7」），只换后缀不够
+  const sdKey = inferStatusDmgKey(label, element);
+  notes.push(gritHit
+    ? `${unit.name} ${STATUS_DMG_NAME[sdKey] || "持续伤害"} → 坚毅受创`
     : label + ` → 实伤 ${Math.floor(res.total || 0)}`);
   rasUnstableHit(unit, res, notes);   // 不稳态：持续伤害、场地、余波这类伤害同样倒地 / 起身后致死
   if (typeof afterDamageTaken === "function") afterDamageTaken(unit, element, res.total || 0, Math.max(0, shieldBefore - shieldSum(unit)), notes, {});
   // 聚焦只看受到的伤害属性对不对，不看来源：状态、场地、余波的伤害也推进序列
   if (!unit.dead) advanceFocusOnHit(null, unit, element, res, notes);
-  const sdKey = inferStatusDmgKey(label, element);
   if (PROC_DOT_FX[sdKey]) procFx(unit, PROC_DOT_FX[sdKey]);
   addStatusDmg(sdKey, res.total || 0);
   noteSideDamage(res.total || 0, STATUS_DMG_NAME[sdKey] || "其他", unit, !!env);
@@ -3491,7 +3495,8 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   else if (unit && !unit.isPlayer && state.actionAcc && state.actionAcc.actorIsPlayer) scoreWeatherHelp(null, unit, res, true);
   if (unit && unit.isPlayer) scoreWeatherHelp(null, unit, res, false);
   if (unit && unit.isPlayer) { const st = battleStat(unit); if (st) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0); }
-  if (unit && unit.upOnShp) {
+  // #340 第 15 条：游戏版打进坚毅只弹「坚毅受创」；主持人 / 计算器照旧（两个数字都弹）
+  if (gritHit) {
     if ((res.intended || res.total || res.shpDealt || 0) > 0) spawnShpHit(unit, element, { value: res.intended || res.total || res.shpDealt });
   } else {
     if ((res.intended || res.total || 0) > 0) spawnFloater(unit, res.intended || res.total, element);
@@ -3503,7 +3508,7 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   checkHighBoom(unit);
   if (highGain && !state._highDefer) flushHighBooms();
   // 共振分享、高压场地都按「真的受到的伤害」：没受到伤害（免疫、濒死倒地、0 伤）就不触发
-  if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element));
+  if (!unit._resoBusy) notes.push(...pulseResonanceDamage(unit, res.total || 0, element, { grit: gritHit }));
   if (!unit._hvBusy && !/高压场地/.test(String(label || ""))) {
     notes.push(...pulseHighVoltage(unit, res.total || 0));
   }
@@ -5993,19 +5998,17 @@ function shpHidden() {
   if (typeof TRPG !== "undefined" && TRPG.active) return false;
   return typeof GAME_MODE !== "undefined" && !!GAME_MODE;
 }
-/** #340 第 15 条：打进坚毅生命的伤害，玩家画面只弹「坚毅受创」，不写数字（GM / 计算器仍弹数字） */
+/** （新）#340 第 15 条：打进坚毅生命的伤害，玩家画面只弹「坚毅受创」，不写数字（GM / 计算器仍弹数字）。
+ *  游戏版照旧是一下伤害弹字（kind "dmg"：打中、受击、攻击演出都照旧），另带 grit: true——
+ *  画面看到 grit 就写「坚毅受创」不写数字，预览不把它算进伤害；联机投影（online-view.js · projectTape）把数值去掉、只留标记 */
 function spawnShpHit(unit, element, opt) {
   opt = opt || {};
-  if (!unit) return;
-  if (shpHidden()) {
-    spawnPopup(unit, { kind: "status", text: "坚毅受创", element: element || "physical", main: !!opt.main });
-  } else {
-    const v = Math.floor(Number(opt.value) || 0);
-    if (v > 0) spawnPopup(unit, {
-      kind: "dmg", value: v, element: element || "physical",
-      main: !!opt.main, adv: !!opt.adv, dis: !!opt.dis
-    });
-  }
+  if (!unit || !((Number(opt.value) || 0) > 0)) return;
+  if (!shpHidden()) { spawnFloater(unit, opt.value, element || "physical"); return; }
+  spawnPopup(unit, {
+    kind: "dmg", value: Math.floor(Number(opt.value) || 0), grit: true, element: element || "physical",
+    main: !!opt.main, adv: !!opt.adv, dis: !!opt.dis
+  });
 }
 /* 坚毅对玩家只给模糊说法（issue #52，作者定）：按坚毅占上限的比例分四档（80% 以上 / 50–80% / 20–50% / 20% 以下），
  * 每档 5 句随机抽一句（休息结算用）；角色资料这类常驻的地方用一个短词 */
@@ -8646,6 +8649,8 @@ function dealToInner(attacker, target, opt) {
     if (typeof raceNoteAttack === "function") raceNoteAttack(attacker, target);
   }
   const wasStunnedT = !!target.stunned;
+  // #340 第 15 条：这一下打进坚毅（游戏版）——结算之前记下：致命的一下、拉斯缪尔不稳态结算后 upOnShp 都清掉了
+  const gritHitT = !!(target && target.isPlayer && target.upOnShp) && shpHidden();
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
@@ -8716,7 +8721,7 @@ function dealToInner(attacker, target, opt) {
   if (extraDiceNote) extra.unshift("掷骰 " + extraDiceNote);
   gainHighFromHits(target, res, extra);
   checkHighBoom(target);
-  extra.push(...pulseResonanceDamage(target, res.total || 0, opt.element || res.element));
+  extra.push(...pulseResonanceDamage(target, res.total || 0, opt.element || res.element, { grit: gritHitT }));
   // 高压场地：每次真的受到伤害才额外电击（协助格挡成功免伤、被免疫、0 伤不触发；空手格挡成功挨一半照样触发）
   if (flags.block !== "assistOk") {
     const hits = (res.perHit && res.perHit.length) ? res.perHit : [{ dealt: res.total || 0 }];
@@ -8807,9 +8812,10 @@ function dealToInner(attacker, target, opt) {
     // 多段攻击（例：拉斯缪尔两次 0.5atk、不稳态四次）：每一段各跳一个数字，看得出判定了几次
     // #340 第 15 条：打进坚毅的伤害只弹「坚毅受创」，不弹数字
     const segs = (res.perHit || []).filter(h => (Number(h.intended) || 0) > 0);
-    if (target && target.upOnShp) {
+    // 游戏版打进坚毅：合成一个「坚毅受创」；主持人 / 计算器照旧（多段、谐波、出血各弹各的数字）
+    if (gritHitT) {
       const shown = Math.max(Number(res.intended) || 0, Number(res.total) || 0, Number(res.shpDealt) || 0);
-      if (shown > 0 || segs.length) spawnShpHit(target, ele, { value: res.intended || res.total || res.shpDealt, main: mainHit, adv: advHit, dis: disHit });
+      if (shown > 0) spawnShpHit(target, ele, { value: shown, main: mainHit, adv: advHit, dis: disHit });
     } else {
       if (segs.length > 1) segs.forEach(h => spawnPopup(target, { kind: "dmg", value: h.intended, element: ele, main: mainHit, adv: advHit, dis: disHit }));
       else if ((res.intended || res.total || 0) > 0) spawnPopup(target, { kind: "dmg", value: res.intended || res.total, element: ele, main: mainHit, adv: advHit, dis: disHit });
@@ -10692,7 +10698,10 @@ function spawnPopup(unit, spec) {
   let dur = 2.3;
   let size = 14;
   let big = false;
-  if (kind === "dmg") {
+  if (kind === "dmg" && spec.grit) {
+    // #340 第 15 条：打进坚毅（spawnShpHit）只写字，不写数字、不按数字放大
+    text = "坚毅受创";
+  } else if (kind === "dmg") {
     const dmg = Math.floor(Number(spec.value) || 0);
     if (dmg <= 0) return;
     const bh = bigHitInfo(unit.level, dmg);
@@ -11338,7 +11347,7 @@ function formatHitLines(actor, target, out, captured) {
   if (res.blocked) head += `被协助格挡挡下${hb ? `（格挡者承受 ${hb} 击破）` : ""}`;
   else {
     // #340 第 15 条：打进坚毅的伤害，战斗日志只写「坚毅受创」，不写数字
-    if (target && target.upOnShp && shpHidden() && dmg > 0) head += "坚毅受创";
+    if (shpHidden() && (Number(res.shpDealt) || 0) > 0) head += "坚毅受创";   // 按 shpDealt：致命的一下结算后 upOnShp 已清掉
     else head += `${dmg} 伤害`;
     if (br) head += `、${br} 击破`;
     if (hits.length > 1) head += `（${hits.length} 击）`;
@@ -11349,7 +11358,7 @@ function formatHitLines(actor, target, out, captured) {
   }
   L.push(head);
   // #340 第 15 条：打进坚毅时计算过程 / 掷骰会写出「= N」，玩家不能看；只留标题「坚毅受创」和后面不含数字的结算句
-  const shpHitHidden = !!(target && target.upOnShp && shpHidden() && dmg > 0);
+  const shpHitHidden = shpHidden() && (Number(res.shpDealt) || 0) > 0;
   const dice = extra.filter(s => /^\s*掷骰/.test(s));
   const others = extra.filter(s => !/^\s*掷骰/.test(s));
   if (!shpHitHidden) dice.forEach(s => {

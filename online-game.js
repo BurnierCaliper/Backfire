@@ -591,7 +591,8 @@
       const hpVisible = snap && !snap.upOnShp && !snap.dying && !snap.dead;
       const n = Math.floor(Number(ev.value) || 0);
       // #340 第 15 条：打进坚毅的伤害不写数字，战场日志只记「坚毅受创」
-      if (ev.kind === "dmg" && snap && snap.upOnShp) {
+      // grit：主机标的「打进坚毅」（致命的那一下快照里已经不是起身中了，也要认）
+      if (ev.kind === "dmg" && (ev.grit === true || snap && snap.upOnShp)) {
         if (!row.words.includes("坚毅受创")) row.words.push("坚毅受创");
       } else if (ev.kind === "dmg" && hpVisible) row.dmg += n;
       else if (ev.kind === "heal" && hpVisible) row.heal += n;

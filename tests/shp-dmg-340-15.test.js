@@ -70,20 +70,17 @@ test("第 15 条：起身中自焚只弹「坚毅受创」", () => {
   assert.ok(floats.every(t => !/\d/.test(t)), "自焚弹字无数字：" + JSON.stringify(floats));
 });
 
-test("第 15 条：联机投影把起身中的伤害变成「坚毅受创」、不给数字", () => {
-  const { c, hero } = gameField();
+test("第 15 条：联机投影把起身中的伤害标成 grit、不给数字，照旧是一下伤害（演打中）", () => {
+  const { hero } = gameField();
   const snap = [{ id: hero.id, name: hero.name, upOnShp: true, dying: false, dead: false, isPlayer: true }];
   const tape = OV.projectTape([
-    { type: "pop", unitId: hero.id, kind: "dmg", value: 7, element: "physical", main: true, snap },
-    { type: "pop", unitId: hero.id, kind: "status", text: "坚毅受创", element: "physical", snap }
+    { type: "pop", unitId: hero.id, kind: "dmg", value: 7, element: "physical", main: true, snap }
   ], { state: { units: snap } });
-  assert.equal(tape.length, 2);
-  assert.equal(tape[0].kind, "status");
-  assert.equal(tape[0].text, "坚毅受创");
+  assert.equal(tape.length, 1);
+  assert.equal(tape[0].kind, "dmg", "照旧是伤害（打中、受击、攻击演出都认 dmg）");
+  assert.equal(tape[0].grit, true);
   assert.equal(tape[0].value, undefined, "投影不能带伤害数字");
   assert.equal(tape[0].main, true, "主攻击标记还在，演出要补打击形状");
-  assert.equal(tape[1].kind, "status");
-  assert.equal(tape[1].text, "坚毅受创");
   // 普通血量上的伤害照旧给数字
   const normal = OV.projectTape([
     { type: "pop", unitId: "e1", kind: "dmg", value: 4, element: "physical",
@@ -91,6 +88,7 @@ test("第 15 条：联机投影把起身中的伤害变成「坚毅受创」、�
   ], { state: { units: [{ id: "e1", upOnShp: false }] } });
   assert.equal(normal[0].kind, "dmg");
   assert.equal(normal[0].value, 4);
+  assert.equal(normal[0].grit, undefined);
 });
 
 test("第 15 条：计算器（非游戏版）起身中仍弹数字；README 有本条且 #52 旧句已作废", () => {

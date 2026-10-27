@@ -1980,7 +1980,7 @@
             // 战斗画面的单位卡没有自带弹字框：临时挂一个
             let bubble = card.querySelector(".ol-popup");
             if (!bubble) { bubble = document.createElement("span"); bubble.className = "ol-popup ol-pop-temp"; bubble.setAttribute("aria-live", "polite"); card.appendChild(bubble); }
-            bubble.textContent = event.text || (event.value == null ? ({ dmg: "受击", heal: "恢复", break: "击破", status: "状态变化" }[event.kind] || "行动") : `${event.kind === "heal" ? "+" : event.kind === "dmg" ? "−" : ""}${event.value}`);
+            bubble.textContent = event.text || (event.kind === "dmg" && event.grit ? "坚毅受创" : event.value == null ? ({ dmg: "受击", heal: "恢复", break: "击破", status: "状态变化" }[event.kind] || "行动") : `${event.kind === "heal" ? "+" : event.kind === "dmg" ? "−" : ""}${event.value}`);
             const fk = (event.kind === "fxword" || event.kind === "status") && event.text && global.HudIcons?.keyOf(event.text);
             if (fk && event.kind === "fxword") { bubble.insertAdjacentHTML("afterbegin", global.HudIcons.badge(fk)); global.HudIcons.proc(bubble.firstElementChild); }
             if (fk) global.HudIcons.procIn(card, fk);
