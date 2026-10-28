@@ -419,7 +419,8 @@
       logPages: (state.logPages || []).length,   // 规则层的日志不进快照（战斗记录不删），只记当时有几页：撤销时把之后新开的回合页并回来（foldLogPages）
       ledger: typeof LEDGER !== "undefined" ? LEDGER.save() : null,
       actorId: G.actorId,
-      apWarnTurn: G.apWarnTurn
+      apWarnTurn: G.apWarnTurn,
+      pvpTurn: !!G.pvpTurn   // 敌人回合里玩家阵营先动的那一段（#445）：撤销回去照样在这一段
     });
     while (G.undo.length > undoLimit()) G.undo.shift();
   }
@@ -458,6 +459,7 @@
     }
     G.actorId = u.actorId;
     G.apWarnTurn = u.apWarnTurn;
+    G.pvpTurn = !!u.pvpTurn;
     G.version++;
     G.predict = null;
     return { label: u.label };
@@ -601,6 +603,18 @@
   /* ================= 4. 技能模型 ================= */
   function unitAlive(u) { return u && !u.hidden && !u.fused && !u.dead && !u._removed; }
   function players() { return state.units.filter(u => u.isPlayer && unitAlive(u)); }
+  /** 现在是不是本机操作玩家角色的时候：我方回合；或者敌人回合开始时，在敌人回合行动的玩家阵营在等本机 / 房主操作（G.pvpTurn，#445）。
+   *  没配置玩家阵营时就是「我方回合」，和以前一样 */
+  function localActing() { return !!state.combatStarted && (state.combatPhase === "player" || !!G.pvpTurn); }
+  /** u 在这个回合能不能动（enemies.js · unitTurnPhase，#445）：没配置玩家阵营时不用看（我方回合玩家角色都能动） */
+  function turnOk(u) {
+    if (!state.combatStarted || typeof pvpOn !== "function" || !pvpOn() || typeof unitTurnPhase !== "function") return true;
+    return unitTurnPhase(u) === (state.combatPhase === "enemy" ? "enemy" : "player");
+  }
+  /** 敌人回合开始时有没有在敌人回合行动的玩家角色要先动（#445）：有就先交给本机 / 房主操作（G.pvpTurn），结束后才跑敌人的 AI */
+  function pvpWaiting() {
+    return typeof phasePlayers === "function" && state.combatPhase === "enemy" && phasePlayers("enemy").some(u => !isWeaponUnit(u));
+  }
   function foes() { return state.units.filter(u => !u.isPlayer && unitAlive(u) && u.kit !== "ironwall" && !(typeof isNeutralCreature === "function" && isNeutralCreature(u)) && !(typeof playerAllied === "function" && playerAllied(u))); }   // 友军不算要打的敌人
 
   function gameSkills(u) {
@@ -657,7 +671,9 @@
   function baseBlockReason(u, sk) {
     if (G.ended) return "战斗已结束";
     if (!state.combatStarted) return "战斗尚未开始";
-    if (state.combatPhase !== "player") return "敌人回合";
+    if (!localActing()) return "敌人回合";
+    // 玩家阵营（#445）：不在这个回合行动的阵营动不了
+    if (u && !turnOk(u)) return state.combatPhase === "enemy" ? "在我方回合行动" : "在敌人回合行动";
     if (!u || u.dead) return "已阵亡";
     if (sk.id === "__stand") return typeof standUpBlocked === "function" ? standUpBlocked(u) : null;
     if (sk.id === "__item" && typeof bagList === "function" && !bagList(u).some(x => x.combat)) return "没有能在战斗中使用的道具";   // 维修工具包也算（战斗中能用）
@@ -2083,7 +2099,7 @@
         const list = target ? eligibleAssisters(breaker, target, job) : [];   // job：PvP 分两轮问（job.pvpStage，#445）
         let choice = null, hotseatExtra = {};
         if (list.length) {
-          if (hotseat() && !job.vsPlayer) {
+          if (hotseat() && !job.vsPlayer && !hostAnswers(list)) {   // 全是在敌人回合行动的玩家阵营（#445）：房主在本机选（下面的 promptAssist）
             const options = list.flatMap(h => {
               if (h.kit === "longge") {
                 const ammo = ((h.resources || {}).ammo || []).length;
@@ -2205,11 +2221,16 @@
     });
   }
 
+  /** 热座 / 联机里由房主在本机替它们回答询问（协助格挡、协助攻击）的一组单位（#445）：全是在敌人回合行动的玩家阵营——
+   *  这一步由房主操控（不在我方回合的行动顺序里，会话也不问它们的操控者） */
+  function hostAnswers(list) {
+    return !!list.length && typeof pvpOn === "function" && pvpOn() && list.every(u => u && u.isPlayer && unitTurnPhase(u) === "enemy");
+  }
   function promptBlock(job, attacker, target, helpers, walls) {
     walls = walls || [];
     // 以身作盾（feats.js）：选项带 extra.ironwall，回答时换成 "ironwall:单位"
     const wallOk = () => (typeof featIronwallDeclarers === "function" ? featIronwallDeclarers(target, attacker) : []);
-    if (hotseat()) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
+    if (hotseat() && !hostAnswers(helpers.concat(walls))) return HotseatGame.requestAsk("block", `${job.opt && job.opt.flags && job.opt.flags.execution ? `【${job.opt.flags.execName || "死刑"} ${job.opt.flags.execHit}/${job.opt.flags.execHits}】` : ""}${attacker.name} 攻击 ${target.name} · 协助格挡`,
       helpers.map(h => ({ helper: h.id, label: h.name, sub: `格挡成功率 ${finalBlockChance(h, attacker, target)}%` }))
         .concat(walls.map(h => ({ helper: h.id, label: `${h.name} 以身作盾`, sub: "专长 · 必定挡住，击破由自己承担 · 每次短休一次", extra: { ironwall: true } }))),
       () => { const list = eligibleBlockers(target, job); wallOk().forEach(w => { if (list.indexOf(w) < 0) list.push(w); }); return list; }, job)
@@ -2402,7 +2423,7 @@
   }
   /** 现在能不能预演：我方回合、没有在选目标、没有演出在播、没有弹窗、战斗没结束。能就返回当前角色 */
   function skillPvActor() {
-    if (!state.combatStarted || state.combatPhase !== "player" || G.ended || G.depth > 0 || G.arm || choiceResolve) return null;
+    if (!localActing() || G.ended || G.depth > 0 || G.arm || choiceResolve) return null;
     const a = unitById(G.actorId);
     return a && a.isPlayer && !a.hidden ? a : null;
   }
@@ -2917,7 +2938,9 @@
   }
   /** 这一刻轮到这台机器出手（#429）：开打了、我方回合、没结束；热座 / 联机房主还要轮到的那个人这台机器的操作者能动（和「结束单位行动」能不能点同一条） */
   function localTurn(hsView) {
-    if (!state.combatStarted || G.ended || state.combatPhase !== "player") return false;
+    if (!state.combatStarted || G.ended || (state.combatPhase !== "player" && !G.pvpTurn)) return false;   // 同 localActing（#445）
+    // 敌人回合里玩家阵营行动（#445）：这一步只有本机 / 房主操作
+    if (G.pvpTurn) return !hotseat() || HotseatGame.isHost();
     return !hotseat() || !localReason(unitById(HotseatGame.currentUnit()), hsView);
   }
   /** 选区域时点中某个区（点区里的空白，或者点区里的单位 / 配置物卡片都算）。处理了返回 true */
@@ -3371,14 +3394,15 @@
   }
 
   async function endTurn(ambush = false) {
-    if (G.depth > 0 || G.ended || !state.combatStarted || state.combatPhase !== "player" || choiceResolve) return;
+    if (G.depth > 0 || G.ended || !state.combatStarted || (state.combatPhase !== "player" && !G.pvpTurn) || choiceResolve) return;
+    if (G.pvpTurn) return endPvpTurn();   // 敌人回合里先动的玩家阵营行动完（#445）：接着跑敌人的 AI
     const gen = G.battleGen;
     if (hotseat() && !ambush) {
       const ack = HotseatGame.submit({ type: "endTurn" });
       if (!ack.ok) { flashHint(ack.error); return; }
       if (!ack.result.roundDone) { autoSelect(true); refreshAll(); return; }
     }
-    const leftover = !hotseat() && players().some(u => !u.dying && (u.ap || 0) > 0);
+    const leftover = !hotseat() && players().some(u => !u.dying && (u.ap || 0) > 0 && turnOk(u));   // 在敌人回合行动的玩家阵营（#445）不算
     if (leftover && G.apWarnTurn !== state.turnNo) {
       G.apWarnTurn = state.turnNo;
       const ans = await openChoice("结束回合", "你还有没有使用的行动点，确定结束回合吗？", [
@@ -3402,24 +3426,59 @@
       phaseCard("敌人回合", "enemy");
       await wait(750);
       if (abandoned(gen)) return;
-      const over = await enemyPhase();
-      if (abandoned(gen)) return;
-      if (!over && !G.ended) {
-        await wait(250);
-        if (abandoned(gen)) return;
-        await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
-        if (abandoned(gen)) return;
-        if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
-        await resolveQueues();
-        if (abandoned(gen)) return;
-        if (!checkEnd()) {
-          phaseCard(`第 ${state.turnNo} 回合`, "player");
-          if (hotseat()) HotseatGame.beginRound();
-          autoSelect(true);
-        }
+      // 在敌人回合行动的玩家阵营（PvP，#445）：同一回合里玩家角色总比非玩家单位先动——先交给本机 / 房主操作
+      // （分配给玩家、让玩家自己操控是第二步），点「结束回合」再跑敌人的 AI（endPvpTurn）
+      if (pvpWaiting()) {
+        G.pvpTurn = true;
+        phaseCard(pvpTurnLabel(), "enemy");
+        autoSelect(true);
+        return;
       }
+      await enemySide(gen);
     } finally {
       if (abandoned(gen)) return;   // 放弃了：abandonBattle 已经把 G.depth、画面收拾好，不再收尾
+      G.depth--;
+      G.version++;
+      syncBusy(true);
+      refreshAll();
+      checkEnd();
+    }
+  }
+  /** 敌人回合的后半段：敌人的 AI 行动 → 敌人回合结束 → 下一回合开始（endTurn、endPvpTurn 共用；调用的地方管 G.depth） */
+  async function enemySide(gen) {
+    const over = await enemyPhase();
+    if (abandoned(gen)) return;
+    if (!over && !G.ended) {
+      await wait(250);
+      if (abandoned(gen)) return;
+      await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
+      if (abandoned(gen)) return;
+      if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
+      await resolveQueues();
+      if (abandoned(gen)) return;
+      if (!checkEnd()) {
+        phaseCard(`第 ${state.turnNo} 回合`, "player");
+        if (hotseat()) HotseatGame.beginRound();
+        autoSelect(true);
+      }
+    }
+  }
+  /** 敌人回合里先动的玩家阵营行动完（PvP，#445）：接着跑敌人的 AI。热座 / 联机只有房主能点（这一步由房主操控它们） */
+  async function endPvpTurn() {
+    if (hotseat() && !HotseatGame.isHost()) { flashHint("只有房主可以结束这一段"); return; }
+    const gen = G.battleGen;
+    const label = pvpTurnLabel();
+    disarm(true);
+    pushUndo(`结束第 ${state.turnNo} 回合 · ${label}`);
+    G.pvpTurn = false;
+    G.pvpDone = state.turnNo;   // 这一回合的玩家阵营已经动过了：房主刷新、恢复房间后不再停下来等
+    G.depth++;
+    syncBusy();
+    try {
+      refreshTop();
+      await enemySide(gen);
+    } finally {
+      if (abandoned(gen)) return;
       G.depth--;
       G.version++;
       syncBusy(true);
@@ -3453,6 +3512,18 @@
         return false;
       }
     }
+    // 场上有两个以上玩家阵营的角色（PvP，app.js · pvpBattleOutcome，#445）：某个阵营的敌对单位全部倒地 / 死亡，这个阵营获胜；
+    // 只有「我方」一个玩家阵营时照旧（下面两行）
+    const pvp = typeof pvpBattleOutcome === "function" ? pvpBattleOutcome() : null;
+    if (pvp) {
+      if (pvp.winners.length) {
+        const names = pvp.winners.map(id => (playerFactionInfo(id) || { name: id }).name).join("、");
+        addLogPhase(`${names} 获胜：敌对阵营的单位全部倒地或死亡。`);
+        G.pvpWinners = pvp.winners.slice();
+        return finish(true);
+      }
+      return pvp.wiped ? finish(false) : false;
+    }
     if (!foes().length) return finish(true);
     if (!standing.length) return finish(false);
     return false;
@@ -3460,13 +3531,16 @@
   /** outcome：win / lose / retreat */
   function finish(win, outcome) {
     G.ended = true;
+    G.pvpTurn = false;
     let finishRoll = 0;   // 结束加分动画要多久：结算面板等它播完
     G.lastOutcome = outcome || (win ? "win" : "lose");
     disarm();
     refreshTop();
     const box = $("g-result");
     const retreated = G.lastOutcome === "retreat";
-    box.querySelector("h2").textContent = retreated ? "撤退" : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
+    // 按阵营分出胜负（#445）：写哪个阵营获胜
+    const pvpNames = win && !retreated && G.pvpWinners && G.pvpWinners.length ? G.pvpWinners.map(id => (playerFactionInfo(id) || { name: id }).name).join("、") : "";
+    box.querySelector("h2").textContent = retreated ? "撤退" : pvpNames ? `${pvpNames} 获胜` : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
     const rewards = systemCommand({ type: "battle.finish", outcome: G.lastOutcome });
@@ -3545,6 +3619,7 @@
   function abandonBattle() {
     G.battleGen++;
     G.ended = true;
+    G.pvpTurn = false;
     G.depth = 0;
     G.tape = null;
     G.skip = false;
@@ -3623,6 +3698,9 @@
     G.ended = false;
     G.endToken = null;
     G.arm = null;
+    G.pvpTurn = false;   // 敌人回合里玩家阵营先动的那一段（#445）
+    G.pvpDone = null;
+    G.pvpWinners = null;
     $("g-result").classList.remove("show");
     $("g-reopen").classList.remove("show");
     cards.forEach(c => c.wrap.remove());
@@ -3781,13 +3859,20 @@
     if (window.MatchupUI) MatchupUI.refresh();   // 冻土跟着选中单位所在区域
   }
 
+  /** 敌人回合里先动的玩家阵营叫什么（顶栏、提示用）：「乙队行动」，几个阵营用「、」连起来 */
+  function pvpTurnLabel() {
+    const ids = [...new Set((typeof phasePlayers === "function" ? phasePlayers("enemy") : []).map(u => playerFactionOf(u)))];
+    const names = ids.map(id => (playerFactionInfo(id) || { name: id }).name).filter(Boolean);
+    return (names.length ? names.join("、") : "玩家阵营") + "行动";
+  }
   function autoSelect(force) {
-    if (hotseat()) { G.actorId = HotseatGame.currentUnit(); return; }
+    // 敌人回合里玩家阵营行动（#445）：热座 / 联机也由房主在本机挑人（会话的行动顺序只管我方回合）
+    if (hotseat() && !G.pvpTurn) { G.actorId = HotseatGame.currentUnit(); return; }
     const cur = unitById(G.actorId);
-    const able = (u) => u && u.isPlayer && unitAlive(u) && !u.stunned && ((u.ap || 0) > 0 || (u.bonus || 0) > 0 || u.dying);
+    const able = (u) => u && u.isPlayer && unitAlive(u) && !u.stunned && ((u.ap || 0) > 0 || (u.bonus || 0) > 0 || u.dying) && turnOk(u);
     if (!force && able(cur)) return;
     const list = players().filter(u => !isWeaponUnit(u)).concat(players().filter(u => isWeaponUnit(u)));
-    const next = list.find(able) || list[0];
+    const next = list.find(able) || list.find(turnOk) || list[0];
     if (next) G.actorId = next.id;
   }
 
@@ -3803,7 +3888,7 @@
     if (field && window.UnitCard && UnitCard.fitTop) UnitCard.fitTop(field);   // 援军那一行变了：留给横幅的高度跟着变
     $("g-round").textContent = state.combatStarted ? `第 ${state.turnNo || 1} 回合` : "准备中";
     const ph = $("g-phasel");
-    ph.textContent = !state.combatStarted ? "等待开始" : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
+    ph.textContent = !state.combatStarted ? "等待开始" : G.pvpTurn ? pvpTurnLabel() : (state.combatPhase === "enemy" ? "敌人行动" : "我方行动");
     ph.classList.toggle("enemy", state.combatStarted && state.combatPhase === "enemy");
     const rt = $("g-retreat");
     if (rt) {
@@ -3944,6 +4029,8 @@
 
   function refreshHud() {
     hudPaints++;
+    // 同 localActing（这个函数会被测试单独抠出来跑，不叫别的新函数）：我方回合，或者敌人回合里玩家阵营先动的那一段（#445）
+    const myTurn = !!state.combatStarted && (state.combatPhase === "player" || !!G.pvpTurn);
     refreshTop();
     // 队伍（#317：按 data-id 对上，同一个人还是同一个按钮）
     const party = $("g-party");
@@ -4012,8 +4099,8 @@
       hudPlace(party, arm, pcs++);
     }
     hudTrim(party, pcs);
-    cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && state.combatPhase === "player"));
-    if (window.HD2DField) HD2DField.actor(state.combatPhase === "player" ? G.actorId : null);   // 新画面：同一个人描金边、脚下光圈
+    cards.forEach((c, id) => c.wrap.classList.toggle("is-actor", id === G.actorId && myTurn));
+    if (window.HD2DField) HD2DField.actor(myTurn ? G.actorId : null);   // 新画面：同一个人描金边、脚下光圈
 
     // 技能（技能栏重画一次 = 新局面：悬停预演的缓存作废；悬停中、触屏点了一下的预演收起）
     hudEpoch++;
@@ -4100,8 +4187,8 @@
     });
     hudTrim(box, list.length);
     G.skillsShown = list;
-    // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着
-    const acting = !!state.combatStarted && state.combatPhase === "player";
+    // 新画面：技能栏上面那一行写谁在行动（收起技能栏时也看得到）；敌人回合空着（在敌人回合行动的玩家阵营先动时照样写，#445）
+    const acting = myTurn;
     if (shell) shell.who(hudEl, !state.combatStarted || acting ? shell.whoHtml(actorView, acting) : "");
     // 新画面：选中技能以后技能栏先收起（选目标时提示栏、按钮条不再把它撑高挡住战场），演完这一下、回到选技能时再展开（#362，hd2d-shell.js · fold；
     // 收着的这一段取景照收起之前的技能栏让开，镜头不重新取景）。不用选目标的技能直接出手，不收
@@ -4128,7 +4215,7 @@
       et.disabled = G.depth > 0 || G.ended;
       etText = "开始战斗" + spaceKey;
     } else {
-      et.disabled = G.depth > 0 || G.ended || state.combatPhase !== "player";
+      et.disabled = G.depth > 0 || G.ended || !myTurn;
       etText = "结束回合" + spaceKey;
     }
     if ($("g-start")) {
@@ -4138,6 +4225,8 @@
     }
     if (window.HotseatGame && HotseatGame.isRequested()) {
       if (!state.combatStarted) { et.disabled = et.disabled || !HotseatGame.canStart(); $("g-start").disabled = $("g-start").disabled || !HotseatGame.canStart(); }
+      // 敌人回合里玩家阵营行动（#445）：只有房主能结束这一段（接着跑敌人的 AI），按钮照旧写「结束回合」
+      else if (hotseat() && G.pvpTurn) et.disabled = et.disabled || !HotseatGame.isHost();
       else if (hotseat()) { et.disabled = et.disabled || !!localReason(unitById(HotseatGame.currentUnit()), hsView); etText = "结束单位行动" + spaceKey; }
     }
     hudInner(et, etText);
@@ -4169,7 +4258,9 @@
     if (G.ended) return "";
     if (hotseat() && state.combatStarted) { const why = localReason(a); if (why) return esc(why); }
     if (!state.combatStarted) return "摆好队伍和敌人后，点「开始战斗」。回合开始效果会在此时结算。";
-    if (state.combatPhase !== "player") return "敌人行动中。点击战场可以跳过演出。";
+    if (state.combatPhase !== "player" && !G.pvpTurn) return "敌人行动中。点击战场可以跳过演出。";   // 同 localActing（#445）
+    // 敌人回合里玩家阵营行动（#445）：玩家角色比非玩家单位先动，结束以后敌人才行动
+    if (G.pvpTurn && (!a || !turnOk(a))) return `敌人回合：${esc(pvpTurnLabel())}（玩家角色先动），点「结束回合」后敌人行动。`;
     if (!a) return "选择一名角色。";
     // 触屏（#429）：没有 Tab、空格，写点哪里（按钮上的字照 refreshHud：热座 / 联机里结束的是这一个单位的行动）
     if (touchUI()) return `<b>${esc(a.name)}</b>　${esc(a.stunned ? TOUCH_TEXT.stunned : TOUCH_TEXT.pick.replace("{0}", window.HotseatGame && HotseatGame.isRequested() && hotseat() ? "结束单位行动" : "结束回合"))}`;
@@ -5749,11 +5840,12 @@
   };
   G.onlineCheckpoint = () => JSON.parse(JSON.stringify({ state, campaign: G.campaign, partyKits: G.partyKits, enemyPlan: G.enemyPlan,
     encounter: G.encounter || null, lastEncounter: G.lastEncounter, level: G.level, ended: G.ended, lastOutcome: G.lastOutcome, actorId: G.actorId,
-    enemyCursor: G.onlineEnemyCursor || {}, ledger: typeof LEDGER === "undefined" ? null : LEDGER.save() }));
+    enemyCursor: G.onlineEnemyCursor || {}, pvpTurn: !!G.pvpTurn, pvpDone: G.pvpDone || null, ledger: typeof LEDGER === "undefined" ? null : LEDGER.save() }));
   G.restoreOnline = saved => {
     for (const key of Object.keys(state)) delete state[key]; Object.assign(state, deepClone(saved.state));
     Object.assign(G, { campaign: saved.campaign, partyKits: saved.partyKits, enemyPlan: saved.enemyPlan, encounter: saved.encounter || null, lastEncounter: saved.lastEncounter,
-      level: saved.level, ended: saved.ended, lastOutcome: saved.lastOutcome, actorId: saved.actorId, onlineEnemyCursor: saved.enemyCursor || {}, depth: 0, tape: null, arm: null, undo: [] });
+      level: saved.level, ended: saved.ended, lastOutcome: saved.lastOutcome, actorId: saved.actorId, onlineEnemyCursor: saved.enemyCursor || {}, depth: 0, tape: null, arm: null, undo: [],
+      pvpTurn: !!saved.pvpTurn, pvpDone: saved.pvpDone || null });   // 敌人回合里玩家阵营先动的那一段（#445）
     if (saved.ledger) LEDGER.load(saved.ledger);
     G.version++; setView(snapAll(), false); refreshAll();
   };
@@ -5765,6 +5857,8 @@
       await resolveQueues();
       if (abandoned(gen)) return;
       if (state.combatPhase === "enemy") {
+        // 在敌人回合行动的玩家阵营还没动（#445）：先停下来等房主操作，房主点「结束回合」再跑敌人的 AI
+        if (G.pvpTurn || (G.pvpDone !== state.turnNo && pvpWaiting())) { G.pvpTurn = true; return; }
         const over = await enemyPhase();
         if (abandoned(gen)) return;
         if (!over) {

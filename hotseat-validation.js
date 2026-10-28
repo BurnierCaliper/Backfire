@@ -77,7 +77,9 @@
     // actual skill requirements and dynamic costs still come from rule helpers.
     if (game && game.ended) return "战斗已结束";
     if (!state.combatStarted) return "战斗尚未开始";
-    if (state.combatPhase !== "player") return "敌人回合";
+    // 按单位在哪个回合行动（enemies.js · unitTurnPhase，#445：在敌人回合行动的玩家阵营只在敌人回合动）；没配置阵营时照旧只在我方回合
+    const turn = typeof unitTurnPhase === "function" ? unitTurnPhase(actor) : "player";
+    if (turn !== (state.combatPhase === "enemy" ? "enemy" : "player")) return state.combatPhase === "enemy" ? "敌人回合" : "在敌人回合行动";
     if (sk.id === "__stand") return standUpBlocked(actor);
     if (actor.stunned) return "失衡中，本回合无法行动";
     if (((sk.cost.ap || 0) || (sk.cost.bonus || 0)) && typeof sinkLocked === "function" && sinkLocked(actor)) return "陷在流沙里没顶，不能行动";
@@ -233,7 +235,8 @@
     }
     if (spec.target === "ally") {
       const target = unitById(cmd.target);
-      if (!present(target) || !target.isPlayer) fail("道具需要选择在场友方", "invalid_item");
+      // 敌对玩家阵营的角色不算友方（enemies.js · allyOf，#445）
+      if (!present(target) || !(typeof allyOf === "function" ? allyOf(actor, target) : target.isPlayer)) fail("道具需要选择在场友方", "invalid_item");
     } else if (spec.target === "zone") {
       if (!Number.isInteger(cmd.dest) || cmd.dest < 1 || cmd.dest > Number(state.zoneMode)) fail("道具需要选择有效区域", "invalid_item");
       if (cmd.target != null) fail("区域道具不能夹带单位目标", "invalid_item");

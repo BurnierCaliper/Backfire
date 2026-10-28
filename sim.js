@@ -108,16 +108,25 @@ const BattleSim = (function () {
   }
 
   /* ---------- 胜负 ---------- */
+  /** 返回 "player"（我方 / 某个玩家阵营赢了）、"enemy"（全员倒地）或 null（还没分出来）。
+   *  场上有两个以上玩家阵营的角色时按阵营判（app.js · pvpBattleOutcome，#445），赢的阵营记在 lastPvpWinners */
+  let lastPvpWinners = null;
   function outcome() {
     if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
+    const pvp = typeof pvpBattleOutcome === "function" && !!pvpBattleOutcome();
     // 援军 / 连续战斗还没打完：继续（chain.js）
     if (!EnemyAI.foes().length) {
       const notes = [];
       const goOn = typeof Chain !== "undefined" && Chain.onCleared(notes);
       notes.forEach(t => appendLog(t));
-      if (!goOn) return "player";
+      if (!goOn && !pvp) return "player";
+    }
+    if (pvp) {
+      const r = pvpBattleOutcome();
+      if (r && r.winners.length) { lastPvpWinners = r.winners.slice(); return "player"; }
+      return r && r.wiped ? "enemy" : null;
     }
     if (!EnemyAI.foes().length) return null;
     if (!standing.length) return "enemy";
@@ -216,7 +225,8 @@ const BattleSim = (function () {
         return (Number(u.shp) || 0) > 0 && !u.upOnShp ? () => standUp(u) : null;
       }
       if (u.stunned) return null;
-      const foes = EnemyAI.foes().filter(f => !f.untargetable);
+      // 配置了玩家阵营（PvP，#445）：打和自己敌对的单位（敌对玩家阵营的角色也算，倒地没起身的不打）；没配置照旧打敌人
+      const foes = (typeof pvpOn === "function" && pvpOn() ? hostilesOf(u).filter(f => !(f.dying && !f.upOnShp)) : EnemyAI.foes()).filter(f => !f.untargetable);
       if (!foes.length) return null;
       let list = [];
       try { list = skillList(u) || []; } catch (e) { list = []; }
@@ -259,8 +269,10 @@ const BattleSim = (function () {
   /* ---------- 回合 ---------- */
   const sig = (u) => u ? `${u.ap}|${u.bonus}|${u.zone}|${u.dying}|${u.upOnShp}` : "gone";
 
-  function playerPhase(policy, stats) {
-    const ids = state.units.filter(u => u.isPlayer && alive(u)).map(u => u.id);
+  /** phase：哪一个回合里行动的玩家角色（默认我方回合；在敌人回合行动的玩家阵营，#445，由 enemyPhase 先叫一次） */
+  function playerPhase(policy, stats, phase) {
+    const when = phase || "player";
+    const ids = state.units.filter(u => u.isPlayer && alive(u) && (typeof unitTurnPhase !== "function" || unitTurnPhase(u) === when)).map(u => u.id);
     for (const id of ids) {
       for (let n = 0; n < 6; n++) {
         const u = unitById(id);
@@ -278,6 +290,11 @@ const BattleSim = (function () {
   }
 
   function enemyPhase(policy, stats) {
+    // 在敌人回合行动的玩家阵营（PvP，#445）：同一回合里玩家角色总比非玩家单位先动——先等它们行动完，再跑敌人的 AI
+    if (state.units.some(u => u.isPlayer && alive(u) && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy")) {
+      playerPhase(policy, stats, "enemy");
+      if (outcome()) return;
+    }
     for (const id of EnemyAI.actingOrder()) {
       for (let n = 0; n < 5; n++) {
         const u = unitById(id);
@@ -300,6 +317,7 @@ const BattleSim = (function () {
     const policy = Object.assign({}, BASIC_POLICY, opt.policy || {});
     const maxRounds = Number(opt.maxRounds) || 40;
     const stats = { actions: 0 };
+    lastPvpWinners = null;
     if (!state.combatStarted) startCombat();
     resolveQueues(policy);
     let winner = outcome();
@@ -316,13 +334,16 @@ const BattleSim = (function () {
       winner = outcome();
     }
     const brief = (u) => ({ kit: u.kit, name: u.name, hp: hpOf(u), dead: !!u.dead, dying: !!u.dying });
-    return {
+    const out = {
       winner: winner || "timeout",
       rounds: state.turnNo,
       actions: stats.actions,
       heroes: state.units.filter(u => u.isPlayer && !isWeapon(u)).map(brief),
       foes: state.units.filter(u => !u.isPlayer && u.kit !== "ironwall").map(brief)
     };
+    // 按阵营分出胜负（#445）：赢的是哪几个玩家阵营
+    if (winner === "player" && lastPvpWinners) out.pvpWinners = lastPvpWinners.slice();
+    return out;
   }
 
   return { setup, run, outcome, resolveQueues, BASIC_POLICY };

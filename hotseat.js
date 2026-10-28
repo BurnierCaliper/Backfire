@@ -117,6 +117,8 @@
         const ident = identity(u, all);
         if (!ident) continue;
         stableById.set(u.id, ident.stableKey);
+        // 不在我方回合行动的单位（在敌人回合行动的玩家阵营，PvP #445）：不排进我方回合的行动顺序，敌人回合里由房主操控
+        if (options.inRound && !options.inRound(u)) continue;
         if (!present(u) || !present(ident.hero) || (down(ident.hero) && !canStand(ident.hero))) continue;
         if (u.weaponOf ? down(u) : down(u) && !canStand(u)) continue;
         result.push({ unitId: u.id, unitName: u.name || u.kit || u.id, operatorId: ident.operatorId,

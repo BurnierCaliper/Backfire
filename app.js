@@ -4810,10 +4810,12 @@ function destroyProp(p, attacker) {
 
 function triggerLeaveOpportunity(mover, fromZone, notes) {
   if (!mover || mover.kind) return;
+  // 敌人的借机攻击打离开的玩家角色；配置了玩家阵营（#445）时只打和它敌对的（单独设成友好的玩家阵营不打）。没配置照旧（友军那一下由 dealTo 挡下）
+  const preyOf = u => !!mover.isPlayer && !(typeof pvpOn === "function" && pvpOn() && !hostileTo(u, mover));
   fieldUnits().forEach(u => {
     if (u.id === mover.id || u.dead || u.hidden || u.stunned) return;
     if (Number(u.zone) !== Number(fromZone)) return;
-    if (u.kit === "captain_wolf" && mover.isPlayer) {
+    if (u.kit === "captain_wolf" && preyOf(u)) {
       const n = addedDiceByLevel(u.level);
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       // 借机是近战：目标已经走到隔壁才结算，带上 atkRange 免得被当成高地远程（±25%）
@@ -4821,7 +4823,7 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
     if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
-    if (u.kit === "thug_knife" && mover.isPlayer) {
+    if (u.kit === "thug_knife" && preyOf(u)) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       opportunityStrike(u, mover, fromZone, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
