@@ -681,7 +681,7 @@ const shieldOf = u => (u.layers || []).filter(l => l.type === "shield").reduce((
 /** 血量打到三分之一（留着治疗的空间，不会倒地） */
 const wound = (...us) => us.forEach(u => (u.layers || []).forEach(l => { if (l.type !== "shield") l.current = Math.max(1, Math.floor((Number(l.max) || 0) / 3)); }));
 const skill = (c, a, id, t, picks) => c.Commands.dispatch({ type: "skill", actor: a.id, skill: id, target: t ? t.id : null, picks: picks || {} });
-/** 一组单位在 fn 前后哪些变了：changed(u, 之前, 之后) */
+/** 一组单位在 fn 前后各自变了没有：按顺序返回 changed(之前, 之后) */
 const diffOf = (us, read, fn, changed) => { const before = us.map(read); fn(); return us.map((u, i) => changed(before[i], read(u))); };
 
 test("teammateOf：同一个玩家阵营才算（武器人跟着持有者、护送对象按自己记的阵营）；单独设成友好的玩家阵营不算；没配置阵营时就是「是不是玩家角色」", () => {
@@ -743,7 +743,7 @@ test("磁场盾、寒气剑舞（温和）：同区友方只算施放者的玩�
   p.c.Commands.dispatch({ type: "battle.friendlyFire", on: true });
   p.chuan.resources.charge = 3;
   assert.deepEqual(diffOf([p.kolt, p.helu], shieldOf, () => skill(p.c, p.bili, "bili_field"), more), [true, false], "开着友伤：柯尔特照旧有护盾，乙的照旧没有");
-  // 对照：没配置阵营（全在「我方」）——同区六人都有护盾、都恢复，和以前一样
+  // 对照：没配置阵营（全在「我方」）——同区六人都有护盾、能治疗的都恢复，和以前一样
   const q = supportField(false);
   const all = [...q.mine, ...q.theirs];
   assert.ok(diffOf(all, shieldOf, () => skill(q.c, q.bili, "bili_field"), more).every(Boolean), "没配置阵营：同区六人都有护盾");
