@@ -1678,14 +1678,22 @@ function phasePlayers(phase) {
   return (state.units || []).filter(u => u && u.isPlayer && !u.escort && !u.hidden && !u.dead && !u._removed && !u.fused &&
     (typeof unitTurnPhase === "function" ? unitTurnPhase(u) : "player") === phase);
 }
+/** 场上的玩家角色（不算武器人；倒地、死掉的也算）分属哪几个玩家阵营（PvP，#445）：阵营 id 的列表。没配置阵营时是空的 */
+function pvpFieldFactions() {
+  if (typeof pvpOn !== "function" || !pvpOn()) return [];
+  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u._removed && !isWeaponUnit(u));
+  return [...new Set(heroes.map(u => playerFactionOf(u)))];
+}
+/** 真的分了阵营对打：场上有两个以上玩家阵营的角色（PvP，#445）。按阵营判胜负、协助攻击分两轮问、敌人的借机攻击按阵营挑都看它；
+ *  没配置阵营，或者配置了但场上的人都在同一个阵营（例：全部在「我方」）时是 false——这时和以前一模一样（友军 state.playerAllies 也照旧） */
+function pvpSplit() { return pvpFieldFactions().length >= 2; }
 /** PvP（#445，docs/pvp.md 第 1.1 节）：场上有两个以上玩家阵营的角色时按阵营判胜负——某个阵营还有人站着、和它敌对的单位全部倒地或死亡
  *  （玩家角色：濒死 / 死亡；非玩家单位：死亡 / 移出），这个阵营获胜（互相友好的几个阵营可以一起赢）；所有玩家阵营都倒下 = 敌人赢。
  *  返回 null = 不按阵营判（没配置阵营，或者场上只有一个玩家阵营：胜负照旧）；否则 { winners: [阵营 id…], wiped, over } */
 function pvpBattleOutcome() {
-  if (typeof pvpOn !== "function" || !pvpOn()) return null;
-  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u._removed && !isWeaponUnit(u));
-  const ids = [...new Set(heroes.map(u => playerFactionOf(u)))];
+  const ids = pvpFieldFactions();
   if (ids.length < 2) return null;
+  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u._removed && !isWeaponUnit(u));
   const standing = u => (typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dead && !u.dying);
   const alive = ids.filter(f => heroes.some(u => playerFactionOf(u) === f && standing(u)));
   const winners = alive.filter(f =>
@@ -2331,7 +2339,7 @@ function turnEnd() {
         const foes = fieldUnits().filter(x => (typeof autoFoe === "function" ? autoFoe(u, x) : !x.isPlayer) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
           zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
           !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
-          !(typeof playerAllied === "function" && playerAllied(x)));
+          !(typeof playerAllied === "function" && playerAllied(x, u)));   // 友军按瑞比的玩家阵营看（#445）
         const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
@@ -4819,8 +4827,9 @@ function destroyProp(p, attacker) {
 
 function triggerLeaveOpportunity(mover, fromZone, notes) {
   if (!mover || mover.kind) return;
-  // 敌人的借机攻击打离开的玩家角色；配置了玩家阵营（#445）时只打和它敌对的（单独设成友好的玩家阵营不打）。没配置照旧（友军那一下由 dealTo 挡下）
-  const preyOf = u => !!mover.isPlayer && !(typeof pvpOn === "function" && pvpOn() && !hostileTo(u, mover));
+  // 敌人的借机攻击打离开的玩家角色；场上有两个以上玩家阵营（#445，pvpSplit）时只打和它敌对的（单独设成友好的玩家阵营不打）。
+  // 只有一个玩家阵营时照旧（友军那一下由 dealTo 挡下）
+  const preyOf = u => !!mover.isPlayer && !(pvpSplit() && !hostileTo(u, mover));
   fieldUnits().forEach(u => {
     if (u.id === mover.id || u.dead || u.hidden || u.stunned) return;
     if (Number(u.zone) !== Number(fromZone)) return;
@@ -6959,8 +6968,9 @@ function assistBreaker(breaker, broken) {
 function eligibleAssisters(breaker, broken, job) {
   if (!broken || assistTargetGone(broken)) return [];
   breaker = assistBreaker(breaker, broken);
-  // 配置了玩家阵营（PvP，#445，docs/pvp.md 第 1.1 节）：先问打出失衡的那一方阵营里的玩家角色，玩家都不选，才轮到同阵营的非玩家单位
-  if (typeof pvpOn === "function" && pvpOn()) {
+  // 场上有两个以上玩家阵营（PvP，#445，docs/pvp.md 第 1.1 节；pvpSplit）：先问打出失衡的那一方阵营里的玩家角色，玩家都不选，才轮到同阵营的非玩家单位。
+  // 只有一个玩家阵营（全部在「我方」，配没配置都一样）时照旧走下面
+  if (pvpSplit()) {
     const stage = job && (job.pvpStage === "players" || job.pvpStage === "npc") ? job.pvpStage : pvpAssistStage(breaker, broken);
     return stage === "npc" ? npcAssisters(breaker, broken, true) : playerAssisters(breaker, broken, true);
   }
@@ -7174,9 +7184,9 @@ function queueAssistAttack(breaker, broken) {
   if (typeof preyBroken === "function" && preyBroken(breaker, broken)) return;   // 尘虫 / 管虫失衡：被沙鱼吞掉（desert.js）
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
   breaker = assistBreaker(breaker, broken);
-  // 配置了玩家阵营（PvP，#445）：先问打出失衡的那一方阵营里的玩家角色（pvpStage "players"，玩家来选），
+  // 场上有两个以上玩家阵营（PvP，#445；pvpSplit）：先问打出失衡的那一方阵营里的玩家角色（pvpStage "players"，玩家来选），
   // 玩家都不选（finishAssist）或者没有能接的玩家，才轮到同阵营的非玩家单位（"npc"，AI 选人）
-  const pvpStage = typeof pvpOn === "function" && pvpOn() ? pvpAssistStage(breaker, broken) : null;
+  const pvpStage = pvpSplit() ? pvpAssistStage(breaker, broken) : null;
   const list = eligibleAssisters(breaker, broken, pvpStage ? { pvpStage } : null);
   const vsPlayer = pvpStage ? pvpStage === "npc" : !!broken.isPlayer || !!(breaker && !breaker.isPlayer);   // 敌人那边出手协助（AI 选人）
   const side = vsPlayer ? (pvpStage ? "非玩家单位" : "敌人") : "玩家角色";
@@ -7252,7 +7262,7 @@ function finishAssist(helperId, extra) {
   }
   if (!helperId) {
     // PvP（#445）：打出失衡的那一方阵营里的玩家角色都不选，才轮到同阵营的非玩家单位协助攻击（AI 选人）
-    if (job.pvpStage === "players" && typeof pvpOn === "function" && pvpOn()) {
+    if (job.pvpStage === "players" && pvpSplit()) {
       const npc = eligibleAssisters(unitById(job.breakerId), target, { pvpStage: "npc" });
       if (npc.length) {
         state.assistQueue.unshift(Object.assign({}, job, { pvpStage: "npc", vsPlayer: true }));
@@ -12274,7 +12284,8 @@ function skillTargetError(a, id, t) {
     const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
     const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
-    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t)) return `${t.name} 是友军，不会被我方攻击`;
+    // 友军按出手的人所在的玩家阵营看（enemies.js · playerAllied 的第二个参数，#445：玩家阵营单独设成友好的敌人阵营也在这里拦下）
+    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t, a)) return `${t.name} 是友军，不会被我方攻击`;
     const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
     if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
         t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
