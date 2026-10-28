@@ -1006,6 +1006,37 @@ test("互相友好的玩家阵营也吃给友方的范围效果（磁场盾、�
   }
 });
 
+test("全反击 / 防守反击：友好的阵营的格挡也触发；友好不传递时防守反击不去打自己人（放的人和进攻者也友好），进攻者和放的人敌对时照常（#460）", () => {
+  // 柯尔特在「我方」（放了全反击、防守反击），绯秋、灯在「乙」（和我方友好），赫鲁米卡在「丙」（和乙敌对；friendly 时和我方友好）
+  const mk = friendly => field({ seed: "PVP460-GUARD", factions: (c, [, helu, hiaki, tou]) => {
+    faction(c, { faction: "乙", unit: hiaki.id });
+    faction(c, { faction: "乙", unit: tou.id });
+    faction(c, { faction: "丙", unit: helu.id });
+    faction(c, { faction: "乙", other: "我方", hostile: false });
+    if (friendly) faction(c, { faction: "丙", other: "我方", hostile: false });
+  } });
+  {
+    // 丙和我方敌对：赫鲁米卡（丙）打绯秋（乙）、灯（乙）挡住——柯尔特的全反击、防守反击都照常（友好的乙的格挡也算全队）
+    const { c, heroes: [kolt, helu, hiaki, tou] } = mk(false);
+    Object.assign(kolt.resources, { allReflect: true, guardStrike: true });
+    const out = c.performAssistBlock(tou, hiaki, helu, { ok: true, roll: 1 });
+    assert.equal(out.ok, true);
+    assert.match(out.notes.join("\n"), /全反击：把伤害与击破反打给/);
+    assert.match(out.notes.join("\n"), new RegExp(`防守反击：${kolt.name} 立刻对 ${helu.name} 发动协助攻击`));
+  }
+  {
+    // 丙也和我方友好：全反击照常（反打的是挡住的灯，灯和丙敌对），防守反击不追加——柯尔特不去打和自己友好的赫鲁米卡
+    const { c, heroes: [kolt, helu, hiaki, tou] } = mk(true);
+    Object.assign(kolt.resources, { guardStrike: true });
+    const h0 = hp(c, helu);
+    const out = c.performAssistBlock(tou, hiaki, helu, { ok: true, roll: 1 });
+    assert.equal(out.ok, true);
+    assert.doesNotMatch(out.notes.join("\n"), /防守反击/, "不打自己人");
+    assert.equal(hp(c, helu), h0, "赫鲁米卡没挨柯尔特的协助攻击");
+    assert.ok(!kolt.resources.guardStrikeUsed, "这次没用掉，留给下一次");
+  }
+});
+
 /** 会放给友方的范围技能的打法（自动对打用）：每人每回合每招最多一次——唤出武器人、磁场盾、寒气剑舞（先安抚成温和）、酸萃 / 冷萃、
  *  全队集结、不倒战意（全部友方）、全反击、防守反击、龙哥的热能轰击 / 冷气穿刺（霰弹枪）/ 洗牌、烟雾弹（每人一次）；都用不了就照默认打法 */
 function supportPolicy(c) {

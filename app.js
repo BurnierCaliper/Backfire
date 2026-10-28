@@ -7589,7 +7589,10 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
         notes.push(`全反击：把伤害与击破反打给 ${attacker.name}。`);
       }
     }
-    const striker = fieldUnits().find(u => u.isPlayer && !u.dead && u.resources && u.resources.guardStrike && teammateOf(u, helper));
+    // 防守反击不去打自己人：友好不传递（#460），放的人可能和格挡者友好、和进攻者也友好（进攻者在别的、和自己友好的阵营）——这个人不追加。
+    // 只有一个玩家阵营时都在同一个阵营，这一条不拦
+    const strikeOk = u => !(attacker && attacker.isPlayer && !samePlayerFaction(u, attacker) && teammateOf(u, attacker));
+    const striker = fieldUnits().find(u => u.isPlayer && !u.dead && u.resources && u.resources.guardStrike && teammateOf(u, helper) && strikeOk(u));
     if (striker && attacker && !striker.resources.guardStrikeUsed) {
       striker.resources.guardStrikeUsed = true;
       const sid = assistSkillId(striker);
