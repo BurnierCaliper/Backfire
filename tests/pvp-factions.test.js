@@ -639,7 +639,7 @@ test("指令 battle.playerFaction：建阵营、分人、定回合、设敌友�
   assert.ok(kolt);
 });
 
-test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩家阵营不排进我方回合的行动顺序，敌人回合里只有房主能操控它们", () => {
+test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩家阵营不排进我方回合的行动顺序，敌人回合里由分到的玩家操控（#464 起；第一步时只有房主能操控）", () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "PVP445-HOTSEAT" });
   c.location = { search: "?hotseat=1" }; c.URLSearchParams = URLSearchParams;
@@ -663,17 +663,21 @@ test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩�
   const units = plain(c.HotseatGame.getView().units.map(u => u.id));
   assert.ok(units.includes(kolt.id), "我方的柯尔特排进行动顺序");
   assert.ok(!units.includes(helu.id), "在敌人回合行动的赫鲁米卡不排进我方回合的行动顺序");
-  // 敌人回合：赫鲁米卡由房主操控（分配给玩家、让玩家自己操控是第二步）。回合推进走房主的规则流程（game.js · systemCommand）
+  // 敌人回合：赫鲁米卡分给了玩家 2，由他自己操控（#464，第二步；第一步时只有房主能操控）。回合推进走房主的规则流程（game.js · systemCommand），
+  // 敌人回合开始时会话给它们排一段行动顺序（game.js · endTurn → HotseatGame.beginRound("enemy")）
   c.HotseatGame.system({ type: "battle.endPlayerTurn" });
   assert.equal(S.combatPhase, "enemy");
   assert.ok(helu.ap > 0, "敌人回合开始补了行动点");
+  c.HotseatGame.beginRound("enemy");
+  assert.equal(send("p2", { type: "orderPick", actor: helu.id, index: 0 }).ok, true);
+  assert.equal(send("p2", { type: "orderConfirm" }).ok, true);
   kolt.zone = 1; helu.zone = 2;
   const hit = { type: "skill", actor: helu.id, skill: "helu_aa", target: kolt.id, picks: {} };
-  const p2 = send("p2", hit);
-  assert.equal(p2.ok, false, "分到的玩家在这一步不能操控");
-  assert.match(p2.error, /只有房主/);
   const p1 = send("p1", hit);
-  assert.equal(p1.ok, true, "房主能操控：" + (p1.error || ""));
+  assert.equal(p1.ok, false, "房主不能替分给玩家的角色行动");
+  assert.match(p1.error, /不是你的角色/);
+  const p2 = send("p2", hit);
+  assert.equal(p2.ok, true, "分到的玩家自己操控：" + (p2.error || ""));
 });
 
 /* ===== 给友方的范围效果按玩家阵营分（#456 / #460）=====

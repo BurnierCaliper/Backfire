@@ -69,8 +69,9 @@
     const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
     session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
       getUnits: () => state.units, canStand: u => !standUpBlocked(u),
-      // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，PvP 第一步 #445）：不排进我方回合的行动顺序（敌人回合里由房主操控）；没配置阵营时都排
-      inRound: u => typeof unitTurnPhase !== "function" || unitTurnPhase(u) === "player" });
+      // 玩家阵营定在哪个回合行动（enemies.js · unitTurnPhase，PvP #445）：我方回合那一段只排在我方回合行动的，
+      // 敌人回合开始时先动的那一段（#464，beginRound("enemy")）只排在敌人回合行动的；没配置阵营时都在我方回合
+      inRound: (u, segment) => typeof unitTurnPhase !== "function" || unitTurnPhase(u) === (segment === "enemy" ? "enemy" : "player") });
     authority = HotseatAuthority.create({ session, validate, execute, afterCommand,
       getState: () => state, getTape: () => GAME.tape || [], viewFor: project });
     session.onChange(() => { if (!executing) authority.broadcast(); });
@@ -130,6 +131,8 @@
       heroes: heroes().map(u => ({ id: u.id, name: u.name, owner: ownerByKit[u.kit] || gm() })),
       units: (s?.roster || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
+      // 排的是哪一段：敌人回合开始时玩家阵营先动的那一段是 "enemy"（#464，行动顺序栏写「敌人回合」）
+      segment: s?.segment === "enemy" ? "enemy" : "player",
       order: (s?.slots || []).map(r => r && ({ actor: r.unitId, name: r.unitName, owner: r.operatorId, locked: r.spent, done: r.completed, current: r.unitId === s.currentUnitId })),
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
       ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: r.roll ? (typeof r.roll === "object" ? { tier: r.roll.tier || null } : true) : false, tier: r.roll && r.roll.tier || null, secret: !!r.secret, title: !!r.title })),
@@ -164,8 +167,7 @@
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {
       if (GAME.depth > 0 && !GAME.tape) fail("正在播放行动，请稍候");
-      // 敌人回合里先动的玩家阵营（#445）：这一步由房主操控，不看我方回合的行动顺序（分配给玩家、让玩家自己操控是第二步）
-      if (pvpHostTurn(unitById(cmd.actor))) { hostOnly(id); HotseatValidation.validateBattle(cmd, { session: { assertAction: () => true }, sender: id, game: GAME }); return; }
+      // 敌人回合里先动的玩家阵营（#464）也按会话的行动顺序：分配给玩家的只有那名玩家能动，没分配的只有主持人能动
       HotseatValidation.validateBattle(cmd, { session, sender: id, game: GAME }); return;
     }
     if (cmd.type === "endTurn") { session.assertAction(id, session.snapshot().currentUnitId); return; }
@@ -234,18 +236,21 @@
     try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); adoptNewHeroes(); session.reconcile(); } return result; }
     finally { executing--; if (active() && !executing) authority.broadcast(); }
   }
-  /** 敌人回合里、在敌人回合行动的玩家阵营的单位（PvP 第一步，enemies.js · unitTurnPhase，#445）：这一步由房主操控 */
-  function pvpHostTurn(u) {
-    return !!u && !!u.isPlayer && !!state.combatStarted && state.combatPhase === "enemy" && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy";
-  }
   function reason(unit) {
     if (!active()) return "";
     if (choice) return "正在等待其他操作者选择";
     if (network && root.OnlineGame?.isPaused()) return "房主连接中断，等待恢复";
-    if (pvpHostTurn(unit)) return (commandOperator || playerId) === gm() ? (session.snapshot().ask ? "正在等待协助回应" : "") : "敌人回合里由房主操控";
     try { session.assertAction(commandOperator || playerId, unit?.id); return ""; } catch (e) { return e.message; }
   }
-  function beginRound() { if (!active()) return; session.beginRound(state.turnNo); if (newRoundSpends?.length) session.markSpent(newRoundSpends); newRoundSpends = null; GAME.disarm(); refresh(); }
+  /** 开始一段行动顺序：不给 = 这一回合的我方回合；"enemy" = 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464，game.js · endTurn 开始） */
+  function beginRound(segment) {
+    if (!active()) return;
+    session.beginRound(state.turnNo, segment);
+    if (segment !== "enemy") { if (newRoundSpends?.length) session.markSpent(newRoundSpends); newRoundSpends = null; }
+    GAME.disarm(); refresh();
+  }
+  /** 敌人回合先动的那一段（#464）已经全部结束了（或者一个能动的都没有）：该跑敌人的 AI 了 */
+  function segmentDone() { if (!active()) return false; const s = session.snapshot(); return s.segment === "enemy" && s.phase === "enemy"; }
   function requestAsk(kind, title, options, eligible, job) {
     return new Promise(resolve => {
       askDetails = { title, options: copy(options), eligible };
@@ -555,10 +560,13 @@
       restoredAsk = saved.session?.ask ? { ...copy(saved.session.ask), remainingMs: saved.askRemainingMs ?? 20000 } : null;
       setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
-    reason, beginRound, system, requestAsk, ownedChoice,
+    reason, beginRound, segmentDone, system, requestAsk, ownedChoice,
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,
     currentUnit: () => active() ? session.snapshot().currentUnitId : null,
-    needsEnemy: () => active() && session.snapshot().phase === "enemy" && !session.snapshot().currentUnitId,
+    /** 我方回合的行动顺序都结束了（敌人回合先动的那一段结束看 segmentDone） */
+    needsEnemy: () => { if (!active()) return false; const s = session.snapshot(); return s.phase === "enemy" && !s.currentUnitId && s.segment !== "enemy"; },
+    /** 现在排的是哪一段：我方回合 "player" / 敌人回合先动的玩家阵营 "enemy"（#464） */
+    segment: () => active() ? session.snapshot().segment || "player" : "player",
     canStart: () => !enabled || !!state.solo || active() && playerId === gm() && !choice && !session.snapshot().ask,
     startCombat() { const ack = clients.get(gm()).send({ type: "startCombat" }); if (!ack.ok) throw new Error(ack.error); return ack.result; },
     switchPlayer(id) { if (!config.players.some(p => p.id === id)) return { ok: false, error: "没有这个操作者" }; playerId = id; GAME.disarm(); refresh(); return { ok: true }; },

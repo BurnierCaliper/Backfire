@@ -598,6 +598,7 @@
     const out = identifiers(view, { displayOnly: true, playerId: context.recipientId, canConfigure: false, canDisable: false }, ["currentUnitId", "gmId", "hostId"]);
     copyFields(view, out, [], ["turnNo"], ["configured", "enabled", "network"]);
     enumField(view, out, "phase", ["setup", "selecting", "picking", "acting", "enemy", "ended", "exploration"]);
+    enumField(view, out, "segment", ["player", "enemy"]);   // 行动顺序排的是哪一段：敌人回合开始时玩家阵营先动的那一段是 enemy（PvP #464）
     enumField(view, out, "mode", ["trpg", "coop"]);
     for (const key of ["players", "operators"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).map(p => identifiers(p, copyFields(p, {}, ["name"], [], ["online", "gm"]), ["id"]));
     const row = item => !obj(item) ? null : identifiers(item, copyFields(item, {}, ["unitName", "operatorName", "name"], [], ["spent", "completed", "locked", "done", "current"]), ["id", "unitId", "actor", "operatorId", "owner", "weaponOf"]);

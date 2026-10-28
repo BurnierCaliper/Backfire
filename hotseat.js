@@ -89,6 +89,9 @@
     const canStand = options.canStand || (u => typeof root.standUpBlocked === "function" ? !root.standUpBlocked(u) : Number(u.shp) > 0);
     let assignments = {}, phase = "setup", turnNo = 0, roster = [], slots = [], confirmed = new Set();
     let swaps = [], ask = null, closedAsk = null, sequence = 0;
+    // segment：现在排的是哪一段的行动顺序——"player" 我方回合；"enemy" 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）。
+    // roster 只有这一段行动的单位（排顺序用）；everyone 是场上所有能操作的单位（别的段的也在），问「归谁操控」（询问发给谁、掷骰……）看它
+    let segment = "player", everyone = [];
     // 小队聊天：重新分配角色 / 有人进出房间会重建会话，聊天记录从上一个会话带过来
     let chat = (Array.isArray(options.chat) ? options.chat : []).filter(r => r && typeof r.text === "string").slice(-CHAT_KEEP);
     // 主持人发起的检定、玩家申请的属性点（跨战斗保留，和小队聊天一样）
@@ -111,22 +114,27 @@
       if (!hero || !isHero(hero)) return null;
       return { hero, operatorId: assignments[hero.id] || gmId, stableKey: u.weaponOf ? hero.id + ":weapon:" + u.kit : hero.id };
     }
+    /** 这一段排进行动顺序的单位（顺手把 everyone 换成场上所有能操作的单位） */
     function rows() {
-      const all = maps(), result = [];
+      const all = maps(), result = [], anyone = [];
       for (const u of all.units) {
         const ident = identity(u, all);
         if (!ident) continue;
         stableById.set(u.id, ident.stableKey);
-        // 不在我方回合行动的单位（在敌人回合行动的玩家阵营，PvP #445）：不排进我方回合的行动顺序，敌人回合里由房主操控
-        if (options.inRound && !options.inRound(u)) continue;
         if (!present(u) || !present(ident.hero) || (down(ident.hero) && !canStand(ident.hero))) continue;
         if (u.weaponOf ? down(u) : down(u) && !canStand(u)) continue;
-        result.push({ unitId: u.id, unitName: u.name || u.kit || u.id, operatorId: ident.operatorId,
-          operatorName: operatorMap.get(ident.operatorId).name, weaponOf: u.weaponOf || null, stableKey: ident.stableKey });
+        const row = { unitId: u.id, unitName: u.name || u.kit || u.id, operatorId: ident.operatorId,
+          operatorName: operatorMap.get(ident.operatorId).name, weaponOf: u.weaponOf || null, stableKey: ident.stableKey };
+        anyone.push(row);
+        // 不在这一段行动的单位（玩家阵营定在别的回合行动，PvP #445 / #464）：不排进这一段的行动顺序，归谁操控照样记着
+        if (!options.inRound || options.inRound(u, segment)) result.push(row);
       }
+      everyone = anyone;
       return result;
     }
     const rowFor = id => roster.find(r => r.unitId === id);
+    /** 归谁操控：这一段没排进顺序的单位（在别的回合行动的玩家阵营）也算 */
+    const ownerRow = id => rowFor(id) || everyone.find(r => r.unitId === id);
     const slotFor = id => slots.findIndex(r => r && r.unitId === id);
     const current = () => phase === "acting" ? (slots.find(r => r && !r.completed) || {}).unitId || null : null;
     const lastLocked = () => slots.reduce((last, row, i) => row && (row.spent || row.completed) ? i : last, -1);
@@ -136,10 +144,10 @@
         waiting: ask.operators.filter(id => !ask.declined.includes(id) && !(ask.hands || []).some(h => h.operatorId === id)).map(id => ({ operatorId: id, operatorName: operatorMap.get(id).name })),
         chooser: ask.chooser || null, chooserName: ask.chooser ? operatorMap.get(ask.chooser).name : null,
         hands: (ask.hands || []).map(h => ({ operatorId: h.operatorId, operatorName: operatorMap.get(h.operatorId).name, unitId: h.unitId,
-          unitName: (rowFor(h.unitId) || {}).unitName || h.unitId, extra: clone(h.extra || {}) })) };
+          unitName: (ownerRow(h.unitId) || {}).unitName || h.unitId, extra: clone(h.extra || {}) })) };
     }
     function snapshot() {
-      return clone({ phase, turnNo, mode, gmId, operators, assignments, roster, slots,
+      return clone({ phase, turnNo, segment, mode, gmId, operators, assignments, roster, slots,
         currentUnitId: current(), confirmed: [...confirmed], pendingSwaps: swaps, ask: askSummary(), closedAsk, chat, table });
     }
     function cleanTable(t) {
@@ -179,7 +187,7 @@
     function skillRoll(id, spec, secret) {
       const op = operator(id);
       if (!spec || typeof spec.prof !== "string" || !spec.unitId) fail("roll_bad", "先选角色和熟练项");
-      const owner = (rowFor(spec.unitId) || {}).operatorId || gmId;
+      const owner = (ownerRow(spec.unitId) || {}).operatorId || gmId;
       if (id !== gmId && id !== owner) fail("table_owner", "只能替自己的角色掷骰");
       if (secret && id !== gmId) fail("chat_secret", "只有主持人能暗骰");
       const r = rollD100(spec, options.random);
@@ -217,7 +225,7 @@
       const t = check.targets.find(x => x.unitId === unitId);
       if (!t) fail("table_check", "这名角色不在检定里");
       if (t.result) fail("table_check", "已经掷过了");
-      const owner = (rowFor(unitId) || {}).operatorId || gmId;
+      const owner = (ownerRow(unitId) || {}).operatorId || gmId;
       if (id !== gmId && id !== owner) fail("table_owner", "只能替自己的角色掷骰");
       if (check.secret && id !== gmId) fail("table_gm", "暗骰检定只有主持人能掷");
       t.result = rollCheck(t, options.random);
@@ -239,7 +247,7 @@
      *  requestCheck(id, unitId, prof, note, name)：只能给自己的角色提；同一角色同时只能有一条待处理 */
     function requestCheck(id, unitId, prof, note, name) {
       operator(id);
-      const owner = (rowFor(unitId) || {}).operatorId || gmId;
+      const owner = (ownerRow(unitId) || {}).operatorId || gmId;
       if (id !== owner) fail("table_owner", "只能给自己的角色申请检定");
       if (typeof prof !== "string" || !prof) fail("table_check", "先选熟练项");
       if (table.checkReqs.some(r => r.unitId === unitId && r.status === "pending")) fail("table_check", "上一次检定申请还在等主持人");
@@ -284,7 +292,7 @@
     /** 玩家给自己的角色申请属性点（一次一点），主持人确认后才真正加上 */
     function requestAttr(id, unitId, attr, name) {
       operator(id);
-      const owner = (rowFor(unitId) || {}).operatorId || gmId;
+      const owner = (ownerRow(unitId) || {}).operatorId || gmId;
       if (id !== owner) fail("table_owner", "只能给自己的角色申请");
       if (table.attrs.some(r => r.unitId === unitId && r.status === "pending")) fail("table_attr", "上一次申请还在等主持人确认");
       const row = { id: "attr-" + (++table.seq), unitId: String(unitId), unitName: String(name || unitId).slice(0, 40), operatorId: id, attrs: [String(attr)], status: "pending", at: now() };
@@ -338,8 +346,10 @@
           (phase === "selecting" || (phase === "acting" && s.from > lastLocked() && s.to > lastLocked()));
       });
       if (ask) {
-        ask.candidates = ask.candidates.filter(id => byId.has(id));
-        ask.operators = [...new Set(ask.candidates.map(id => byId.get(id).operatorId))];
+        // 询问的候选人看场上所有能操作的单位（在别的回合行动的玩家阵营也在，#464）
+        const anyone = new Map(everyone.map(r => [r.unitId, r]));
+        ask.candidates = ask.candidates.filter(id => anyone.has(id));
+        ask.operators = [...new Set(ask.candidates.map(id => anyone.get(id).operatorId))];
         if (ask.hands) ask.hands = ask.hands.filter(h => ask.candidates.includes(h.unitId));
         if (!ask.operators.length || ask.operators.every(id => ask.declined.includes(id)) && !(ask.hands || []).length) closeAsk("unavailable", null, {}, null);
       }
@@ -398,12 +408,16 @@
       swaps = swaps.filter(s => ![s.actor, s.target].some(u => rowFor(u) && (rowFor(u).stableKey || "").split(":weapon:")[0] === heroId));
       return reconcile(true);
     }
-    function beginRound(number) {
+    /** 开始一段行动顺序。seg："player"（不给）= 我方回合；"enemy" = 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）——
+     *  和我方回合一样选顺序、轮到谁谁动（分配给玩家的由他操控，没分配的由主持人操控），全部结束以后 phase 回到 "enemy"（再跑敌人的 AI）。
+     *  同一回合的同一段已经开始了就不重开（敌人回合那一段做完了也不重开） */
+    function beginRound(number, seg) {
+      const next = seg === "enemy" ? "enemy" : "player";
       if (!Number.isInteger(number) || number < 1) fail("round", "回合编号无效");
       if (phase === "ended") fail("ended", "战斗已经结束");
-      if (turnNo === number && ["selecting", "acting"].includes(phase)) return snapshot();
+      if (turnNo === number && segment === next && (["selecting", "acting"].includes(phase) || (next === "enemy" && phase === "enemy"))) return snapshot();
       if (ask) fail("waiting", "正在等待协助回应");
-      turnNo = number; spent.clear(); completed.clear(); swaps = []; confirmed.clear();
+      turnNo = number; segment = next; spent.clear(); completed.clear(); swaps = []; confirmed.clear();
       phase = "selecting"; roster = rows(); slots = roster.map(() => null);
       if (!roster.length) phase = "enemy";
       return emit("beginRound");
@@ -509,8 +523,9 @@
       if (ask) fail("ask_pending", "还有协助询问没有结束");
       if (!spec || typeof spec.kind !== "string" || !spec.kind) throw new TypeError("Ask requires a kind");
       reconcile(false);
-      const candidates = [...new Set(spec.candidates || [])].filter(id => rowFor(id));
-      const owners = [...new Set(candidates.map(id => rowFor(id).operatorId))];
+      // 候选人看场上所有能操作的单位（在别的回合行动的玩家阵营也问它的操控者，#464）
+      const candidates = [...new Set(spec.candidates || [])].filter(id => ownerRow(id));
+      const owners = [...new Set(candidates.map(id => ownerRow(id).operatorId))];
       // 联机协助攻击：能协助的玩家先「举手」，由打出失衡的那名玩家（chooser）从举手的人里选谁出手
       const chooser = spec.chooser && operatorMap.has(spec.chooser) ? spec.chooser : null;
       ask = { id: "ask-" + (++sequence), kind: spec.kind, jobId: spec.jobId == null ? null : spec.jobId,
@@ -543,21 +558,21 @@
         if (!unitId) { const result = closeAsk("declined", null, {}, null); emit("askDeclined"); return { status: "closed", accepted: false, result: clone(result) }; }
         const hand = ask.hands.find(h => h.unitId === unitId);
         if (hand) { const result = closeAsk("accepted", hand.unitId, hand.extra, hand.operatorId); emit("askAccepted"); return { status: "closed", accepted: true, result: clone(result) }; }
-        if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "只能选举手的人或自己的单位");
+        if (!ask.candidates.includes(unitId) || ownerRow(unitId).operatorId !== id) fail("not_candidate", "只能选举手的人或自己的单位");
         const result = closeAsk("accepted", unitId, clone(response.extra || {}), id); emit("askAccepted");
         return { status: "closed", accepted: true, result: clone(result) };
       }
       if (!ask.operators.includes(id)) fail("not_candidate", "这次询问没有发给你");
       if (ask.declined.includes(id)) fail("already_declined", "你已经放弃这次协助");
       if (unitId && ask.chooser) {
-        if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
+        if (!ask.candidates.includes(unitId) || ownerRow(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
         // 举手：记下（同一名玩家再举一次就换成新的选择），等打出失衡的人决定
         ask.hands = ask.hands.filter(h => h.operatorId !== id);
         ask.hands.push({ operatorId: id, unitId, extra: clone(response.extra || {}) });
         emit("askHand"); return { status: "waiting", accepted: false, raised: true, result: null };
       }
       if (unitId) {
-        if (!ask.candidates.includes(unitId) || rowFor(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
+        if (!ask.candidates.includes(unitId) || ownerRow(unitId).operatorId !== id) fail("not_candidate", "不能代替其他单位回答");
         const extra = clone(response.extra || {});
         const result = closeAsk("accepted", unitId, extra, id); emit("askAccepted");
         return { status: "closed", accepted: true, result: clone(result) };
@@ -572,7 +587,7 @@
     function askFor(id) {
       operator(id); if (!ask) return null;
       const summary = askSummary(), declined = ask.declined.includes(id);
-      const list = ask.candidates.map(rowFor).filter(r => r && r.operatorId === id);
+      const list = ask.candidates.map(ownerRow).filter(r => r && r.operatorId === id);
       const isChooser = !!ask.chooser && ask.chooser === id;
       const raised = (ask.hands || []).find(h => h.operatorId === id) || null;
       return clone({ ...summary, eligible: list.length > 0 || isChooser && ask.hands.length > 0, declined, isChooser, raised: raised ? raised.unitId : null,
@@ -593,7 +608,7 @@
     function endBattle() { phase = "ended"; swaps = []; if (ask) closeAsk("ended", null, {}, null); return emit("ended"); }
     function reset() {
       if (ask) closeAsk("reset", null, {}, null);
-      phase = "setup"; turnNo = 0; spent.clear(); completed.clear(); slots = []; swaps = []; confirmed.clear(); stableById.clear();
+      phase = "setup"; turnNo = 0; segment = "player"; spent.clear(); completed.clear(); slots = []; swaps = []; confirmed.clear(); stableById.clear();
       roster = rows(); return emit("reset");
     }
     // This checkpoint belongs to the host's online recovery sidecar, never to a
@@ -606,7 +621,7 @@
       const saved = clone(value);
       if (!saved || !["setup", "selecting", "acting", "enemy", "ended"].includes(saved.phase) ||
           !Number.isInteger(saved.turnNo) || saved.turnNo < 0 || !Array.isArray(saved.slots)) throw new Error("无效的房主顺序存档");
-      phase = "setup"; setAssignments(saved.assignments);
+      phase = "setup"; segment = saved.segment === "enemy" ? "enemy" : "player"; setAssignments(saved.assignments);
       phase = saved.phase; turnNo = saved.turnNo; sequence = Number(saved.sequence) || 0;
       spent.clear(); completed.clear();
       for (const key of saved.spent || []) spent.add(key);
@@ -630,7 +645,7 @@
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
       assertAction, finishUnit, markSpent, adopt, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, requestCheck, decideCheck, skillRoll, showTitle,
-      ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
+      ownerOf: unitId => (ownerRow(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && ask.deadline != null && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },
       onAskClosed(fn) { askClosures.add(fn); return () => askClosures.delete(fn); } };
