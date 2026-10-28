@@ -602,7 +602,8 @@
     enumField(view, out, "mode", ["trpg", "coop"]);
     for (const key of ["players", "operators"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).map(p => identifiers(p, copyFields(p, {}, ["name"], [], ["online", "gm"]), ["id"]));
     const row = item => !obj(item) ? null : identifiers(item, copyFields(item, {}, ["unitName", "operatorName", "name"], [], ["spent", "completed", "locked", "done", "current"]), ["id", "unitId", "actor", "operatorId", "owner", "weaponOf"]);
-    for (const key of ["roster", "slots", "order", "units", "heroes"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).slice(0, 200).map(row);
+    // operable：场上所有能操作的单位归谁（PvP #464：敌人回合那一段 units 只有这一段的人；只有 id / 名字 / 操控者）
+    for (const key of ["roster", "slots", "order", "units", "heroes", "operable"]) if (Array.isArray(get(view, key))) out[key] = get(view, key).slice(0, 200).map(row);
     out.confirmed = arr(get(view, "confirmed")).map(id).filter(Boolean);
     out.chat = arr(get(view, "chat")).slice(-300).flatMap(m => {
       if (get(m, "secret")) return [];   // 主持人暗骰：只在房主本机

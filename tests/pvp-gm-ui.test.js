@@ -150,3 +150,19 @@ test("主持人面板「阵营」一栏（#464）：新建 / 改名 / 改回合 
   assert.match(await page.locator("#ogm-notice").innerText(), /最多 8 个玩家阵营/);
   assert.deepEqual(f.errors, []);
 });
+
+test("主持人面板「阵营」一栏（自查）：画好以后场上的敌人阵营变了（盗匪那一只倒下），「应用敌友关系」照样发给下拉框上写的那一对阵营，不按画的时候的顺序号对", async t => {
+  const f = await fixture(t); if (!f) return; const { page } = f;
+  // 场上再来一只安保：敌人阵营有盗匪、安保两个
+  await page.evaluate(() => { fixture.view.state.units.push({ id: "guard", name: "安保", zone: 2, isPlayer: false, level: 2, layers: [{ type: "flesh", current: 12, max: 15 }], ap: 1, bonus: 1, statuses: {}, enemyFaction: "安保" }); });
+  await page.click('[data-tab="factions"]');
+  const label = id => page.evaluate(id => document.getElementById(id).closest("label").textContent, id);
+  assert.match(await label("ogm-rel-e-0-0"), /我方 ↔ 盗匪/);
+  assert.match(await label("ogm-rel-e-0-1"), /我方 ↔ 安保/);
+  // 画好以后盗匪那一只倒下了（面板没重画；乙 ↔ 盗匪 单独设过，名单里照样有盗匪，只是排到了安保后面）
+  await page.evaluate(() => { fixture.view.state.units = fixture.view.state.units.filter(u => u.id !== "enemy"); });
+  await page.selectOption("#ogm-rel-e-0-1", "hostile");   // 我方 ↔ 安保：敌对
+  await page.click('[data-action="faction-relations"]');
+  assert.deepEqual(await calls(page), [{ type: "battle.playerFaction", faction: "我方", enemy: "安保", hostile: true }], "只发我方 ↔ 安保这一对，别的不动");
+  assert.deepEqual(f.errors, []);
+});

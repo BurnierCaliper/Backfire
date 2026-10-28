@@ -38,7 +38,7 @@ function room(opt = {}) {
     assert.equal(send("p1", { type: "battle.playerFaction", faction: "乙", unit: hiaki.id }).ok, true);
   }
   assert.equal(send("p1", { type: "startCombat" }).ok, true);
-  c.HotseatGame.beginRound();
+  if (!opt.ambush) c.HotseatGame.beginRound();   // ambush：突袭开局，我方回合的行动顺序不开始（测试自己推进到敌人回合）
   [kolt, helu, hiaki, tou].forEach(h => { h.level = Math.max(Number(h.level) || 1, 5); });
   const view = () => plain(c.HotseatGame.getView());
   const owner = u => (view().units.find(r => r.id === u.id) || {}).owner;
@@ -164,6 +164,54 @@ test("敌人回合那一段：分到的玩家掷骰、申请检定照样是自�
   // 同一回合再叫一次「开始敌人回合那一段」：不会重开（已经选好的格子不丢）
   c.HotseatGame.beginRound("enemy");
   assert.ok(view().order.some(r => r && r.actor === helu.id), "没有重开");
+});
+
+test("敌人回合那一段（自查）：选顺序的时候这一段的人都没了（主持人把乙改回我方回合行动）——这一段直接算结束、接着跑敌人的 AI，不停在「选择行动顺序」", () => {
+  const f = room();
+  const { c, send, view } = f;
+  toEnemySegment(f);
+  assert.equal(view().phase, "picking");
+  assert.equal(send("p1", { type: "battle.playerFaction", faction: "乙", phase: "player" }).ok, true);
+  assert.equal(view().units.length, 0, "这一段没有人了");
+  assert.equal(view().phase, "enemy", "不停在选顺序（以前要主持人点「按当前格子开始」）");
+  assert.equal(c.HotseatGame.segmentDone(), true, "该跑敌人的 AI 了");
+  assert.equal(c.HotseatGame.needsEnemy(), false, "不会被当成我方回合结束");
+});
+
+test("突袭开局（自查）：开战就先进敌人回合时，敌人回合那一段里花了点数的单位照样锁住格子（不能再挪、不能转交）", () => {
+  const f = room({ ambush: true });
+  const { c, S, helu, hiaki, send, view } = f;
+  c.HotseatGame.system({ type: "battle.endPlayerTurn" });   // 突袭：开战直接进敌人回合（game.js · endTurn(true)），我方回合的行动顺序没开始
+  assert.equal(S.combatPhase, "enemy");
+  c.HotseatGame.beginRound("enemy");
+  assert.equal(view().segment, "enemy");
+  assert.equal(send("p1", { type: "orderStart" }).ok, true);
+  const cur = view().currentUnitId, who = (view().order.find(r => r && r.actor === cur) || {}).owner;
+  assert.ok([helu.id, hiaki.id].includes(cur), "轮到乙的人");
+  const moved = send(who, { type: "move", actor: cur, dest: 2 });
+  assert.equal(moved.ok, true, moved.error);
+  assert.equal(view().order.find(r => r && r.actor === cur).locked, true, "花了附赠：格子锁住（以前一直攒在开战时的那一份里，记不上）");
+  const gate = c.HotseatGame.transferState();
+  assert.equal(gate.ok, false, "正在行动的单位花了点数：不能转交");
+});
+
+test("发给玩家的包带上场上所有单位归谁（operable，自查）：敌人回合那一段 units 只有乙的人，在我方回合行动的角色照样认得出是谁的（掷骰、角色资料、接管……都看这一份）", () => {
+  const f = room();
+  const { c, S, kolt, helu, hiaki, tou, view } = f;
+  toEnemySegment(f);
+  const v = view();
+  assert.deepEqual(v.units.map(u => u.id).sort(), [helu.id, hiaki.id].sort(), "行动顺序只排乙的人");
+  const owners = Object.fromEntries((v.operable || []).map(r => [r.id, r.owner]));
+  assert.deepEqual([owners[kolt.id], owners[helu.id], owners[hiaki.id], owners[tou.id]], ["p1", "p2", "p1", "p3"], "四个人都在，归谁照分配");
+  // 白名单：发给玩家的包里也有，只有 id / 名字 / 操控者
+  load(c, ["online-view.js"]);
+  S.units.filter(u => u.isPlayer).forEach((u, i) => { u.shp = 812339 + i; });
+  const packet = c.OnlineView.projectPacket({ type: "result", protocol: 1, build: "x", seq: 1, screen: "battle", state: S, view: v }, { recipientId: "p3", gmId: "p1" });
+  assert.deepEqual(plain(packet.view.operable).find(r => r.id === tou.id), { id: tou.id, name: tou.name, owner: "p3" });
+  assert.doesNotMatch(JSON.stringify(packet.view), /81233|shp/i, "不带坚毅");
+  // 只有一个玩家阵营时 operable 和 units 一样（玩家画面和以前一样）
+  const one = room({ split: false }).view();
+  assert.deepEqual(one.operable, one.units);
 });
 
 test("只有一个玩家阵营（默认全在「我方」）时一切照旧：行动顺序、回合推进、询问和以前一样；敌人回合没有玩家先动的那一段", () => {

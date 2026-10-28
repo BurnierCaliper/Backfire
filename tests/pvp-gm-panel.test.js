@@ -2,7 +2,7 @@
 // 这一份测不用浏览器的部分：
 //   · 主持人「加入玩家角色」（gm.addHero / gm.removeHero，gm-commands.js；app.js · spawnHeroCard / removeHeroUnit）：任何一张角色卡，
 //     带着角色卡原本的等级、装备、加点（队伍记忆），选区、选阵营；同一张已经在场上不能再加；移出和移出敌人一样；
-//     角色卡已经分配给房间里某名玩家的，加进来照旧归他（hotseat-game.js · adoptNewHeroes）
+//     角色卡已经分配给房间里某名玩家的，加进来照旧归他（hotseat-game.js · adoptAddedHero）
 // 面板本身（online-gm-ui.js）的画面测试在 tests/pvp-gm-ui.test.js
 "use strict";
 const test = require("node:test");
@@ -238,4 +238,23 @@ test("热座 / 联机：加进来的角色卡已经分配给房间里某名玩�
   assert.equal(c.HotseatGame.transferHero(xia.id, "p3").ok, true);
   assert.equal(owner(xia), "p3");
   assert.ok(kolt);
+});
+
+test("热座 / 联机（自查）：只有「加入玩家角色」（gm.addHero）照角色卡原来的操控者；战场配置「加入队员」（battle.panel addParty）加进来的照旧归主持人——和以前一样", () => {
+  const f = hotseat();
+  const { c, S, units: [, helu], send, gm } = f;
+  const operator = id => (c.HotseatGame.getView().units.find(r => r.id === id) || {}).owner;   // 会话里真正的操控者（行动顺序那一份）
+  assert.equal(send("p1", { type: "startCombat" }).ok, true);
+  c.HotseatGame.beginRound();
+  assert.equal(operator(helu.id), "p2");
+  gm({ type: "gm.removeHero", actor: helu.id });
+  const ack = send("p1", { type: "battle.panel", action: "addParty", kit: "helu", zone: 1 });
+  assert.equal(ack.ok, true, ack.error);
+  const back = S.units.find(u => u.kit === "helu" && !u.weaponOf);
+  assert.ok(back && back.id !== helu.id);
+  assert.equal(operator(back.id), "p1", "加入队员：照旧归主持人（以前加进来的人没分配过就是主持人的）");
+  // 换成「加入玩家角色」：照旧归玩家 2
+  gm({ type: "gm.removeHero", actor: back.id });
+  const again = byId(S, gm({ type: "gm.addHero", kit: "helu", zone: 1 }).id);
+  assert.equal(operator(again.id), "p2", "加入玩家角色：照角色卡原来的操控者");
 });

@@ -3075,9 +3075,10 @@
         if (hit) all.push(hit);
       });
     }
-    // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，打敌人的技能只能选嘲讽它的那个单位（配置物 / 危墙也不行；enemies.js · playerTauntTarget）
-    const taunt = side === "enemy" && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
-    if (taunt) all = all.filter(u => u.id === taunt.id);
+    // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，和自己敌对的单位只剩嘲讽它的那个（打敌人、任意单位的技能都是；配置物 / 危墙也不行）；
+    // 自己人照常（app.js · tauntFoe，和扣点之前的检查同一个判断；enemies.js · playerTauntTarget）
+    const taunt = side !== "ally" && side !== "allySelf" && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
+    if (taunt) all = all.filter(u => { const real = unitById(u.id); return !!real && !tauntFoe(actor, real, taunt); });
     return all;
   }
 

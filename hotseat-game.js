@@ -130,6 +130,8 @@
     return { enabled: enabled && !state.solo, network, configured, notice, mode: config.mode, playerId: id, hostId: gm(), players: copy(config.players),
       heroes: heroes().map(u => ({ id: u.id, name: u.name, owner: ownerByKit[u.kit] || gm() })),
       units: (s?.roster || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
+      // 场上所有能操作的单位归谁（#464）：units 只是这一段排进行动顺序的；敌人回合那一段里，在我方回合行动的角色归谁看这一份
+      operable: (s?.operable || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
       phase: s?.phase === "selecting" ? "picking" : s?.phase || "setup", currentUnitId: s?.currentUnitId || null,
       // 排的是哪一段：敌人回合开始时玩家阵营先动的那一段是 "enemy"（#464，行动顺序栏写「敌人回合」）
       segment: s?.segment === "enemy" ? "enemy" : "player",
@@ -206,21 +208,17 @@
       if (cmd.type === "battle.setup" || cmd.type === "battle.setupRogue" || cmd.type === "trpg.ui" && !state.combatStarted) {
         session.reset(); const assignments = {}; for (const u of heroes()) assignments[u.id] = ownerByKit[u.kit] || gm(); session.setAssignments(assignments);
       }
-      adoptNewHeroes();
       session.reconcile();
     } finally { executing--; }
     setTimeout(() => { if (active() && GAME.resumeHotseat) GAME.resumeHotseat(); }, 0);
   }
-  /** 战斗中新上场的角色（主持人「加入玩家角色」gm.addHero、战场配置「加入队员」，#464）：这张角色卡已经分配给房间里某名玩家的，
-   *  照旧归他操控（ownerByKit 记着每张角色卡归谁，不在场的也留着）；没分配过的归主持人。已经分配过的不动（换人用「转交」） */
-  function adoptNewHeroes() {
-    if (!session) return;
-    const held = session.snapshot().assignments || {};
-    for (const u of heroes()) {
-      const owner = ownerByKit[u.kit];
-      if (Object.hasOwn(held, u.id) || !owner || owner === gm() || !config.players.some(p => p.id === owner)) continue;
-      session.adopt(u.id, owner);
-    }
+  /** 主持人「加入玩家角色」（gm.addHero，#464）加进来的这一个：这张角色卡已经分配给房间里某名玩家的，照旧归他操控
+   *  （ownerByKit 记着每张角色卡归谁，不在场的也留着）；没分配过的归主持人。只管这一个——战场配置「加入队员」加进来的照旧归主持人（一切照旧） */
+  function adoptAddedHero(unitId) {
+    const u = heroes().find(x => x.id === unitId), owner = u && ownerByKit[u.kit];
+    if (!u || !owner || owner === gm() || !config.players.some(p => p.id === owner)) return;
+    if (Object.hasOwn(session.snapshot().assignments || {}, u.id)) return;
+    session.adopt(u.id, owner);
   }
   function submit(cmd) {
     try {
@@ -233,7 +231,7 @@
   }
   function system(cmd, context) {
     executing++;
-    try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); adoptNewHeroes(); session.reconcile(); } return result; }
+    try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); if (cmd.type === "gm.addHero" && result && result.id) adoptAddedHero(result.id); session.reconcile(); } return result; }
     finally { executing--; if (active() && !executing) authority.broadcast(); }
   }
   function reason(unit) {
@@ -246,7 +244,10 @@
   function beginRound(segment) {
     if (!active()) return;
     session.beginRound(state.turnNo, segment);
-    if (segment !== "enemy") { if (newRoundSpends?.length) session.markSpent(newRoundSpends); newRoundSpends = null; }
+    // 开战 / 新回合开始时攒下的花费这一段开始时记上，以后的直接记（onActionSpend）。敌人回合那一段也一样：
+    // 突袭开局先进敌人回合时还攒着，不清掉的话这一段里花的点数一直攒在这里，格子锁不上（还能挪、能转交）
+    if (newRoundSpends?.length) session.markSpent(newRoundSpends);
+    newRoundSpends = null;
     GAME.disarm(); refresh();
   }
   /** 敌人回合先动的那一段（#464）已经全部结束了（或者一个能动的都没有）：该跑敌人的 AI 了 */

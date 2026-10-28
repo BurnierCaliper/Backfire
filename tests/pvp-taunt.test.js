@@ -147,6 +147,71 @@ test("嘲讽对玩家：只认敌对的人——同阵营队友开着友伤嘲�
   assert.ok(cand(tou, "tou_aa").length >= 0 && hiaki);
 });
 
+/** 自查（#464）用的场面：party 里第 3、4 个分到「乙」，其余在「我方」；狂徒一只；全在 1 区，带战斗画面（game.js）和联机校验 */
+function field2(party, seed) {
+  const c = H.load();
+  c.BattleSim.setup({ party, enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], zoneMode: 3, seed: seed || "PVP464-TAUNT2" });
+  const S = c.S.state, heroes = party.map(k => c.findKit(k, S.units)), thug = S.units.find(u => !u.isPlayer);
+  S.units.forEach(u => { u.zone = 1; });
+  thug.layers = [{ type: "flesh", current: 500, max: 500 }]; thug.def = thug.defMax = 30;
+  heroes.slice(2).forEach(h => c.Commands.dispatch({ type: "battle.playerFaction", faction: "乙", unit: h.id }));
+  c.startCombat();
+  heroes.forEach(h => { h.ap = h.apMax = 4; h.bonus = h.bonusMax = 4; h.level = Math.max(Number(h.level) || 1, 5); });
+  c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; } };
+  load(c, ["game.js", "hotseat-validation.js"]);
+  const skill = (a, id) => c.GAME.gameSkills(a).find(s => s.id === id);
+  const cand = (a, id) => ids(c.GAME.candidateUnits(a, skill(a, id)));
+  return { c, S, heroes, thug, cand };
+}
+
+test("嘲讽对玩家（自查）：不管技能写的是哪一边都认——电能鞭（说明里写着「拉到」，算任意单位）、诺拉的普攻（任意单位）打敌对的单位也只能打嘲讽者；打自己人照常", () => {
+  const { c, S, heroes: [kolt, helu, chuan, nora], thug, cand } = field2(["kolt", "helu", "chuan", "nora"]);
+  chuan.tauntTo = kolt.id; nora.tauntTo = kolt.id;
+  assert.equal(c.skillSideOf(chuan, "chuan_whip"), "any", "电能鞭照提示文字猜成「任意单位」（以前只认打敌人的技能，漏了它）");
+  assert.match(c.skillTargetError(chuan, "chuan_whip", thug) || "", /川川 被 柯尔特 嘲讽：只能攻击 柯尔特/, "电能鞭打狂徒：扣点之前拦下");
+  assert.match(c.skillTargetError(chuan, "chuan_whip", helu) || "", /嘲讽/, "我方的赫鲁米卡（敌对阵营）也不行");
+  assert.doesNotMatch(c.skillTargetError(chuan, "chuan_whip", kolt) || "", /嘲讽/, "打嘲讽者照常");
+  assert.ok(!cand(chuan, "chuan_whip").includes(thug.id), "本机名单里没有狂徒");
+  assert.ok(cand(chuan, "chuan_whip").includes(kolt.id), "嘲讽者在名单里");
+  const ap = chuan.ap, hp = c.totalHp(thug);
+  c.Commands.dispatch({ type: "skill", actor: chuan.id, skill: "chuan_whip", target: thug.id, picks: {} });
+  assert.equal(chuan.ap, ap, "直接发指令打狂徒：不扣行动点");
+  assert.equal(c.totalHp(thug), hp, "狂徒没挨打");
+  // 诺拉：普攻、针尖是「任意单位」（engine.js · SKILL_TARGET_SIDE）——打敌对的单位只能打嘲讽者，扎同阵营的川川照常
+  assert.equal(c.skillSideOf(nora, "nora_aa"), "any");
+  assert.match(c.skillTargetError(nora, "nora_aa", thug) || "", /诺拉 被 柯尔特 嘲讽/);
+  assert.doesNotMatch(c.skillTargetError(nora, "nora_needle", chuan) || "", /嘲讽/, "针尖扎自己人（当治疗手段）不管嘲讽");
+  assert.deepEqual(plain(c.__errors), []);
+  assert.ok(S);
+});
+
+test("嘲讽对玩家（自查）：给友方的那一步照常选自己人——开着友伤（同阵营的队友也能打）时也不拿掉、不拦（意式浓缩给同阵营的人加行动点）", () => {
+  const { c, S, heroes: [kolt, , yuito, nora] } = field2(["kolt", "helu", "yuito", "nora"], "PVP464-TAUNT3");
+  yuito.tauntTo = kolt.id;
+  c.setFriendlyFire(null, true);   // 本机一个人操控：开着友伤，同阵营的诺拉也算「能打到的人」
+  assert.equal(c.attackFoe(yuito, nora), true, "开着友伤：诺拉打得到");
+  const st = (c.skillFlowSteps("yuito_espresso", yuito, { mode: "ap" }) || []).find(s => s.key === "target");
+  assert.ok(st && st.units.some(u => u.id === nora.id), "给友方加行动点的那一步还列着诺拉");
+  S.skillFlow = { id: "yuito_espresso", actorId: yuito.id, picks: { mode: "ap", target: nora.id }, index: 99 };
+  try { assert.doesNotMatch(c.skillTargetError(yuito, "yuito_espresso", nora) || "", /嘲讽/, "给诺拉加行动点不拦"); }
+  finally { S.skillFlow = null; }
+});
+
+test("嘲讽对玩家（自查）：反应不受限制、也不用掉嘲讽——被嘲讽的人照样能接协助攻击打别的失衡单位（和敌人被嘲讽一样：敌人的协助攻击不看嘲讽）", () => {
+  const f = field();
+  const { c, S, kolt, hiaki, tou, thug } = f;
+  tou.tauntTo = kolt.id;
+  thug.stunned = true; thug.def = 0;
+  S.assistQueue = [{ breakerId: hiaki.id, targetId: thug.id, vsPlayer: false, pvpStage: "players" }];
+  assert.ok(c.eligibleAssisters(hiaki, thug, S.assistQueue[0]).some(u => u.id === tou.id), "灯在协助攻击的名单里");
+  const hp = c.totalHp(thug);
+  c.finishAssist(tou.id);
+  while (S.blockQueue && S.blockQueue.length) c.finishBlock(null);
+  assert.ok(c.totalHp(thug) < hp, "灯的协助攻击真的打到了狂徒（以前问了灯、回满了架势，打的时候又被嘲讽拦下）");
+  assert.equal(tou.tauntTo, kolt.id, "协助攻击不用掉嘲讽");
+  assert.match(c.skillTargetError(tou, "tou_aa", thug) || "", /嘲讽/, "自己出手照旧只能打柯尔特");
+});
+
 test("嘲讽对玩家：自动对打的玩家打法也认嘲讽（被嘲讽时只打嘲讽者）", () => {
   const f = field();
   const { c, kolt, helu, tou } = f;

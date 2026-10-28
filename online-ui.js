@@ -44,6 +44,9 @@
     const players = () => view.players || [];
     const playerName = id => (players().find(p => p.id === id) || {}).name || id || "主持人";
     const hs = () => view.packet && view.packet.view || {};
+    // 场上的单位归谁操控：认「自己的角色」（掷骰、角色资料、轮到谁……）看 operable——PvP 敌人回合那一段 units 只有这一段排进顺序的人（#464）；
+    // 旧主机没发 operable 就照旧用 units
+    const operable = () => hs().operable || hs().units || [];
     const paused = () => !view.status?.connected || !view.status?.hostOnline || !!view.status?.paused;
     const disabled = () => pending || paused() || animating;
     const button = (text, action, data = "", off = false, primary = false) => `<button type="button" class="g-btn ol-button${primary ? " ol-primary" : ""}" data-online="${action}" ${data}${off ? " disabled" : ""}>${esc(text)}</button>`;
@@ -412,7 +415,7 @@
     }
     /** 主持人对玩家座位的操作：掉线时「接管」他的角色（战斗中也行）；「释放座位」让丢了恢复令牌的人能用同一个昵称重新加入 */
     function seatTools(p) {
-      const units = (view.packet?.view?.units || []).filter(u => u.owner === p.id);
+      const units = operable().filter(u => u.owner === p.id);
       const take = !p.online && units.length ? button("接管", "takeOver", `data-player="${esc(p.id)}" title="由主持人替他操作 ${esc(units.map(u => u.name).join("、"))}"`, pending) : "";
       return `<span class="ol-seat-tools">${take}${button("释放座位", "releaseSeat", `data-player="${esc(p.id)}" data-name="${esc(p.name)}"`, pending)}</span>`;
     }
@@ -602,7 +605,7 @@
       const list = hs().checks || [];
       const open = list.filter(c => c.status === "open");
       const recent = list.filter(c => c.status !== "open" && Date.now() - (c.at || 0) < 15 * 60 * 1000).slice(-1);
-      const mineIds = new Set((hs().units || []).filter(u => u.owner === own()).map(u => u.id));
+      const mineIds = new Set(operable().filter(u => u.owner === own()).map(u => u.id));
       const rows = open.concat(recent);
       if (!rows.length) return "";
       // 战斗中：检定收成一行窄条（只列进行中的），把高度留给战场；说明放在悬停提示里
@@ -639,7 +642,7 @@
       return `<div class="ol-high" title="高能 ${esc(he)}：血量低于高能值时自爆"><span>高能</span><div class="ol-high-track"><i class="ol-high-hp" style="width:${Math.min(100, cur / max * 100)}%"></i><i class="u-high${he >= cur * 0.75 ? " danger" : ""}" style="width:${Math.min(100, he / max * 100)}%"></i></div><b>${esc(he)} / ${esc(cur)}</b></div>`;
     }
     function card(u) {
-      const owner = (hs().units || []).find(x => x.id === u.id)?.owner;
+      const owner = operable().find(x => x.id === u.id)?.owner;
       const resources = Object.entries(u.resources || {}).filter(([k, v]) => names[k] && (typeof v === "number" || v === true)).map(([k, v]) => `${names[k]} ${v === true ? "" : v}`);
       const conditions = Object.entries(u.statuses || {}).filter(([k, v]) => names[k] && v).map(([k, v]) => `${names[k]}${typeof v === "number" && v !== 1 ? " " + v : ""}`);
       // 状态 / 效果画成图标（hud-icons.js）；没有图标模块时还是写字
@@ -668,7 +671,7 @@
       const m = view.matchup || view.packet?.matchup || null;
       if (!m || !global.MatchupUI) return m;
       const st = displayState || view.state || {}, cur = hs().currentUnitId;
-      const mine = (hs().units || []).some(u => u.id === cur && u.owner === own());
+      const mine = operable().some(u => u.id === cur && u.owner === own());
       return global.MatchupUI.viewChart(m, st, selectedActor || (mine ? cur : null));
     };
     function openWorkshop(mat) {
@@ -1205,7 +1208,7 @@
     /* ---------- 角色资料 / 武器（向房主要数据，只读显示）；背包见 openBag ---------- */
     function myKit() {
       const units = (displayState || view.state || {}).units || [];
-      const mine = (hs().units || []).filter(u => u.owner === own()).map(u => units.find(x => x.id === u.id)).filter(Boolean);
+      const mine = operable().filter(u => u.owner === own()).map(u => units.find(x => x.id === u.id)).filter(Boolean);
       const heroes = mine.filter(u => !u.weaponOf);
       const hero = heroes.find(u => u.kit === focusKit) || heroes[0] || mine[0];
       return hero ? hero.kit : null;
@@ -1335,7 +1338,7 @@
     function rollUnits() {
       const units = ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && !u.hidden && u.kit);
       if (view.isHost) return units;
-      const mine = new Set((hs().units || []).filter(u => u.owner === own()).map(u => u.id));
+      const mine = new Set(operable().filter(u => u.owner === own()).map(u => u.id));
       return units.filter(u => mine.has(u.id));
     }
     function profLevel(kit, prof) {
@@ -1576,7 +1579,7 @@
       // 战斗中舞台本身不滚动，是战场自己滚动：同样放回原处
       if (fieldEl && fieldEl.isConnected && fieldEl.scrollTop !== fieldTop) fieldEl.scrollTop = fieldTop;
     }
-    const myUnits = () => (hs().units || []).filter(u => u.owner === own()).map(u => u.id);
+    const myUnits = () => operable().filter(u => u.owner === own()).map(u => u.id);
     /** 战场点选的规则询问（柯尔特更换刀头、赫米卡环境扫描……）：轮到自己回答时，敌人在战场上亮起、点它；其余选项放提示栏按钮 */
     function fieldAsk() { const a = hs().ask; return view.screen === "battle" && a && a.kind === "choice" && a.field && a.eligible && !a.declined && (a.options || []).length ? a : null; }
     async function answerField(index) {
@@ -1593,7 +1596,7 @@
       p = p || view.packet || {};
       const v = p.view || {};
       return { active: !!view.active, isHost: !!view.isHost, screen: screen || p.screen || view.screen, phase: v.phase, current: v.currentUnitId, turnNo: (p.state || view.state || {}).turnNo,
-        room: view.roomCode || "", mine: (v.units || []).filter(u => u.owner === own()).map(u => u.id) };
+        room: view.roomCode || "", mine: (v.operable || v.units || []).filter(u => u.owner === own()).map(u => u.id) };
     };
     /** 播一个包的音效：被新的包顶掉、离开房间、演出倍率 0（跳过）以后不再响 */
     const sfxFor = (packet, before, generation) => global.OnlineSfx ? global.OnlineSfx.start(packet, {

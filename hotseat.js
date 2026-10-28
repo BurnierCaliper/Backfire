@@ -147,7 +147,8 @@
           unitName: (ownerRow(h.unitId) || {}).unitName || h.unitId, extra: clone(h.extra || {}) })) };
     }
     function snapshot() {
-      return clone({ phase, turnNo, segment, mode, gmId, operators, assignments, roster, slots,
+      // operable：场上所有能操作的单位归谁（#464：敌人回合那一段 roster 只有这一段的人，玩家画面认「自己的角色」看这一份）
+      return clone({ phase, turnNo, segment, mode, gmId, operators, assignments, roster, slots, operable: everyone,
         currentUnitId: current(), confirmed: [...confirmed], pendingSwaps: swaps, ask: askSummary(), closedAsk, chat, table });
     }
     function cleanTable(t) {
@@ -329,6 +330,9 @@
         while (slots.length > roster.length) { const i = slots.lastIndexOf(null); if (i < 0) break; slots.splice(i, 1); }
         while (slots.length < roster.length) slots.push(null);
         if (changed) confirmed.clear();
+        // 选顺序的时候这一段的人都没了（被移出、倒下起不来、分到别的回合行动的阵营……，#464）：和一开始就没人一样（beginRound），这一段直接算结束，
+        // 不然停在「选择行动顺序」等主持人点「按当前格子开始」
+        if (!roster.length) phase = "enemy";
       } else if (phase === "acting" || phase === "enemy") {
         for (const r of roster) if (!previousIds.has(r.unitId) && slotFor(r.unitId) < 0) {
           // 战斗中召唤出的武器人：紧挨着本人，并且立刻轮到它行动（本人还有行动的话，武器人结束后再回到本人）

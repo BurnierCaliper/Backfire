@@ -57,17 +57,16 @@
       for (let i = 2; i < 100; i++) { const id = name.slice(0, 14) + i; if (!taken.has(id)) return id; }
       return name;
     }
-    /** 「应用敌友关系」：只发改了的那几对 */
+    /** 「应用敌友关系」：只发改了的那几对。每个下拉框上写着它是哪两个阵营（data-rel-*）：画面画好以后场上的敌人阵营变了（最后一个敌人倒下……）
+     *  也不会把设置发给别的阵营（以前按画的时候的顺序号对，顺序一变就对错） */
     function relationChanges() {
-      const list = factions(), cfg = factionCfg(), out = [];
-      list.forEach((a, i) => list.slice(i + 1).forEach((b, j) => {
-        const v = value(`ogm-rel-p-${i}-${i + 1 + j}`);
-        if (v != null && v !== relValue((cfg.players || {})[pairKey(a.id, b.id)])) out.push({ type: "battle.playerFaction", faction: a.id, other: b.id, hostile: relHostile(v) });
-      }));
-      list.forEach((a, i) => foeFactions().forEach((e, k) => {
-        const v = value(`ogm-rel-e-${i}-${k}`);
-        if (v != null && v !== relValue((cfg.enemies || {})[a.id + "|" + e])) out.push({ type: "battle.playerFaction", faction: a.id, enemy: e, hostile: relHostile(v) });
-      }));
+      const cfg = factionCfg(), out = [];
+      container.querySelectorAll("select[data-rel-a]").forEach(el => {
+        const a = el.dataset.relA, v = el.value;
+        if (el.dataset.relB != null) {
+          if (v !== relValue((cfg.players || {})[pairKey(a, el.dataset.relB)])) out.push({ type: "battle.playerFaction", faction: a, other: el.dataset.relB, hostile: relHostile(v) });
+        } else if (el.dataset.relEnemy != null && v !== relValue((cfg.enemies || {})[a + "|" + el.dataset.relEnemy])) out.push({ type: "battle.playerFaction", faction: a, enemy: el.dataset.relEnemy, hostile: relHostile(v) });
+      });
       return out;
     }
     /** 「应用分配」：只发换了阵营的人 */
@@ -98,7 +97,7 @@
       ["人类", "红皮人", "类人"].concat(Object.keys(ENEMY_RACES).filter(r => !["人类", "红皮人"].includes(r)).reduce((a, r) => a.concat([r], (ENEMY_RACES[r].branches || []).map(b => r + "·" + b)), [])).forEach(r => { o[r] = r; });
       return o;
     };
-    const select = (id, label, options) => `<label>${label}<select id="${id}">${options}</select></label>`;
+    const select = (id, label, options, extra = "") => `<label>${label}<select id="${id}"${extra ? " " + extra : ""}>${options}</select></label>`;
     const number = (id, label, initial = 0, min = 0, max = "", step = "any") => { if (id.endsWith("-level") || (id === "ogm-unit-value" && unitField === "level")) max = 25; return `<label>${label}<input id="${id}" type="number" min="${min}"${max === "" ? "" : ` max="${max}"`} step="${step}" value="${esc(initial)}" required></label>`; };
     const check = (id, label, yes) => `<label class="ogm-check"><input id="${id}" type="checkbox"${yes ? " checked" : ""}>${label}</label>`;
     const button = (label, action, extra = "", disabled = false) => `<button type="button" data-action="${action}" ${extra}${disabled || busy ? " disabled" : ""}>${label}</button>`;
@@ -138,8 +137,9 @@
       const rows = list.map((f, i) => `<li><span><b>${esc(f.name)}</b><small>${esc(phaseNames[f.phase] || phaseNames.player)}行动 · ${count(f.id)} 人${f.id === DEFAULT_FACTION ? " · 默认阵营" : ""}</small></span><div class="ogm-grid"><label>名字<input id="ogm-fac-name-${i}" type="text" maxlength="16" value="${esc(f.name)}"></label>${select("ogm-fac-phase-" + i, "在哪个回合行动", options(phaseNames, f.phase))}</div><div class="ogm-actions">${button("应用", "faction-save", `data-index="${i}"`)}${f.id === DEFAULT_FACTION ? "" : button("删除阵营", "faction-delete", `data-index="${i}" class="ogm-danger"`)}</div></li>`).join("");
       const playersDefault = typeof PVP_CFG !== "undefined" && PVP_CFG.playersHostile === false ? "友好" : "敌对";
       const pairs = [], foeRows = [];
-      list.forEach((a, i) => list.slice(i + 1).forEach((b, j) => pairs.push(select(`ogm-rel-p-${i}-${i + 1 + j}`, `${esc(a.name)} ↔ ${esc(b.name)}`, options({ "": `默认（${playersDefault}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.players || {})[pairKey(a.id, b.id)]))))));
-      list.forEach((a, i) => foes.forEach((e, k) => foeRows.push(select(`ogm-rel-e-${i}-${k}`, `${esc(a.name)} ↔ ${esc(e)}`, options({ "": `默认（${allied(e) ? "友好" : "敌对"}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.enemies || {})[a.id + "|" + e]))))));
+      // 下拉框上写明是哪两个阵营（relationChanges 照这个发，不靠顺序号）
+      list.forEach((a, i) => list.slice(i + 1).forEach((b, j) => pairs.push(select(`ogm-rel-p-${i}-${i + 1 + j}`, `${esc(a.name)} ↔ ${esc(b.name)}`, options({ "": `默认（${playersDefault}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.players || {})[pairKey(a.id, b.id)])), `data-rel-a="${esc(a.id)}" data-rel-b="${esc(b.id)}"`))));
+      list.forEach((a, i) => foes.forEach((e, k) => foeRows.push(select(`ogm-rel-e-${i}-${k}`, `${esc(a.name)} ↔ ${esc(e)}`, options({ "": `默认（${allied(e) ? "友好" : "敌对"}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.enemies || {})[a.id + "|" + e])), `data-rel-a="${esc(a.id)}" data-rel-enemy="${esc(e)}"`))));
       const memberRows = people.map(u => select("ogm-member-" + u.id, `${esc(u.name)}${u.escort ? "（护送对象）" : ""} · ${esc(u.zone)} 区`, list.map(f => option(f.id, f.name, f.id === heroFaction(u))).join(""))).join("");
       return `<h3>玩家阵营</h3><p class="ogm-muted">每个阵营定在我方回合或敌人回合行动。在敌人回合行动的玩家角色：已经分配给玩家的由那名玩家在敌人回合自己操控，没分配的由主持人操控；它们全部行动完，才轮到敌人的 AI。删除阵营：里面的人回到默认阵营。</p><ul class="ogm-enemies ogm-factions">${rows}</ul><h3>新建阵营</h3><div class="ogm-grid"><label>名字<input id="ogm-fac-new-name" type="text" maxlength="16" placeholder="例：乙队"></label>${select("ogm-fac-new-phase", "在哪个回合行动", options(phaseNames, "player"))}</div>${button("新建阵营", "faction-add", 'class="ogm-primary"', list.length >= MAX_FACTIONS)}<h3>敌友关系</h3><p class="ogm-muted">不同的玩家阵营默认互相敌对；玩家阵营和敌人阵营默认照旧（敌对，战斗模板写了同阵营的友好）。友好不传递：甲和乙、乙和丙友好，甲和丙照它俩自己的设置。</p>${pairs.length || foeRows.length ? `<div class="ogm-grid">${pairs.join("")}${foeRows.join("")}</div>${button("应用敌友关系", "faction-relations", 'class="ogm-primary"')}` : '<p class="ogm-muted">只有一个玩家阵营，场上也没有敌人阵营。</p>'}<h3>分配角色</h3><p class="ogm-muted">武器人跟着角色。</p>${people.length ? `<div class="ogm-grid">${memberRows}</div>${button("应用分配", "faction-members", 'class="ogm-primary"')}` : '<p class="ogm-muted">场上没有玩家角色。</p>'}`;
     }

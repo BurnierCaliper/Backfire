@@ -10172,12 +10172,13 @@ function pushDest(a, t) {
  *  谐波攻击（这一步写着 harmonic，或者整个技能在 engine.js · SKILL_HITS_SUBMERGED 里）照样留着，别的技能的名单里拿掉。
  *  画面、联机 / 热座的校验（hotseat-validation.js · checkFlow）、模拟器都用这一份：下潜中的单位也选不进去 */
 function skillFlowSteps(id, actor, picks) {
-  // 嘲讽对玩家（#464）：被敌对的人嘲讽时，打敌人的技能分步里选的敌人只剩嘲讽者（给友方的那一步、选自己人的不管）
+  // 嘲讽对玩家（#464）：被敌对的人嘲讽时，分步里能选的敌对单位只剩嘲讽者——不管技能写的是打敌人、任意单位还是说明里写着友方
+  // （电能鞭、磁力移动、拆卸模式、霰弹枪的特殊射击……分步里选的照样是敌人）；自己人（同阵营、友好的阵营，开着友伤也算）一个不拿掉
   const taunt = tauntForSkill(actor, id);
   return (skillFlowStepsAll(id, actor, picks) || []).map(st => {
     if (!st || st.type !== "unit" || !Array.isArray(st.units)) return st;
     if (taunt) {
-      const kept = st.units.filter(u => !u || u.id === taunt.id || !attackFoe(actor, u));
+      const kept = st.units.filter(u => !u || !tauntFoe(actor, u, taunt));
       if (kept.length !== st.units.length) st = Object.assign({}, st, { units: kept });
     }
     const harmonic = st.harmonic != null ? !!st.harmonic : skillHitsSubmerged(id);
@@ -12400,7 +12401,6 @@ function roleTargetError(a, id, t) {
   return null;
 }
 
-/** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 /** 技能选目标的一边：engine.js · SKILL_TARGET_SIDE 写了的照写的，没写的照提示文字猜（和本机名单 game.js · candidateUnits、联机校验同一种猜法） */
 function skillSideOf(a, id) {
   if (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) return SKILL_TARGET_SIDE[id];
@@ -12409,26 +12409,40 @@ function skillSideOf(a, id) {
   const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
   return /任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy";
 }
-/** 嘲讽对玩家（PvP 第二步，docs/pvp.md 第 5 节，#464）：a 被嘲讽（enemies.js · playerTauntTarget）时，选目标的一边是敌人的技能
- *  只能对嘲讽它的那个单位用——单体目标、分步里选的敌人都只能是它，配置物 / 危墙也不行；给自己 / 友方用的、只选区域的不管。不合规矩返回原因 */
+/** 嘲讽对玩家（#464）：反应（协助攻击、协助格挡、借机攻击）不受嘲讽限制，也不用掉嘲讽——和敌人被嘲讽一样（敌人的协助攻击不看嘲讽，npcAssisters）。
+ *  协助攻击的技能 id 都带 assist；没有专属协助技能、拿普通攻击当协助的看 state._assistBy（finishAssist 里设的） */
+function tauntReaction(a, id) {
+  return /_opp$|_block$|assist/.test(String(id)) || (!!a && !!state._assistBy && state._assistBy === a.id);
+}
+/** 嘲讽对玩家（#464）：被 f 嘲讽着的 a 不能选 u——u 是和 a 敌对的单位（非玩家单位、敌对玩家阵营的人），又不是嘲讽者 f。
+ *  自己人（同一个玩家阵营、单独设成友好的阵营）不拦：给友方用的那一步照常选，开着友伤打自己阵营的队友也照常（友伤开关照常可用） */
+function tauntFoe(a, u, f) {
+  return !!u && !!f && u.id !== f.id && attackFoe(a, u) && !teammateOf(a, u);
+}
+/** 嘲讽对玩家（PvP 第二步，docs/pvp.md 第 5 节，#464）：a 被嘲讽（enemies.js · playerTauntTarget）时，选单位只能选嘲讽它的那个——
+ *  单体目标、分步里选的单位，和 a 敌对的只能是嘲讽者（tauntFoe），不管技能写的是打敌人、任意单位，还是说明里写着友方、分步里选的却是敌人
+ *  （电能鞭、磁力移动、拆卸模式、霰弹枪的特殊射击……）；打敌人 / 任意单位的技能也不能打配置物 / 危墙。
+ *  给自己人用的、只选区域的（范围攻击打一个区）、反应（tauntReaction）不管。不合规矩返回原因 */
 function playerTauntWhy(a, id, t) {
   const f = typeof playerTauntTarget === "function" ? playerTauntTarget(a) : null;
-  if (!f || skillSideOf(a, id) !== "enemy") return null;
+  if (!f || tauntReaction(a, id)) return null;
+  const side = skillSideOf(a, id);
   const fl = state.skillFlow;
   const picked = (fl && fl.id === id ? Object.values(fl.picks || {}) : []).map(v => (typeof v === "string" ? unitById(v) : null)).filter(Boolean);
   const unitT = t && t.id ? unitById(t.id) : null;
-  const structure = !unitT && (t ? true : isStructureToken(state.targetId));
-  const wrong = structure || [unitT].concat(picked).some(u => u && u.id !== f.id && attackFoe(a, u));
+  const structure = (side === "enemy" || side === "any") && !unitT && (t ? true : isStructureToken(state.targetId));
+  const wrong = structure || [unitT].concat(picked).some(u => tauntFoe(a, u, f));
   return wrong ? `${a.name} 被 ${f.name} 嘲讽：只能攻击 ${f.name}` : null;
 }
-/** 选这个技能的分步名单时 actor 被谁嘲讽着（只看打敌人的技能；没有返回 null） */
+/** 选这个技能的分步名单时 actor 被谁嘲讽着（反应不算；没有返回 null） */
 function tauntForSkill(actor, id) {
   const f = actor && actor.isPlayer && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
-  return f && skillSideOf(actor, id) === "enemy" ? f : null;
+  return f && !tauntReaction(actor, id) ? f : null;
 }
 
+/** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
 function skillTargetError(a, id, t) {
-  // 嘲讽对玩家（#464）：被敌对的人嘲讽时，打敌人的技能只能选嘲讽者（专长、义体也一样，所以放在最前面）。只有一个玩家阵营时一个都不拦
+  // 嘲讽对玩家（#464）：被敌对的人嘲讽时，敌对的单位只能选嘲讽者（专长、义体也一样，所以放在最前面）。只有一个玩家阵营时一个都不拦
   if (a && a.isPlayer) { const why = playerTauntWhy(a, id, t); if (why) return why; }
   if (typeof featOfSkill === "function" && featOfSkill(id)) {
     const fl = state.skillFlow;
@@ -12639,8 +12653,8 @@ function runSkill(id, optRun) {
       const fuelGain = FUEL_SKILLS.includes(id) && xiaFuelOn() && ((findKit("xia", state.units) || {}).resources || {}).engine;
       const seqBefore = Number(state.actionSeq) || 0;
       const apBefore = a0 ? Number(a0.ap) || 0 : 0;
-      // 嘲讽对玩家（#464）：被嘲讽的人这一下打的是不是嘲讽者（目标或分步里选的），真的出了手就用掉这次嘲讽
-      const taunt = a0 && a0.isPlayer && typeof playerTauntTarget === "function" ? playerTauntTarget(a0) : null;
+      // 嘲讽对玩家（#464）：被嘲讽的人这一下打的是不是嘲讽者（目标或分步里选的），真的出了手就用掉这次嘲讽（反应不算，和敌人一样）
+      const taunt = a0 && a0.isPlayer && typeof playerTauntTarget === "function" && !tauntReaction(a0, id) ? playerTauntTarget(a0) : null;
       const tauntAimed = !!taunt && (state.targetId === taunt.id || (!!state.skillFlow && state.skillFlow.id === id && Object.values(state.skillFlow.picks || {}).includes(taunt.id)));
       // 用队友给的行动点出手：这次行动的分数分一部分给给行动点的人（addScore 按 state._apShare 分）
       const apShare = a0 && a0.isPlayer && !state._apShare ? apShareFor(a0, (skillCost(id) || {}).ap) : null;
