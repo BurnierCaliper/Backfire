@@ -118,6 +118,83 @@ test("移出玩家角色：和移出敌人一样不算击杀；武器人跟着�
   assert.ok(S.units.includes(kolt));
 });
 
+/** 联机房主（online-game.js 的协调，转发连接、演出换成确定的假件；和 tests/online-host.test.js 同一套搭法）：房间里主持人 host、玩家 p2 */
+async function onlineHost() {
+  const c = H.load(), sends = [], errors = [];
+  c.BattleSim.setup({ party: ["ruby", "kolt"], enemies: [{ id: "thug_knife", lv: 2, zone: 2 }], seed: "PVP464-ONLINE" });
+  let message, statusListener;
+  const status = { connected: true, hostOnline: true, paused: true, roster: [{ id: "host", role: "host", name: "主持人", online: true }, { id: "p2", role: "player", name: "玩家", online: true }] };
+  c.console = { error: e => errors.push(String(e)), log() {}, warn() {} };
+  c.location = { search: "", reload() {} }; c.URLSearchParams = URLSearchParams;
+  c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; }, body: { classList: { add() {} } } };
+  c.addEventListener = () => {}; c.setInterval = () => 1; c.queueMicrotask = queueMicrotask; c.setTimeout = setTimeout; c.clearTimeout = clearTimeout;
+  const state = c.S.state;
+  c.GAME = { depth: 0, sim: false, tape: null, ended: false, level: 1, undo: [], onlineEditWindow: false,
+    refresh() {}, disarm() {}, resumeHotseat() {}, checkEnd() {}, onlineCheckpoint: () => plain({ state }), restoreOnline() {}, resumeOnline: async () => {},
+    async actSystem(cmd, meta, context) { this.depth++; try { const value = c.HotseatGame.system(cmd, context); c.OnlineGame.onActionSettled(cmd, value, [], meta); return value; } finally { this.depth--; } } };
+  c.Screens = { current: () => "battle", is: screen => screen === "battle" };
+  c.Commands.register("screen", () => ({}), { domain: "fixture" });
+  c.TrpgFlow = { enter() {}, onlineCheckpoint: () => ({}), restoreOnline() {} };
+  c.trpgReadSlots = () => [{ name: "已有团" }, null, null];
+  c.HotseatUI = { mount() {} };
+  c.OnlineView = { projectPacket: p => plain({ ...p, displayOnly: true }), projectLogs: rows => plain(rows) };
+  c.OnlineActions = { create: () => ({ menu() { return {}; } }) };
+  const ep = { identity: { id: "host", name: "主持人", role: "host", roomCode: "AAAAAA" },
+    credentials: () => ({ roomCode: "AAAAAA", role: "host", token: "test", build: "backfire-d3-v1", protocol: 1 }),
+    onMessage(fn) { message = fn; }, onStatus(fn) { statusListener = fn; fn(plain(status)); },
+    send: async (packet, recipient) => { sends.push({ packet: plain(packet), recipient }); return { ok: true }; },
+    async setReady() { status.paused = false; statusListener(plain(status)); }, close() {}, reconnect() {} };
+  c.RelayTransport = { createHost: async () => ep, resumeHost: async () => ep };
+  load(c, ["hotseat.js", "hotseat-authority.js", "hotseat-validation.js", "gm-commands.js", "hotseat-game.js", "online-wire.js", "online-game.js"]);
+  await c.OnlineGame.create({ slot: 0, name: "主持人", url: "https://fixture.invalid" });
+  c.OnlineGame.start();
+  const heroes = state.units.filter(u => u.isPlayer && !u.weaponOf);
+  c.OnlineGame.assign(Object.fromEntries(heroes.map(u => [u.id, u.kit === "kolt" ? "p2" : "host"])));
+  // 玩家发来的指令包（requestId 递增）；等房主回 ack
+  let requestId = 0;
+  const fromPlayer = async command => {
+    const id = ++requestId, before = sends.length;
+    await message({ type: "cmd", requestId: id, command, protocol: 1, build: "backfire-d3-v1" }, "p2");
+    for (let i = 0; i < 50 && !sends.slice(before).some(s => s.packet.type === "ack" && s.packet.requestId === id); i++) await new Promise(r => setTimeout(r, 5));
+    return (sends.slice(before).find(s => s.packet.type === "ack" && s.packet.requestId === id) || {}).packet;
+  };
+  return { c, state, heroes, errors, fromPlayer, publicLogs: () => c.OnlineGame.getView().packet.publicLogs };
+}
+
+test("联机房主：主持人面板发的 battle.playerFaction 和主持人指令一样走结算流程（改了立刻生效、公开记录只写「调整了战场」）；不合法的退回规则层的原因、不进结算；玩家发不了", async () => {
+  const f = await onlineHost();
+  const { c, state, heroes } = f, kolt = heroes.find(u => u.kit === "kolt");
+  c.HotseatGame.startCombat(); c.HotseatGame.beginRound();
+  const ok = await c.OnlineGame.submit({ type: "battle.playerFaction", faction: "乙", name: "乙队", phase: "enemy", unit: kolt.id });
+  assert.equal(ok.ok, true, ok.error);
+  assert.equal(c.playerFactionOf(kolt), "乙", "改了立刻生效");
+  assert.equal(c.playerFactionInfo("乙").phase, "enemy");
+  assert.equal(f.publicLogs().at(-1).summary, "主持人调整了战场", "公开记录不写谁和谁敌对");
+  // 不合法：规则层的原因原样退回，状态不变，也不当成「房主遇到处理错误」
+  const before = plain(state.playerFactions);
+  const bad = await c.OnlineGame.submit({ type: "battle.playerFaction", faction: "我方", remove: true });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /不能删/);
+  const unknown = await c.OnlineGame.submit({ type: "battle.playerFaction", faction: "乙", other: "丁", hostile: true });
+  assert.match(unknown.error, /没有这个玩家阵营/);
+  assert.deepEqual(plain(state.playerFactions), before, "被拒的不留下改动");
+  assert.equal(c.OnlineGame.getView().packet.systemNotice, "", "没有「房主遇到处理错误」");
+  // 玩家发不了
+  const fromP2 = await f.fromPlayer({ type: "battle.playerFaction", faction: "乙", unit: heroes.find(u => u.kit === "ruby").id });
+  assert.equal(fromP2.ok, false);
+  assert.match(fromP2.error, /只有主持人/);
+  assert.equal(c.playerFactionOf(heroes.find(u => u.kit === "ruby")), "我方");
+  // 加入玩家角色也从这条路走：公开记录写「在 X 区加入 谁 Lv」
+  const add = await c.OnlineGame.submit({ type: "gm.addHero", kit: "xia", zone: 1, faction: "乙" });
+  assert.equal(add.ok, true, add.error);
+  const row = f.publicLogs().at(-1);
+  assert.deepEqual([row.action, row.unitName, row.zone], ["spawn", "夕夏", 1]);
+  assert.equal(typeof row.level, "number");
+  assert.equal((await c.OnlineGame.submit({ type: "gm.removeHero", actor: state.units.find(u => u.kit === "xia").id })).ok, true);
+  assert.deepEqual([f.publicLogs().at(-1).action, f.publicLogs().at(-1).unitName], ["remove", "夕夏"]);
+  assert.deepEqual(f.errors, []);
+});
+
 /** 热座 / 联机（房主的 hotseat-game.js，真的会话和校验）：p1 主持人，p2 玩家。主持人指令照联机的路走 HotseatGame.system */
 function hotseat(opt = {}) {
   const f = gmField({ party: opt.party || ["kolt", "helu"], seed: opt.seed || "PVP464-HS" });

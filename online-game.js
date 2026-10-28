@@ -344,6 +344,15 @@
       try { HotseatGame.system(cmd, context); publish(); return { ok: true }; }
       finally { messageContexts.delete(context); }
     }
+    // 玩家阵营（规则层 #445，主持人面板「阵营」一栏 #464）：只有主持人能改。先在一份拷贝上试一遍（字段、有没有这个阵营、阵营数上限……），
+    // 不合法的直接退回原因，不进结算流程；合法的和主持人指令一样走结算流程（GAME.actSystem：排在演出后面、发包、判胜负）
+    if (cmd.type === "battle.playerFaction") {
+      if (sender !== identity.id) error("只有主持人可以执行此操作");
+      HotseatValidation.inspect(() => BattleCommands.execute(copy(cmd)));
+      const before = seq;
+      await GAME.actSystem(cmd, {}, gmContext);
+      settled(before); return { ok: true };
+    }
     if (cmd.type.startsWith("gm.")) {
       if (sender !== identity.id) error("只有主持人可以执行此操作");
       if (["gm.enemyAct", "gm.enemyEndTurn"].includes(cmd.type) && !manualPhase) error("当前不是主持人敌人行动阶段");
@@ -518,13 +527,15 @@
     try {
       if (!isHost()) return await rpc("cmd", { command: cmd });
       const at = battleEpoch;
+      // 主持人面板「阵营」一栏发的 battle.playerFaction（#464）和主持人指令一样排队
+      const gmLike = (cmd.type.startsWith("gm.") && cmd.type !== "gm.msg") || cmd.type === "battle.playerFaction";
       const run = async () => {
         while (GAME.depth > (manualPhase || GAME.onlineEditWindow ? 1 : 0)) await new Promise(r => setTimeout(r, 50));
         // 排队等演出的时候主持人放弃了这场战斗（abandonBattle，#322）：冲着那场战斗的主持人操作作废
-        if (cmd.type.startsWith("gm.") && at !== battleEpoch) error("这场战斗已经放弃，排队的主持人操作没有执行");
+        if (gmLike && at !== battleEpoch) error("这场战斗已经放弃，排队的主持人操作没有执行");
         return execute(cmd, identity.id);
       };
-      if (cmd.type.startsWith("gm.") && cmd.type !== "gm.msg") { const next = gmQueue.then(run, run); gmQueue = next.catch(() => {}); return await next; }
+      if (gmLike) { const next = gmQueue.then(run, run); gmQueue = next.catch(() => {}); return await next; }
       return await (immediate(cmd) ? execute(cmd, identity.id) : enqueue(run));
     } catch (e) { notice = e.message; notify(); return { ok: false, error: e.message }; }
   }
@@ -621,7 +632,8 @@
       const actor = state.units.find(u => u.id === cmd.actor);
       // 主持人加入的玩家角色（gm.addHero，#464）：和生成敌人一样写「在 X 区加入 谁 Lv」（名字、等级按加进来的那个单位）
       const hero = cmd.type === "gm.addHero" ? state.units.find(u => u.isPlayer && !u.weaponOf && u.kit === cmd.kit) : null;
-      if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
+      // 主持人改玩家阵营（battle.playerFaction，#464）：公开记录只写「主持人调整了战场」（谁和谁敌对不写）
+      if (cmd.type?.startsWith("gm.") || cmd.type === "battle.playerFaction") publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" || cmd.type === "gm.addHero" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeHero" ? "remove" : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : hero ? hero.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: hero ? hero.level : cmd.level, at: Date.now() });
       else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (!["move", "standUp", "useItem"].includes(cmd.type) && meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });

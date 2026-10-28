@@ -33,10 +33,47 @@
     // 玩家阵营：规则层（enemies.js · playerFactionList / playerFactionOf）；没加载规则时用 view.factions、单位上的 faction
     const DEFAULT_FACTION = typeof PVP_CFG !== "undefined" ? PVP_CFG.defaultFaction : "我方";
     const factions = () => typeof playerFactionList === "function" ? playerFactionList() : view.factions || [{ id: DEFAULT_FACTION, name: DEFAULT_FACTION, phase: "player" }];
-    const factionOf = u => typeof playerFactionOf === "function" ? playerFactionOf(u) : u.faction || DEFAULT_FACTION;
+    const heroFaction = u => typeof playerFactionOf === "function" ? playerFactionOf(u) : u.faction || DEFAULT_FACTION;
     const factionName = id => (factions().find(f => f.id === id) || { name: id }).name;
     // 谁在操控（热座分配；没分配的是主持人）
     const ownerName = u => { const h = (view.heroes || []).find(x => x.id === u.id), p = h && (view.players || []).find(x => x.id === h.owner); return p ? p.name + (p.gm ? "（主持人）" : "") : "主持人"; };
+    // 阵营管理（#464）：全部走规则层的指令 battle.playerFaction（enemies.js · setPlayerFaction），面板只是界面
+    const phaseNames = { player: "我方回合", enemy: "敌人回合" };
+    const MAX_FACTIONS = typeof PVP_CFG !== "undefined" ? PVP_CFG.maxFactions : 8;
+    const factionCfg = () => { const c = state().playerFactions; return c && typeof c === "object" ? c : { players: {}, enemies: {} }; };
+    const pairKey = (a, b) => [String(a), String(b)].sort().join("|");
+    const relValue = v => v === true ? "hostile" : v === false ? "friendly" : "";
+    const relHostile = v => v === "hostile" ? true : v === "friendly" ? false : null;
+    // 敌友关系里列的敌人阵营：场上非玩家单位的阵营（图鉴里的阵营名），加上已经单独设过的
+    const foeFactions = () => [...new Set(units().filter(u => !u.isPlayer && present(u)).map(u => typeof factionOf === "function" ? factionOf(u) : u.enemyFaction)
+      .concat(Object.keys(factionCfg().enemies || {}).map(k => k.split("|")[1])).filter(Boolean))];
+    const allied = e => (state().playerAllies || []).includes(e);
+    // 能分阵营的：玩家角色和护送对象（武器人跟着持有者）
+    const members = () => units().filter(u => u.isPlayer && !u._removed && (u.escort || !isWeapon(u)));
+    /** 新阵营的 id：名字没被用过就用名字，用过了在后面加数字 */
+    function newFactionId(name) {
+      const taken = new Set(factions().flatMap(f => [f.id, f.name]));
+      if (!taken.has(name)) return name;
+      for (let i = 2; i < 100; i++) { const id = name.slice(0, 14) + i; if (!taken.has(id)) return id; }
+      return name;
+    }
+    /** 「应用敌友关系」：只发改了的那几对 */
+    function relationChanges() {
+      const list = factions(), cfg = factionCfg(), out = [];
+      list.forEach((a, i) => list.slice(i + 1).forEach((b, j) => {
+        const v = value(`ogm-rel-p-${i}-${i + 1 + j}`);
+        if (v != null && v !== relValue((cfg.players || {})[pairKey(a.id, b.id)])) out.push({ type: "battle.playerFaction", faction: a.id, other: b.id, hostile: relHostile(v) });
+      }));
+      list.forEach((a, i) => foeFactions().forEach((e, k) => {
+        const v = value(`ogm-rel-e-${i}-${k}`);
+        if (v != null && v !== relValue((cfg.enemies || {})[a.id + "|" + e])) out.push({ type: "battle.playerFaction", faction: a.id, enemy: e, hostile: relHostile(v) });
+      }));
+      return out;
+    }
+    /** 「应用分配」：只发换了阵营的人 */
+    function memberChanges() {
+      return members().filter(u => { const v = value("ogm-member-" + u.id); return v && v !== heroFaction(u); }).map(u => ({ type: "battle.playerFaction", faction: value("ogm-member-" + u.id), unit: u.id }));
+    }
     const zones = () => Array.from({ length: Number(state().zoneMode) || 2 }, (_, i) => i + 1);
     // 「生成敌人」的等级默认填队伍平均等级（作者 10/20 定；trpg-tasks.js · trpgPartyLevel，四舍五入），主持人照样可以改
     const partyLevel = () => (typeof trpgPartyLevel === "function" && trpgPartyLevel()) || 1;
@@ -91,7 +128,20 @@
       const cards = heroCards(), free = cards.filter(c => !heroOnField(c.kit));
       if (!free.some(c => c.kit === heroKit)) heroKit = free[0]?.kit || "";
       const list = heroes();
-      return `<h3>加入玩家角色</h3><div class="ogm-grid">${select("ogm-hero-kit", "角色卡", cards.map(c => `<option value="${esc(c.kit)}"${c.kit === heroKit ? " selected" : ""}${heroOnField(c.kit) ? " disabled" : ""}>${esc(c.name)}${heroOnField(c.kit) ? "（已在场上）" : ""}</option>`).join(""))}${select("ogm-hero-zone", "加入区域", zoneOptions(zones().length))}${select("ogm-hero-faction", "玩家阵营", factions().map(f => option(f.id, f.name, f.id === DEFAULT_FACTION)).join(""))}</div><p class="ogm-muted">任何一张角色卡都可以（房间里有人在用的、没人用的）：带着角色卡原本的等级、装备、加点。已经分配给玩家的角色照旧由那名玩家操控，没分配的由主持人操控（可以在「角色分配」里转交）。同一张角色卡已经在场上时不能再加一份。</p>${button("加入战场", "add-hero", 'class="ogm-primary"', !heroKit)}<h3>在场玩家角色</h3><ul class="ogm-enemies ogm-heroes">${list.map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${esc(factionName(factionOf(u)))} · 操控：${esc(ownerName(u))}${u.dead ? " · 倒下" : ""}</small></span><div class="ogm-actions">${button("移出", "remove-hero", `data-id="${esc(u.id)}"`)}</div></li>`).join("") || "<li>当前没有玩家角色。</li>"}</ul><p class="ogm-muted">移出：和移出敌人一样，不算击杀；武器人跟着一起离场。</p>`;
+      return `<h3>加入玩家角色</h3><div class="ogm-grid">${select("ogm-hero-kit", "角色卡", cards.map(c => `<option value="${esc(c.kit)}"${c.kit === heroKit ? " selected" : ""}${heroOnField(c.kit) ? " disabled" : ""}>${esc(c.name)}${heroOnField(c.kit) ? "（已在场上）" : ""}</option>`).join(""))}${select("ogm-hero-zone", "加入区域", zoneOptions(zones().length))}${select("ogm-hero-faction", "玩家阵营", factions().map(f => option(f.id, f.name, f.id === DEFAULT_FACTION)).join(""))}</div><p class="ogm-muted">任何一张角色卡都可以（房间里有人在用的、没人用的）：带着角色卡原本的等级、装备、加点。已经分配给玩家的角色照旧由那名玩家操控，没分配的由主持人操控（可以在「角色分配」里转交）。同一张角色卡已经在场上时不能再加一份。</p>${button("加入战场", "add-hero", 'class="ogm-primary"', !heroKit)}<h3>在场玩家角色</h3><ul class="ogm-enemies ogm-heroes">${list.map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${esc(factionName(heroFaction(u)))} · 操控：${esc(ownerName(u))}${u.dead ? " · 倒下" : ""}</small></span><div class="ogm-actions">${button("移出", "remove-hero", `data-id="${esc(u.id)}"`)}</div></li>`).join("") || "<li>当前没有玩家角色。</li>"}</ul><p class="ogm-muted">移出：和移出敌人一样，不算击杀；武器人跟着一起离场。</p>`;
+    }
+    /** 阵营（PvP 第二步，docs/pvp.md 第 1.1 节，#464）：新建 / 删除玩家阵营、改名字、定在哪个回合行动；和其他玩家阵营、敌人阵营是敌是友；
+     *  把场上的玩家角色分进某个阵营。每个按钮发的都是 battle.playerFaction（规则层 enemies.js · setPlayerFaction） */
+    function factionsMarkup() {
+      const list = factions(), cfg = factionCfg(), foes = foeFactions(), people = members();
+      const count = id => people.filter(u => heroFaction(u) === id).length;
+      const rows = list.map((f, i) => `<li><span><b>${esc(f.name)}</b><small>${esc(phaseNames[f.phase] || phaseNames.player)}行动 · ${count(f.id)} 人${f.id === DEFAULT_FACTION ? " · 默认阵营" : ""}</small></span><div class="ogm-grid"><label>名字<input id="ogm-fac-name-${i}" type="text" maxlength="16" value="${esc(f.name)}"></label>${select("ogm-fac-phase-" + i, "在哪个回合行动", options(phaseNames, f.phase))}</div><div class="ogm-actions">${button("应用", "faction-save", `data-index="${i}"`)}${f.id === DEFAULT_FACTION ? "" : button("删除阵营", "faction-delete", `data-index="${i}" class="ogm-danger"`)}</div></li>`).join("");
+      const playersDefault = typeof PVP_CFG !== "undefined" && PVP_CFG.playersHostile === false ? "友好" : "敌对";
+      const pairs = [], foeRows = [];
+      list.forEach((a, i) => list.slice(i + 1).forEach((b, j) => pairs.push(select(`ogm-rel-p-${i}-${i + 1 + j}`, `${esc(a.name)} ↔ ${esc(b.name)}`, options({ "": `默认（${playersDefault}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.players || {})[pairKey(a.id, b.id)]))))));
+      list.forEach((a, i) => foes.forEach((e, k) => foeRows.push(select(`ogm-rel-e-${i}-${k}`, `${esc(a.name)} ↔ ${esc(e)}`, options({ "": `默认（${allied(e) ? "友好" : "敌对"}）`, hostile: "敌对", friendly: "友好" }, relValue((cfg.enemies || {})[a.id + "|" + e]))))));
+      const memberRows = people.map(u => select("ogm-member-" + u.id, `${esc(u.name)}${u.escort ? "（护送对象）" : ""} · ${esc(u.zone)} 区`, list.map(f => option(f.id, f.name, f.id === heroFaction(u))).join(""))).join("");
+      return `<h3>玩家阵营</h3><p class="ogm-muted">每个阵营定在我方回合或敌人回合行动。在敌人回合行动的玩家角色：已经分配给玩家的由那名玩家在敌人回合自己操控，没分配的由主持人操控；它们全部行动完，才轮到敌人的 AI。删除阵营：里面的人回到默认阵营。</p><ul class="ogm-enemies ogm-factions">${rows}</ul><h3>新建阵营</h3><div class="ogm-grid"><label>名字<input id="ogm-fac-new-name" type="text" maxlength="16" placeholder="例：乙队"></label>${select("ogm-fac-new-phase", "在哪个回合行动", options(phaseNames, "player"))}</div>${button("新建阵营", "faction-add", 'class="ogm-primary"', list.length >= MAX_FACTIONS)}<h3>敌友关系</h3><p class="ogm-muted">不同的玩家阵营默认互相敌对；玩家阵营和敌人阵营默认照旧（敌对，战斗模板写了同阵营的友好）。友好不传递：甲和乙、乙和丙友好，甲和丙照它俩自己的设置。</p>${pairs.length || foeRows.length ? `<div class="ogm-grid">${pairs.join("")}${foeRows.join("")}</div>${button("应用敌友关系", "faction-relations", 'class="ogm-primary"')}` : '<p class="ogm-muted">只有一个玩家阵营，场上也没有敌人阵营。</p>'}<h3>分配角色</h3><p class="ogm-muted">武器人跟着角色。</p>${people.length ? `<div class="ogm-grid">${memberRows}</div>${button("应用分配", "faction-members", 'class="ogm-primary"')}` : '<p class="ogm-muted">场上没有玩家角色。</p>'}`;
     }
     function enemiesMarkup() {
       const library = presets(); if (!library.some(p => p.id === enemyId)) enemyId = library[0]?.id || "";
@@ -150,25 +200,34 @@
       // Notifications may arrive while the GM types. Preserve the pending form,
       // except after an explicit selector change or accepted submit.
       if (open && focused && !busy && container.querySelector("#ogm-panel")) return;
-      const tabs = { enemies: "敌人", units: "单位", props: "配置物", field: "地形", weather: "天气", attack: "安排攻击" };
+      const tabs = { enemies: "敌人", factions: "阵营", units: "单位", props: "配置物", field: "地形", weather: "天气", attack: "安排攻击" };
       // 入口在暂停页面里（#298，以前是右下角的「主持人工具」按钮 #ogm-toggle）：这里只画面板
-      container.innerHTML = open ? `<section id="ogm-panel" aria-label="主持人工具面板"><header><h2>主持人工具</h2>${button("关闭", "close", 'aria-label="关闭主持人工具"')}</header><div class="ogm-toolbar">${check("ogm-silent", "静默（不写玩家记录）", silent)}<span class="ogm-muted">仅主持人</span></div><nav aria-label="主持人工具类别">${Object.entries(tabs).map(([k, label]) => button(label, "tab", `data-tab="${k}" aria-pressed="${tab === k}"`)).join("")}</nav><p id="ogm-notice" role="status"${notice ? "" : " hidden"}>${esc(notice)}</p><div class="ogm-content">${({ enemies: enemiesMarkup, units: unitMarkup, props: propMarkup, field: fieldMarkup, weather: weatherMarkup, attack: attackMarkup })[tab]()}</div></section>` : "";
+      container.innerHTML = open ? `<section id="ogm-panel" aria-label="主持人工具面板"><header><h2>主持人工具</h2>${button("关闭", "close", 'aria-label="关闭主持人工具"')}</header><div class="ogm-toolbar">${check("ogm-silent", "静默（不写玩家记录）", silent)}<span class="ogm-muted">仅主持人</span></div><nav aria-label="主持人工具类别">${Object.entries(tabs).map(([k, label]) => button(label, "tab", `data-tab="${k}" aria-pressed="${tab === k}"`)).join("")}</nav><p id="ogm-notice" role="status"${notice ? "" : " hidden"}>${esc(notice)}</p><div class="ogm-content">${({ enemies: enemiesMarkup, factions: factionsMarkup, units: unitMarkup, props: propMarkup, field: fieldMarkup, weather: weatherMarkup, attack: attackMarkup })[tab]()}</div></section>` : "";
     }
     /** 暂停页面里点「主持人工具」：打开面板（和以前点 #ogm-toggle 一样） */
     function openPanel() { view = bridge.getView(); if (!container) render(); if (!container) return; open = true; refresh(); }
     // Esc closes the panel wherever focus is (capture phase, before the stage swallows the key).
     function onKey(event) { if (event.key === "Escape" && open && container) { event.preventDefault(); event.stopPropagation(); open = false; refresh(); } }
     function refresh() { if (container?.contains(document.activeElement)) document.activeElement.blur(); render(); }
+    /** 发一条指令；成功返回 true。静默（不写玩家记录）只对主持人指令（gm.*）有意义，规则指令（battle.playerFaction）不带 */
     async function send(command) {
-      if (busy) return;
-      view = bridge.getView(); if (!view?.active || !view.isHost || view.mode === "rogue") { render(); return; }
-      const form = container.querySelector("#ogm-panel"); if (form && !Array.from(form.querySelectorAll("input")).every(i => i.reportValidity())) return;
-      command.silent = silent; busy = true; notice = "正在执行…";
+      if (busy) return false;
+      view = bridge.getView(); if (!view?.active || !view.isHost || view.mode === "rogue") { render(); return false; }
+      const form = container.querySelector("#ogm-panel"); if (form && !Array.from(form.querySelectorAll("input")).every(i => i.reportValidity())) return false;
+      if (command.type.startsWith("gm.")) command.silent = silent;
+      busy = true; notice = "正在执行…";
       if (["gm.enemyAct", "gm.forceAttack"].includes(command.type)) open = false; // Let normal player reaction dialogs appear.
       refresh();
-      try { const result = await bridge.submit(JSON.parse(JSON.stringify(command))); notice = result && result.ok === false ? result.error || "操作被拒绝。" : "已执行。"; }
+      let ok = false;
+      try { const result = await bridge.submit(JSON.parse(JSON.stringify(command))); ok = !(result && result.ok === false); notice = ok ? "已执行。" : result.error || "操作被拒绝。"; }
       catch (error) { notice = error.message || String(error); }
       finally { busy = false; refresh(); }
+      return ok;
+    }
+    /** 一次改好几处（敌友关系、分配角色）：一条一条发，哪条被拒就停在那里（提示写着原因） */
+    async function sendAll(commands) {
+      if (!commands.length) { notice = "没有改动。"; refresh(); return; }
+      for (const command of commands) if (!(await send(command))) return;
     }
     function onChange(event) {
       const { id, value: v } = event.target;
@@ -205,6 +264,22 @@
         // 加入 / 移出玩家角色（#464）：阵营选的是默认阵营就不写（gm.addHero 不给 faction = 默认阵营）
         case "add-hero": { cmd = { type: "gm.addHero", kit: value("ogm-hero-kit"), zone: num("ogm-hero-zone") }; const f = value("ogm-hero-faction"); if (f && f !== DEFAULT_FACTION) cmd.faction = f; break; }
         case "remove-hero": cmd = { type: "gm.removeHero", actor: b.dataset.id }; break;
+        // 阵营（#464）：都是 battle.playerFaction
+        case "faction-add": {
+          const name = String(value("ogm-fac-new-name") || "").trim();
+          if (!name) { notice = "先填新阵营的名字。"; refresh(); return; }
+          cmd = { type: "battle.playerFaction", faction: newFactionId(name), name, phase: value("ogm-fac-new-phase") === "enemy" ? "enemy" : "player" }; break;
+        }
+        case "faction-save": {
+          const i = b.dataset.index, f = factions()[Number(i)]; if (!f) return;
+          const name = String(value("ogm-fac-name-" + i) || "").trim();
+          cmd = { type: "battle.playerFaction", faction: f.id, phase: value("ogm-fac-phase-" + i) === "enemy" ? "enemy" : "player" };
+          if (name && name !== f.name) cmd.name = name;
+          break;
+        }
+        case "faction-delete": { const f = factions()[Number(b.dataset.index)]; if (!f) return; cmd = { type: "battle.playerFaction", faction: f.id, remove: true }; break; }
+        case "faction-relations": void sendAll(relationChanges()); return;
+        case "faction-members": void sendAll(memberChanges()); return;
         case "manual-all-on": case "manual-all-off": cmd = { type: "gm.setManual", actors: "all", enabled: action === "manual-all-on" }; break;
         case "manual-one": cmd = { type: "gm.setManual", actors: [b.dataset.id], enabled: !manual(units().find(u => u.id === b.dataset.id)) }; break;
         case "enemy-move": cmd = { type: "gm.enemyAct", actor: actorId, action: "move", dest: Number(b.dataset.zone) }; break;
