@@ -354,6 +354,14 @@
       }
       assignments = next; reconcile(false); return emit("assignments");
     }
+    /** 战斗中新上场、还没分配过的英雄（主持人「加入玩家角色」，#464）：交给 operatorId。战斗中也可以；已经分配过的不改（换人用 transfer） */
+    function adopt(unitId, operatorId) {
+      operator(operatorId);
+      if (!maps().heroes.some(u => u.id === unitId)) fail("not_hero", "只能分配英雄角色");
+      if (Object.hasOwn(assignments, unitId)) fail("assigned", "这个角色已经分配过了");
+      if (operatorId !== gmId) assignments[unitId] = operatorId;
+      return reconcile(true);
+    }
     /** 主持人接管某个操作者的全部角色（例如玩家掉线）：战斗中也可以；角色和武器人改由主持人操作，顺序格子不变 */
     function takeOver(id, playerId) {
       host(id); operator(playerId);
@@ -620,7 +628,7 @@
     }
     setAssignments(options.assignments || {});
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
-      assertAction, finishUnit, markSpent, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
+      assertAction, finishUnit, markSpent, adopt, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, requestCheck, decideCheck, skillRoll, showTitle,
       ownerOf: unitId => (rowFor(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && ask.deadline != null && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },

@@ -357,23 +357,25 @@ function ledgerOnBlock(helper, notes) {
 
 /** 开战：把档案里的状态盖到场上的角色身上（不再每场回满） */
 function ledgerApplyToField(notes) {
-  partyHeroes().forEach(h => {
-    const rec = LEDGER.heroes[h.kit];
-    if (rec) {
-      (h.layers || []).forEach((l, i) => {
-        const v = (rec.layers || [])[i];
-        if (v != null) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(v) || 0));
-      });
-      if (rec.shp != null) h.shp = Math.max(0, Math.min(Number(h.shpMax) || 0, Number(rec.shp) || 0));
-      h.dead = !!rec.dead;
-      h.dying = !!rec.dying && !rec.dead;
-      h.upOnShp = !!rec.upOnShp && !rec.dead;
-    }
-    // 耐久为 0 的武器不能用
-    (h.linkedKits || []).forEach(k => weaponDur(k));
-    const held = heldWeaponKit(h);
-    if (held && weaponBroken(held)) disarmBrokenWeapon(h, notes);
-  });
+  partyHeroes().forEach(h => ledgerApplyHero(h, notes));
+}
+/** 一个角色：档案里记着的血量 / 坚毅 / 倒地盖上来，耐久为 0 的武器拿不了。开战（上面）和主持人「加入玩家角色」（app.js · spawnHeroCard，#464）共用 */
+function ledgerApplyHero(h, notes) {
+  const rec = LEDGER.heroes[h.kit];
+  if (rec) {
+    (h.layers || []).forEach((l, i) => {
+      const v = (rec.layers || [])[i];
+      if (v != null) l.current = Math.max(0, Math.min(Number(l.max) || 0, Number(v) || 0));
+    });
+    if (rec.shp != null) h.shp = Math.max(0, Math.min(Number(h.shpMax) || 0, Number(rec.shp) || 0));
+    h.dead = !!rec.dead;
+    h.dying = !!rec.dying && !rec.dead;
+    h.upOnShp = !!rec.upOnShp && !rec.dead;
+  }
+  // 耐久为 0 的武器不能用
+  (h.linkedKits || []).forEach(k => weaponDur(k));
+  const held = heldWeaponKit(h);
+  if (held && weaponBroken(held)) disarmBrokenWeapon(h, notes);
 }
 
 /** 武器人上次留下的伤势。作者定：武器人每次开战都回满血（唯一上不了场的情况是耐久为 0），

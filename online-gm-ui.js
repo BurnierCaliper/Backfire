@@ -20,10 +20,23 @@
   function mount(bridge) {
     if (!bridge || typeof bridge.getView !== "function" || typeof bridge.submit !== "function") throw new TypeError("OnlineGMUI requires getView and submit");
     let view, container = null, open = false, tab = "enemies", busy = false, notice = "", silent = false;
-    let enemyId = "", actorId = "", skillId = "", picks = {}, unitId = "", unitField = "hp", propId = "", propKind = "boom", fieldZone = 1, gapKey = "1-2";
+    let enemyId = "", actorId = "", skillId = "", picks = {}, unitId = "", unitField = "hp", propId = "", propKind = "boom", fieldZone = 1, gapKey = "1-2", heroKit = "";
     const state = () => view && view.state || {};
     const units = () => state().units || [];
     const enemies = () => units().filter(u => !u.isPlayer && present(u));
+    // 玩家角色（PvP 第二步 #464）：场上的角色（武器人跟着角色、护送对象不算；倒下的也列出来，好移出）
+    const isWeapon = u => typeof isWeaponUnit === "function" ? isWeaponUnit(u) : !!(u.weaponOf || u.escort);
+    const heroes = () => units().filter(u => u.isPlayer && !u._removed && !isWeapon(u));
+    // 角色卡：任何一张（房间里有人在用的、没人用的）；规则没加载时（测试的假桥）用 view.heroCards
+    const heroCards = () => typeof livePartyCards === "function" ? livePartyCards().filter(c => !c.weaponOf).map(c => ({ kit: c.kit, name: c.name })) : view.heroCards || [];
+    const heroOnField = kit => units().some(u => u.isPlayer && !u.weaponOf && !u._removed && u.kit === kit);
+    // 玩家阵营：规则层（enemies.js · playerFactionList / playerFactionOf）；没加载规则时用 view.factions、单位上的 faction
+    const DEFAULT_FACTION = typeof PVP_CFG !== "undefined" ? PVP_CFG.defaultFaction : "我方";
+    const factions = () => typeof playerFactionList === "function" ? playerFactionList() : view.factions || [{ id: DEFAULT_FACTION, name: DEFAULT_FACTION, phase: "player" }];
+    const factionOf = u => typeof playerFactionOf === "function" ? playerFactionOf(u) : u.faction || DEFAULT_FACTION;
+    const factionName = id => (factions().find(f => f.id === id) || { name: id }).name;
+    // 谁在操控（热座分配；没分配的是主持人）
+    const ownerName = u => { const h = (view.heroes || []).find(x => x.id === u.id), p = h && (view.players || []).find(x => x.id === h.owner); return p ? p.name + (p.gm ? "（主持人）" : "") : "主持人"; };
     const zones = () => Array.from({ length: Number(state().zoneMode) || 2 }, (_, i) => i + 1);
     // 「生成敌人」的等级默认填队伍平均等级（作者 10/20 定；trpg-tasks.js · trpgPartyLevel，四舍五入），主持人照样可以改
     const partyLevel = () => (typeof trpgPartyLevel === "function" && trpgPartyLevel()) || 1;
@@ -71,9 +84,18 @@
       const needTarget = !NO_TARGET.has(skillId) && !steps.some(s => s.type === "unit");
       return `<p class="ogm-muted">先由 AI 行动，再由主持人操作。点数和射程仍按敌人原规则结算。</p><div class="ogm-grid">${select("ogm-manual-actor", "手动敌人", unitOptions(enemies().filter(manual), actorId))}<p class="ogm-budget">行动 ${esc(a.ap || 0)} / 附赠 ${esc(a.bonus || 0)}${a.stunned ? " · 失衡" : ""}</p>${select("ogm-skill", "技能", list.map(s => option(s.id, s.label || s.id, s.id === skillId)).join(""))}${needTarget ? select("ogm-target", "目标", option("", "请选择目标", true) + unitOptions(units().filter(u => u.isPlayer && present(u)), null)) : ""}${stepMarkup}</div><div class="ogm-actions">${button("执行技能", "enemy-skill", "", !view.manualPhase || !skillId)}${zones().filter(z => Math.abs(z - a.zone) === 1).map(z => button("移动到 " + z + " 区", "enemy-move", `data-zone="${z}"`, !view.manualPhase)).join("")}${button("结束敌人回合", "enemy-end", 'class="ogm-primary"', !view.manualPhase)}</div>${!view.manualPhase ? '<p class="ogm-muted">敌人回合的手动阶段开始后可以操作。</p>' : ""}`;
     }
+    /** 加入玩家角色（PvP 第二步，docs/pvp.md 第 1.1 节，#464）：「生成敌人」旁边一块。任何一张角色卡都能选（房间里有人在用的、没人用的），
+     *  带着角色卡原本的等级、装备、加点（gm.addHero）；选加入哪一区、哪个玩家阵营。同一张角色卡已经在场上时灰掉。
+     *  在场的玩家角色可以移出（gm.removeHero，和移出敌人一样不算击杀） */
+    function heroMarkup() {
+      const cards = heroCards(), free = cards.filter(c => !heroOnField(c.kit));
+      if (!free.some(c => c.kit === heroKit)) heroKit = free[0]?.kit || "";
+      const list = heroes();
+      return `<h3>加入玩家角色</h3><div class="ogm-grid">${select("ogm-hero-kit", "角色卡", cards.map(c => `<option value="${esc(c.kit)}"${c.kit === heroKit ? " selected" : ""}${heroOnField(c.kit) ? " disabled" : ""}>${esc(c.name)}${heroOnField(c.kit) ? "（已在场上）" : ""}</option>`).join(""))}${select("ogm-hero-zone", "加入区域", zoneOptions(zones().length))}${select("ogm-hero-faction", "玩家阵营", factions().map(f => option(f.id, f.name, f.id === DEFAULT_FACTION)).join(""))}</div><p class="ogm-muted">任何一张角色卡都可以（房间里有人在用的、没人用的）：带着角色卡原本的等级、装备、加点。已经分配给玩家的角色照旧由那名玩家操控，没分配的由主持人操控（可以在「角色分配」里转交）。同一张角色卡已经在场上时不能再加一份。</p>${button("加入战场", "add-hero", 'class="ogm-primary"', !heroKit)}<h3>在场玩家角色</h3><ul class="ogm-enemies ogm-heroes">${list.map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${esc(factionName(factionOf(u)))} · 操控：${esc(ownerName(u))}${u.dead ? " · 倒下" : ""}</small></span><div class="ogm-actions">${button("移出", "remove-hero", `data-id="${esc(u.id)}"`)}</div></li>`).join("") || "<li>当前没有玩家角色。</li>"}</ul><p class="ogm-muted">移出：和移出敌人一样，不算击杀；武器人跟着一起离场。</p>`;
+    }
     function enemiesMarkup() {
       const library = presets(); if (!library.some(p => p.id === enemyId)) enemyId = library[0]?.id || "";
-      return `<h3>生成敌人</h3><div class="ogm-grid">${select("ogm-enemy-kind", "种类", library.map(p => option(p.id, p.name || p.label || p.id, p.id === enemyId)).join(""))}${number("ogm-enemy-level", "等级", partyLevel(), 1, "", 1)}${select("ogm-enemy-zone", "加入区域", zoneOptions(zones().length))}${number("ogm-enemy-count", "数量", 1, 1, 100, 1)}${ivInput("ogm-enemy-iv-hp", "血量水平 %")}${ivInput("ogm-enemy-iv-atk", "ATK 水平 %")}${select("ogm-enemy-race", "种族", options(raceNames(), ""))}${isFishKit(enemyId) ? select("ogm-enemy-enrich", "富集", options(enrichNames, "")) : ""}</div><p class="ogm-muted">个体值：杂兵、精英的血量和 ATK 在 ±10% 内波动；水平空着就随机，写了就按写的（−10～10）。首领不波动。种族：空着就按敌人的配置（固定的照固定，随机的抽），只有有种族的敌人才生效。</p>${button("加入战场", "spawn", 'class="ogm-primary"', !enemyId)}<h3>在场敌人</h3><div class="ogm-actions">${button("全部手动", "manual-all-on")}${button("全部交给 AI", "manual-all-off")}</div><ul class="ogm-enemies">${enemies().map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${manual(u) ? "手动" : "AI"}</small></span><div class="ogm-actions">${button(manual(u) ? "交给 AI" : "手动", "manual-one", `data-id="${esc(u.id)}"`)}${button("移出", "remove-enemy", `data-id="${esc(u.id)}"`)}${button("击杀", "kill-enemy", `data-id="${esc(u.id)}" class="ogm-danger"`)}</div></li>`).join("") || "<li>当前没有敌人。</li>"}</ul><p class="ogm-muted">移出：无击杀奖励、无死亡效果。击杀：按正常死亡结算。</p><h3>手动行动</h3>${manualMarkup()}`;
+      return `<h3>生成敌人</h3><div class="ogm-grid">${select("ogm-enemy-kind", "种类", library.map(p => option(p.id, p.name || p.label || p.id, p.id === enemyId)).join(""))}${number("ogm-enemy-level", "等级", partyLevel(), 1, "", 1)}${select("ogm-enemy-zone", "加入区域", zoneOptions(zones().length))}${number("ogm-enemy-count", "数量", 1, 1, 100, 1)}${ivInput("ogm-enemy-iv-hp", "血量水平 %")}${ivInput("ogm-enemy-iv-atk", "ATK 水平 %")}${select("ogm-enemy-race", "种族", options(raceNames(), ""))}${isFishKit(enemyId) ? select("ogm-enemy-enrich", "富集", options(enrichNames, "")) : ""}</div><p class="ogm-muted">个体值：杂兵、精英的血量和 ATK 在 ±10% 内波动；水平空着就随机，写了就按写的（−10～10）。首领不波动。种族：空着就按敌人的配置（固定的照固定，随机的抽），只有有种族的敌人才生效。</p>${button("加入战场", "spawn", 'class="ogm-primary"', !enemyId)}${heroMarkup()}<h3>在场敌人</h3><div class="ogm-actions">${button("全部手动", "manual-all-on")}${button("全部交给 AI", "manual-all-off")}</div><ul class="ogm-enemies">${enemies().map(u => `<li><span><b>${esc(u.name)}</b><small>${esc(u.zone)} 区 · Lv${esc(u.level)} · ${manual(u) ? "手动" : "AI"}</small></span><div class="ogm-actions">${button(manual(u) ? "交给 AI" : "手动", "manual-one", `data-id="${esc(u.id)}"`)}${button("移出", "remove-enemy", `data-id="${esc(u.id)}"`)}${button("击杀", "kill-enemy", `data-id="${esc(u.id)}" class="ogm-danger"`)}</div></li>`).join("") || "<li>当前没有敌人。</li>"}</ul><p class="ogm-muted">移出：无击杀奖励、无死亡效果。击杀：按正常死亡结算。</p><h3>手动行动</h3>${manualMarkup()}`;
     }
     function unitMarkup() {
       const u = selectedUnit(); if (!u) return "<p>场上没有单位。</p>"; unitId = u.id;
@@ -152,7 +174,7 @@
       const { id, value: v } = event.target;
       if (id === "ogm-silent") { silent = event.target.checked; return; }
       const selectors = {
-        "ogm-enemy-kind": () => { enemyId = v; }, "ogm-manual-actor": () => { actorId = v; skillId = ""; picks = {}; },
+        "ogm-enemy-kind": () => { enemyId = v; }, "ogm-hero-kit": () => { heroKit = v; }, "ogm-manual-actor": () => { actorId = v; skillId = ""; picks = {}; },
         "ogm-skill": () => { skillId = v; picks = {}; }, "ogm-unit": () => { unitId = v; }, "ogm-unit-field": () => { unitField = v; },
         "ogm-prop": () => { propId = v; }, "ogm-prop-kind": () => { propKind = v; }, "ogm-gap": () => { gapKey = v; }, "ogm-field-zone": () => { fieldZone = Number(v); }
       };
@@ -180,6 +202,9 @@
           break;
         }
         case "remove-enemy": case "kill-enemy": cmd = { type: "gm.removeUnit", actor: b.dataset.id, mode: action === "kill-enemy" ? "kill" : "remove" }; break;
+        // 加入 / 移出玩家角色（#464）：阵营选的是默认阵营就不写（gm.addHero 不给 faction = 默认阵营）
+        case "add-hero": { cmd = { type: "gm.addHero", kit: value("ogm-hero-kit"), zone: num("ogm-hero-zone") }; const f = value("ogm-hero-faction"); if (f && f !== DEFAULT_FACTION) cmd.faction = f; break; }
+        case "remove-hero": cmd = { type: "gm.removeHero", actor: b.dataset.id }; break;
         case "manual-all-on": case "manual-all-off": cmd = { type: "gm.setManual", actors: "all", enabled: action === "manual-all-on" }; break;
         case "manual-one": cmd = { type: "gm.setManual", actors: [b.dataset.id], enabled: !manual(units().find(u => u.id === b.dataset.id)) }; break;
         case "enemy-move": cmd = { type: "gm.enemyAct", actor: actorId, action: "move", dest: Number(b.dataset.zone) }; break;

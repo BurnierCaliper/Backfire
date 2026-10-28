@@ -369,6 +369,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **PvP 第二步：主持人分阵营——主持人面板加入玩家角色**（#464，docs/pvp.md 第 1.1 节（作者 10/27–10/28 定稿）；规则层是第一步 #445 / #456 / #460；gm-commands.js · 指令 `gm.addHero` / `gm.removeHero`（新）；app.js · `spawnHeroCard` / `removeHeroUnit` / `applyCampaignHero`（新，从 game.js · `applyCampaignToField` 搬出来的每个人那一份）；ledger.js · `ledgerApplyHero`（新，从 `ledgerApplyToField` 拆出来）；hotseat.js · `adopt`（新）；hotseat-game.js · `adoptNewHeroes`（新）/ `afterCommand` / `system`；online-gm-ui.js · `heroMarkup`（新）；online-game.js · `onActionSettled`；测试 tests/pvp-gm-panel.test.js、tests/pvp-gm-ui.test.js）
+  - **以前**：第一步只有规则层和指令 `battle.playerFaction`，没有界面；主持人只能「生成敌人」，没法把玩家角色当作一个单位加入战场（战场配置的「加入队员」只给本机，也只认队伍里的人）。
+  - **现在**：
+    - **加入玩家角色**：联机跑团主持人面板「敌人」一栏，「生成敌人」下面多一块「加入玩家角色」。**任何一张角色卡都能选**（房间里有人在用的、没人用的，作者 10/28「都可以」），选加入哪一区、哪个玩家阵营（已有的阵营；不选 = 默认阵营「我方」），点「加入战场」发 `gm.addHero`。
+      - **带着角色卡原本的等级、装备、加点**：队伍记忆里有这张卡的（跑团用过的，不管现在有没有人在用），照记忆里的等级、经验、属性和加点、专长、义体、武器等级 / 改装 / 图纸、羁绊——和开战摆队伍是同一份（`applyCampaignHero`）；跑团档案（LEDGER）记着的伤势也照档案（`ledgerApplyHero`，和开战一样）；记忆里没有的按角色卡原样（1 级）。武器拿在手上。
+      - **同一张角色卡已经在场上时不能再加一份**（倒下的也算在场上；面板上灰掉写「已在场上」，指令也拒绝）；武器的卡跟着角色进场，不能单独加；跑团档案里已经死亡的角色不能加。移出以后可以再加回来。
+      - 开战以后加进来的：所在阵营正好在这个回合行动就补满行动点 / 附赠（和战场配置的「加入队员」一样），不然到它自己的回合开始时再补。
+      - **谁来操控**：这张角色卡已经分配给房间里某名玩家的（主持人分配过、不在场的也记着），加进来照旧由他操控；没分配过的由主持人操控，主持人可以照常在「角色分配」里转交（战斗中转交）。
+    - **移出**：面板上「在场玩家角色」列出每个人的所在区、等级、阵营、操控者，「移出」发 `gm.removeHero`——和「移出」敌人一样不算击杀、不触发倒下；武器人跟着一起离场，分到的阵营去掉，指向它的嘲讽 / 掩护 / 禁足失效。公开记录写「主持人在 X 区加入 谁 Lv」「主持人移出了谁（不计击杀）」。
+    - 只有房间主持人能发这两个指令（和别的主持人指令一样）；没有加玩家角色时一切照旧。
+  - **测试**：tests/pvp-gm-panel.test.js（加入：队伍记忆里的等级 / 属性 / 加点 / 武器等级 / 专长、没用过的卡按原样、选区、选阵营、没建的阵营被拒；同一张卡在场上（含倒下）、武器的卡、不认识的卡、档案里死亡的、乱给等级、不是主持人都被拒，移出后能再加；开战后加进来按阵营补不补行动点、档案里的伤势；移出：武器人一起走、阵营去掉、嘲讽失效、不算击杀、敌人 / 武器人不能这样移出；热座：有人在用的卡加回来照旧归他、没分配过的归主持人、能转交），tests/pvp-gm-ui.test.js（面板：位置、角色卡名单和灰掉、选区选阵营发出的指令、默认阵营不写、在场玩家角色写阵营和操控者、移出、名字转义）。
 - **PvP 阵营判断补漏：互相友好的玩家阵营也吃给友方的范围效果；单体选友方的技能按阵营；高能自爆的余波、感电的波及按阵营**（#460，#453 / #459 的后续，作者 10/28 定的；enemies.js · `teammateOf` / `allyOf` / `chainSideOf`（新）/ `sewerDotThreat`；app.js · `highBoomHitsUnit` / `shockPulse` / `applyNeutralize` / `performAssistBlock`（防守反击）/ `sandPullTargets` / `shelterAllies` / `boostAllies` / `heluScanAct` / `skillFlowStepsAll` / `FRIENDLY_PICK_STEPS`（新）/ `skillTargetError` / `runSkillInner`；feats.js · `featAllyOk`（新）/ `featSkillTargetWhy` / 战地包扎 / 看天 / 打气 / 挺身 / 拉一把；cyberware.js · `cyberwareSkillTargetWhy`；测试 tests/pvp-factions.test.js）
   - **以前**：#459 的 `teammateOf(施放者, u)` 只认和施放者**同一个**玩家阵营的人：单独设成友好的玩家阵营（`battle.playerFaction` 的 `hostile: false`）不吃群体治疗、护盾、全队集结、全体坚挺、全反击……；可单体选友方的技能（`allyOf`）、铁壁 / 防护罩又认他们，两边不一致（#459 那一条的「待作者确认」）。另外 #459 排查出来，一批单体选友方的技能的分步名单 / 扣点前的检查 / 结算里的检查还按「是不是玩家角色」，敌对玩家阵营的人选得上：能被治疗、加行动点、振奋、保释、借力移动、拉出流沙……；高能自爆的余波（「余波只打同阵营」）、感电 / 中和感电的波及（「同区同阵营」）把所有玩家角色当成一边，玩家炸了 / 感电了连敌对阵营的人一起打。
   - **现在**（作者：「互相友好的话就吃」「高能还有感电确实也需要重新改成现在这样按照阵营的」）：

@@ -619,9 +619,11 @@
     if (cmd.type === "battle.endEnemyTurn") GAME.onlineEnemyCursor = {};
     if (cmd.silent !== true) {
       const actor = state.units.find(u => u.id === cmd.actor);
+      // 主持人加入的玩家角色（gm.addHero，#464）：和生成敌人一样写「在 X 区加入 谁 Lv」（名字、等级按加进来的那个单位）
+      const hero = cmd.type === "gm.addHero" ? state.units.find(u => u.isPlayer && !u.weaponOf && u.kit === cmd.kit) : null;
       if (cmd.type?.startsWith("gm.")) publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
-        action: cmd.type === "gm.spawnEnemy" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
-        unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: cmd.level, at: Date.now() });
+        action: cmd.type === "gm.spawnEnemy" || cmd.type === "gm.addHero" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeHero" ? "remove" : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
+        unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : hero ? hero.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: hero ? hero.level : cmd.level, at: Date.now() });
       else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (!["move", "standUp", "useItem"].includes(cmd.type) && meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
       // 新一回合开始（敌人回合收尾 / 开战）：写回合数，回合开始的持续伤害、倒下也跟着这一行
       else if (cmd.type === "battle.endEnemyTurn" || cmd.type === "startCombat") publicLogs.push({ kind: "round", turn: state.turnNo, hits: hitSummary(tape), at: Date.now() });

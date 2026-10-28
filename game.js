@@ -4536,14 +4536,6 @@
   const SAVE_KEY = "anterscale-saves";
   const CAMP_KEY = "anterscale-campaign";
 
-  function defaultStatuses() {
-    return {
-      burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
-      high: false, reso: false, unstable: false, weak: false, inspire: false,
-      sturdy: false, hide: false, advantage: false, chase: false, latestElement: null
-    };
-  }
-
   function packHero(u) {
     return {
       kit: u.kit,
@@ -4619,58 +4611,10 @@
     if (!camp) return;
     if (camp.kuizhi != null) state.kuizhi = camp.kuizhi;
     if (camp.items) { ensureBag(); state.bag.items = JSON.parse(JSON.stringify(camp.items)); }
+    // 每个人的等级、装备、加点（app.js · applyCampaignHero：主持人面板「加入玩家角色」也用这一份，#464）
     (camp.party || []).forEach(s => {
       const u = state.units.find(x => x.isPlayer && x.kit === s.kit);
-      if (!u) return;
-      if (s.level) u.level = s.level;
-      u.xp = s.xp || 0;
-      if (s.attrs) u.attrs = s.attrs;
-      if (s.roles) u.roles = s.roles;
-      if (s.resources) u.resources = Object.assign(u.resources || {}, s.resources);
-      if (s.attrPoints != null) u.attrPoints = s.attrPoints;
-      if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
-      if (s.notes) u.levelNotes = s.notes;
-      if (Array.isArray(s.feats)) u.feats = s.feats.slice();
-      if (Array.isArray(s.featFull)) u.featFull = s.featFull.slice();
-      if (s.featPoints != null) u.featPoints = Number(s.featPoints) || 0;
-      // 旧档：专长以前没存进记忆，丢了的按等级补回成「可选的专长点」（7 / 11 / 13 / 16 级各一项），让主持人重新选
-      if (typeof FEAT_LEVELS !== "undefined" && u.level) {
-        const should = FEAT_LEVELS.filter(L => L <= u.level).length;
-        const have = (u.feats || []).length + (Number(u.featPoints) || 0);
-        if (should > have) u.featPoints = (Number(u.featPoints) || 0) + should - have;
-      }
-      // 来源等级：新档直接读；旧档没有的按升级表补（feats.js · featPointLevelsOf），不丢点
-      if (Array.isArray(s.featPointLevels)) u.featPointLevels = s.featPointLevels.slice();
-      if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);
-      // 义体：先放回去，下面 applyLevelStats 才会按它扣生命 / 坚毅上限、重算改造率（旧档没有这两项就是没装）
-      if (Array.isArray(s.cyberware) && s.cyberware.length) u.cyberware = JSON.parse(JSON.stringify(s.cyberware));
-      else if (u.cyberware) delete u.cyberware;
-      if (s.cyberOverinstall) u.cyberOverinstall = true;
-      else if (u.cyberOverinstall) delete u.cyberOverinstall;
-      if (s.cyberPlan) {
-        // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
-        u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));
-        u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }];
-      } else if (u.cyberPlan) { delete u.cyberPlan; u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }]; }
-      if (typeof applyLevelStats === "function") applyLevelStats(u);
-      if (s.bonds) u.bonds = JSON.parse(JSON.stringify(s.bonds));   // 先放羁绊：改装槽数量要按「武器等级 + 羁绊」算
-      if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
-      if (s.weaponBlueprints) u.weaponBlueprints = JSON.parse(JSON.stringify(s.weaponBlueprints));
-      if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {
-        Object.keys(s.weaponLevels).forEach(k => {
-          const quiet = window.appendLog; window.appendLog = () => {};   // 恢复存档时不写「须找工匠」提示
-          try { setOwnedWeaponLevel(u, k, s.weaponLevels[k]); } finally { window.appendLog = quiet; }
-        });
-      }
-      u.shpMax = s.shpMax || u.shpMax;
-      u.shp = u.shpMax;
-      if (s.personalAtk != null) u.personalAtk = s.personalAtk;
-      if (s.weaponAtk != null) u.weaponAtk = s.weaponAtk;
-      u.atk = (u.personalAtk || 0) + (u.weaponHeld === false ? 0 : (u.weaponAtk || 0));
-      u.stunned = false; u.dying = false; u.dead = false; u.upOnShp = false;
-      u.statuses = defaultStatuses();
-      (u.layers || []).forEach(l => { l.current = l.max; });
-      u.def = u.defMax;
+      if (u) applyCampaignHero(u, s);
     });
   }
 

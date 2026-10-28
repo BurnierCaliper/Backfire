@@ -204,9 +204,21 @@
       if (cmd.type === "battle.setup" || cmd.type === "battle.setupRogue" || cmd.type === "trpg.ui" && !state.combatStarted) {
         session.reset(); const assignments = {}; for (const u of heroes()) assignments[u.id] = ownerByKit[u.kit] || gm(); session.setAssignments(assignments);
       }
+      adoptNewHeroes();
       session.reconcile();
     } finally { executing--; }
     setTimeout(() => { if (active() && GAME.resumeHotseat) GAME.resumeHotseat(); }, 0);
+  }
+  /** 战斗中新上场的角色（主持人「加入玩家角色」gm.addHero、战场配置「加入队员」，#464）：这张角色卡已经分配给房间里某名玩家的，
+   *  照旧归他操控（ownerByKit 记着每张角色卡归谁，不在场的也留着）；没分配过的归主持人。已经分配过的不动（换人用「转交」） */
+  function adoptNewHeroes() {
+    if (!session) return;
+    const held = session.snapshot().assignments || {};
+    for (const u of heroes()) {
+      const owner = ownerByKit[u.kit];
+      if (Object.hasOwn(held, u.id) || !owner || owner === gm() || !config.players.some(p => p.id === owner)) continue;
+      session.adopt(u.id, owner);
+    }
   }
   function submit(cmd) {
     try {
@@ -219,7 +231,7 @@
   }
   function system(cmd, context) {
     executing++;
-    try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); session.reconcile(); } return result; }
+    try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); adoptNewHeroes(); session.reconcile(); } return result; }
     finally { executing--; if (active() && !executing) authority.broadcast(); }
   }
   /** 敌人回合里、在敌人回合行动的玩家阵营的单位（PvP 第一步，enemies.js · unitTurnPhase，#445）：这一步由房主操控 */

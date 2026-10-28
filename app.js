@@ -9741,6 +9741,109 @@ function defaultLinkedKits(kit) {
   })[kit] || [];
 }
 
+/** 把队伍记忆里一个人的那一份（game.js · packHero 存的：等级、经验、属性、专长、义体、武器等级 / 改装 / 图纸、羁绊……）盖到场上的这个角色身上，
+ *  血量、架势、坚毅回满。开战摆队伍（game.js · applyCampaignToField）和主持人面板「加入玩家角色」（spawnHeroCard，#464）用同一份 */
+function applyCampaignHero(u, s) {
+  if (!u || !s) return u;
+  if (s.level) u.level = s.level;
+  u.xp = s.xp || 0;
+  if (s.attrs) u.attrs = s.attrs;
+  if (s.roles) u.roles = s.roles;
+  if (s.resources) u.resources = Object.assign(u.resources || {}, s.resources);
+  if (s.attrPoints != null) u.attrPoints = s.attrPoints;
+  if (s.attrPicks) u.attrPicks = s.attrPicks.slice();
+  if (s.notes) u.levelNotes = s.notes;
+  if (Array.isArray(s.feats)) u.feats = s.feats.slice();
+  if (Array.isArray(s.featFull)) u.featFull = s.featFull.slice();
+  if (s.featPoints != null) u.featPoints = Number(s.featPoints) || 0;
+  // 旧档：专长以前没存进记忆，丢了的按等级补回成「可选的专长点」（7 / 11 / 13 / 16 级各一项），让主持人重新选
+  if (typeof FEAT_LEVELS !== "undefined" && u.level) {
+    const should = FEAT_LEVELS.filter(L => L <= u.level).length;
+    const have = (u.feats || []).length + (Number(u.featPoints) || 0);
+    if (should > have) u.featPoints = (Number(u.featPoints) || 0) + should - have;
+  }
+  // 来源等级：新档直接读；旧档没有的按升级表补（feats.js · featPointLevelsOf），不丢点
+  if (Array.isArray(s.featPointLevels)) u.featPointLevels = s.featPointLevels.slice();
+  if (typeof featPointLevelsOf === "function") featPointLevelsOf(u);
+  // 义体：先放回去，下面 applyLevelStats 才会按它扣生命 / 坚毅上限、重算改造率（旧档没有这两项就是没装）
+  if (Array.isArray(s.cyberware) && s.cyberware.length) u.cyberware = JSON.parse(JSON.stringify(s.cyberware));
+  else if (u.cyberware) delete u.cyberware;
+  if (s.cyberOverinstall) u.cyberOverinstall = true;
+  else if (u.cyberOverinstall) delete u.cyberOverinstall;
+  if (s.cyberPlan) {
+    // 义体改造：按方案重建血量层（applyLevelStats 只会重建已经有方案的单位，先摆一层肉体给它换）
+    u.cyberPlan = JSON.parse(JSON.stringify(s.cyberPlan));
+    u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }];
+  } else if (u.cyberPlan) { delete u.cyberPlan; u.layers = [{ type: "flesh", current: 1, max: 1, inner: true }]; }
+  if (typeof applyLevelStats === "function") applyLevelStats(u);
+  if (s.bonds) u.bonds = JSON.parse(JSON.stringify(s.bonds));   // 先放羁绊：改装槽数量要按「武器等级 + 羁绊」算
+  if (s.weaponParts) u.weaponParts = JSON.parse(JSON.stringify(s.weaponParts));
+  if (s.weaponBlueprints) u.weaponBlueprints = JSON.parse(JSON.stringify(s.weaponBlueprints));
+  if (s.weaponLevels && typeof setOwnedWeaponLevel === "function") {
+    Object.keys(s.weaponLevels).forEach(k => {
+      const quiet = window.appendLog; window.appendLog = () => {};   // 恢复存档时不写「须找工匠」提示
+      try { setOwnedWeaponLevel(u, k, s.weaponLevels[k]); } finally { window.appendLog = quiet; }
+    });
+  }
+  u.shpMax = s.shpMax || u.shpMax;
+  u.shp = u.shpMax;
+  if (s.personalAtk != null) u.personalAtk = s.personalAtk;
+  if (s.weaponAtk != null) u.weaponAtk = s.weaponAtk;
+  u.atk = (u.personalAtk || 0) + (u.weaponHeld === false ? 0 : (u.weaponAtk || 0));
+  u.stunned = false; u.dying = false; u.dead = false; u.upOnShp = false;
+  u.statuses = {
+    burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
+    high: false, reso: false, unstable: false, weak: false, inspire: false,
+    sturdy: false, hide: false, advantage: false, chase: false, latestElement: null
+  };
+  (u.layers || []).forEach(l => { l.current = l.max; });
+  u.def = u.defMax;
+  return u;
+}
+
+/** 主持人把一张角色卡当作一个单位加入战场（PvP 第二步，docs/pvp.md 第 1.1 节，#464：联机跑团主持人面板「加入玩家角色」，指令 gm.addHero）。
+ *  任何一张角色卡都行（房间里有人在用的、没人用的）：按角色卡生成玩家角色，武器拿在手上；memory = 队伍记忆里这张卡的那一份
+ *  （跑团用过的角色卡才有）：带上记忆里的等级、装备、加点（applyCampaignHero），跑团档案记着的伤势照档案（ledger.js · ledgerApplyHero，
+ *  和开战摆队伍一样）。faction：分到哪个玩家阵营（不给 = 默认阵营「我方」）。
+ *  开战以后加进来的：所在阵营正好在这个回合行动就补满行动点 / 附赠（和战场配置的「加入队员」一样），不然到它自己的回合开始时再补。
+ *  同一张角色卡已经在场上（含倒下的）、不是角色卡（武器的卡跟着角色进场）返回 null */
+function spawnHeroCard(kit, zone, memory, faction) {
+  const card = livePartyCards().find(c => c.kit === kit && !c.weaponOf);
+  if (!card || (state.units || []).some(u => u.isPlayer && !u.weaponOf && !u._removed && u.kit === kit)) return null;
+  const u = spawnLiveCard(card, Number(zone) || 1);
+  u.weaponHeld = true;
+  u.atk = (u.personalAtk || 0) + (u.weaponAtk || 0);
+  if (memory) applyCampaignHero(u, memory);
+  state.units.push(u);
+  // 客制化图纸按队伍重算（跑团；trpg.js · trpgSyncWeaponMods，开战摆队伍时也是这样）
+  if (typeof TRPG !== "undefined" && TRPG.active && typeof trpgSyncWeaponMods === "function") trpgSyncWeaponMods();
+  resetBattleFlags(u);
+  if (typeof ledgerApplyHero === "function") ledgerApplyHero(u, []);
+  if (faction != null && faction !== PVP_CFG.defaultFaction) setPlayerFaction({ faction, unit: u.id });
+  if (state.combatStarted) {
+    if (u.kit === "kolt") u.prideMaxHp = baseMaxHp(u);   // 过度自信看进入战斗时的血量上限（startCombat 同一句）
+    const mine = unitTurnPhase(u) === (state.combatPhase === "enemy" ? "enemy" : "player");
+    u.ap = mine ? (u.apMax || 1) : 0;
+    u.bonus = mine ? (u.bonusMax || 1) : 0;
+  }
+  return u;
+}
+/** 主持人把玩家角色移出战场（#464，指令 gm.removeHero；和「移出」敌人一样：不算击杀、不触发倒下的效果）：连同它的武器人一起离开，
+ *  分到的玩家阵营去掉（回到默认），指向它的嘲讽 / 掩护 / 禁足一并失效（和单人模式伙伴退场一样）。返回离场的单位 id */
+function removeHeroUnit(u) {
+  if (!u) return [];
+  if (typeof pvpOn === "function" && pvpOn() && pvpOwn(state.playerFactions.members, u.id)) setPlayerFaction({ faction: PVP_CFG.defaultFaction, unit: u.id });
+  const gone = new Set((state.units || []).filter(x => x === u || (x.weaponOf && x.weaponOf === u.kit)).map(x => x.id));
+  state.units = state.units.filter(x => !gone.has(x.id));
+  state.units.forEach(x => {
+    if (gone.has(x.tauntTo)) x.tauntTo = null;
+    if (gone.has(x.coverBy)) x.coverBy = null;
+    if (gone.has(x.lockdownBy)) x.lockdownBy = null;
+  });
+  ["selectedId", "attackerId", "targetId"].forEach(k => { if (gone.has(state[k])) state[k] = null; });
+  return [...gone];
+}
+
 /** 载入队伍。kits 不给时读游戏的队伍配置（GAME.partyKits），再没有就用默认四人。
  *  （计算器的按钮会把点击事件传进来，所以只认数组） */
 function loadLiveParty(kits) {
