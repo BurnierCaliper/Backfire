@@ -369,6 +369,24 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **PvP：给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者同一个玩家阵营的人**（#456，#445 / PR #453 的后续，作者 10/28 同意；enemies.js · `teammateOf`（新）；app.js · `runSkillInner`（`vitas_dance` / `bili_field` / `yuito_extract` / `yuito_cold` / `role_sturdy` / `role_rally` / `longge_chill` / `longge_assist` / `longge_heat` / `longge_shuffle`）/ `longgeHealPick` / `performAssistBlock`（全反击、防守反击）；feats.js · `rally`（号召）；items.js · `useEffectItem`（烟雾弹）；game.js · `longgeHealOptions`；测试 tests/pvp-factions.test.js）
+  - **以前**：#453 把敌我判断按玩家阵营统一了，单体选友方的技能 / 道具不能选敌对阵营的人；但给「同区友方 / 全部友方 / 全队」的效果还是按「是不是玩家角色」给，敌对玩家阵营的人站在同一区也会吃到治疗、护盾、集结、坚挺……；全反击 / 防守反击被敌对阵营的人格挡成功也会触发（防守反击还会去打自己阵营的进攻者）。
+  - **现在**：这些效果只给和施放者同一个玩家阵营的人（enemies.js · `teammateOf`：武器人跟着持有者、替身跟着操控它的人、护送对象按自己记的阵营），统一走这一个判断，没有每个技能各写一套。改了的（全部列出）：
+    - 寒气剑舞（温和：同区友方治疗）、磁场盾（同区友方护盾）。
+    - 结人酸萃 / 冷萃给友方的那一份（治疗 / +1 架势）。开着友伤时区域里结人以外的队友算敌人（#440 / #443 作者特意定的例外）照旧。
+    - 不倒战意 15 级「全部友方坚挺」（兼修·鼓劲选全部友方也一样）、全队集结（同区队员的主职责增益）。
+    - 全反击（全队成功格挡反伤）、防守反击（成功协助格挡后追加协助攻击）：只算和格挡者同一个玩家阵营的人放的。
+    - 龙哥：冷气穿刺蓝弹（目标那一区的友方治疗）、热能轰击红弹治疗 / 蓝弹的 1 冰击破、洗牌连续蓝弹（治疗血量比例最低的队友）、手杖协助攻击的治疗——自动挑的（`longgeHealPick`）和让玩家挑的名单（战斗画面、热座 / 联机的询问选项：game.js · `longgeHealOptions`）都只有龙哥阵营的人；挑了别的阵营的人改给自己阵营血量比例最低的。
+    - 专长「号召」（开战时同区我方护盾）、道具「烟雾弹」（区域内全部友方躲藏）。
+    - **只有一个玩家阵营时一切照旧**：没配置阵营、配置了但全在「我方」、多一个没人的阵营时，`teammateOf` 就是「是不是玩家角色」，和以前一模一样（下面「测试」里和 main 逐字比对过）。
+    - **友伤开关不管这些**：开着友伤时同阵营的队友照旧吃增益。**敌人给自己人的增益不变**（敌人那边的代码没动）。
+  - **没改的**（不是「给友方的范围效果」，列出来请作者定要不要另开 issue）：
+    - 单体选友方、#453 没覆盖到的分步名单 / 结算前的校验还是按「是不是玩家角色」，敌对阵营的人选得上：拆卸模式的接收者、环境扫描的电池护盾、助威、双重奏、冰美式（治疗）、意式浓缩（行动点）、爆发治疗、治疗支援、续命、回收护盾、「非法」改装加行动点、拉出流沙、保释、借力，专长战地包扎、看天、打气、挺身、拉一把，义体里给友方用的那一类。
+    - 载具代挡：车按「我方 / 敌方」两边替同区的人代挡（vehicle.js · `vehicleGuards`）——玩家坐的车也替敌对阵营的人挡，敌对阵营的人打过来又不挡。要按阵营分得先定空车（「最后坐在车上的一方」）算谁的阵营。
+    - 按「玩家 / 非玩家」两边算的连锁伤害：高能自爆的余波（「余波只打同阵营」）、感电 / 中和感电的波及，敌对阵营的人也会被波及。
+    - 首领机制（分担 / 远离 / 踩塔）和敌人的「操控转打队友」把所有玩家角色当成一边。
+  - **待作者确认**：单独设成友好的玩家阵营（`battle.playerFaction` 的 `hostile: false`）照 issue 写的「只给施放者同一个玩家阵营的人」也不吃这些范围效果；但单体选友方的技能照 #453 能选他们（`allyOf`），铁壁 / 防护罩照 #453 也护他们。要不要改成友好的阵营也吃？改的话只动 `teammateOf` 一处。
+  - **测试**：tests/pvp-factions.test.js 加 8 条，在最新的 main 上全部失败：`teammateOf` 的判断（武器人、护送对象、友好的阵营、没配置时）；两个敌对阵营同区时磁场盾 / 寒气剑舞、全队集结 / 不倒战意（全部友方）、全反击 / 防守反击（对面挡住我方的攻击时，防守反击不再去打自己阵营的进攻者）、龙哥的四种子弹治疗、号召 / 烟雾弹、酸萃 / 冷萃只给施放者的阵营（酸萃 / 冷萃另看友好的阵营不吃、敌对的照旧挨打），开着友伤也照旧给自己阵营，不配置阵营的同一个局面照旧给同区全部玩家角色；放这些技能的打法同一种子整场自动对打两场：不配置 / 全在「我方」/ 多一个没人的阵营结果和整场记录一模一样，两个阵营对打时这些效果一次也没给到对面。和 main 对照（临时脚本，没提交）：26 个种子（会放这些技能的打法、默认打法、友军、护送对象、多阵营混战）× 不配置 / 全在「我方」/ 多一个没人的阵营共 78 场，main 和这个分支的结果、整场记录完全一样；同样的 25 个种子分成两个敌对阵营对打，main 把这些效果给到敌对阵营的人 703 次，这个分支 0 次。
 - **PvP 第一步：玩家阵营——玩家角色可以分属不同阵营、互相敌对；每个阵营定在我方回合或敌人回合行动；协助攻击先问玩家角色；按阵营判胜负**（#445，docs/pvp.md 第 1.1 节（作者 10/27–10/28 定稿）里「阵营」这一层；enemies.js · `PVP_CFG`（新）/ `playerFactionOf` / `unitTurnPhase` / `samePlayerFaction` / `playerFactionsHostile` / `pvpFoe` / `pvpFriendlyEnemy` / `factionHostileTo` / `autoFoe` / `allyOf` / `setPlayerFaction`（都是新的）、`hostileTo` / `playerAllied`（加参数：按谁的阵营看）/ `attackFoe` / `friendlyFireHit`；battle-commands.js · 指令 `battle.playerFaction`（新）、`assistAnswer`；app.js · `state.playerFactions` / `resetBattleRecords` / `startCombat` / `canControlUnit` / `phasePlayers` / `pvpFieldFactions` / `pvpSplit` / `pvpBattleOutcome` / `playerTurnStart` / `playerTurnEnd`（新）/ `startPlayerPhase` / `startEnemyPhase` / `endPlayerTurn` / `endEnemyTurn` / `quicksandTurnEnd` / `visibleEnemies` / `eligibleAssisters` / `pvpAssistStage` / `npcAssisters` / `playerAssisters`（新）/ `queueAssistAttack` / `finishAssist` / `eligibleBlockers` / `dealToInner` / `skillTargetError` / `triggerLeaveOpportunity` / `turnEnd`（无人机）/ `turretShot` / `applyPassivePlusAtStart` / `barrierOwner` / `barrierGuards`；feats.js · `featIronwallDeclarers`；items.js · `itemEnemyOk` / `itemAllyOk`（新）；mods.js · `bpAtkAdjust`；game.js · `candidateUnits` / `endTurn` / `enemySide` / `endPvpTurn`（新）/ `checkEnd` / `finish`；sim.js · `outcome` / `playerPhase` / `enemyPhase`；hotseat.js / hotseat-game.js / hotseat-validation.js；online-view.js · `projectUnit`；测试 tests/pvp-factions.test.js）
   - **以前**：敌我只分「玩家 vs 非玩家」两边。玩家之间永远不敌对（友伤开关 #431 / #435 / #439 只是让开着友伤的人能打到队友）；非玩家单位之间按阵营表（`hostileTo`、`HOSTILE_FACTIONS` / `HOSTILE_PAIRS`、`state.playerAllies`）。玩家角色都在我方回合行动；胜负看「敌人全灭 / 我方全员倒地」。
   - **现在**：

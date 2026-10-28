@@ -790,6 +790,11 @@ test("全反击、防守反击（全队）：只算和格挡者同一个玩家�
   assert.equal(theirs.ok, true);
   assert.doesNotMatch(theirs.notes.join("\n"), /全反击|防守反击/, "敌对阵营的人挡住：不反伤、不追加协助攻击");
   assert.ok(!kolt.resources.guardStrikeUsed);
+  // 我方的赫鲁米卡打乙的绯秋、乙的灯挡住：柯尔特的防守反击不会反过来打自己阵营的赫鲁米卡（以前会）
+  const hpHelu = hp(p.c, helu);
+  const back = p.c.performAssistBlock(tou, hiaki, helu, { ok: true, roll: 1 });
+  assert.doesNotMatch(back.notes.join("\n"), /防守反击|全反击/);
+  assert.equal(hp(p.c, helu), hpHelu, "赫鲁米卡没挨自己人的协助攻击");
   // 我方的赫鲁米卡替柯尔特挡住：照常
   const mine = p.c.performAssistBlock(helu, kolt, p.foe, { ok: true, roll: 1 });
   assert.match(mine.notes.join("\n"), /全反击：把伤害与击破反打给/);
