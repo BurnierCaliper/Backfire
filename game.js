@@ -326,8 +326,20 @@
   }
   function snapAll() {
     const arr = (state.units || []).map(snapUnit).concat((state.props || []).map(snapProp)).concat(snapGaps());
+    // 阵营标记（PvP 第二步 #464）：场上有两个以上玩家阵营时，单位卡名字前面画它属于哪个阵营（和联机玩家的画面同一份，unit-card.js · factionMarks）
+    const marks = factionMarksNow();
+    arr.forEach(s => { if (marks[s.id]) s.faction = marks[s.id]; });
     arr.env = snapEnv();
     return arr;
+  }
+  /** 每个单位的阵营标记 { 单位 id: { name, tone } }：玩家这一边是玩家阵营（enemies.js · playerFactionOf），非玩家单位是敌人阵营（factionOf）；
+   *  没配置阵营、场上只有一个玩家阵营时是空表（卡片和以前一模一样） */
+  function factionMarksNow() {
+    if (typeof pvpSplit !== "function" || !pvpSplit() || !window.UnitCard || typeof UnitCard.factionMarks !== "function") return {};
+    return UnitCard.factionMarks((state.units || []).filter(u => !u.hidden && !u.fused && !u._removed).map(u => {
+      const f = u.isPlayer ? playerFactionOf(u) : null;
+      return { id: u.id, isPlayer: !!u.isPlayer, faction: f, factionName: f ? (playerFactionInfo(f) || {}).name || f : null, enemyFaction: u.isPlayer ? null : factionOf(u) };
+    }));
   }
   function applyEnv(env) {
     if (!env) return;
@@ -2871,7 +2883,9 @@
     (s.hung || []).forEach(n => tokens.push(n));
     const info = vc ? { kind: "prop", propKind: vc.kind } : { kind, kit: s.kit, ownerName: owner && owner.name, escort: s.escort, stage: s.stage };
     const head = headOf(s);
-    return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
+    // 阵营（PvP 第二步 #464）：场上有两个以上玩家阵营时写它属于哪个阵营（快照上的 s.faction，见 snapAll）
+    const facText = s.faction && window.UnitCard && UnitCard.FACTION_MARK ? " · " + UnitCard.FACTION_MARK.title + s.faction.name : "";
+    return UnitTip.html(info, tokens.filter(Boolean), { name: head.name, sub: `Lv${head.level} · ${s.zone} 区${vc ? " · " + (s.isPlayer ? "我方" : "敌方") : ""}${facText}${head.race ? " · " + head.race : ""}${head.iv && typeof ivText === "function" ? " · 个体值 " + ivText(head) : ""}`,
       mechs: window.UnitCard && UnitCard.mechLines ? UnitCard.mechLines(s) : [],   // 首领机制：还有几回合落下
       rows: vc ? vc.roster : null, rowsTitle: vc ? vc.seatText : "",
       perks: vc ? [] : (s.racePerks || []) });                                       // 种族被动（画成车时不写驾驶员的）

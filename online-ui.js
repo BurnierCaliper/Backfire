@@ -293,10 +293,13 @@
       const kind = u.isPlayer ? (u.escort ? "escort" : u.weaponOf || u.weaponUnit ? "weapon" : "hero") : "enemy";
       // 首领机制的倒计时：主机投影好的 display.marks / casts（online-view.js），这里只拼文字
       const mechs = global.UnitCard && global.UnitCard.mechLines ? global.UnitCard.mechLines({ marks: (u.display || {}).marks, casts: (u.display || {}).casts }) : [];
-      if (vc) return T.html({ kind: "prop", propKind: vc.kind }, tokens.filter(Boolean), { name: vc.name || u.name || u.id, sub: `Lv${vc.level || 1} · ${u.zone} 区 · ${u.isPlayer ? "我方" : "敌方"}`, mechs,
+      // 阵营（PvP 第二步 #464）：场上有两个以上玩家阵营时写它属于哪个阵营（只有阵营名字；只有一个玩家阵营时不写）
+      const fac = (global.UnitCard && global.UnitCard.factionMarks ? global.UnitCard.factionMarks(data.units) : {})[u.id];
+      const facText = fac ? ` · ${global.UnitCard.FACTION_MARK.title}${fac.name}` : "";
+      if (vc) return T.html({ kind: "prop", propKind: vc.kind }, tokens.filter(Boolean), { name: vc.name || u.name || u.id, sub: `Lv${vc.level || 1} · ${u.zone} 区 · ${u.isPlayer ? "我方" : "敌方"}${facText}`, mechs,
         rows: Array.isArray(vc.roster) ? vc.roster : null, rowsTitle: vc.seatText || "" }, opt);
       // 分阶段的首领 / 精英：主机算好的阶段编号（display.stage），能力只列这一阶段的，和单机一样
-      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区`, mechs }, opt);
+      return T.html({ kind, kit: u.kit, ownerName: owner && owner.name, escort: u.escort, stage: (u.display || {}).stage }, tokens.filter(Boolean), { name: u.name || u.id, sub: `Lv${u.level || 1} · ${u.zone} 区${facText}`, mechs }, opt);
     }
     /** 悬停说明（旧画面的单位卡 / 间隔竖条、新画面的铭牌）：只出简短版——名字、行动方式、效果名字、首领机制的倒计时，末尾提示点一下看全部
      *  （作者 10/20 定：以前首领的悬停说明占满整屏、盖住被悬停的卡，最后几行被「回到…」按钮挡住）。详情面板正开着这一个就不弹 */

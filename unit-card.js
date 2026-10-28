@@ -468,6 +468,40 @@
     return c;
   }
 
+  /* 阵营标记（PvP 第二步，docs/pvp.md 第 1.1 节，#464）：场上有两个以上玩家阵营时，每张单位卡的名字前面一个小方块，写阵营名字的头一个字——
+   * 玩家这一边按阵营上色（颜色在 game.css · .u-fac[data-tone]，默认阵营总是头一个颜色，别的阵营按 id 排），非玩家单位写它的敌人阵营（灰色）；
+   * 悬停写「阵营：名字」。只用阵营 id / 名字（联机是 online-view.js 白名单里的 faction / factionName / enemyFaction），不碰坚毅数值。
+   * 只有一个玩家阵营（或者没配置阵营）时一个标记都不画，一切照旧 */
+  const FACTION_MARK = { tones: 8, foe: "foe", title: "阵营：" };
+  /** units：[{ id, isPlayer, faction, factionName, enemyFaction, hidden }] → { 单位 id: { name, tone } }；只有一个玩家阵营时是空表 */
+  function factionMarks(units) {
+    const list = (units || []).filter(u => u && !u.hidden);
+    const dflt = typeof PVP_CFG !== "undefined" ? PVP_CFG.defaultFaction : "我方";
+    const ids = [...new Set(list.filter(u => u.isPlayer && u.faction).map(u => String(u.faction)))];
+    if (ids.length < 2) return {};
+    // 按码位排（不用 localeCompare：房主和玩家的语言设置不一样时颜色也得一样）
+    ids.sort((a, b) => (a === dflt ? -1 : b === dflt ? 1 : a < b ? -1 : a > b ? 1 : 0));
+    const out = {};
+    list.forEach(u => {
+      if (u.isPlayer && u.faction) out[u.id] = { name: String(u.factionName || u.faction), tone: String(ids.indexOf(String(u.faction)) % FACTION_MARK.tones) };
+      else if (!u.isPlayer && u.enemyFaction) out[u.id] = { name: String(u.enemyFaction), tone: FACTION_MARK.foe };
+    });
+    return out;
+  }
+  /** 卡片上的阵营标记：s.faction = { name, tone }（factionMarks 给的）；没有就拿掉（只有一个玩家阵营时卡片和以前一模一样） */
+  function paintFaction(c, s) {
+    const head = c.unit.querySelector(".u-head");
+    let mark = head && head.querySelector(".u-fac");
+    const f = s && s.faction;
+    if (!f || !head) { if (mark) mark.remove(); return; }
+    if (!mark) { mark = el("span", "u-fac"); head.insertBefore(mark, head.firstChild); }
+    const text = Array.from(String(f.name || "?"))[0] || "?";
+    if (mark.textContent !== text) mark.textContent = text;
+    mark.dataset.tone = String(f.tone);
+    mark.title = FACTION_MARK.title + f.name;
+    mark.setAttribute("aria-label", FACTION_MARK.title + f.name);
+  }
+
   /** 卡片顶上写的名字、等级、ATK、种族、个体值。和载具合并的驾驶员（s.vehicle，vehicle.js · vehicleCardOf）画成车：
    *  名字、等级、ATK 按车，不写驾驶员的种族 / 个体值；快照里的 name 等字段照旧是驾驶员自己的 */
   function headOf(s) {
@@ -480,6 +514,7 @@
     const q = (sel) => c.unit.querySelector(sel);
     const head = headOf(s);
     q(".u-name").textContent = head.name;
+    paintFaction(c, s);   // 阵营标记（PvP，#464）：只有一个玩家阵营时没有
     // 种族被动（enemies.js · RACE_PERKS）：画成车的驾驶员不写
     const perks = s.vehicle ? [] : (s.racePerks || []);
     q(".u-name").title = head.race ? [`${head.name} · ${head.race}`].concat(perks).join("\n") : "";
@@ -658,7 +693,8 @@
     MECH_ICON, mechN, mechLast, mechTip, mechTipHtml, mechIcon, mechIconsHtml, towerMarkHtml, paintTowers,
     MECH_ALERT, mechFresh, alertNew,
     topStack, paintBanner, fitTop, bannerItems, bannerText, hideTip,
-    BADGE_ROW, orderBadges, fitBadges
+    BADGE_ROW, orderBadges, fitBadges,
+    FACTION_MARK, factionMarks
   };
   root.UnitCard = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
