@@ -643,7 +643,7 @@ function useEffectItem(actor, it, target, zone, notes) {
       return;
     }
     notes.push(`${actor.name} 向 ${z} 区使用${it.name}。`);
-    // 只给友方的（烟雾弹）：和用道具的人同一个玩家阵营的人（enemies.js · teammateOf，#456）
+    // 只给友方的（烟雾弹）：用道具的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#456 / #460）
     const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" &&
       (!it.alliesOnly || (typeof teammateOf === "function" ? teammateOf(actor, u) : u.isPlayer)));
     if (!units.length) notes.push(`${z} 区没有单位。`);

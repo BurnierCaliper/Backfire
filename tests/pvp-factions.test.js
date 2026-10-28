@@ -5,7 +5,9 @@
 // 规则在 enemies.js · PVP_CFG / playerFactionOf / hostileTo / attackFoe / friendlyFireHit / setPlayerFaction，
 // 接线见 app.js（canControlUnit、startEnemyPhase、eligibleAssisters、pvpSplit / pvpBattleOutcome）、battle-commands.js、sim.js、
 // hotseat*.js、online-view.js · projectUnit（白名单）
-// 给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者同一个玩家阵营的人（#456）：enemies.js · teammateOf，接线见文件最后几条
+// 给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者的自己人（#456：同一个玩家阵营；#460：单独设成友好的玩家阵营也算）：
+// enemies.js · teammateOf（单体选友方的 allyOf 是同一个判断），接线见文件最后几条；
+// 单体选友方的技能（分步名单、出手前的校验、结算）和连锁伤害（高能自爆的余波、感电 / 中和感电的波及：enemies.js · chainSideOf）也按阵营（#460），在最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -674,9 +676,9 @@ test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩�
   assert.equal(p1.ok, true, "房主能操控：" + (p1.error || ""));
 });
 
-/* ===== 给友方的范围效果按玩家阵营分（#456）=====
- * 「同区友方 / 全部友方 / 全队」的效果只给施放者同一个玩家阵营的人（enemies.js · teammateOf）。下面每条先看两个敌对玩家阵营同区时
- * 只给施放者的阵营，再拿不配置阵营的同一个局面对照：照旧给同区全部玩家角色（和以前一样）。 */
+/* ===== 给友方的范围效果按玩家阵营分（#456 / #460）=====
+ * 「同区友方 / 全部友方 / 全队」的效果只给施放者的自己人（enemies.js · teammateOf：同一个玩家阵营，#460 起单独设成友好的玩家阵营也算）。
+ * 下面每条先看两个敌对玩家阵营同区时只给施放者的阵营，再拿不配置阵营的同一个局面对照：照旧给同区全部玩家角色（和以前一样）。 */
 const shieldOf = u => (u.layers || []).filter(l => l.type === "shield").reduce((s, l) => s + (Number(l.current) || 0), 0);
 /** 血量打到三分之一（留着治疗的空间，不会倒地） */
 const wound = (...us) => us.forEach(u => (u.layers || []).forEach(l => { if (l.type !== "shield") l.current = Math.max(1, Math.floor((Number(l.max) || 0) / 3)); }));
@@ -684,7 +686,7 @@ const skill = (c, a, id, t, picks) => c.Commands.dispatch({ type: "skill", actor
 /** 一组单位在 fn 前后各自变了没有：按顺序返回 changed(之前, 之后) */
 const diffOf = (us, read, fn, changed) => { const before = us.map(read); fn(); return us.map((u, i) => changed(before[i], read(u))); };
 
-test("teammateOf：同一个玩家阵营才算（武器人跟着持有者、护送对象按自己记的阵营）；单独设成友好的玩家阵营不算；没配置阵营时就是「是不是玩家角色」", () => {
+test("teammateOf：同一个玩家阵营算（武器人跟着持有者、护送对象按自己记的阵营），单独设成友好的玩家阵营也算（#460）；没配置阵营时就是「是不是玩家角色」", () => {
   const { c, S, heroes: [kolt, helu, hiaki, tou], foe } = field({ factions: null });
   assert.equal(c.teammateOf(kolt, hiaki), true, "没配置阵营：玩家角色都算");
   assert.equal(c.teammateOf(kolt, foe), false, "非玩家单位不算");
@@ -711,10 +713,31 @@ test("teammateOf：同一个玩家阵营才算（武器人跟着持有者、护�
   faction(c, { faction: "乙", unit: vip.id });
   assert.equal(c.teammateOf(hiaki, vip), true);
   assert.equal(c.teammateOf(kolt, vip), false);
-  // 单独设成友好的玩家阵营：单体选友方能选（allyOf，#445），给友方的范围效果不给（只给同一个阵营）
+  // 单独设成友好的玩家阵营：也算自己人（#460）——给友方的范围效果（teammateOf）和单体选友方（allyOf）是同一个判断
   faction(c, { faction: "乙", other: "我方", hostile: false });
+  assert.equal(c.teammateOf(kolt, hiaki), true, "友好的玩家阵营也算");
+  assert.equal(c.teammateOf(hiaki, kolt), true);
+  assert.equal(c.teammateOf(kolt, mochi), true, "武器人跟着持有者");
   assert.equal(c.allyOf(kolt, hiaki), true);
-  assert.equal(c.teammateOf(kolt, hiaki), false);
+});
+
+test("teammateOf：友好不传递——甲和乙、乙和丙友好，甲和丙照旧按它俩之间的设置（默认敌对）；改回默认又不算（#460）", () => {
+  // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」，灯在「丙」
+  const { c, heroes: [kolt, helu, hiaki, tou] } = field({ factions: (c, [, , hiaki, tou]) => {
+    faction(c, { faction: "乙", unit: hiaki.id });
+    faction(c, { faction: "丙", unit: tou.id });
+  } });
+  assert.deepEqual([c.teammateOf(kolt, hiaki), c.teammateOf(kolt, tou), c.teammateOf(hiaki, tou)], [false, false, false], "默认互相敌对");
+  faction(c, { faction: "乙", other: "我方", hostile: false });
+  faction(c, { faction: "乙", other: "丙", hostile: false });
+  assert.equal(c.teammateOf(kolt, hiaki), true, "我方 ↔ 乙：友好");
+  assert.equal(c.teammateOf(tou, hiaki), true, "丙 ↔ 乙：友好");
+  assert.equal(c.teammateOf(kolt, tou), false, "我方 ↔ 丙：没设过，照旧敌对（友好不传递）");
+  assert.equal(c.teammateOf(tou, helu), false);
+  assert.equal(c.allyOf(kolt, tou), false, "单体选友方也一样");
+  faction(c, { faction: "乙", other: "我方", hostile: null });
+  assert.equal(c.teammateOf(kolt, hiaki), false, "改回默认：又是敌对");
+  assert.equal(c.teammateOf(kolt, helu), true, "同阵营照旧");
 });
 
 /** 川川（哔哩哩）、诺拉（维塔斯，温和）、柯尔特、赫鲁米卡和狂徒同在 1 区。split：诺拉、赫鲁米卡分到「乙」（和我方敌对）；否则不配置阵营 */
@@ -886,7 +909,7 @@ test("专长「号召」（开战时同区我方护盾）、道具烟雾弹（�
   assert.deepEqual(smoke(q), [true, true, true, true]);
 });
 
-test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营（单独设成友好的阵营也不给）；敌对阵营的人照旧挨打；只有一个阵营时照旧", () => {
+test("结人酸萃 / 冷萃：给友方的那一份只给结人的自己人（同阵营、单独设成友好的阵营，#460）；敌对阵营的人照旧挨打；只有一个阵营时照旧", () => {
   // 结人、赫鲁米卡在「我方」，柯尔特、绯秋在「乙」（field 默认的分法）
   const mk = mode => {
     const f = field({ party: ["yuito", "helu", "kolt", "hiaki"], seed: "PVP456-YUITO", factions: mode ? undefined : null });
@@ -900,11 +923,11 @@ test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营�
   const hpOf = f => u => hp(f.c, u), def = u => u.def;
   const sign = (a, b) => Math.sign(b - a);
   {
-    // 乙设成和我方友好：不挨打，也不吃结人的治疗 / 架势
+    // 乙设成和我方友好：不挨打，也吃结人的治疗 / 架势（#460：互相友好的阵营也是自己人）
     const f = mk("friendly");
     wound(...f.heroes);
-    assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 0, 0], "酸萃：结人、赫鲁米卡恢复；友好的乙不恢复、不挨打");
-    assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 0, 0], "冷萃：结人、赫鲁米卡 +1 架势；友好的乙不变");
+    assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 1, 1], "酸萃：结人、赫鲁米卡恢复；友好的乙也恢复、不挨打");
+    assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 1, 1], "冷萃：结人、赫鲁米卡 +1 架势；友好的乙也 +1");
   }
   {
     // 乙和我方敌对：照旧挨打（#445），不吃治疗 / 架势（乙的两人满血：挨了酸液也不会倒地，冷萃照样打得到）
@@ -919,6 +942,98 @@ test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营�
     wound(...f.heroes);
     assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 1, 1]);
     assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 1, 1]);
+  }
+});
+
+test("互相友好的玩家阵营也吃给友方的范围效果（磁场盾、寒气剑舞、全队集结、不倒战意、号召、烟雾弹）；友好不传递，敌对的阵营照旧不吃（#460）", () => {
+  const more = (a, b) => b > a;
+  {
+    // 川川（哔哩哩）、赫鲁米卡在「我方」，诺拉（维塔斯）在「乙」（和我方友好），柯尔特在「丙」（和两边都敌对）
+    const f = field({ party: ["chuan", "nora", "kolt", "helu"], seed: "PVP460-FRIEND", factions: (c, [, nora, kolt]) => {
+      faction(c, { faction: "乙", unit: nora.id });
+      faction(c, { faction: "丙", unit: kolt.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const { c } = f;
+    const [chuan, nora, kolt, helu] = f.heroes;
+    const bili = c.spawnWeapon(chuan, "bili"), vitas = c.spawnWeapon(nora, "vitas");
+    [bili, vitas].forEach(w => { w.zone = 1; w.level = 6; w.ap = w.apMax = 4; w.bonus = w.bonusMax = 4; });
+    nora.resources.mood = "gentle";
+    const six = [chuan, bili, helu, nora, vitas, kolt];
+    const healable = six.filter(u => u !== bili);   // 哔哩哩只有护盾层，没有可以治疗的血量
+    chuan.resources.charge = 3;
+    assert.deepEqual(diffOf(six, shieldOf, () => skill(c, bili, "bili_field"), more), [true, true, true, true, true, false],
+      "磁场盾（哔哩哩在我方）：我方和友好的乙都有护盾，敌对的丙（柯尔特）没有");
+    wound(...healable);
+    assert.deepEqual(diffOf(healable, u => hp(c, u), () => skill(c, vitas, "vitas_dance", f.foe), more), [true, true, true, true, false],
+      "寒气剑舞（维塔斯在乙，温和）：乙和友好的我方都恢复，丙不恢复");
+    // 乙和丙也设成友好（我方和丙之间没设：照旧敌对）——乙的剑舞给丙，我方的磁场盾照旧不给丙
+    faction(c, { faction: "乙", other: "丙", hostile: false });
+    chuan.resources.charge = 3;
+    assert.deepEqual(diffOf([nora, kolt], shieldOf, () => skill(c, bili, "bili_field"), more), [true, false], "磁场盾（我方）：丙照旧没有（友好不传递）");
+    wound(...healable);
+    assert.deepEqual(diffOf([chuan, kolt], u => hp(c, u), () => skill(c, vitas, "vitas_dance", f.foe), more), [true, true], "寒气剑舞（乙）：丙也恢复了");
+  }
+  {
+    // 结人（辅助 15 级）、赫鲁米卡在「我方」，柯尔特在「乙」（友好），绯秋在「丙」（敌对）；三人都改成直伤，集结给 atk +15
+    const f = field({ party: ["yuito", "helu", "kolt", "hiaki"], seed: "PVP460-RALLY", factions: (c, [, , kolt, hiaki]) => {
+      faction(c, { faction: "乙", unit: kolt.id });
+      faction(c, { faction: "丙", unit: hiaki.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const [yuito, helu, kolt, hiaki] = f.heroes;
+    yuito.roles = { primary: "辅助", secondary: "辅助" }; yuito.level = 15; f.c.resetBattleFlags(yuito); yuito.ap = 4; yuito.bonus = 4;
+    [helu, kolt, hiaki].forEach(u => { u.roles = Object.assign({}, u.roles, { primary: "直伤" }); });
+    skill(f.c, yuito, "role_rally");
+    assert.deepEqual([helu, kolt, hiaki].map(u => u.rallyAtk || 0), [15, 15, 0], "全队集结：友好的乙（柯尔特）也拿到，丙（绯秋）不拿");
+    skill(f.c, yuito, "role_sturdy", null, { mode: "all" });
+    assert.deepEqual([yuito, helu, kolt, hiaki].map(u => !!u.statuses.sturdy), [true, true, true, false], "不倒战意·全部友方：友好的乙也坚挺");
+  }
+  {
+    // 柯尔特有号召；柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const f = field({ seed: "PVP460-FEAT", factions: (c, [kolt, , hiaki, tou]) => {
+      kolt.feats = ["rally"];
+      faction(c, { faction: "乙", unit: hiaki.id });
+      faction(c, { faction: "丙", unit: tou.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const [kolt, helu, hiaki, tou] = f.heroes;
+    const m = logText(f.c).match(/号召：(.+) 获得 \d+ 点护盾/);
+    assert.deepEqual(m ? m[1].split("、").sort() : [], [kolt.name, helu.name, hiaki.name].sort(), "号召：友好的乙（绯秋）也拿到护盾，丙（灯）不拿");
+    f.c.bagAdd("fx_smoke", 1); kolt.bonus = 1;
+    f.c.useItemOn(kolt, "fx_smoke", null, 1);
+    assert.deepEqual([kolt, helu, hiaki, tou].map(u => !!u.statuses.hide), [true, true, true, false], "烟雾弹：友好的乙也躲藏，丙不躲");
+  }
+});
+
+test("全反击 / 防守反击：友好的阵营的格挡也触发；友好不传递时防守反击不去打自己人（放的人和进攻者也友好），进攻者和放的人敌对时照常（#460）", () => {
+  // 柯尔特在「我方」（放了全反击、防守反击），绯秋、灯在「乙」（和我方友好），赫鲁米卡在「丙」（和乙敌对；friendly 时和我方友好）
+  const mk = friendly => field({ seed: "PVP460-GUARD", factions: (c, [, helu, hiaki, tou]) => {
+    faction(c, { faction: "乙", unit: hiaki.id });
+    faction(c, { faction: "乙", unit: tou.id });
+    faction(c, { faction: "丙", unit: helu.id });
+    faction(c, { faction: "乙", other: "我方", hostile: false });
+    if (friendly) faction(c, { faction: "丙", other: "我方", hostile: false });
+  } });
+  {
+    // 丙和我方敌对：赫鲁米卡（丙）打绯秋（乙）、灯（乙）挡住——柯尔特的全反击、防守反击都照常（友好的乙的格挡也算全队）
+    const { c, heroes: [kolt, helu, hiaki, tou] } = mk(false);
+    Object.assign(kolt.resources, { allReflect: true, guardStrike: true });
+    const out = c.performAssistBlock(tou, hiaki, helu, { ok: true, roll: 1 });
+    assert.equal(out.ok, true);
+    assert.match(out.notes.join("\n"), /全反击：把伤害与击破反打给/);
+    assert.match(out.notes.join("\n"), new RegExp(`防守反击：${kolt.name} 立刻对 ${helu.name} 发动协助攻击`));
+  }
+  {
+    // 丙也和我方友好：全反击照常（反打的是挡住的灯，灯和丙敌对），防守反击不追加——柯尔特不去打和自己友好的赫鲁米卡
+    const { c, heroes: [kolt, helu, hiaki, tou] } = mk(true);
+    Object.assign(kolt.resources, { guardStrike: true });
+    const h0 = hp(c, helu);
+    const out = c.performAssistBlock(tou, hiaki, helu, { ok: true, roll: 1 });
+    assert.equal(out.ok, true);
+    assert.doesNotMatch(out.notes.join("\n"), /防守反击/, "不打自己人");
+    assert.equal(hp(c, helu), h0, "赫鲁米卡没挨柯尔特的协助攻击");
+    assert.ok(!kolt.resources.guardStrikeUsed, "这次没用掉，留给下一次");
   }
 });
 
@@ -1029,5 +1144,386 @@ test("只有一个玩家阵营时一切照旧：同一种子整场自动对打�
     const pvp = sim("pvp");
     ["磁场盾", "寒气剑舞", "全队集结", "号召", "烟雾弹"].forEach(k => assert.match(pvp.log, MARKS[k], `${cs.seed}（两个阵营）：这一场放了${k}`));
     assert.deepEqual(pvp.cross, [], cs.seed + "：给友方的范围效果没有给到敌对阵营的人");
+  }
+});
+
+/* ===== 单体选友方的技能按阵营（#460）=====
+ * 分步名单、扣点之前的检查（app.js · skillTargetError，专长 / 义体各自的那一份）、结算里的检查、联机出手前的校验都只认自己人
+ * （enemies.js · teammateOf：同阵营或友好的阵营）。下面的局面：前两人在「我方」，第三人在「乙」（和我方友好），
+ * 第四人在「丙」（和两边都敌对）；每条都再拿不配置阵营的同一个局面对照（照旧是全部玩家角色）。 */
+function trio(party, split, enemies) {
+  return field({ party, enemies, seed: "PVP460-ALLY", factions: split ? (c, h) => {
+    faction(c, { faction: "乙", unit: h[2].id });
+    faction(c, { faction: "丙", unit: h[3].id });
+    faction(c, { faction: "乙", other: "我方", hostile: false });
+  } : null });
+}
+/** 分步里某一步（key）列出的单位 id（排好序）；没有这一步返回 null */
+const stepUnits = (c, id, actor, picks, key) => {
+  const st = (c.skillFlowSteps(id, actor, picks || {}) || []).find(s => s.key === key);
+  return st ? ids(st.units).sort() : null;
+};
+const idsOf = us => ids(us).sort();
+
+test("单体选友方的技能·分步名单：只列自己人（同阵营、友好的阵营），敌对阵营的人不列；没配置阵营时照旧是全部玩家角色（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    {
+      // 结人：助威（10 级起走分步）、双重奏、冰美式（治疗）、意式浓缩（行动点）；保释、借力的名单
+      const { c, heroes: [yuito, helu, kolt, hiaki] } = trio(["yuito", "helu", "kolt", "hiaki"], split);
+      yuito.level = 10;
+      const mine = split ? [yuito, helu, kolt] : [yuito, helu, kolt, hiaki];   // 含结人自己
+      const others = mine.filter(u => u !== yuito);
+      assert.deepEqual(stepUnits(c, "yuito_inspire", yuito, {}, "target"), idsOf(others), "助威" + tag);
+      assert.deepEqual(stepUnits(c, "yuito_duet", yuito, {}, "target"), idsOf(mine), "双重奏" + tag);
+      assert.deepEqual(stepUnits(c, "yuito_amer", yuito, { mode: "heal" }, "target"), idsOf(mine), "冰美式（治疗）" + tag);
+      assert.deepEqual(stepUnits(c, "yuito_espresso", yuito, { mode: "ap" }, "target"), idsOf(mine), "意式浓缩（行动点）" + tag);
+      assert.deepEqual(idsOf(c.shelterAllies(yuito)), idsOf(others), "保释" + tag);
+      assert.deepEqual(idsOf(c.boostAllies(yuito)), idsOf(others), "借力" + tag);
+    }
+    {
+      // 扭矩（柯尔特的武器人，跟着柯尔特的阵营）：拆卸模式的接收者；「非法」改装（废料满了）给行动点那一项只对自己人有
+      const { c, heroes: [kolt, helu, hiaki, tou], foe } = trio(["kolt", "helu", "hiaki", "tou"], split);
+      const torque = c.spawnWeapon(kolt, "torque");
+      assert.ok(torque, "扭矩上场");
+      const mine = split ? [kolt, helu, hiaki, torque] : [kolt, helu, hiaki, tou, torque];
+      assert.deepEqual(stepUnits(c, "torque_strip", torque, { target: foe.id, mode: "ally" }, "ally"), idsOf(mine), "拆卸模式的接收者" + tag);
+      kolt.resources.stripStore = { flesh: 999 };   // 废料达到上限
+      assert.ok(c.koltScrapFull(kolt));
+      const apStep = t => (c.skillFlowSteps("kolt_mod", kolt, { target: t.id }) || []).some(s => s.key === "mode");
+      assert.equal(apStep(hiaki), true, "「非法」改装：友好的乙能给行动点" + tag);
+      assert.equal(apStep(tou), !split, split ? "「非法」改装：敌对的丙只能过载，没有给行动点那一项" : "没配置阵营：照旧有");
+      assert.equal(apStep(foe), false, "敌人照旧没有");
+    }
+    {
+      // Helumica：环境扫描（超充能电池的护盾给谁）、拉出流沙
+      const { c, S, heroes: [helu, kolt, hiaki, tou] } = trio(["helu", "kolt", "hiaki", "tou"], split);
+      const p = c.makeProp("battery", 1, 3);
+      S.props = [p];
+      const mine = split ? [helu, kolt, hiaki] : [helu, kolt, hiaki, tou];
+      assert.deepEqual(stepUnits(c, "helu_scan", helu, { dest: 1, act: "prop:" + p.id, mode: "shield" }, "ally"), idsOf(mine), "环境扫描的电池护盾" + tag);
+      S.fields[1].quicksand = true;
+      [kolt, hiaki, tou].forEach(u => { u.sink = 1; });
+      assert.deepEqual(stepUnits(c, "sand_pull", helu, {}, "target"), idsOf(mine.filter(u => u !== helu)), "拉出流沙" + tag);
+    }
+    {
+      // 小朋友（龙哥的武器人）：爆发治疗；专长「拉一把」：同区濒死的友方
+      const { c, heroes: [lg, kolt, hiaki, tou] } = trio(["longge", "kolt", "hiaki", "tou"], split);
+      const w = c.spawnWeapon(lg, "xiaoxiao");
+      assert.ok(w, "小朋友上场");
+      const mine = split ? [lg, kolt, hiaki, w] : [lg, kolt, hiaki, tou, w];
+      assert.deepEqual(stepUnits(c, "xiaoxiao_burst", w, {}, "target"), idsOf(mine), "爆发治疗" + tag);
+      kolt.feats = ["pickup"];
+      [lg, hiaki, tou].forEach(u => { u.dying = true; });
+      assert.deepEqual(stepUnits(c, "feat_pickup", kolt, {}, "target"), idsOf(split ? [lg, hiaki] : [lg, hiaki, tou]), "拉一把" + tag);
+    }
+  }
+});
+
+test("单体选友方的技能·出手前的校验：敌对阵营的人在扣点之前就拦下（职责 / 角色技能、分步里选的人、专长），友好的阵营照常；联机出手前的校验也一样（#460）", () => {
+  const flow = (c, a, id, picks) => { c.S.state.attackerId = a.id; c.S.state.skillFlow = { id, actorId: a.id, picks, index: 99 }; };
+  const why = (c, a, id, t, picks) => { flow(c, a, id, picks || {}); try { return c.skillTargetError(a, id, t); } finally { c.S.state.skillFlow = null; } };
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营：照旧能选）";
+    const blocked = (v, msg) => split ? assert.ok(v, msg) : assert.equal(v, null, msg + tag);
+    {
+      // 柯尔特（生存 15 级：应急处理、续命）、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+      const { c, heroes: [kolt, helu, hiaki, tou], foe } = trio(["kolt", "helu", "hiaki", "tou"], split);
+      kolt.roles = { primary: "生存", secondary: "生存" }; kolt.level = 15; c.resetBattleFlags(kolt);
+      kolt.feats = ["bandage", "skywatch", "cheer", "standin"];
+      for (const id of ["role_firstaid", "role_renew", "feat_bandage", "feat_skywatch", "feat_cheer", "feat_standin"]) {
+        blocked(why(c, kolt, id, tou), `${id}：敌对阵营的灯`);
+        assert.equal(why(c, kolt, id, hiaki), null, `${id}：友好的乙（绯秋）能选`);
+        assert.equal(why(c, kolt, id, helu), null, `${id}：同阵营能选`);
+      }
+      assert.match(why(c, kolt, "role_renew", foe) || "", /只能对友方使用/, "续命对敌人照旧不行");
+      // 「非法」改装（废料满了）选给行动点：只有自己人
+      kolt.resources.stripStore = { flesh: 999 };
+      blocked(why(c, kolt, "kolt_mod", tou, { target: tou.id, mode: "ap" }), "「非法」改装给敌对阵营的人行动点");
+      assert.equal(why(c, kolt, "kolt_mod", hiaki, { target: hiaki.id, mode: "ap" }), null, "给友好的乙行动点");
+      assert.equal(why(c, kolt, "kolt_mod", tou, { target: tou.id, mode: "overload" }), null, "只过载：敌对阵营的人也行（敌我都能过载）");
+      // 拆卸模式的接收者（扭矩 2 级起才有拆卸模式）
+      const torque = c.spawnWeapon(kolt, "torque");
+      torque.level = 6;
+      assert.match((c.skillList(torque).find(s => s.id === "torque_strip") || {}).hint || "", /友方/, "拆卸模式：说明里写着友方");
+      blocked(why(c, torque, "torque_strip", foe, { target: foe.id, mode: "ally", ally: tou.id }), "拆卸模式的接收者是敌对阵营的人");
+      assert.equal(why(c, torque, "torque_strip", foe, { target: foe.id, mode: "ally", ally: hiaki.id }), null, "接收者是友好的乙");
+      // 说明里写着「友方」、分步里选的目标却是敌人：照样能打敌对阵营的人（不按「给友方用的技能」拦）
+      assert.equal(why(c, torque, "torque_strip", tou, { target: tou.id, mode: "scrap" }), null, "拆卸模式拆敌对阵营的人" + tag);
+    }
+    {
+      // 结人：冰美式（治疗）、意式浓缩（行动点）、双重奏、助威（10 级起走分步）；川川：回收护盾
+      const { c, heroes: [yuito, chuan, kolt, hiaki] } = trio(["yuito", "chuan", "kolt", "hiaki"], split);
+      yuito.level = 10;
+      blocked(why(c, yuito, "yuito_amer", hiaki, { mode: "heal", target: hiaki.id }), "冰美式治疗敌对阵营的人");
+      assert.equal(why(c, yuito, "yuito_amer", kolt, { mode: "heal", target: kolt.id }), null, "冰美式治疗友好的乙");
+      blocked(why(c, yuito, "yuito_espresso", hiaki, { mode: "ap", target: hiaki.id }), "意式浓缩给敌对阵营的人行动点");
+      assert.equal(why(c, yuito, "yuito_espresso", hiaki, { mode: "atk", target: hiaki.id }), null, "意式浓缩的酸液攻击：敌对阵营的人照样能打");
+      blocked(why(c, yuito, "yuito_duet", hiaki, { target: hiaki.id }), "双重奏治疗敌对阵营的人");
+      blocked(why(c, yuito, "yuito_inspire", hiaki, { mode: "turn", target: hiaki.id }), "助威振奋敌对阵营的人");
+      assert.equal(why(c, yuito, "yuito_inspire", kolt, { mode: "turn", target: kolt.id }), null, "助威友好的乙");
+      c.addShieldLayer(hiaki, 5, false);   // 身上有能回收的护盾：以前只看这个
+      blocked(why(c, chuan, "chuan_reclaim", hiaki), "回收敌对阵营的人的护盾");
+      c.addShieldLayer(kolt, 5, false);
+      assert.equal(why(c, chuan, "chuan_reclaim", kolt), null, "回收友好的乙的护盾");
+    }
+    {
+      // 龙哥：冷气穿刺、热能轰击（扳机解锁、有子弹时说明里写着「治疗该区友方」，目标是敌人）照样能打敌对阵营的人（不按给友方的技能拦）
+      const { c, heroes: [lg, kolt, hiaki, tou] } = trio(["longge", "kolt", "hiaki", "tou"], split);
+      Object.assign(lg.resources, { trigger: true, ammo: ["red", "blue"], seen: [true, true], known: 2 });
+      for (const id of ["longge_chill", "longge_heat"]) {
+        assert.match((c.skillList(lg).find(s => s.id === id) || {}).hint || "", /友方/, id + "：说明里写着友方");
+        assert.equal(why(c, lg, id, tou, { mode: "cane", target: tou.id }), null, id + "：打敌对阵营的人" + tag);
+      }
+      // 小朋友（龙哥的武器人）：爆发治疗、治疗支援
+      const w = c.spawnWeapon(lg, "xiaoxiao");
+      blocked(why(c, w, "xiaoxiao_burst", tou, { target: tou.id }), "爆发治疗敌对阵营的人");
+      assert.equal(why(c, w, "xiaoxiao_burst", hiaki, { target: hiaki.id }), null, "爆发治疗友好的乙");
+      blocked(why(c, w, "xiaoxiao_heal", tou), "治疗支援敌对阵营的人");
+      assert.equal(why(c, w, "xiaoxiao_heal", hiaki), null, "治疗支援友好的乙");
+      assert.ok(kolt);
+    }
+  }
+  // 联机出手前的校验（hotseat-validation.js）：分步名单里没有的人选不上；单选目标的给友方技能也按阵营
+  const f = trio(["yuito", "helu", "kolt", "hiaki"], true);
+  const { c, heroes: [yuito, , kolt, hiaki] } = f;
+  yuito.level = 10; yuito.resources.liquid = 4;   // 双重奏 9 级起、要 2 咖啡液
+  load(c, ["hotseat-validation.js"]);
+  const session = { assertAction: () => true }, game = { depth: 0, tape: null };
+  const check = (a, sk, t, picks) => c.HotseatValidation.validateBattle({ type: "skill", actor: a.id, skill: sk, target: t.id, picks }, { session, sender: "p1", game });
+  assert.throws(() => check(yuito, "yuito_amer", hiaki, { mode: "heal", target: hiaki.id }), /不合法的分步选择/, "冰美式治疗敌对阵营的人：分步名单里没有");
+  assert.doesNotThrow(() => check(yuito, "yuito_amer", kolt, { mode: "heal", target: kolt.id }), "冰美式治疗友好的乙");
+  assert.throws(() => check(yuito, "yuito_duet", hiaki, { target: hiaki.id }), /不合法的分步选择/, "双重奏");
+});
+
+test("单体选友方的技能·结算：直接发指令也给不到敌对阵营的人（不扣行动点、不掉咖啡液），友好的阵营照常给；没配置阵营时照旧（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    // 结人、赫鲁米卡在「我方」，柯尔特在「乙」（友好），绯秋在「丙」（敌对）
+    const { c, heroes: [yuito, helu, kolt, hiaki] } = trio(["yuito", "helu", "kolt", "hiaki"], split);
+    yuito.level = 10; yuito.resources.liquid = 9;
+    wound(kolt, hiaki);
+    const hp0 = { kolt: hp(c, kolt), hiaki: hp(c, hiaki) };
+    // 双重奏（2 咖啡液）：敌对的丙治不到
+    const ap0 = yuito.ap, liq0 = yuito.resources.liquid;
+    skill(c, yuito, "yuito_duet", hiaki, { target: hiaki.id });
+    if (split) {
+      assert.equal(hp(c, hiaki), hp0.hiaki, "双重奏：敌对阵营的绯秋没恢复");
+      assert.deepEqual([yuito.ap, yuito.resources.liquid], [ap0, liq0], "扣点之前就拦下：行动点、咖啡液都没花");
+    } else assert.ok(hp(c, hiaki) > hp0.hiaki, "双重奏" + tag);
+    skill(c, yuito, "yuito_duet", kolt, { target: kolt.id });
+    assert.ok(hp(c, kolt) > hp0.kolt, "双重奏：友好的乙恢复" + tag);
+    // 意式浓缩（行动点）：给友好的乙 +1，敌对的丙不给
+    yuito.ap = 4;
+    const kap = kolt.ap, hap = hiaki.ap;
+    skill(c, yuito, "yuito_espresso", kolt, { mode: "ap", target: kolt.id });
+    assert.equal(kolt.ap, kap + 1, "意式浓缩：友好的乙行动点 +1" + tag);
+    skill(c, yuito, "yuito_espresso", hiaki, { mode: "ap", target: hiaki.id });
+    assert.equal(hiaki.ap, split ? hap : hap + 1, split ? "意式浓缩：敌对的丙没加" : "意式浓缩" + tag);
+    // 助威（10 级 · 附赠）：振奋
+    yuito.bonus = 4;
+    skill(c, yuito, "yuito_inspire", hiaki, { mode: "turn", target: hiaki.id });
+    assert.equal(!!(hiaki.statuses && hiaki.statuses.inspire), !split, split ? "助威：敌对的丙没振奋" : "助威" + tag);
+    skill(c, yuito, "yuito_inspire", kolt, { mode: "turn", target: kolt.id });
+    assert.equal(!!kolt.statuses.inspire, true, "助威：友好的乙振奋" + tag);
+    assert.ok(helu);
+  }
+});
+
+/* ===== 连锁伤害按阵营（#460）=====
+ * 高能自爆的余波、感电 / 中和感电的波及打「同阵营」：炸的 / 感电的人在玩家这一边时是它的自己人（enemies.js · chainSideOf：
+ * 同阵营或友好的阵营），敌对阵营的人不挨；敌人那边照旧是所有非玩家单位。局面同上（我方两人、友好的乙、敌对的丙），两个狂徒同区 */
+const TWO_THUGS = [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }];
+/** fn 里 applyTypedDot 打到的单位（日志标签对得上 re 的那几下），id 排好序 */
+function dotTargets(c, re, fn) {
+  const out = [], f = c.applyTypedDot;
+  c.applyTypedDot = function (u, dmg, el, notes, label) { if (re.test(String(label || ""))) out.push(u.id); return f.apply(this, arguments); };
+  try { fn(); } finally { c.applyTypedDot = f; }
+  return out.sort();
+}
+
+test("高能自爆的余波：玩家这一边炸的只打它的自己人（同阵营、友好的阵营），敌对阵营的人不挨；敌人炸的照旧打同区的敌人；没配置阵营时照旧打同区全部玩家角色（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [f1, f2] } = trio(["kolt", "helu", "hiaki", "tou"], split, TWO_THUGS);
+    const hp0 = { tou: hp(c, tou), kolt: hp(c, kolt) };
+    helu.statuses.high = true; helu.highEnergy = 40;
+    const hitByHelu = dotTargets(c, /被高能余波击中/, () => c.explodeHigh(helu, 40));
+    assert.ok(logText(c).includes("【高能自爆】" + helu.name), "赫鲁米卡高能自爆");
+    assert.deepEqual(hitByHelu, idsOf(split ? [kolt, hiaki] : [kolt, hiaki, tou]), "赫鲁米卡（我方）炸：余波打我方和友好的乙" + (split ? "，不打敌对的丙" : tag));
+    assert.ok(hp(c, kolt) < hp0.kolt, "柯尔特挨了余波");
+    assert.equal(hp(c, tou) < hp0.tou, !split, split ? "灯（丙）没挨" : "灯也挨了" + tag);
+    // 敌人炸的：照旧打同区的其他非玩家单位，不打玩家角色
+    f1.statuses = f1.statuses || {}; f1.statuses.high = true;
+    assert.deepEqual(dotTargets(c, /被高能余波击中/, () => c.explodeHigh(f1, 40)), [f2.id], "狂徒炸：只打另一个狂徒" + tag);
+    // 判断本身（enemies.js · chainSideOf）
+    assert.equal(c.chainSideOf(kolt, tou), !split, "chainSideOf：敌对阵营的人" + tag);
+    assert.equal(c.chainSideOf(kolt, hiaki), true, "友好的阵营算同阵营");
+    assert.equal(c.chainSideOf(kolt, f2), false, "敌人不算");
+    assert.equal(c.chainSideOf(f1, f2), true, "敌人那边照旧：所有非玩家单位");
+    assert.equal(c.chainSideOf(f1, kolt), false);
+  }
+});
+
+test("感电 / 中和感电的波及：玩家这一边的只打同区的自己人（含自己；同阵营、友好的阵营），敌对阵营的人不挨；敌人的照旧；没配置阵营时照旧（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [f1, f2] } = trio(["kolt", "helu", "hiaki", "tou"], split, TWO_THUGS);
+    const mine = idsOf(split ? [kolt, helu, hiaki] : [kolt, helu, hiaki, tou]);
+    // 感电触发（回合结束的那一下）：赫鲁米卡（我方）
+    helu.statuses.shock = true;
+    let notes = [];
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => { notes = c.shockPulse(helu); }), mine, "感电：我方和友好的乙（含自己）" + (split ? "，不打敌对的丙" : tag));
+    const listed = ((notes[0] || "").match(/同区同阵营：([^）]*)）/) || [])[1] || "";
+    assert.deepEqual(listed.split("、").sort(), (split ? [kolt, helu, hiaki] : [kolt, helu, hiaki, tou]).map(u => u.name).sort(), "记录里的同阵营名单也一样" + tag);
+    // 敌对的丙（灯）自己感电：只打丙自己（我方、乙都和丙敌对）
+    tou.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => c.shockPulse(tou)), split ? [tou.id] : mine, "灯（丙）感电" + tag);
+    // 中和感电：一样打同区的自己人
+    helu.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被中和感电波及/, () => c.applyNeutralize(helu)), mine, "中和感电" + tag);
+    assert.equal(helu.statuses.shock, false, "中和后感电清掉");
+    // 敌人的感电：照旧打同区的非玩家单位（含自己）
+    f1.statuses = f1.statuses || {}; f1.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => c.shockPulse(f1)), idsOf([f1, f2]), "狂徒感电：两个狂徒" + tag);
+  }
+});
+
+/** 会放单体给友方技能的打法（自动对打用）：每人每回合每招最多一次，每回合从不同的那一招开始试；挑人只看「是不是玩家角色」
+ *  （敌对阵营的人交给规则自己拦），分步技能每一步挑名单里血量比例最低的（选项挑写好的那一项）；都用不了就照默认打法 */
+function friendlyPolicy(c) {
+  const S = c.S.state;
+  const used = new Set();
+  const ratio = u => c.totalHp(u) / Math.max(1, c.totalMaxHp(u));
+  const byHp = (a, b) => ratio(a) - ratio(b) || String(a.id).localeCompare(String(b.id));
+  const pals = (u, self) => S.units.filter(x => x.isPlayer && !x.dead && !x.hidden && !x.fused && (self || x.id !== u.id)).sort(byHp);
+  const go = (u, id, target, picks) => {
+    const key = [u.id, id, S.turnNo, S.combatPhase].join(":");
+    if (used.has(key) || !(c.skillList(u) || []).some(s => s.id === id)) return null;
+    S.skillFlow = picks ? { id, picks } : null;
+    let cost;
+    try { cost = c.skillCost(id) || {}; } finally { S.skillFlow = null; }
+    if ((cost.ap || 0) > (u.ap || 0) || (cost.bonus || 0) > (u.bonus || 0) || c.skillRequirementError(u, id)) return null;
+    used.add(key);
+    return () => skill(c, u, id, target, picks);
+  };
+  const one = (u, id, t) => (t ? go(u, id, t) : null);
+  const flow = (u, id, prefer) => {
+    if (!(c.skillList(u) || []).some(s => s.id === id)) return null;
+    const picks = {};
+    let last = null;
+    for (let g = 0; g < 8; g++) {
+      const st = (c.skillFlowSteps(id, u, picks) || []).find(s => picks[s.key] === undefined);
+      if (!st) break;
+      if (st.type === "unit") {
+        const list = (st.units || []).filter(x => x && c.unitById(x.id)).sort(byHp);
+        if (!list.length) return null;
+        picks[st.key] = list[0].id; last = list[0];
+      } else if (st.type === "zone") {
+        if (!(st.zones || []).length) return null;
+        picks[st.key] = st.zones[0];
+      } else {
+        const o = (st.options || []).find(x => prefer && x.value === prefer[st.key]) || (st.options || [])[0];
+        if (!o) return null;
+        picks[st.key] = o.value;
+      }
+    }
+    return go(u, id, last, picks);
+  };
+  return {
+    act(u) {
+      if (u.dying || u.stunned) return c.BattleSim.BASIC_POLICY.act(u);
+      const near1 = x => c.zoneDist(u.zone, x.zone, S.zoneMode) <= 1;
+      const tries = [
+        () => flow(u, "yuito_duet"),
+        () => flow(u, "yuito_amer", { mode: "heal" }),
+        () => flow(u, "yuito_espresso", { mode: "ap" }),
+        () => flow(u, "yuito_inspire", { mode: "turn" }),
+        () => one(u, "role_firstaid", pals(u).find(near1)),
+        () => one(u, "role_buffer", pals(u).find(near1)),
+        () => one(u, "role_cover", pals(u)[0]),
+        () => flow(u, "role_shelter"),
+        () => flow(u, "sand_pull"),
+        () => one(u, "feat_bandage", pals(u, true).find(x => near1(x) && !x.dying)),
+        () => one(u, "feat_cheer", pals(u)[0]),
+        () => flow(u, "kolt_mod", { mode: "ap" })
+      ];
+      const start = (Number(S.turnNo) * 7 + S.units.indexOf(u) * 3) % tries.length;
+      for (let i = 0; i < tries.length; i++) { const thunk = tries[(start + i) % tries.length](); if (thunk) return thunk; }
+      return c.BattleSim.BASIC_POLICY.act(u);
+    },
+    longgeSafety() { return false; }
+  };
+}
+
+test("单体选友方 / 连锁伤害：同一种子整场自动对打，不配置 / 全在「我方」/ 多一个没人的阵营结果和整场记录一模一样；两个敌对阵营对打时治疗、护盾、行动点…从不给到对面，余波、感电也从不打到对面（#460）", () => {
+  const MARKS = { 应急处理: /应急处理：/, 缓冲: /缓冲：/, 掩护: /掩护：/, 保释: /本回合豁免天气与场地/, 拉出流沙: /拉出流沙|拽了上来/, 双重奏: /双重奏：/,
+    助威: /振奋（助威/, 战地包扎: /战地包扎：/, 打气: /打气：/, 高能自爆: /【高能自爆】/, 余波: /被高能余波击中/, 感电波及: /被感电波及/ };
+  const cases = [
+    { party: ["yuito", "kolt", "helu", "tou"], roles: { kolt: "生存", helu: "环境手", tou: "护卫" }, feats: { kolt: ["cheer"], helu: ["bandage"], tou: ["bandage"] }, seed: "PVP460-AUTO-A",
+      enemies: [{ id: "watchcrow", lv: 9, zone: 1 }, { id: "patrolboat", lv: 9, zone: 2 }, { id: "alarm_bot", lv: 9, zone: 2 }],
+      marks: ["应急处理", "缓冲", "掩护", "保释", "拉出流沙", "双重奏", "战地包扎", "高能自爆", "余波", "感电波及"] },
+    { party: ["helu", "yuito", "hiaki", "kolt"], roles: { hiaki: "生存", helu: "辅助", kolt: "环境手" }, feats: { helu: ["bandage"], hiaki: ["cheer"] }, seed: "PVP460-AUTO-B",
+      enemies: [{ id: "thug_knife", lv: 9, zone: 1 }, { id: "watchcrow", lv: 9, zone: 2 }, { id: "guard_sword", lv: 9, zone: 2 }],
+      marks: ["应急处理", "缓冲", "保释", "拉出流沙", "双重奏", "助威", "战地包扎", "打气", "高能自爆", "余波", "感电波及"] }
+  ];
+  for (const cs of cases) {
+    const sim = mode => {
+      const c = H.load();
+      c.BattleSim.setup({ party: cs.party, seed: cs.seed, zoneMode: 3, enemies: cs.enemies, before(S) {
+        S.units.filter(u => u.isPlayer).forEach(u => {
+          u.level = 15;
+          if (cs.roles[u.kit]) u.roles = { primary: cs.roles[u.kit], secondary: cs.roles[u.kit] };
+          if (cs.feats[u.kit]) u.feats = cs.feats[u.kit].slice();
+          c.resetBattleFlags(u);
+        });
+      } });
+      const S = c.S.state;
+      const heroes = S.units.filter(u => u.isPlayer && !u.hidden), foes = S.units.filter(u => !u.isPlayer && !u.hidden);
+      heroes.forEach(u => { u.zone = 1; });
+      c.findKit("yuito", S.units).resources.liquid = 12;
+      c.findKit("kolt", S.units).resources.stripStore = { flesh: 999 };   // 「非法」改装的废料满了
+      // 流沙：一半的人陷进去；连锁伤害：两名玩家角色感电、一名高能（高能值接近血量），敌人也各上一种
+      S.fields[1].quicksand = true;
+      heroes.forEach((u, i) => { if (i % 2) u.sink = 1; });
+      [heroes[0], heroes[2]].forEach(u => { u.statuses = u.statuses || {}; u.statuses.shock = true; });
+      Object.assign(heroes[1].statuses = heroes[1].statuses || {}, { high: true });
+      heroes[1].highEnergy = Math.floor(c.totalHp(heroes[1]) * 0.7);
+      foes[0].statuses = Object.assign(foes[0].statuses || {}, { shock: true });
+      foes[1].statuses = Object.assign(foes[1].statuses || {}, { high: true });
+      foes[1].highEnergy = Math.floor(c.totalHp(foes[1]) * 0.6);
+      if (mode === "all") faction(c, { faction: "我方" });
+      if (mode === "empty") faction(c, { faction: "乙", phase: "enemy" });
+      const cross = [];
+      if (mode === "pvp") {
+        // 后两名角色分到「乙」（和我方敌对）；记下给友方的效果、连锁伤害落到敌对阵营的人身上的次数
+        heroes.slice(2).forEach(h => faction(c, { faction: "乙", unit: h.id }));
+        const stack = [];
+        const wrap = (name, top) => { const f = c[name]; c[name] = function () { stack.push(top(arguments)); try { return f.apply(this, arguments); } finally { stack.pop(); } }; };
+        wrap("runSkillInner", () => ({ kind: "skill", by: c.unitById(S.attackerId) }));
+        wrap("explodeHigh", a => ({ kind: "chain", by: a[0] }));
+        wrap("shockPulse", a => ({ kind: "chain", by: a[0] }));
+        const watch = (name, who, kind) => { const f = c[name]; c[name] = function () {
+          const top = stack[stack.length - 1], u = who(arguments);
+          if (top && top.kind === kind && top.by && top.by.isPlayer && u && u.isPlayer && c.pvpFoe(top.by, u)) cross.push(`${name}：${top.by.name} → ${u.name}`);
+          return f.apply(this, arguments);
+        }; };
+        ["healUnit", "addShieldLayer", "addTempLayer", "clearSink"].forEach(n => watch(n, a => a[0], "skill"));
+        watch("grantAllyAp", a => a[1], "skill");
+        watch("applyTypedDot", a => (/被高能余波击中|被感电波及/.test(String(a[4] || "")) ? a[0] : null), "chain");
+      }
+      const r = plain(c.BattleSim.run({ maxRounds: 12, policy: friendlyPolicy(c) }));
+      return { r, log: logText(c), cross };
+    };
+    const off = sim(null), all = sim("all"), empty = sim("empty");
+    cs.marks.forEach(k => assert.match(off.log, MARKS[k], `${cs.seed}：这一场放了${k}`));
+    assert.deepEqual(all.r, off.r, cs.seed + "：全部在「我方」——结果一样");
+    assert.equal(all.log, off.log, cs.seed + "：整场记录一样");
+    assert.deepEqual(empty.r, off.r, cs.seed + "：多一个没人的阵营——结果一样");
+    assert.equal(empty.log, off.log, cs.seed + "：整场记录一样");
+    const pvp = sim("pvp");
+    ["保释", "拉出流沙", "双重奏", "高能自爆", "余波", "感电波及"].forEach(k => assert.match(pvp.log, MARKS[k], `${cs.seed}（两个阵营）：这一场有${k}`));
+    assert.deepEqual(pvp.cross, [], cs.seed + "：给友方的效果、连锁伤害没有落到敌对阵营的人身上");
   }
 });

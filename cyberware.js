@@ -330,7 +330,9 @@ function cyberwareSkillTargetWhy(u, skillId, t, picks) {
   if (!d) return null;
   const k = cwKind(d);
   if (t && t.id && !t.isStructure && !t.kind) {
-    if ((k.target === "ally" || k.target === "allySelf") && !t.isPlayer) return "只能对友方使用";
+    // 友方：u 的自己人（同阵营或友好的玩家阵营，enemies.js · teammateOf，#460：敌对玩家阵营的人不算；没配置阵营时就是玩家角色）
+    const ally = typeof teammateOf === "function" ? teammateOf(u, t) : !!t.isPlayer;
+    if ((k.target === "ally" || k.target === "allySelf") && !ally) return "只能对友方使用";
     if (k.target === "ally" && t.id === u.id) return "要选其他友方";
     // 开着友伤（#428）时打敌人的义体也能对自己以外的队友用
     if (k.target === "enemy" && t.isPlayer && !(typeof friendlyFireHit === "function" && friendlyFireHit(u, t))) return "只能对敌人使用";
