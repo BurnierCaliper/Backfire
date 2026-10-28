@@ -2174,10 +2174,10 @@
     }
   }
 
-  /** 龙哥手杖协助攻击能治疗的人：敌人所在区的友方，加上龙哥自己（他会移动过去） */
+  /** 龙哥手杖协助攻击能治疗的人：敌人所在区的友方（和龙哥同一个玩家阵营的人，enemies.js · teammateOf，#456），加上龙哥自己（他会移动过去） */
   function longgeHealOptions(lg, target) {
     const z = Number(target.zone);
-    const list = state.units.filter(u => u.isPlayer && unitAlive(u) && u.id !== lg.id && Number(u.zone) === z);
+    const list = state.units.filter(u => (typeof teammateOf === "function" ? teammateOf(lg, u) : u.isPlayer) && unitAlive(u) && u.id !== lg.id && Number(u.zone) === z);
     return [lg].concat(list);
   }
   let choiceResolve = null;
