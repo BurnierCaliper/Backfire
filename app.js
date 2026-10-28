@@ -1868,6 +1868,10 @@ function beginRound(notes) {
   });
   Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes));
   tickRuinGround(notes);
+  // 集结施放者倒下兜底：死掉的单位会被下面 offField 跳过，先对全体（含 dead）跑一遍
+  if (typeof endRallyIfCasterDown === "function") {
+    state.units.forEach(u => endRallyIfCasterDown(u, notes));
+  }
   state.units.forEach(u => {
     u.lostDefThisTurn = 0;
     // 收回的武器人（hidden）、合体中的、已经死掉的不在场上：不吃场地、自我效果、沙尘回复，也不算进能量场
@@ -1891,6 +1895,7 @@ function beginRound(notes) {
     convertUnstableInHv(u, notes);
     // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）
     if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
     if (u.self === "burn") {
       notes.push(...tickSelfBurn(u, true));
     }
@@ -2331,6 +2336,7 @@ function turnEnd() {
           caster.stunned = true;
           notes.push(`击破预告失败：${caster.name} 架势被击破。`);
           notes.push(imbalanceLine(caster));
+          if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(caster, notes);
         }
       }
       u.instant.omenArmed = false;
@@ -3460,6 +3466,7 @@ function convertUnstableInHv(u, notes) {
     u.stunned = true;
     if (notes) notes.push(`${u.name} 在高压场地：不稳直接转为晕眩。`);
     if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
   }
 }
 
@@ -3580,11 +3587,13 @@ function rasUnstableHit(target, res, notes) {
     target.dying = false;
     target.dead = true;
     notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   } else if (!target.dying) {
     target.dying = true;
     noteKnockdown(target);   // 战场数据：倒地次数
     if (typeof clearStunOnDown === "function") clearStunOnDown(target);
     notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   }
 }
 
@@ -5117,6 +5126,7 @@ function applyCombat(target, result, attacker) {
     notes.push(`牵挂：结人代为承受 ${taken} 击破（结人架势 ${yuito.def}）`);
     if (yuito.def <= 0) {
       notes.push(imbalanceLine(yuito));
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(yuito, notes);
       queueAssistAttack(attacker, yuito);
     }
   }
@@ -5206,6 +5216,7 @@ function applyCombat(target, result, attacker) {
       if (c.def <= 0) {
         c.stunned = true;
         notes.push(imbalanceLine(c));
+        if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(c, notes);
         queueAssistAttack(null, c);
       }
     }
@@ -5274,6 +5285,7 @@ function applyCombat(target, result, attacker) {
   }
   // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）。攻击者被猛击反震打进失衡的，在 dealTo 结算完这一击后结束
   if (typeof endSelfOnStun === "function") endSelfOnStun(target, notes);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   // 死刑：被标记的人倒下了 → 立刻转标
   if (typeof bossMechSync === "function") bossMechSync(notes);
   if (typeof raceAfterHurt === "function") raceAfterHurt(target, result, attacker, notes);   // 易怒蛮牛（enemies.js）
@@ -5734,6 +5746,10 @@ function refreshEconomy(u) {
   }
   if (state.fields[u.zone] && state.fields[u.zone].energy) ap += 1;
   if (typeof featAlertBonus === "function") bonus += featAlertBonus(u);   // 警戒（feats.js）：每场第一回合 +1 附赠
+  // Q1（主人确认）：异常集结 +1 附赠在集结持续期间每回合都有——按仍有效的 rallyBy 份额加
+  if (u.rallyBy) {
+    for (const e of Object.values(u.rallyBy)) bonus += Number(e.bonusGranted) || 0;
+  }
   if (typeof bpEconomy === "function") ({ ap, bonus } = bpEconomy(u, { ap, bonus }));   // 单局图纸
   // 剑术+：上回合切换刀势得到、还没用掉的附赠动作留到这一回合（这一回合结束时过期）；也是加成，在扣之前加
   const carry = u.resources && u.resources.stanceCarry;
@@ -6988,6 +7004,7 @@ function applyKnockdown(unit, notes, opt) {
       unit.upOnShp = false;
       unit.dying = false;
       notes.push(`${unit.name} 起身中，${opt.cause ? opt.cause + "打光了坚毅生命" : "坚毅生命耗尽"}，死亡。`);
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       return "dead";
     }
     if (unit.dying) return "dying";
@@ -6995,6 +7012,7 @@ function applyKnockdown(unit, notes, opt) {
       unit.dead = true;
       unit.dying = false;
       notes.push(`${unit.name} 力竭 3：被击倒后立刻死亡。`);
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       return "dead";
     }
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
@@ -7005,6 +7023,7 @@ function applyKnockdown(unit, notes, opt) {
     clearStunOnDown(unit);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
     return "dying";
   }
   unit.dead = true;
@@ -7638,6 +7657,12 @@ function resetBattleFlags(u) {
   u.loseBonusNext = false;
   u.itemAtkBonus = 0;
   u.rallyAtk = 0;
+  u.rallyBreak = 0;
+  u.rallyBlock = 0;
+  u.rallyHeal = false;
+  u.rallyMove = false;
+  delete u.rallyBuff;
+  delete u.rallyBy;
   u.highEnergy = 0;
   u.highFrom = null;
   u._imbalanceLock = false;
@@ -7650,6 +7675,7 @@ function resetBattleFlags(u) {
   u.instant = {};
   const r = u.resources = u.resources || {};
   delete r.rallyDr;   // 全队集结的坦克减伤只在那一场有效
+  delete r.rallyOn;   // 施放者标记：晕眩 / 濒死时全体增益一起结束
   r.stance = "draw";
   r.smashOnce = true;
   r.smashNext = false;
@@ -7979,38 +8005,178 @@ function triggerOneStatus(t, src, key) {
 
 // 全队集结·直伤：ATK 加成（applyRallyBuff 写 rallyAtk，party.js · effectiveAtk 读）
 const RALLY_BUFF = { atk: 15 };
+// Q1 / Q2（主人确认，PR #418）：异常 +1 附赠在集结持续期间每回合都有（refreshEconomy 按 rallyBy 份额加）；
+// 多名辅助各自 rallyOn，队员用 rallyBy[casterId]={atkGranted,bonusGranted,…} 叠份额；倒下只清该施放者那份。
 
-function applyRallyBuff(u, lines) {
-  if (!u || !u.roles) return;
-  const p = u.roles.primary;
-  u.rallyBuff = p;
-  if (p === "直伤") {
-    u.rallyAtk = RALLY_BUFF.atk;   // 出手按 effectiveAtk 算，它读 rallyAtk；只改 u.atk 不加伤害（#340 第 16 条）
-    u.atk = (u.atk || 0) + RALLY_BUFF.atk;
-    lines.push(`${u.name} 直伤集结：ATK +${RALLY_BUFF.atk}。`);
-  } else if (p === "异常") {
-    u.bonus = (u.bonus || 0) + 1;
-    lines.push(`${u.name} 异常集结：附赠 +1。`);
-  } else if (p === "击破") {
-    u.rallyBreak = 1;
-    lines.push(`${u.name} 击破集结：造成击破 +1。`);
-  } else if (p === "坦克") {
-    u.resources = u.resources || {};
-    u.resources.rallyDr = true;
-    lines.push(`${u.name} 坦克集结：全属性减伤 15%。`);
-  } else if (p === "护卫") {
-    u.rallyBlock = 15;
-    lines.push(`${u.name} 护卫集结：格挡成功率 +15%。`);
-  } else if (p === "生存") {
-    u.rallyHeal = true;
-    lines.push(`${u.name} 生存集结：治疗与护盾 +50%。`);
-  } else if (p === "环境手") {
-    state.weatherLock = (state.weatherLock || u.name + "集结锁定");
-    lines.push(`${u.name} 环境集结：天气锁定。`);
-  } else if (p === "控场") {
-    u.rallyMove = true;
-    lines.push(`${u.name} 控场集结：可免费移动友方。`);
+/** 按 rallyBy 重算聚合字段（rallyAtk / rallyBreak / rallyBlock / rallyDr / rallyHeal / rallyMove / rallyBuff） */
+function syncRallyAggregates(u) {
+  if (!u) return;
+  const entries = Object.values(u.rallyBy || {});
+  if (!entries.length) {
+    u.rallyAtk = 0;
+    u.rallyBreak = 0;
+    u.rallyBlock = 0;
+    u.rallyHeal = false;
+    u.rallyMove = false;
+    delete u.rallyBuff;
+    if (u.resources) delete u.resources.rallyDr;
+    return;
   }
+  u.rallyAtk = entries.reduce((s, e) => s + (Number(e.atkGranted) || 0), 0);
+  u.rallyBreak = entries.reduce((s, e) => s + (Number(e.breakGranted) || 0), 0);
+  u.rallyBlock = entries.reduce((s, e) => s + (Number(e.blockGranted) || 0), 0);
+  u.rallyHeal = entries.some(e => e.heal);
+  u.rallyMove = entries.some(e => e.move);
+  const tankN = entries.filter(e => e.tank).length;
+  if (tankN) {
+    u.resources = u.resources || {};
+    u.resources.rallyDr = tankN;
+  } else if (u.resources) {
+    delete u.resources.rallyDr;
+  }
+  u.rallyBuff = entries[0].role;
+}
+
+/** 施放者倒下时，是否立刻收回本回合已按其份额发下的异常附赠（+1）。
+ *  false（主人 10/28 确认）= 本回合已发的保留，refreshEconomy 从下一回合起不再加；
+ *  true = 立刻扣回（附赠不分来源，可能扣掉队员留着协助格挡的那个）。 */
+const RALLY_REVOKE_BONUS_ON_DOWN = false;   // 主人 10/28 确认：不收回
+
+/** 会产生实际效果的集结职责（辅助等没有效果的份额，结束时不写日志） */
+const RALLY_EFFECT_ROLES = ["直伤", "击破", "坦克", "护卫", "生存", "环境手", "控场", "异常"];
+
+/** 清掉一名施放者在该队员身上的那一份集结增益（幂等；atk 不低于 baseEffectiveAtk+itemAtkBonus+剩余 rallyAtk）。
+ *  lines 给了就写日志：点名施放者；还有别人的份额时注明仍有效；无效果的份额（如辅助）不写。 */
+function clearRallyShare(u, casterId, lines) {
+  if (!u || !u.rallyBy) return false;
+  const cid = String(casterId);
+  const e = u.rallyBy[cid];
+  if (!e) return false;
+  const atkG = Number(e.atkGranted) || 0;
+  const bonusG = Number(e.bonusGranted) || 0;
+  const wasEnv = e.role === "环境手" || e.env;
+  const hadEffect = RALLY_EFFECT_ROLES.includes(e.role) || !!(e.tank || e.env || atkG || bonusG);
+  delete u.rallyBy[cid];
+  if (!Object.keys(u.rallyBy).length) delete u.rallyBy;
+
+  if (atkG) {
+    u.rallyAtk = Math.max(0, (Number(u.rallyAtk) || 0) - atkG);
+    // 不把 bondAtk / duetAtk 写进 u.atk：托底只用基础 + 注射剂 + 仍有效的集结份额
+    const floor = (typeof baseEffectiveAtk === "function" ? baseEffectiveAtk(u, state.units) : 0)
+      + (Number(u.itemAtkBonus) || 0) + (Number(u.rallyAtk) || 0);
+    u.atk = Math.max(floor, (Number(u.atk) || 0) - atkG);
+  }
+  if (bonusG && RALLY_REVOKE_BONUS_ON_DOWN) {
+    // Q1：refreshEconomy 每回合按份额加过。附赠不分来源：本回合若已用掉 1 个，这里扣的可能是正常那个
+    u.bonus = Math.max(0, (Number(u.bonus) || 0) - bonusG);
+  }
+  syncRallyAggregates(u);
+  if (wasEnv) {
+    const stillEnv = (typeof fieldUnits === "function" ? fieldUnits() : (state.units || []))
+      .some(x => x && x.rallyBy && Object.values(x.rallyBy).some(en => en && (en.role === "环境手" || en.env)));
+    if (!stillEnv && state.weatherLock && /集结锁定$/.test(String(state.weatherLock))) state.weatherLock = null;
+  }
+  if (lines && hadEffect) {
+    const caster = (state.units || []).find(x => x && String(x.id) === cid);
+    const cName = caster ? caster.name : "施放者";
+    const others = Object.keys(u.rallyBy || {}).map(k => (state.units || []).find(x => x && String(x.id) === k))
+      .filter(Boolean).map(x => x.name);
+    lines.push(`${u.name} 失去${cName}的全队集结增益${others.length ? `（${others.join("、")}的还在）` : ""}。`);
+  }
+  return true;
+}
+
+/** 清掉一名队员身上全部集结增益（所有施放者份额）。正式流程不调它（resetBattleFlags 直接删字段），供测试 / 工具一次清空 */
+function clearRallyBuff(u, lines) {
+  if (!u) return;
+  const ids = Object.keys(u.rallyBy || {});
+  if (ids.length) {
+    ids.forEach(cid => clearRallyShare(u, cid, null));
+    if (lines) lines.push(`${u.name} 的全队集结增益结束。`);
+    return;
+  }
+  // 无 rallyBy 的旧标记：只清聚合字段（异常不扣 bonus——没有份额可扣）
+  if (!u.rallyBuff) return;
+  const p = u.rallyBuff;
+  if (p === "直伤") {
+    const granted = Number(u.rallyAtk) || 0;
+    u.rallyAtk = 0;
+    const floor = (typeof baseEffectiveAtk === "function" ? baseEffectiveAtk(u, state.units) : 0)
+      + (Number(u.itemAtkBonus) || 0);
+    u.atk = Math.max(floor, (Number(u.atk) || 0) - granted);
+  } else if (p === "击破") {
+    u.rallyBreak = 0;
+  } else if (p === "坦克") {
+    if (u.resources) delete u.resources.rallyDr;
+  } else if (p === "护卫") {
+    u.rallyBlock = 0;
+  } else if (p === "生存") {
+    u.rallyHeal = false;
+  } else if (p === "环境手") {
+    if (state.weatherLock && /集结锁定$/.test(String(state.weatherLock))) state.weatherLock = null;
+  } else if (p === "控场") {
+    u.rallyMove = false;
+  }
+  delete u.rallyBuff;
+  if (lines) lines.push(`${u.name} 的全队集结增益结束。`);
+}
+
+/** 施放者晕眩或濒死（或直接死亡）时：只清该施放者提供的那一份（其它施放者的份额保留）。
+ *  中央钩子：所有直接写 stunned / dying / dead 的路径都应调它；beginRound 对全体（含已死）再兜一次。
+ *  首领 / 载具驾驶员标记没攒满的那次失衡（stunShrugged）不算真晕眩，集结不结束。 */
+function endRallyIfCasterDown(u, notes) {
+  if (!u || !u.resources || !u.resources.rallyOn) return false;
+  if (!(u.stunned || u.dying || u.dead)) return false;
+  // 标记没攒满、马上恢复架势：不算真晕眩（dying / dead 仍结束）
+  if (!u.dying && !u.dead && typeof stunShrugged === "function" && stunShrugged(u)) return false;
+  u.resources.rallyOn = false;
+  const lines = notes || [];
+  const cid = u.id;
+  const why = u.dead ? "死亡" : (u.dying ? "濒死" : "晕眩");
+  lines.push(`${u.name} 的全队集结结束：施放者${why}。`);
+  // 含已死亡的队员：否则 GM 复活后份额还在，每回合继续 +1 附赠 / 整场 +15
+  (state.units || []).filter(x => x && x.isPlayer).forEach(x => clearRallyShare(x, cid, lines));
+  return true;
+}
+
+/** 给一名队员叠上 caster 的集结份额（按队员主职责）；同一 caster 再施放会先清旧份额再加（幂等） */
+function applyRallyBuff(u, lines, caster) {
+  if (!u || !u.roles) return;
+  const cid = caster && caster.id != null ? String(caster.id) : "_";
+  if (u.rallyBy && u.rallyBy[cid]) clearRallyShare(u, cid, null);
+  const p = u.roles.primary;
+  const e = { role: p, atkGranted: 0, bonusGranted: 0 };
+  if (p === "直伤") {
+    e.atkGranted = RALLY_BUFF.atk;
+    u.atk = (u.atk || 0) + e.atkGranted;
+    (lines || []).push(`${u.name} 直伤集结：ATK +${e.atkGranted}。`);
+  } else if (p === "异常") {
+    e.bonusGranted = 1;
+    u.bonus = (u.bonus || 0) + 1;
+    (lines || []).push(`${u.name} 异常集结：每回合附赠 +1。`);
+  } else if (p === "击破") {
+    e.breakGranted = 1;
+    (lines || []).push(`${u.name} 击破集结：造成击破 +1。`);
+  } else if (p === "坦克") {
+    e.tank = true;
+    (lines || []).push(`${u.name} 坦克集结：全属性减伤 15%。`);
+  } else if (p === "护卫") {
+    e.blockGranted = 15;
+    (lines || []).push(`${u.name} 护卫集结：格挡成功率 +15%。`);
+  } else if (p === "生存") {
+    e.heal = true;
+    (lines || []).push(`${u.name} 生存集结：治疗与护盾 +50%。`);
+  } else if (p === "环境手") {
+    e.env = true;
+    state.weatherLock = (state.weatherLock || u.name + "集结锁定");
+    (lines || []).push(`${u.name} 环境集结：天气锁定。`);
+  } else if (p === "控场") {
+    e.move = true;
+    (lines || []).push(`${u.name} 控场集结：可免费移动友方。`);
+  }
+  u.rallyBy = u.rallyBy || {};
+  u.rallyBy[cid] = e;
+  syncRallyAggregates(u);
 }
 
 function attackConnected(res, flags) {
@@ -8772,6 +8938,7 @@ function dealToInner(attacker, target, opt) {
   if (typeof ratfolkAfterHit === "function") ratfolkAfterHit(attacker, target, res, flags, extra, { dist, wasDown: wasDownForRat, wasStunned: wasStunnedT });
   // 猛击反震把攻击者自己打进失衡：这一击的霜结 / 溅射 / 导体照常结算完，再随晕眩结束自我效果
   if (attacker && attacker !== target && attacker.stunned && typeof endSelfOnStun === "function") endSelfOnStun(attacker, extra);
+  if (attacker && attacker !== target && typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(attacker, extra);
   if ((res.total || 0) > 0 && layersBeforeHit) {
     // 只认敌人、只认这一击之前还有血、这一击之后归零（或被移除）的那一层；已经碎掉的层不会被后来的攻击反复记录
     const now = target.layers || [];
@@ -9390,7 +9557,10 @@ function exitMecha(ruby, reason) {
     if (armor.length) { mint.layers = armor; armor.forEach(l => delete l.inner); armor[armor.length - 1].inner = true; }
     // 明特带走机甲这段时间的架势（不然解除一次两个人的架势都回满）；机甲失衡（被击落）时明特也失衡
     mint.def = mechaStunned ? 0 : Math.min(Number(mint.defMax) || 0, mechaDef);
-    if (mechaStunned) mint.stunned = true;
+    if (mechaStunned) {
+      mint.stunned = true;
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(mint, notes);
+    }
     // 坠落伤害只在被击落时算一次（通用的「飞行被击落扣 20%」对机甲不再先扣一遍，见 engine.js · resolveAttack）
     if (shot) {
       const fall = safe ? 0 : Math.floor(totalMaxHp(ruby) * 0.2);
@@ -10951,6 +11121,7 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     // 飞行单位被击破：和攻击打空架势一样强制击落，扣 20% 最大生命（engine.js · resolveAttack 的击落）
     if (before > 0) knockdownByBreak(sink, notes);
     if (typeof endSelfOnStun === "function" && !opt.keepSelf) endSelfOnStun(sink, notes);   // keepSelf：猛击反震，留给 dealTo 结算完这一击再结束
+    if (typeof endRallyIfCasterDown === "function" && !opt.keepSelf) endRallyIfCasterDown(sink, notes);
     queueAssistAttack(opt.by || null, sink);
     if (brokeIntoStun && typeof onBroken === "function") onBroken(sink, notes);
   } else {
@@ -10997,6 +11168,7 @@ function applyUnstable(u, notes) {
       u.stunned = true;
       if (notes) { notes.push(`${u.name} 叠加两个不稳：转为晕眩。`); notes.push(imbalanceLine(u)); }
       if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);   // 晕眩后自我效果结束
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
       queueAssistAttack(null, u);
     }
     return false;
@@ -11009,6 +11181,7 @@ function applyUnstable(u, notes) {
 function maybeUnstableTrip(u, notes, by) {
   if (!u || u.stunned || u.dead || u.noPosture) return;
   if (u.statuses && u.statuses.sturdy) return;   // 坚挺：剩 1 架势也站得住
+  if (u.resources && u.resources.divertGuard) return;   // 扭矩自保模式：和不稳面对坚挺一样（主人确认）
   if (!u.statuses || !u.statuses.unstable) return;
   if ((Number(u.def) || 0) > 1) return;
   u.stunned = true;
@@ -11017,6 +11190,7 @@ function maybeUnstableTrip(u, notes, by) {
   notes.push(`${u.name} 不稳：架势只剩 ${u.def}，直接失衡。`);
   notes.push(imbalanceLine(u));
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
   queueAssistAttack(by || null, u);
 }
 
@@ -11818,7 +11992,7 @@ const SKILL_REQUIREMENT = {
   role_apocalypse:  (a) => roleCapWhy(a, "role_apocalypse"),
   role_shake:       (a) => roleCapWhy(a, "role_shake"),
   role_rearrange:   (a) => roleCapWhy(a, "role_rearrange"),
-  role_rally:       (a) => roleCapWhy(a, "role_rally"),
+  role_rally:       (a) => (a && a.stunned ? "失衡时不能施放全队集结" : null) || roleCapWhy(a, "role_rally"),   // 主人 10/28：失衡的施放者不能放
   role_double_dot:  (a) => roleCapWhy(a, "role_double_dot")
     || (fieldFoes(a).some(u => hasAnyStatus(u)) ? null : "场上没有带状态效果的敌人"),
   role_gold:        (a) => roleCapWhy(a, "role_gold")
@@ -13845,10 +14019,11 @@ function runSkillInner(id, optRun) {
         lines.push(`${tgt.name} 的${INSTANT_NAME[key]}将延长一回合。`);
       }
     } else if (id === "role_rally") {
-      if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
+      if (a.stunned) lines.push("失衡时不能施放全队集结。");   // 兜底：正常已在 SKILL_REQUIREMENT 拦下
+      else if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
       else {
         a.resources.rallyOn = true;
-        fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines));
+        fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines, a));
         lines.push("全队集结：同区队员获得主职责增益，直到你晕眩或濒死。");
       }
     } else if (id === "role_firstaid") {
@@ -14891,10 +15066,11 @@ function dmFillDef(u) {
   u._imbalanceLock = false;
 }
 
-function dmForceStun(u) {
+function dmForceStun(u, notes) {
   if (u.trainingDummy) return;   // 训练假人不会失衡
   u.def = 0;
   u.stunned = true;
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
 }
 
 function dmRevive(u) {

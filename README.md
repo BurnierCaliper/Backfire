@@ -369,6 +369,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **全队集结：施放者倒下就结束、两人施放叠加、异常每回合 +1；扭矩自保不受不稳**（主人 夕夏 10/28 在对话里确认：异常附赠每回合都有；两名辅助的集结各职责都叠加、倒下只清自己那份；倒下不收回本回合已发的附赠；失衡时不能施放；接 #340 第 16 / 17 条；PR #418。改动：app.js · `syncRallyAggregates` / `clearRallyShare` / `clearRallyBuff` / `applyRallyBuff` / `endRallyIfCasterDown` / `refreshEconomy` / `resetBattleFlags` / `beginRound` / `turnEnd` / `applyCombat` / `applyKnockdown` / `dealToInner` / `dealBreak` / `applyUnstable` / `maybeUnstableTrip` / `convertUnstableInHv` / `rasUnstableHit` / `exitMecha` / `dmForceStun` / `runSkillInner`（role_rally）/ `SKILL_REQUIREMENT.role_rally` / `RALLY_REVOKE_BONUS_ON_DOWN`；items.js · `itemStun`；enemies.js · `kingExecutionGrab` / `crushSkullDown` / `runEnemyActionInner`；vehicle.js · `vehicleDestroy`；engine.js / matchup.js（坦克减伤按份数）；online-view.js（去掉没人读的 `rallyDr` 投影）；gm-commands.js / trpg-commands.js（GM 强制失衡写日志）；party.js / skill-text.js 文案）
+  - **以前**（main）：集结整场有效，施放者倒下什么都不清，濒死起身、晕眩恢复后也还在。两人先后施放：直伤伤害只 +15（`rallyAtk` 是直接赋值）但 `u.atk` 加了 30；异常只在施放那一回合 +2；坦克 `rallyDr` 只是 true，不叠加。扭矩自保模式架势剩 1 时会因不稳直接失衡。
+  - **现在**：每名施放者各记一份（施放者 `resources.rallyOn`，队员 `rallyBy[施放者]`）。集结持续到**这名施放者**晕眩 / 濒死 / 死亡，倒下时只清他给每个队员（包括已经死亡的队员）的那一份，另一名施放者的份额保留；日志写「X 失去 Y 的全队集结增益（Z 的还在）」，没有效果的份额（辅助）不写。异常：集结期间 `refreshEconomy` 每回合按有效份额各 +1 附赠，两人就是 +2。两人时各职责都叠加：直伤 +30、击破 +2、护卫 +30%、坦克 −30%（结算和克制表一致）。施放者倒下时，本回合已经发下的异常附赠不收回，`refreshEconomy` 从下一回合起不再加（`RALLY_REVOKE_BONUS_ON_DOWN = false`）。失衡的辅助不能施放全队集结（技能栏、AI、联机 / 热座校验都走 `SKILL_REQUIREMENT`，原因「失衡时不能施放全队集结」）。直伤清份额时 `u.atk` 托底为 `baseEffectiveAtk + itemAtkBonus + 剩余 rallyAtk`，不把双重奏 / 思念写进 `u.atk`。坦克队员自己失衡仍有减伤。扭矩自保模式和坚挺一样不受不稳。
+  - **没改的**：施放方式和 `RALLY_BUFF` 数值、自保模式的架势保底和 25% 减伤、坚挺。自我效果什么时候结束另见 #430。
+  - **测试**：tests/rally-caster-end.test.js（施放者晕眩 / 濒死 / 死亡、队员自己晕眩、牵挂、闪光弹、捏碎颅骨、beginRound 兜底、异常每回合 +1、两人叠加和分别清、两人时的日志、已死队员的份额、用掉附赠后倒下不扣、GM 强制失衡、失衡不能施放、坦克 / 击破 / 护卫两人叠加、atk 托底、坦克自己失衡、载具标记没攒满）、divert-guard、matchup。原来的 18 条里有 16 条在 origin/main 上失败（通过的 2 条是对照）。
 - **友伤开关后续（三）：开着友伤时音爆 / 探测模式触发的碎渣机炮在敌人和队友里随机挑；川川「磁场护盾」、龙哥热能轰击（红弹）也打到队友；借机攻击单元、警戒、近距离压制单元对队友也起作用**（#437，作者 10/27 对 #432「待作者确认」的回复；app.js · `scrapAutoTarget`（新）/ `ecmoBoomTriggerProps` / `ecmoProbeTrigger` / `triggerMagnetShield` / `runSkillInner` 的 `longge_heat`；mods.js · `bpLeaveOpportunity` / `bpAtkAdjust`；feats.js · `featAlertOnEnter`；测试 tests/friendly-fire.test.js）
   - **以前**：#432 起音爆 / 探测模式触发的碎渣机炮开着友伤时名单里有队友，挑的是名单（`scrapTargets`，按场上单位的顺序）里的第一个；我方排在敌人前面，所以 2 距离内只要有队友就一定先打队友。川川「磁场护盾」被打破时推开同区敌人并各受 1 击破、龙哥热能轰击（霰弹枪 · 红弹）让同区敌人熔融，这两处 #431 漏掉了（还写死成只打敌人），开着友伤也不碰队友。「谁动就打谁」的反应和光环（借机攻击单元、警戒、近距离压制单元）开着友伤也只对敌人。
   - **现在**：都看施放者 / 主人的操控者的开关（enemies.js · `friendlyFireHit`）；打到队友照常结算、不计分数（和 #431 一样）。**开关关着时一切照旧。**
@@ -501,13 +506,13 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **强化注射剂 / 全队集结·直伤的 ATK 加成算进出手**（修复 #340 第 16 条；party.js · `effectiveAtk`；app.js · `applyRallyBuff` / `resetBattleFlags`、`RALLY_BUFF`（新配置）；测试 tests/atk-buffs.test.js（新））
   - **以前**：强化注射剂写「ATK +3 至战斗结束」，代码给 `u.atk` 和 `u.itemAtkBonus` 各加 3；全队集结·直伤给 `u.atk` +15。出手按 `effectiveAtk` 算，它不读这两个字段，伤害一点不加（坚毅照扣）。
   - **现在**：`effectiveAtk` 加上 `itemAtkBonus` 和 `rallyAtk`。直伤集结另记 `rallyAtk`（数值放在配置 `RALLY_BUFF = { atk: 15 }`，`rallyAtk`、`u.atk` 和日志「ATK +15」都读它；下一场 `resetBattleFlags` 清掉）；注射剂本来就写了 `itemAtkBonus`，现在真的进伤害。
-  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结的「持续到自己晕眩或濒死」**没做**：现在 +15 整场有效，濒死起身、晕眩恢复后都还在；「自己」是指施放者还是每个拿到加成的队员没写清楚，待主人确认后再补。
+  - **没改的**：道具扣坚毅（`selfShpCost` / `shpLossText`）、集结其它职责、`u.atk` 本身仍会加（别处若读它也看得到加成）。直伤集结「持续到施放者晕眩或濒死」后来已补（见 PR #418 那一条）。
   - **测试**：tests/atk-buffs.test.js（新，3 条；前 2 条在没改的代码上都失败，第 3 条在加配置前失败）：打针后 `effectiveAtk` +3；直伤集结后 +15，下一场清零；把 `RALLY_BUFF.atk` 改成 7，出手和日志都跟着变成 +7。
 
 - **扭矩「转移注意」自保模式：被攻击时架势也不会低于 1**（修复 #340 第 17 条；engine.js · `applyResultToUnit`；测试 tests/divert-guard.test.js（新））
   - **以前**：技能写「架势值不会低于 1」，保底只在 `dealBreak`（直接击破）里做；攻击走 `applyResultToUnit`，被攻击时架势照样打到 0、进失衡。
   - **现在**：`applyResultToUnit` 和 `dealBreak` 一样认 `resources.divertGuard`：架势 ≥ 1 时这一击最多打到剩 1，笔记写「自保模式：架势保留 1」。坚挺（`statuses.sturdy`）照旧。
-  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。不稳照旧——自保模式下架势剩 1 时仍会因不稳直接失衡（坚挺不会），待主人确认是否要改。
+  - **没改的**：转移注意怎么开 / 关、自保模式的 25% 减伤（`flags.dr25`）、坚挺本身。自保模式不受不稳影响后来已补（见 PR #418 那一条）。
   - **测试**：tests/divert-guard.test.js（新，1 条，在没改的代码上失败）：走真实流程——柯尔特召唤扭矩 → 扭矩转移注意（进自保模式）→ 敌人攻击扭矩（架势 4、这一击 11 击破）→ 架势 1、不进失衡、不算击破，日志有「自保模式：架势保留 1」。
 
 - **巨人招式图鉴文字改成「atk + 等级颗 d8」，和实际骰数一致**（修复 #340 第 19 条；bestiary.js · `BESTIARY_TEXT.giant`；测试 tests/giant-bestiary.test.js（新））

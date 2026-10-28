@@ -200,6 +200,18 @@ for (const [name, unit, els, opt, re] of EFFECTS) {
   });
 }
 
+test("选中单位·全队集结：坦克自己失衡仍显示 −15%（与 engine 一致，只看施放者）", () => {
+  // 在旧 matchup.js（rallyDr && !(stunned||dying)）上失败
+  const unit = { resources: { rallyDr: true }, stunned: true };
+  const m = unitChart(unit);
+  assert.equal(m.defender, true);
+  assert.ok(m.rows.some(r => /全队集结/.test(r.pctReason)), "克制表应写出全队集结");
+  for (const el of ["fire", "energy", "physical"]) {
+    near(total(m, el, "flesh"), engPct(unit, el), `失衡坦克/${el}`);
+  }
+});
+
+
 test("选中单位·熔融装甲：物理打装甲强制 +50%（和结算一致）；冰 ×2 记在 row.mult", () => {
   const unit = { instant: { melt: true } };
   const m = unitChart(unit);

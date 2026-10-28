@@ -59,7 +59,13 @@ function matchupDefenderRow(u, el, weather, envX, fieldT) {
   if (typeof raceDefendMods === "function") raceDefendMods(u, el).forEach(m => add(m.value, m.reason.replace(/。$/, "")));   // 敌人的种族被动：热耐性、鳞片
   if (u.self === "store" && el === "harmonic") add(0.25, "蓄能：谐波受伤 +25%");
   (u.etchMarks || []).forEach(m => { if (m && m.element === el) { const v = Number(m.pct) || 0.1; add(v, `蚀刻残留：${ELE[el]} +${Math.round(v * 100)}%，并视为被克制`); } });
-  if (r.rallyDr && !(u.stunned || u.dying)) add(-0.15, "全队集结（坦克）：全属性减伤 −15%");
+  // 和 engine.js · resolveAttack 一致：rallyDr 在自己失衡 / 濒死时仍生效（只看施放者是否倒下）；份额可叠
+  {
+    const n = Math.max(0, Math.floor(Number(r.rallyDr) || 0));
+    if (n) add(-0.15 * n, n > 1
+      ? `全队集结（坦克）×${n}：全属性减伤 −${15 * n}%`
+      : "全队集结（坦克）：全属性减伤 −15%");
+  }
   if (typeof frenzyTakenCut === "function") { const v = frenzyTakenCut(u); if (v) add(-v, `狂暴：受到的伤害 −${Math.round(v * 100)}%`); }   // effects.js · FRENZY
   if (u.instant && u.instant.iceNext) add(0.5, "冰冻：下一次被攻击的第一击 +50%");
   return out;
@@ -143,7 +149,9 @@ function matchupDefenderOf(u) {
   pick.forEach(k => { if (u[k] !== undefined) d[k] = u[k]; });
   // 起身状态（坚毅生命）：只记「不吃克制」，不带坚毅相关字段
   if (u.upOnShp && u.isPlayer) d.chartOff = true;
-  d.resources = { flattened: !!(u.resources && u.resources.flattened), hostage: !!(u.resources && u.resources.hostage), rallyDr: !!(u.resources && u.resources.rallyDr) };
+  // rallyDr 投影为份额数（叠两名辅助 = 2），供克制表与 engine 一致按 −15%×N 显示
+  const rd = u.resources && u.resources.rallyDr;
+  d.resources = { flattened: !!(u.resources && u.resources.flattened), hostage: !!(u.resources && u.resources.hostage), rallyDr: rd ? (Number(rd) || 1) : 0 };
   d.instant = { melt: !!(u.instant && u.instant.melt), iceNext: !!(u.instant && u.instant.iceNext) };
   return d;
 }
