@@ -1466,7 +1466,8 @@ function sewerDotThreat(u, k) {
   }
   if (k === "shock") {
     const d = statusDotDice("shock", u.level, w);
-    const mates = (state.units || []).filter(x => x && !x.dead && !x.hidden && !x._removed && Number(x.zone) === Number(u.zone) && !!x.isPlayer === !!u.isPlayer).length;
+    // 同区同阵营：和感电的波及（app.js · shockPulse）同一个判断（chainSideOf，#460；清的是敌人自己那边，结果和以前一样）
+    const mates = (state.units || []).filter(x => x && !x.dead && !x.hidden && !x._removed && Number(x.zone) === Number(u.zone) && chainSideOf(u, x)).length;
     return Math.max(d.min || 1, (d.s + 1) / 2 + (d.bonus || 0)) * sm * Math.max(1, mates);
   }
   return 0;
@@ -1718,6 +1719,7 @@ function friendlyFirePick(by, u) {
  * 改它用指令 battle.playerFaction（battle-commands.js → setPlayerFaction）；主持人面板是第二步。
  * 敌我判断都接在这里：hostileTo / playerAllied（按谁的阵营看）/ attackFoe / friendlyFireHit（敌对玩家阵营的角色也算进来）/ autoFoe / allyOf；
  * 给友方的范围效果只给施放者的自己人（同一个玩家阵营，或者单独设成友好的玩家阵营）：teammateOf（#456 / #460；单体选友方的 allyOf 是同一个判断）；
+ * 连锁伤害（高能自爆的余波、感电的波及）打的「同阵营」：chainSideOf（#460）；
  * 谁在哪个回合行动：unitTurnPhase（app.js · canControlUnit、回合开始补行动点）；胜负：factionHostileTo（app.js · pvpBattleOutcome） */
 const PVP_CFG = {
   defaultFaction: "我方",   // 默认阵营的 id：没分过阵营的玩家角色都在这里
@@ -1823,12 +1825,19 @@ function allyOf(a, b) {
 /** u 算不算 by 的自己人：u 在玩家这一边，而且所在的玩家阵营不和 by 的敌对——同一个玩家阵营，或者单独设成友好的玩家阵营（#460，作者 10/28：
  *  「互相友好的话就吃」；友好不传递：甲和乙、乙和丙友好，甲和丙照旧按它俩之间的设置）。武器人跟着持有者、替身跟着操控它的人、
  *  护送对象按自己记的阵营（playerFactionOf）。给友方的范围效果（群体治疗、护盾、全队集结、全体坚挺、全反击……，#456）问这里；
- *  单体选友方的技能 / 道具问 allyOf（#445），是同一个判断。
+ *  单体选友方的技能 / 道具问 allyOf（#445），是同一个判断；连锁伤害打的「同阵营」（chainSideOf）玩家这一边也按它。
  *  by 不在玩家这一边（没有施放者……）时照旧只看 u 是不是玩家角色。没配置阵营 / 场上只有「我方」时就是「u 在玩家这一边」，和以前一样。
  *  友伤开关不管这里（开着友伤时同阵营的队友照旧吃增益） */
 function teammateOf(by, u) {
   if (!u || !u.isPlayer) return false;
   return !playerFactionsHostile(playerFactionOf(by), playerFactionOf(u));
+}
+/** 连锁伤害打的「同阵营」（#460，作者 10/28：「高能还有感电确实也需要重新改成现在这样按照阵营的」）：高能自爆的余波、感电 / 中和感电的波及。
+ *  照原来「我方 / 敌人」两边的写法，只是把「我方」换成阵营判断——source 在玩家这一边时是它的自己人（teammateOf：同阵营或友好的阵营，
+ *  敌对玩家阵营的人不挨）；source 是非玩家单位时照旧是所有非玩家单位。没配置阵营 / 只有「我方」时就是「和 source 同一边」，和以前一样 */
+function chainSideOf(source, u) {
+  if (!source || !u) return false;
+  return source.isPlayer ? teammateOf(source, u) : !u.isPlayer;
 }
 /** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
  *   { reset: true }                    清空配置：回到默认（全部在「我方」，一切照旧）

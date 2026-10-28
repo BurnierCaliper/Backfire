@@ -6,7 +6,8 @@
 // 接线见 app.js（canControlUnit、startEnemyPhase、eligibleAssisters、pvpSplit / pvpBattleOutcome）、battle-commands.js、sim.js、
 // hotseat*.js、online-view.js · projectUnit（白名单）
 // 给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者的自己人（#456：同一个玩家阵营；#460：单独设成友好的玩家阵营也算）：
-// enemies.js · teammateOf（单体选友方的 allyOf 是同一个判断），接线见文件最后几条
+// enemies.js · teammateOf（单体选友方的 allyOf 是同一个判断），接线见文件最后几条；
+// 单体选友方的技能（分步名单、出手前的校验、结算）和连锁伤害（高能自爆的余波、感电 / 中和感电的波及：enemies.js · chainSideOf）也按阵营（#460），在最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -1119,8 +1120,8 @@ test("只有一个玩家阵营时一切照旧：同一种子整场自动对打�
  * 分步名单、扣点之前的检查（app.js · skillTargetError，专长 / 义体各自的那一份）、结算里的检查、联机出手前的校验都只认自己人
  * （enemies.js · teammateOf：同阵营或友好的阵营）。下面的局面：前两人在「我方」，第三人在「乙」（和我方友好），
  * 第四人在「丙」（和两边都敌对）；每条都再拿不配置阵营的同一个局面对照（照旧是全部玩家角色）。 */
-function trio(party, split) {
-  return field({ party, seed: "PVP460-ALLY", factions: split ? (c, h) => {
+function trio(party, split, enemies) {
+  return field({ party, enemies, seed: "PVP460-ALLY", factions: split ? (c, h) => {
     faction(c, { faction: "乙", unit: h[2].id });
     faction(c, { faction: "丙", unit: h[3].id });
     faction(c, { faction: "乙", other: "我方", hostile: false });
@@ -1295,5 +1296,203 @@ test("单体选友方的技能·结算：直接发指令也给不到敌对阵营
     skill(c, yuito, "yuito_inspire", kolt, { mode: "turn", target: kolt.id });
     assert.equal(!!kolt.statuses.inspire, true, "助威：友好的乙振奋" + tag);
     assert.ok(helu);
+  }
+});
+
+/* ===== 连锁伤害按阵营（#460）=====
+ * 高能自爆的余波、感电 / 中和感电的波及打「同阵营」：炸的 / 感电的人在玩家这一边时是它的自己人（enemies.js · chainSideOf：
+ * 同阵营或友好的阵营），敌对阵营的人不挨；敌人那边照旧是所有非玩家单位。局面同上（我方两人、友好的乙、敌对的丙），两个狂徒同区 */
+const TWO_THUGS = [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }];
+/** fn 里 applyTypedDot 打到的单位（日志标签对得上 re 的那几下），id 排好序 */
+function dotTargets(c, re, fn) {
+  const out = [], f = c.applyTypedDot;
+  c.applyTypedDot = function (u, dmg, el, notes, label) { if (re.test(String(label || ""))) out.push(u.id); return f.apply(this, arguments); };
+  try { fn(); } finally { c.applyTypedDot = f; }
+  return out.sort();
+}
+
+test("高能自爆的余波：玩家这一边炸的只打它的自己人（同阵营、友好的阵营），敌对阵营的人不挨；敌人炸的照旧打同区的敌人；没配置阵营时照旧打同区全部玩家角色（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [f1, f2] } = trio(["kolt", "helu", "hiaki", "tou"], split, TWO_THUGS);
+    const hp0 = { tou: hp(c, tou), kolt: hp(c, kolt) };
+    helu.statuses.high = true; helu.highEnergy = 40;
+    const hitByHelu = dotTargets(c, /被高能余波击中/, () => c.explodeHigh(helu, 40));
+    assert.ok(logText(c).includes("【高能自爆】" + helu.name), "赫鲁米卡高能自爆");
+    assert.deepEqual(hitByHelu, idsOf(split ? [kolt, hiaki] : [kolt, hiaki, tou]), "赫鲁米卡（我方）炸：余波打我方和友好的乙" + (split ? "，不打敌对的丙" : tag));
+    assert.ok(hp(c, kolt) < hp0.kolt, "柯尔特挨了余波");
+    assert.equal(hp(c, tou) < hp0.tou, !split, split ? "灯（丙）没挨" : "灯也挨了" + tag);
+    // 敌人炸的：照旧打同区的其他非玩家单位，不打玩家角色
+    f1.statuses = f1.statuses || {}; f1.statuses.high = true;
+    assert.deepEqual(dotTargets(c, /被高能余波击中/, () => c.explodeHigh(f1, 40)), [f2.id], "狂徒炸：只打另一个狂徒" + tag);
+    // 判断本身（enemies.js · chainSideOf）
+    assert.equal(c.chainSideOf(kolt, tou), !split, "chainSideOf：敌对阵营的人" + tag);
+    assert.equal(c.chainSideOf(kolt, hiaki), true, "友好的阵营算同阵营");
+    assert.equal(c.chainSideOf(kolt, f2), false, "敌人不算");
+    assert.equal(c.chainSideOf(f1, f2), true, "敌人那边照旧：所有非玩家单位");
+    assert.equal(c.chainSideOf(f1, kolt), false);
+  }
+});
+
+test("感电 / 中和感电的波及：玩家这一边的只打同区的自己人（含自己；同阵营、友好的阵营），敌对阵营的人不挨；敌人的照旧；没配置阵营时照旧（#460）", () => {
+  for (const split of [true, false]) {
+    const tag = split ? "" : "（没配置阵营）";
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [f1, f2] } = trio(["kolt", "helu", "hiaki", "tou"], split, TWO_THUGS);
+    const mine = idsOf(split ? [kolt, helu, hiaki] : [kolt, helu, hiaki, tou]);
+    // 感电触发（回合结束的那一下）：赫鲁米卡（我方）
+    helu.statuses.shock = true;
+    let notes = [];
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => { notes = c.shockPulse(helu); }), mine, "感电：我方和友好的乙（含自己）" + (split ? "，不打敌对的丙" : tag));
+    const listed = ((notes[0] || "").match(/同区同阵营：([^）]*)）/) || [])[1] || "";
+    assert.deepEqual(listed.split("、").sort(), (split ? [kolt, helu, hiaki] : [kolt, helu, hiaki, tou]).map(u => u.name).sort(), "记录里的同阵营名单也一样" + tag);
+    // 敌对的丙（灯）自己感电：只打丙自己（我方、乙都和丙敌对）
+    tou.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => c.shockPulse(tou)), split ? [tou.id] : mine, "灯（丙）感电" + tag);
+    // 中和感电：一样打同区的自己人
+    helu.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被中和感电波及/, () => c.applyNeutralize(helu)), mine, "中和感电" + tag);
+    assert.equal(helu.statuses.shock, false, "中和后感电清掉");
+    // 敌人的感电：照旧打同区的非玩家单位（含自己）
+    f1.statuses = f1.statuses || {}; f1.statuses.shock = true;
+    assert.deepEqual(dotTargets(c, /被感电波及/, () => c.shockPulse(f1)), idsOf([f1, f2]), "狂徒感电：两个狂徒" + tag);
+  }
+});
+
+/** 会放单体给友方技能的打法（自动对打用）：每人每回合每招最多一次，每回合从不同的那一招开始试；挑人只看「是不是玩家角色」
+ *  （敌对阵营的人交给规则自己拦），分步技能每一步挑名单里血量比例最低的（选项挑写好的那一项）；都用不了就照默认打法 */
+function friendlyPolicy(c) {
+  const S = c.S.state;
+  const used = new Set();
+  const ratio = u => c.totalHp(u) / Math.max(1, c.totalMaxHp(u));
+  const byHp = (a, b) => ratio(a) - ratio(b) || String(a.id).localeCompare(String(b.id));
+  const pals = (u, self) => S.units.filter(x => x.isPlayer && !x.dead && !x.hidden && !x.fused && (self || x.id !== u.id)).sort(byHp);
+  const go = (u, id, target, picks) => {
+    const key = [u.id, id, S.turnNo, S.combatPhase].join(":");
+    if (used.has(key) || !(c.skillList(u) || []).some(s => s.id === id)) return null;
+    S.skillFlow = picks ? { id, picks } : null;
+    let cost;
+    try { cost = c.skillCost(id) || {}; } finally { S.skillFlow = null; }
+    if ((cost.ap || 0) > (u.ap || 0) || (cost.bonus || 0) > (u.bonus || 0) || c.skillRequirementError(u, id)) return null;
+    used.add(key);
+    return () => skill(c, u, id, target, picks);
+  };
+  const one = (u, id, t) => (t ? go(u, id, t) : null);
+  const flow = (u, id, prefer) => {
+    if (!(c.skillList(u) || []).some(s => s.id === id)) return null;
+    const picks = {};
+    let last = null;
+    for (let g = 0; g < 8; g++) {
+      const st = (c.skillFlowSteps(id, u, picks) || []).find(s => picks[s.key] === undefined);
+      if (!st) break;
+      if (st.type === "unit") {
+        const list = (st.units || []).filter(x => x && c.unitById(x.id)).sort(byHp);
+        if (!list.length) return null;
+        picks[st.key] = list[0].id; last = list[0];
+      } else if (st.type === "zone") {
+        if (!(st.zones || []).length) return null;
+        picks[st.key] = st.zones[0];
+      } else {
+        const o = (st.options || []).find(x => prefer && x.value === prefer[st.key]) || (st.options || [])[0];
+        if (!o) return null;
+        picks[st.key] = o.value;
+      }
+    }
+    return go(u, id, last, picks);
+  };
+  return {
+    act(u) {
+      if (u.dying || u.stunned) return c.BattleSim.BASIC_POLICY.act(u);
+      const near1 = x => c.zoneDist(u.zone, x.zone, S.zoneMode) <= 1;
+      const tries = [
+        () => flow(u, "yuito_duet"),
+        () => flow(u, "yuito_amer", { mode: "heal" }),
+        () => flow(u, "yuito_espresso", { mode: "ap" }),
+        () => flow(u, "yuito_inspire", { mode: "turn" }),
+        () => one(u, "role_firstaid", pals(u).find(near1)),
+        () => one(u, "role_buffer", pals(u).find(near1)),
+        () => one(u, "role_cover", pals(u)[0]),
+        () => flow(u, "role_shelter"),
+        () => flow(u, "sand_pull"),
+        () => one(u, "feat_bandage", pals(u, true).find(x => near1(x) && !x.dying)),
+        () => one(u, "feat_cheer", pals(u)[0]),
+        () => flow(u, "kolt_mod", { mode: "ap" })
+      ];
+      const start = (Number(S.turnNo) * 7 + S.units.indexOf(u) * 3) % tries.length;
+      for (let i = 0; i < tries.length; i++) { const thunk = tries[(start + i) % tries.length](); if (thunk) return thunk; }
+      return c.BattleSim.BASIC_POLICY.act(u);
+    },
+    longgeSafety() { return false; }
+  };
+}
+
+test("单体选友方 / 连锁伤害：同一种子整场自动对打，不配置 / 全在「我方」/ 多一个没人的阵营结果和整场记录一模一样；两个敌对阵营对打时治疗、护盾、行动点…从不给到对面，余波、感电也从不打到对面（#460）", () => {
+  const MARKS = { 应急处理: /应急处理：/, 缓冲: /缓冲：/, 掩护: /掩护：/, 保释: /本回合豁免天气与场地/, 拉出流沙: /拉出流沙|拽了上来/, 双重奏: /双重奏：/,
+    助威: /振奋（助威/, 战地包扎: /战地包扎：/, 打气: /打气：/, 高能自爆: /【高能自爆】/, 余波: /被高能余波击中/, 感电波及: /被感电波及/ };
+  const cases = [
+    { party: ["yuito", "kolt", "helu", "tou"], roles: { kolt: "生存", helu: "环境手", tou: "护卫" }, feats: { kolt: ["cheer"], helu: ["bandage"], tou: ["bandage"] }, seed: "PVP460-AUTO-A",
+      enemies: [{ id: "watchcrow", lv: 9, zone: 1 }, { id: "patrolboat", lv: 9, zone: 2 }, { id: "alarm_bot", lv: 9, zone: 2 }],
+      marks: ["应急处理", "缓冲", "掩护", "保释", "拉出流沙", "双重奏", "战地包扎", "高能自爆", "余波", "感电波及"] },
+    { party: ["helu", "yuito", "hiaki", "kolt"], roles: { hiaki: "生存", helu: "辅助", kolt: "环境手" }, feats: { helu: ["bandage"], hiaki: ["cheer"] }, seed: "PVP460-AUTO-B",
+      enemies: [{ id: "thug_knife", lv: 9, zone: 1 }, { id: "watchcrow", lv: 9, zone: 2 }, { id: "guard_sword", lv: 9, zone: 2 }],
+      marks: ["应急处理", "缓冲", "保释", "拉出流沙", "双重奏", "助威", "战地包扎", "打气", "高能自爆", "余波", "感电波及"] }
+  ];
+  for (const cs of cases) {
+    const sim = mode => {
+      const c = H.load();
+      c.BattleSim.setup({ party: cs.party, seed: cs.seed, zoneMode: 3, enemies: cs.enemies, before(S) {
+        S.units.filter(u => u.isPlayer).forEach(u => {
+          u.level = 15;
+          if (cs.roles[u.kit]) u.roles = { primary: cs.roles[u.kit], secondary: cs.roles[u.kit] };
+          if (cs.feats[u.kit]) u.feats = cs.feats[u.kit].slice();
+          c.resetBattleFlags(u);
+        });
+      } });
+      const S = c.S.state;
+      const heroes = S.units.filter(u => u.isPlayer && !u.hidden), foes = S.units.filter(u => !u.isPlayer && !u.hidden);
+      heroes.forEach(u => { u.zone = 1; });
+      c.findKit("yuito", S.units).resources.liquid = 12;
+      c.findKit("kolt", S.units).resources.stripStore = { flesh: 999 };   // 「非法」改装的废料满了
+      // 流沙：一半的人陷进去；连锁伤害：两名玩家角色感电、一名高能（高能值接近血量），敌人也各上一种
+      S.fields[1].quicksand = true;
+      heroes.forEach((u, i) => { if (i % 2) u.sink = 1; });
+      [heroes[0], heroes[2]].forEach(u => { u.statuses = u.statuses || {}; u.statuses.shock = true; });
+      Object.assign(heroes[1].statuses = heroes[1].statuses || {}, { high: true });
+      heroes[1].highEnergy = Math.floor(c.totalHp(heroes[1]) * 0.7);
+      foes[0].statuses = Object.assign(foes[0].statuses || {}, { shock: true });
+      foes[1].statuses = Object.assign(foes[1].statuses || {}, { high: true });
+      foes[1].highEnergy = Math.floor(c.totalHp(foes[1]) * 0.6);
+      if (mode === "all") faction(c, { faction: "我方" });
+      if (mode === "empty") faction(c, { faction: "乙", phase: "enemy" });
+      const cross = [];
+      if (mode === "pvp") {
+        // 后两名角色分到「乙」（和我方敌对）；记下给友方的效果、连锁伤害落到敌对阵营的人身上的次数
+        heroes.slice(2).forEach(h => faction(c, { faction: "乙", unit: h.id }));
+        const stack = [];
+        const wrap = (name, top) => { const f = c[name]; c[name] = function () { stack.push(top(arguments)); try { return f.apply(this, arguments); } finally { stack.pop(); } }; };
+        wrap("runSkillInner", () => ({ kind: "skill", by: c.unitById(S.attackerId) }));
+        wrap("explodeHigh", a => ({ kind: "chain", by: a[0] }));
+        wrap("shockPulse", a => ({ kind: "chain", by: a[0] }));
+        const watch = (name, who, kind) => { const f = c[name]; c[name] = function () {
+          const top = stack[stack.length - 1], u = who(arguments);
+          if (top && top.kind === kind && top.by && top.by.isPlayer && u && u.isPlayer && c.pvpFoe(top.by, u)) cross.push(`${name}：${top.by.name} → ${u.name}`);
+          return f.apply(this, arguments);
+        }; };
+        ["healUnit", "addShieldLayer", "addTempLayer", "clearSink"].forEach(n => watch(n, a => a[0], "skill"));
+        watch("grantAllyAp", a => a[1], "skill");
+        watch("applyTypedDot", a => (/被高能余波击中|被感电波及/.test(String(a[4] || "")) ? a[0] : null), "chain");
+      }
+      const r = plain(c.BattleSim.run({ maxRounds: 12, policy: friendlyPolicy(c) }));
+      return { r, log: logText(c), cross };
+    };
+    const off = sim(null), all = sim("all"), empty = sim("empty");
+    cs.marks.forEach(k => assert.match(off.log, MARKS[k], `${cs.seed}：这一场放了${k}`));
+    assert.deepEqual(all.r, off.r, cs.seed + "：全部在「我方」——结果一样");
+    assert.equal(all.log, off.log, cs.seed + "：整场记录一样");
+    assert.deepEqual(empty.r, off.r, cs.seed + "：多一个没人的阵营——结果一样");
+    assert.equal(empty.log, off.log, cs.seed + "：整场记录一样");
+    const pvp = sim("pvp");
+    ["保释", "拉出流沙", "双重奏", "高能自爆", "余波", "感电波及"].forEach(k => assert.match(pvp.log, MARKS[k], `${cs.seed}（两个阵营）：这一场有${k}`));
+    assert.deepEqual(pvp.cross, [], cs.seed + "：给友方的效果、连锁伤害没有落到敌对阵营的人身上");
   }
 });

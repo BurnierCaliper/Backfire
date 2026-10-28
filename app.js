@@ -633,7 +633,8 @@ function glowStoreTurnEnd(notes) {
 function highBoomHitsUnit(source, u) {
   if (!u || u.id === source.id || u.dead || u.hidden) return false;
   if (u.kit === "ufo_body") return false;
-  return !!u.isPlayer === !!source.isPlayer;
+  // 余波只打同阵营：炸的人的自己人（enemies.js · chainSideOf，#460：玩家这一边按玩家阵营分，敌对阵营的人不挨；敌人炸的照旧打所有非玩家单位）
+  return chainSideOf(source, u);
 }
 
 function highBoomHitsProp(source, p) {
@@ -2528,11 +2529,12 @@ function shockPulse(source) {
   const r = takeDice(d.n, d.s, d.bonus || 0);
   const sm = statusMult(source);   // 加倍计量：感电此回合效果翻倍
   const dmg = Math.max(d.min || 1, r.total) * sm;
+  // 同区同阵营（含自己）：感电的人的自己人（enemies.js · chainSideOf，#460：玩家这一边按玩家阵营分，敌对阵营的人不挨；敌人那边照旧）
   const allies = fieldUnits().filter(u =>
     !u.dead && !u.hidden &&
     !ignoresAoe(u) &&
     Number(u.zone) === Number(source.zone) &&
-    !!u.isPlayer === !!source.isPlayer
+    chainSideOf(source, u)
   );
   notes.push(`${source.name} 感电触发 ${r.text} → ${dmg}${sm > 1 ? "（加倍计量 ×2）" : ""} 电击（同区同阵营：${allies.map(u => u.name).join("、") || "无"}）`);
   allies.forEach(u => {
@@ -5405,9 +5407,10 @@ function applyNeutralize(u) {
     const raw = Math.max(d.min || 1, d.s + (d.bonus || 0));
     const dmg = scale(raw);
     notes.push(`${u.name} 中和感电：立刻触发一次（最大 ${raw}）。`);
+    // 和感电的波及一样打同区同阵营（含自己）：被中和的人的自己人（enemies.js · chainSideOf，#460）
     const allies = fieldUnits().filter(o =>
       !o.dead && !o.hidden && !ignoresAoe(o) &&
-      Number(o.zone) === Number(u.zone) && !!o.isPlayer === !!u.isPlayer
+      Number(o.zone) === Number(u.zone) && chainSideOf(u, o)
     );
     allies.forEach(o => applyTypedDot(o, dmg, "electric", notes, `${o.name} 被中和感电波及`));
     const shields = (u.layers || []).filter(l => l.type === "shield" && Number(l.current) > 0);
