@@ -378,7 +378,10 @@ function vehicleDestroy(p, notes) {
     const maxMarks = typeof BOSS_STUN_MARKS !== "undefined" ? BOSS_STUN_MARKS : 2;
     if (typeof isBossUnit === "function" && isBossUnit(u)) u.stunMarks = Math.max(Number(u.stunMarks) || 0, maxMarks - 1);
     if (!u.stunned && u.def > 0) dealBreak(u, u.def, "fire", notes, "殉爆");
-    else u.stunned = true;
+    else {
+      u.stunned = true;
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
+    }
     if (typeof isBossUnit === "function" && isBossUnit(u)) { u.stunMarks = maxMarks; u._bossRefill = false; }
     hit(u, c.blast.ejectMult, c.blast.ejectBurn);
   });

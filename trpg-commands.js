@@ -138,7 +138,7 @@ const BackstageCommands = (() => {
       case "layer": dmApplyLayer(u, c.index, c.current, c.max); break;
       case "fillHp": dmFillHp(u); appendLog(`${u.name} 后台满血。`); break;
       case "fillDef": dmFillDef(u); appendLog(`${u.name} 后台满架势。`); break;
-      case "stun": dmForceStun(u); appendLog(`${u.name} 被后台打入失衡。`); queueAssistAttack(null, u); break;
+      case "stun": { const rn = []; dmForceStun(u, rn); appendLog(`${u.name} 被后台打入失衡。`); rn.forEach(t => appendLog(t)); } queueAssistAttack(null, u); break;
       case "unstun": u.stunned = false; if ((u.def || 0) <= 0) u.def = u.defMax || 1; appendLog(`${u.name} 解除失衡。`); break;
       // Existing backstage knock-out deliberately does not become D3's normal-kill operation.
       case "knockOut": (u.layers || []).forEach(l => { l.current = 0; }); u.dead = true; u.dying = !!u.isPlayer; appendLog(`${u.name} 被后台击倒。`); break;

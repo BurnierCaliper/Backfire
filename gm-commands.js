@@ -338,7 +338,7 @@
     if (p.statuses) { u.statuses = Object.assign({}, u.statuses, p.statuses); if (own(p.statuses, "shockwave") && typeof syncShockwave === "function") syncShockwave(u, null); }
     if (own(p, "neutralize")) notes.push(...applyNeutralize(u));
     const stun = own(p, "stunned") ? p.stunned : p.stun;
-    if (stun === true) dmForceStun(u); else if (stun === false) { u.stunned = false; u._imbalanceLock = false; }
+    if (stun === true) dmForceStun(u, notes); else if (stun === false) { u.stunned = false; u._imbalanceLock = false; }
     if (!u.isPlayer && (u.dead || isInnerDepleted(u))) kill(u, notes);
     notes.push("修改 " + u.name + "：" + JSON.stringify(p));
   }
