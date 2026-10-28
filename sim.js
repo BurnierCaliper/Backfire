@@ -225,8 +225,10 @@ const BattleSim = (function () {
         return (Number(u.shp) || 0) > 0 && !u.upOnShp ? () => standUp(u) : null;
       }
       if (u.stunned) return null;
-      // 配置了玩家阵营（PvP，#445）：打和自己敌对的单位（敌对玩家阵营的角色也算，倒地没起身的不打）；没配置照旧打敌人
-      const foes = (typeof pvpOn === "function" && pvpOn() ? hostilesOf(u).filter(f => !(f.dying && !f.upOnShp)) : EnemyAI.foes()).filter(f => !f.untargetable);
+      // 配置了玩家阵营（PvP，#445）：打和自己敌对的单位（敌对玩家阵营的角色也算，倒地没起身的不打）；没配置照旧打敌人。
+      // 被敌对的人嘲讽着（#464，enemies.js · playerTauntTarget）：只打嘲讽它的那个（和敌人 AI 被嘲讽一样）
+      const taunt = typeof playerTauntTarget === "function" ? playerTauntTarget(u) : null;
+      const foes = (taunt ? [taunt] : typeof pvpOn === "function" && pvpOn() ? hostilesOf(u).filter(f => !(f.dying && !f.upOnShp)) : EnemyAI.foes()).filter(f => !f.untargetable);
       if (!foes.length) return null;
       let list = [];
       try { list = skillList(u) || []; } catch (e) { list = []; }

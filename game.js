@@ -3061,6 +3061,9 @@
         if (hit) all.push(hit);
       });
     }
+    // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，打敌人的技能只能选嘲讽它的那个单位（配置物 / 危墙也不行；enemies.js · playerTauntTarget）
+    const taunt = side === "enemy" && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
+    if (taunt) all = all.filter(u => u.id === taunt.id);
     return all;
   }
 

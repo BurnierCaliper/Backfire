@@ -1839,6 +1839,26 @@ function chainSideOf(source, u) {
   if (!source || !u) return false;
   return source.isPlayer ? teammateOf(source, u) : !u.isPlayer;
 }
+/** 嘲讽对玩家（PvP 第二步，docs/pvp.md 第 5 节，作者 10/28，#464）：玩家这一边的单位被嘲讽时，也只能选嘲讽它的那个单位作为攻击目标（和敌人被嘲讽一样）；
+ *  玩家角色被嘲讽时，它的武器人一起被嘲讽（武器人自己没被嘲讽就跟着持有者的）。返回 u 现在被强制攻击的对象，没有返回 null。
+ *  只认和 u 敌对的人的嘲讽：敌对玩家阵营的人（或非玩家单位）。同阵营的队友开着友伤嘲讽的（柯尔特「过度自信」打到队友……）不算——
+ *  只有一个玩家阵营时这里一个都不拦，一切照旧。嘲讽者倒地（濒死没起身）、不在场、躲起来选不中，或者 u 本来就打不到它（attackFoe）时不起作用 */
+function playerTauntTarget(u) {
+  if (!u || !u.isPlayer) return null;
+  const holder = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  const id = u.tauntTo || (holder && holder.tauntTo);
+  const t = id && typeof unitById === "function" ? unitById(id) : null;
+  if (!t || t.dead || t.hidden || t._removed || t.fused || t.submerged || t.untargetable || (t.statuses && t.statuses.hide) || (t.dying && !t.upOnShp)) return null;
+  if (t.isPlayer && !pvpFoe(u, t)) return null;
+  return attackFoe(u, t) ? t : null;
+}
+/** 被嘲讽的玩家单位对嘲讽它的那个单位出了手（技能 / 道具，app.js · runSkill、battle-commands.js · 用道具）：这次嘲讽用掉了（「下次攻击必须打你」）。
+ *  武器人和持有者共用持有者的那一次：谁先打了嘲讽者都算 */
+function playerTauntDone(u, t) {
+  if (!u || !t) return;
+  const holder = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  [u, holder].forEach(x => { if (x && x.tauntTo === t.id) x.tauntTo = null; });
+}
 /** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
  *   { reset: true }                    清空配置：回到默认（全部在「我方」，一切照旧）
  *   { faction, name?, phase? }         建 / 改一个玩家阵营：名字、在我方回合（"player"）还是敌人回合（"enemy"）行动
