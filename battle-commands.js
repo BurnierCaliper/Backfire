@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setScene", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -47,6 +47,48 @@
   }
   /** 这个敌人身上这种机制现在叫什么（填过的技能名 / 机制原名）：去掉之前先记下来写提示 */
   function mechLabel(u, type) { return mechConfig(bossMechList(u, type)[0] || { type }).name; }
+  /** 玩家阵营指令（PvP 第一步，enemies.js · setPlayerFaction，#445）的字段：
+   *  reset 只能单独给 true；其余都要有 faction（阵营 id）。id / 名字是去掉首尾空格、不带「|」的非空字符串（字数见 PVP_CFG），
+   *  要能原样发给玩家（online-view.js · safeText 不整段丢掉）；phase 只收 "player" / "enemy"；remove 只能和 faction 一起给 true；
+   *  unit 是场上的玩家角色或护送对象（武器人跟着持有者，不能单独分）；other（另一个玩家阵营）和 enemy（图鉴里的敌人阵营名）一次只给一个，
+   *  这时 hostile 只收 true（敌对）/ false（友好）/ null（回到默认） */
+  function playerFactionCheck(c) {
+    const C = root.PVP_CFG || (typeof PVP_CFG !== "undefined" ? PVP_CFG : { idMax: 16, nameMax: 16, enemyMax: 24, phases: ["player", "enemy"] });
+    const known = ["type", "reset", "faction", "name", "phase", "remove", "unit", "other", "enemy", "hostile"];
+    Object.keys(c).forEach(k => { if (!known.includes(k)) throw new Error("Unknown player faction field: " + k); });
+    const has = k => Object.prototype.hasOwnProperty.call(c, k);
+    if (has("reset")) {
+      if (c.reset !== true) throw new Error("player faction reset must be true");
+      if (Object.keys(c).some(k => k !== "type" && k !== "reset")) throw new Error("player faction reset takes no other fields");
+      return;
+    }
+    const label = (v, field, max) => {
+      if (typeof v !== "string" || !v || v !== v.trim() || v.includes("|") || Array.from(v).length > max || ["__proto__", "prototype", "constructor"].includes(v))
+        throw new Error("player faction " + field + " must be a nonempty trimmed string without | (at most " + max + " characters)");
+      if (root.OnlineView && typeof root.OnlineView.safeText === "function" && root.OnlineView.safeText(v) === null) throw new Error("player faction " + field + " can't be shown to players: " + v);
+    };
+    label(c.faction, "id", C.idMax);
+    if (has("name")) label(c.name, "name", C.nameMax);
+    if (has("phase") && !C.phases.includes(c.phase)) throw new Error("Unknown player faction phase: " + c.phase);
+    if (has("remove")) {
+      if (c.remove !== true) throw new Error("player faction remove must be true");
+      if (Object.keys(c).some(k => !["type", "faction", "remove"].includes(k))) throw new Error("player faction remove takes no other fields");
+    }
+    if (has("unit")) {
+      const u = actor(c.unit);
+      if (!u.isPlayer || (typeof isWeaponUnit === "function" && isWeaponUnit(u) && !u.escort)) throw new Error("player faction unit must be a player character (weapon units follow their holder)");
+    }
+    if (has("other") && has("enemy")) throw new Error("player faction relation: give other or enemy, not both");
+    if (has("other")) { label(c.other, "other", C.idMax); if (c.other === c.faction) throw new Error("player faction other must be a different faction"); }
+    if (has("enemy")) {
+      label(c.enemy, "enemy", C.enemyMax);
+      const info = typeof ENEMY_INFO !== "undefined" ? ENEMY_INFO : null;
+      if (info && !Object.keys(info).some(k => info[k] && info[k].faction === c.enemy)) throw new Error("Unknown enemy faction: " + c.enemy);
+    }
+    const rel = has("other") || has("enemy");
+    if (rel && !(c.hostile === true || c.hostile === false || c.hostile === null)) throw new Error("player faction hostile must be true, false or null");
+    if (!rel && has("hostile")) throw new Error("player faction hostile needs other or enemy");
+  }
   function validate(cmd) {
     if (types.indexOf(cmd.type) < 0) throw new Error("Unknown battle command: " + cmd.type);
     if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
@@ -71,6 +113,7 @@
       if (typeof cmd.on !== "boolean") throw new Error("friendly fire on must be a boolean");
       if (cmd.owner != null && (typeof cmd.owner !== "string" || !cmd.owner)) throw new Error("friendly fire owner must be a nonempty string");
     }
+    if (cmd.type === "battle.playerFaction") playerFactionCheck(cmd);
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
       if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn", "ruinOn", "isolate"], "field kind");
@@ -358,7 +401,8 @@
         u.resources.bit = cmd.bit === "acid" ? "acid" : "drill"; return u.resources.bit;
       }
       case "blockAnswer": return seeded(cmd.seed, () => finishBlock(cmd.helper || null, cmd.forced || null));
-      case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = helper.isPlayer ? "player" : "enemy"; try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
+      // 按协助的人在哪个回合行动（enemies.js · unitTurnPhase，#445：在敌人回合行动的玩家阵营算敌人回合）
+      case "assistAnswer": { const helper = unitById(cmd.helper); const prev = state.combatPhase; if (helper) state.combatPhase = typeof unitTurnPhase === "function" ? unitTurnPhase(helper) : (helper.isPlayer ? "player" : "enemy"); try { return finishAssist(cmd.helper || null, cmd.extra || {}); } finally { state.combatPhase = prev; } }
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
       case "heluScanAnswer": return resolveHeluScan(cmd.picks || null);
       case "longgeSafetyAnswer": return resolveLonggeSafety(!!cmd.front);
@@ -397,6 +441,8 @@
         const on = setFriendlyFire(owner, cmd.on);
         return { owner: owner == null ? FRIENDLY_FIRE.localOwner : owner, on };
       }
+      // 玩家阵营（PvP 第一步，enemies.js · setPlayerFaction，#445）：把玩家角色分到不同的阵营、定在哪个回合行动、和其他阵营是敌是友；改了立刻生效
+      case "battle.playerFaction": return { factions: setPlayerFaction(cmd) };
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };

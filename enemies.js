@@ -1590,9 +1590,14 @@ function factionOf(u) {
   const i = typeof enemyInfo === "function" ? enemyInfo(u.kit) : null;
   return (i && i.faction) || null;
 }
-/** 这个敌人和我方是同阵营（跑团战斗模板可以设「我方与某阵营同阵营」，state.playerAllies） */
-function playerAllied(u) {
+/** 这个敌人和我方是同阵营（跑团战斗模板可以设「我方与某阵营同阵营」，state.playerAllies）。
+ *  by：按哪个玩家阵营看（玩家这一边的单位，或者阵营 id；不给 = 默认阵营「我方」）——这个玩家阵营和敌人的阵营
+ *  用 battle.playerFaction 单独设过敌友（PvP 第一步，#445）就照设的，没设过照旧看 state.playerAllies */
+function playerAllied(u, by) {
   if (!u || u.isPlayer) return false;
+  const fp = by == null ? PVP_CFG.defaultFaction : (typeof by === "string" ? by : playerFactionOf(by));
+  const set = pvpEnemyRelation(fp, u);
+  if (set !== null) return !set;
   const g = (typeof state !== "undefined" && state.playerAllies) || [];
   return g.length > 0 && g.includes(factionOf(u));
 }
@@ -1601,8 +1606,10 @@ function hostileTo(a, b) {
   if (!a || !b || a === b) return false;
   // 中立生物（尘虫、管虫）：谁都不当它是敌人；要打它得专门去打（玩家手动、沙鱼捕食）
   if (typeof isNeutralCreature === "function" && (isNeutralCreature(a) || isNeutralCreature(b))) return false;
-  if (!!a.isPlayer !== !!b.isPlayer) return !playerAllied(a.isPlayer ? b : a);
-  if (a.isPlayer) return false;
+  // 玩家这一边和敌人：按玩家的阵营看（#445；没配置阵营时就是「我方」，照旧看 state.playerAllies）
+  if (!!a.isPlayer !== !!b.isPlayer) return !playerAllied(a.isPlayer ? b : a, a.isPlayer ? a : b);
+  // 玩家这一边之间：只有分属敌对的玩家阵营才敌对（#445；没配置阵营时都在「我方」，照旧不敌对）
+  if (a.isPlayer) return playerFactionsHostile(playerFactionOf(a), playerFactionOf(b));
   const fa = factionOf(a), fb = factionOf(b);
   if (!fa || !fb || fa === fb) return false;
   if (HOSTILE_FACTIONS.includes(fa) || HOSTILE_FACTIONS.includes(fb)) return true;
@@ -1672,23 +1679,197 @@ function friendlyFireOn(a) {
   if (!a || !a.isPlayer) return false;
   return friendlyFireSetting(friendlyFireOwner(a));
 }
-/** a 这一下打 b 是不是友伤：a 开着友伤，b 是 a 以外的队友（替身打操控它的人也算打自己，不算） */
+/** a 这一下打 b 是不是打到玩家这一边的人（替身打操控它的人也算打自己，不算）：
+ *    a 开着友伤、b 是 a 以外的同阵营队友（友伤开关只管同阵营，#445）；
+ *    或者 b 是和 a 敌对的玩家阵营的角色（PvP，#445：开关开不开都打得到）。
+ *  两种都和打敌人完全一样结算，这一击带着 flags.friendlyFire 不计分数（PvP 每队单独计分是第三步，docs/pvp.md 第 4 节） */
 function friendlyFireHit(a, b) {
   if (!a || !b || a === b || (a.id != null && a.id === b.id) || (a.creditTo != null && a.creditTo === b.id)) return false;
-  return !!a.isPlayer && !!b.isPlayer && friendlyFireOn(a);
+  if (!a.isPlayer || !b.isPlayer) return false;
+  if (pvpFoe(a, b)) return true;
+  return friendlyFireOn(a) && samePlayerFaction(a, b);
 }
-/** 谁能被 a 的这次攻击打到（单体选目标、范围攻击挑人共用）：敌我不同的（和以前的 isPlayer 判断一样，友军 / 中立 / 下潜这些照旧另判），
- *  或者 a 开着友伤、b 是 a 以外的队友（friendlyFireHit） */
+/** 谁能被 a 的这次攻击打到（单体选目标、范围攻击挑人共用）：敌我不同的（和以前的 isPlayer 判断一样，友军 / 中立 / 下潜这些照旧另判；
+ *  a 的玩家阵营和 b 的敌人阵营单独设成了友好的不算，#445），或者 friendlyFireHit 认的玩家这一边的人（开着友伤的同阵营队友、敌对玩家阵营的角色） */
 function attackFoe(a, b) {
   if (!a || !b || a === b || (a.id != null && a.id === b.id)) return false;
-  return !!a.isPlayer !== !!b.isPlayer || friendlyFireHit(a, b);
+  if (!!a.isPlayer !== !!b.isPlayer) return !pvpFriendlyEnemy(a, b);
+  return friendlyFireHit(a, b);
 }
 /** 自动挑目标（#432，作者 10/27）：by 的自动攻击（瑞比的无人机、炮台、护送对象的还击、洗牌的红弹、音爆 / 探测模式触发的碎渣机炮……）
  *  挑目标时，by 的操控者开着友伤就把 by 以外的队友（武器人、护送对象也算）也放进候选名单；挑法照原来的规则（最近、血最少、随机……），
  *  只是名单变大了。u 是不是这样加进来的队友：by 以外、还在场上、没倒地（濒死没起身的打了也白打，和炮台 / 碎渣机炮挑我方时一样不挑）。
- *  召唤物 / 替身本身不在场上的单位里；替身（creditTo）不挑操控它的人（friendlyFireHit）。射程、躲藏、隔墙这些照各处原来的条件另判 */
+ *  召唤物 / 替身本身不在场上的单位里；替身（creditTo）不挑操控它的人（friendlyFireHit）。射程、躲藏、隔墙这些照各处原来的条件另判。
+ *  PvP（#445）：敌对玩家阵营的角色也走这里进名单（friendlyFireHit 认它们，开关开不开都在） */
 function friendlyFirePick(by, u) {
   return !!u && !!u.isPlayer && !u.dead && !u.hidden && !u.fused && !u._removed && !(u.dying && !u.upOnShp) && friendlyFireHit(by, u);
+}
+
+/* ===== 玩家阵营（PvP 第一步，#445，docs/pvp.md 第 1.1 节）=====
+ * 每个玩家角色属于一个「玩家阵营」：武器人跟着持有者，替身（creditTo）跟着操控它的人；护送对象没有主人，自己记（没记的在默认阵营）。
+ * 默认全部在同一个阵营「我方」（PVP_CFG.defaultFaction）——这时一切和以前一模一样：没有配置时（state.playerFactions 是 null）
+ * 下面的判断都走原来的分支。配置记在战斗状态里（存档、预演、联机房间检查点都跟着整个 state 走；开新的一场战斗清空，app.js · resetBattleRecords）：
+ *   state.playerFactions = {
+ *     list:    [{ id, name, phase }],      阵营：id、名字、在我方回合（"player"）还是敌人回合（"enemy"）行动；默认阵营总在第一个
+ *     members: { 单位 id: 阵营 id },        玩家角色归哪个阵营（没记的在默认阵营）
+ *     players: { "甲|乙": true / false },   两个玩家阵营之间单独设过的敌友（键按字典序排；true = 敌对），没设的按 PVP_CFG.playersHostile
+ *     enemies: { "甲|盗匪": true / false }  玩家阵营和敌人阵营（enemyInfo(kit).faction）单独设过的敌友，没设的照旧（敌对；state.playerAllies 的同阵营友好）
+ *   }
+ * 改它用指令 battle.playerFaction（battle-commands.js → setPlayerFaction）；主持人面板是第二步。
+ * 敌我判断都接在这里：hostileTo / playerAllied（按谁的阵营看）/ attackFoe / friendlyFireHit（敌对玩家阵营的角色也算进来）/ autoFoe / allyOf；
+ * 谁在哪个回合行动：unitTurnPhase（app.js · canControlUnit、回合开始补行动点）；胜负：factionHostileTo（app.js · pvpBattleOutcome） */
+const PVP_CFG = {
+  defaultFaction: "我方",   // 默认阵营的 id：没分过阵营的玩家角色都在这里
+  defaultName: "我方",      // 默认阵营的名字
+  newPhase: "player",       // 新建的阵营没写在哪个回合行动时：我方回合
+  phases: ["player", "enemy"],
+  playersHostile: true,     // 不同的玩家阵营默认互相敌对
+  maxFactions: 8,           // 最多几个玩家阵营（含默认阵营）
+  idMax: 16,                // 阵营 id 最多几个字
+  nameMax: 16,              // 阵营名字最多几个字
+  enemyMax: 24              // 敌人阵营的名字最多几个字
+};
+/** 现在的阵营配置；没配置返回 null（只有默认阵营，一切照旧） */
+function pvpConfig() {
+  const cfg = typeof state !== "undefined" && state ? state.playerFactions : null;
+  return cfg && typeof cfg === "object" && Array.isArray(cfg.list) ? cfg : null;
+}
+/** 配置了玩家阵营没有 */
+function pvpOn() { return !!pvpConfig(); }
+function pvpOwn(o, k) { return !!o && typeof o === "object" && Object.prototype.hasOwnProperty.call(o, k); }
+/** 玩家阵营的信息 { id, name, phase }；没有这个阵营返回 null（默认阵营总有） */
+function playerFactionInfo(id) {
+  const cfg = pvpConfig();
+  const row = cfg && id != null ? cfg.list.find(f => f && f.id === String(id)) : null;
+  if (row) return { id: row.id, name: row.name || row.id, phase: row.phase === "enemy" ? "enemy" : "player" };
+  return id === PVP_CFG.defaultFaction ? { id, name: PVP_CFG.defaultName, phase: "player" } : null;
+}
+/** 所有玩家阵营（默认阵营在第一个） */
+function playerFactionList() {
+  const cfg = pvpConfig();
+  return cfg ? cfg.list.map(f => playerFactionInfo(f && f.id)).filter(Boolean) : [playerFactionInfo(PVP_CFG.defaultFaction)];
+}
+/** u 属于哪个玩家阵营（阵营 id；非玩家单位返回 null）。武器人跟着持有者，替身（creditTo）跟着操控它的人 */
+function playerFactionOf(u) {
+  if (u && u.creditTo != null && typeof unitById === "function") u = unitById(u.creditTo) || u;
+  if (!u || !u.isPlayer) return null;
+  const cfg = pvpConfig();
+  if (!cfg) return PVP_CFG.defaultFaction;
+  const owner = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  const id = (owner || u).id;
+  const f = id != null && pvpOwn(cfg.members, id) ? cfg.members[id] : null;
+  return f != null && playerFactionInfo(f) ? f : PVP_CFG.defaultFaction;
+}
+/** u 在哪个回合行动："player"（我方回合）/ "enemy"（敌人回合）。玩家这一边看所在的玩家阵营（默认我方回合），非玩家单位在敌人回合 */
+function unitTurnPhase(u) {
+  const f = playerFactionOf(u);
+  if (f == null) return "enemy";
+  const info = playerFactionInfo(f);
+  return info && info.phase === "enemy" ? "enemy" : "player";
+}
+/** a、b 都在玩家这一边、同一个玩家阵营 */
+function samePlayerFaction(a, b) {
+  const fa = playerFactionOf(a);
+  return fa != null && fa === playerFactionOf(b);
+}
+function pvpPairKey(a, b) { return [String(a), String(b)].sort().join("|"); }
+/** 两个玩家阵营（id）敌不敌对：同一个阵营不敌对；单独设过的照设的，没设的按 PVP_CFG.playersHostile */
+function playerFactionsHostile(fa, fb) {
+  if (fa == null || fb == null || fa === fb) return false;
+  const cfg = pvpConfig();
+  if (!cfg) return false;
+  const key = pvpPairKey(fa, fb);
+  return pvpOwn(cfg.players, key) && typeof cfg.players[key] === "boolean" ? cfg.players[key] : !!PVP_CFG.playersHostile;
+}
+/** a、b 是敌对玩家阵营的单位（PvP 的对手） */
+function pvpFoe(a, b) {
+  return !!a && !!b && a !== b && playerFactionsHostile(playerFactionOf(a), playerFactionOf(b));
+}
+/** 玩家阵营 fp 和非玩家单位 u 的阵营单独设过的敌友：true 敌对 / false 友好 / null 没设过（照旧） */
+function pvpEnemyRelation(fp, u) {
+  const cfg = pvpConfig();
+  if (!cfg || fp == null || !u || u.isPlayer) return null;
+  const fe = factionOf(u);
+  if (!fe) return null;
+  const key = fp + "|" + fe;
+  return pvpOwn(cfg.enemies, key) && typeof cfg.enemies[key] === "boolean" ? cfg.enemies[key] : null;
+}
+/** a、b 一边在玩家这一边、一边是非玩家单位，而且这个玩家阵营和那个敌人阵营单独设成了友好（state.playerAllies 默认的友好照旧另判） */
+function pvpFriendlyEnemy(a, b) {
+  if (!a || !b || !!a.isPlayer === !!b.isPlayer) return false;
+  const p = a.isPlayer ? a : b, o = a.isPlayer ? b : a;
+  return pvpEnemyRelation(playerFactionOf(p), o) === false;
+}
+/** 玩家阵营 fp 和单位 u 敌不敌对（胜负判定用：不用拿一个具体的玩家单位去问 hostileTo，结论和 hostileTo 一样） */
+function factionHostileTo(fp, u) {
+  if (fp == null || !u) return false;
+  if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return false;
+  if (u.isPlayer) return playerFactionsHostile(fp, playerFactionOf(u));
+  return !playerAllied(u, fp);
+}
+/** 自动挑目标的候选（#432 的那几处名单，#445 起统一问这里）：敌人（by 的玩家阵营单独设成友好的敌人阵营除外），
+ *  以及 friendlyFirePick 认的玩家这一边的人（开着友伤的同阵营队友、敌对玩家阵营的角色；倒地没起身的不挑） */
+function autoFoe(by, u) {
+  if (!u) return false;
+  if (!u.isPlayer) return !pvpFriendlyEnemy(by, u);
+  return friendlyFirePick(by, u);
+}
+/** 给友方用的技能（治疗、振奋……）选目标时 b 算不算 a 的友方：b 在玩家这一边，而且不和 a 敌对（同阵营，或者单独设成友好的玩家阵营）。
+ *  没配置阵营时就是「b 在玩家这一边」，和以前一样 */
+function allyOf(a, b) {
+  if (!b || !b.isPlayer) return false;
+  return !playerFactionsHostile(playerFactionOf(a), playerFactionOf(b));
+}
+/** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
+ *   { reset: true }                    清空配置：回到默认（全部在「我方」，一切照旧）
+ *   { faction, name?, phase? }         建 / 改一个玩家阵营：名字、在我方回合（"player"）还是敌人回合（"enemy"）行动
+ *   { faction, remove: true }          删掉一个玩家阵营（默认阵营删不掉）：里面的人回到默认阵营，和它有关的敌友设置一起去掉
+ *   { faction, unit }                  把玩家角色（武器人跟着持有者，不能单独分）分到这个阵营
+ *   { faction, other, hostile }        这个阵营和另一个玩家阵营：true 敌对 / false 友好 / null 回到默认（互相敌对）
+ *   { faction, enemy, hostile }        这个阵营和某个敌人阵营（图鉴里的阵营名，例「盗匪」）：true 敌对 / false 友好 / null 回到默认（照旧）
+ *  分人、设敌友可以和建阵营一起给（没有这个阵营就先建）。每次换一份新的对象（联机按差量发、预演的拷贝都看得出变了）。返回改完的配置（拷贝，清空后是 null） */
+function setPlayerFaction(cmd) {
+  if (cmd.reset) { state.playerFactions = null; return null; }
+  const old = pvpConfig();
+  const next = old ? JSON.parse(JSON.stringify(old))
+    : { list: [{ id: PVP_CFG.defaultFaction, name: PVP_CFG.defaultName, phase: "player" }], members: {}, players: {}, enemies: {} };
+  ["members", "players", "enemies"].forEach(k => { if (!next[k] || typeof next[k] !== "object" || Array.isArray(next[k])) next[k] = {}; });
+  const id = String(cmd.faction);
+  if (cmd.remove) {
+    if (id === PVP_CFG.defaultFaction) throw new Error("默认阵营「" + PVP_CFG.defaultName + "」不能删");
+    if (!next.list.some(f => f.id === id)) throw new Error("没有这个玩家阵营：" + id);
+    next.list = next.list.filter(f => f.id !== id);
+    Object.keys(next.members).forEach(k => { if (next.members[k] === id) delete next.members[k]; });
+    Object.keys(next.players).forEach(k => { if (k.split("|").includes(id)) delete next.players[k]; });
+    Object.keys(next.enemies).forEach(k => { if (k.split("|")[0] === id) delete next.enemies[k]; });
+    state.playerFactions = next;
+    return JSON.parse(JSON.stringify(next));
+  }
+  let row = next.list.find(f => f.id === id);
+  if (!row) {
+    if (next.list.length >= PVP_CFG.maxFactions) throw new Error("最多 " + PVP_CFG.maxFactions + " 个玩家阵营");
+    row = { id, name: id === PVP_CFG.defaultFaction ? PVP_CFG.defaultName : id, phase: PVP_CFG.newPhase };
+    next.list.push(row);
+  }
+  if (cmd.name != null) row.name = String(cmd.name).trim();
+  if (cmd.phase != null) row.phase = cmd.phase === "enemy" ? "enemy" : "player";
+  if (cmd.unit != null) {
+    const u = typeof unitById === "function" ? unitById(cmd.unit) : null;
+    if (!u) throw new Error("没有这个单位：" + cmd.unit);
+    if (id === PVP_CFG.defaultFaction) delete next.members[u.id]; else next.members[u.id] = id;
+  }
+  if (cmd.other != null) {
+    const other = String(cmd.other);
+    if (!next.list.some(f => f.id === other)) throw new Error("没有这个玩家阵营：" + other);
+    const key = pvpPairKey(id, other);
+    if (cmd.hostile === null) delete next.players[key]; else next.players[key] = !!cmd.hostile;
+  }
+  if (cmd.enemy != null) {
+    const key = id + "|" + String(cmd.enemy);
+    if (cmd.hostile === null) delete next.enemies[key]; else next.enemies[key] = !!cmd.hostile;
+  }
+  state.playerFactions = next;
+  return JSON.parse(JSON.stringify(next));
 }
 
 /* ===== 第三采矿场 ===== */

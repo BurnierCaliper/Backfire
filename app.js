@@ -47,6 +47,7 @@ const state = {
   forceVoid: {},
   friendlyFire: {},   // 友伤开关：{ 操控者: true / false }（enemies.js · FRIENDLY_FIRE，#428）
   ffHurt: {},         // 友伤打掉、还没补回来的血：{ 单位 id: 血量 }（ffHurtOf，#428）
+  playerFactions: null,   // 玩家阵营（PvP 第一步，enemies.js · PVP_CFG，#445）：null = 全部在「我方」，一切照旧
   fields: {
     1: emptyField(),
     2: emptyField(),
@@ -1367,10 +1368,12 @@ function clearSink(u, notes, why) {
   u.sink = 0;
   if (notes) notes.push(`${u.name} ${why || "离开流沙"}，下陷清零。`);
 }
-/** 回合结束：这回合花过行动点就陷得更深，没花就慢慢浮出来。sideIsPlayer：结算哪一方 */
+/** 回合结束：这回合花过行动点就陷得更深，没花就慢慢浮出来。sideIsPlayer：结算哪一方的回合（我方回合 / 敌人回合）——
+ *  按单位在哪个回合行动分（enemies.js · unitTurnPhase，#445：在敌人回合行动的玩家阵营跟着敌人一方结算；没配置阵营时就是敌我两边） */
 function quicksandTurnEnd(sideIsPlayer, notes) {
+  const phase = sideIsPlayer ? "player" : "enemy";
   (state.units || []).forEach(u => {
-    if (!!u.isPlayer !== !!sideIsPlayer) return;
+    if ((typeof unitTurnPhase === "function" ? unitTurnPhase(u) : (u.isPlayer ? "player" : "enemy")) !== phase) return;
     const spent = !!u._sinkSpent;
     u._sinkSpent = false;
     if (!inQuicksand(u)) { if (sinkOf(u)) clearSink(u, notes, "不在流沙里"); return; }
@@ -1561,8 +1564,9 @@ function applyPassivePlusAtStart() {
   if (typeof passivePlus !== "function") return;
   const notes = [];
   const hero = (kit) => { const u = findKit(kit, state.units); return u && u.isPlayer && !u.dead && !u.hidden ? u : null; };
-  // by 开着友伤（enemies.js · friendlyFirePick，#432；开战前在菜单里打开的）：自动挑的名单里也有 by 以外的队友
-  const foes = (by) => state.units.filter(u => (!u.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(by, u))) && !u.dead && !u.hidden && !u.fused && (u.layers || []).some(l => l.current > 0));
+  // by 开着友伤（enemies.js · friendlyFirePick，#432；开战前在菜单里打开的）：自动挑的名单里也有 by 以外的队友；
+  // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，by 的阵营单独设成友好的敌人阵营不在
+  const foes = (by) => state.units.filter(u => (typeof autoFoe === "function" ? autoFoe(by, u) : !u.isPlayer) && !u.dead && !u.hidden && !u.fused && (u.layers || []).some(l => l.current > 0));
   const helu = hero("helu");
   if (helu && passivePlus(helu, 1)) {   // 频谱分析+：随机一个敌人的外层血量聚焦
     const pool = foes(helu);
@@ -1650,6 +1654,8 @@ function startCombat() {
   }
   beginRound([]);
   startPlayerPhase();
+  // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）：开战时还没轮到它们，行动点 / 附赠从 0 开始，到第一个敌人回合开始时才补
+  (state.units || []).forEach(u => { if (u && u.isPlayer && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy") { u.ap = 0; u.bonus = 0; } });
   if (typeof ratfolkBattleStart === "function") ratfolkBattleStart();   // 下水道狂鼠：记下开战时的血量（暴虐猎手斩杀看「降到」，enemies.js）
   appendLog("战斗开始。回合开始效果已结算。", "sep");
   if (state.ambush) appendLog("遭遇战：长休时被偷袭，我方来不及反应，跳过第一回合（没有行动点和附赠动作）。");
@@ -1663,8 +1669,37 @@ function canControlUnit(u) {
   if (!state.combatStarted) return false;
   if (!u || u.hidden || u.dead) return false;
   if (isEffectivelyStunned(u) && !u.isPlayer) return false;
-  if (state.combatPhase === "enemy") return !u.isPlayer;
-  return !!u.isPlayer;
+  // 这个回合谁能动（enemies.js · unitTurnPhase，#445）：玩家角色看所在的玩家阵营（默认在我方回合），非玩家单位在敌人回合
+  const phase = state.combatPhase === "enemy" ? "enemy" : "player";
+  return (typeof unitTurnPhase === "function" ? unitTurnPhase(u) : (u.isPlayer ? "player" : "enemy")) === phase;
+}
+/** 在 phase 回合行动、还在场上的玩家角色（含武器人；护送对象玩家不能操作，不算）。没配置玩家阵营时：我方回合是全部玩家角色，敌人回合没有 */
+function phasePlayers(phase) {
+  return (state.units || []).filter(u => u && u.isPlayer && !u.escort && !u.hidden && !u.dead && !u._removed && !u.fused &&
+    (typeof unitTurnPhase === "function" ? unitTurnPhase(u) : "player") === phase);
+}
+/** 场上的玩家角色（不算武器人；倒地、死掉的也算）分属哪几个玩家阵营（PvP，#445）：阵营 id 的列表。没配置阵营时是空的 */
+function pvpFieldFactions() {
+  if (typeof pvpOn !== "function" || !pvpOn()) return [];
+  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u._removed && !isWeaponUnit(u));
+  return [...new Set(heroes.map(u => playerFactionOf(u)))];
+}
+/** 真的分了阵营对打：场上有两个以上玩家阵营的角色（PvP，#445）。按阵营判胜负、协助攻击分两轮问、敌人的借机攻击按阵营挑都看它；
+ *  没配置阵营，或者配置了但场上的人都在同一个阵营（例：全部在「我方」）时是 false——这时和以前一模一样（友军 state.playerAllies 也照旧） */
+function pvpSplit() { return pvpFieldFactions().length >= 2; }
+/** PvP（#445，docs/pvp.md 第 1.1 节）：场上有两个以上玩家阵营的角色时按阵营判胜负——某个阵营还有人站着、和它敌对的单位全部倒地或死亡
+ *  （玩家角色：濒死 / 死亡；非玩家单位：死亡 / 移出），这个阵营获胜（互相友好的几个阵营可以一起赢）；所有玩家阵营都倒下 = 敌人赢。
+ *  返回 null = 不按阵营判（没配置阵营，或者场上只有一个玩家阵营：胜负照旧）；否则 { winners: [阵营 id…], wiped, over } */
+function pvpBattleOutcome() {
+  const ids = pvpFieldFactions();
+  if (ids.length < 2) return null;
+  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u._removed && !isWeaponUnit(u));
+  const standing = u => (typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dead && !u.dying);
+  const alive = ids.filter(f => heroes.some(u => playerFactionOf(u) === f && standing(u)));
+  const winners = alive.filter(f =>
+    !heroes.some(u => standing(u) && playerFactionsHostile(f, playerFactionOf(u))) &&
+    !(state.units || []).some(u => u && !u.isPlayer && u.kit !== "ironwall" && !u.dead && !u.hidden && !u._removed && !u.fused && factionHostileTo(f, u)));
+  return { winners, wiped: !alive.length, over: winners.length > 0 || !alive.length };
 }
 
 /** 沙暴逆风：飞行的杂兵有 25% 概率顶住风、不扣行动点（精英、首领照扣） */
@@ -2072,40 +2107,74 @@ function startPlayerPhase() {
   state.combatPhase = "player";
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead) return;
-    // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
-    if (u.stunned) bossShrugStun(u, notes);
-    const wasStun = !!u.stunned;
-    refreshEconomy(u);
-    if (wasStun) {
-      recoverFromStun(u, notes);
-      notes.push(`${u.name} 晕眩：本回合不获得行动点与附赠动作。`);
-    }
-    if (u.resources && u.resources.gambitArmed) {
-      u.resources.gambitArmed = false;
-      u.resources.gambitStrike = true;
-      u.resources.gambitWound = false;   // 受伤翻倍到这里（自己下一次行动前）为止
-      notes.push(`${u.name} 破釜沉舟：本回合攻击双倍；受伤翻倍结束。`);
-    }
-    if (u.kit === "ras" && u.resources && !u.stunned && (typeof passiveOn !== "function" || passiveOn(u))) {
-      addRasEnergy(20, "玩家回合开始");
-      notes.push("拉斯缪尔回合开始累积能量 +20%。");
-    }
-    if (u.resources && u.resources.preparedPending) {
-      u.resources.preparedActive = true;
-      u.resources.preparedPending = false;
-      notes.push(`${u.name} 「准备」生效：本回合第一次攻击的第一击基础包 +1d${prepDieSides(u)}，吃倍率和克制。`);
-    }
+    // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）：行动点 / 附赠到敌人回合开始时再补（startEnemyPhase）
+    if (typeof unitTurnPhase === "function" && unitTurnPhase(u) !== "player") return;
+    playerTurnStart(u, notes);
   });
   // 首领机制：落在我方回合开始的死刑等（我方已经回满行动点 / 附赠，可以用来协助格挡）
   if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("player", notes);
   appendLog(notes.join("\n"));
   renderAll();
 }
+/** 一名玩家角色（含武器人）自己的回合开始：补行动点 / 附赠、解除晕眩，和回合开始生效的被动。
+ *  一般在我方回合开始（startPlayerPhase）；所在的玩家阵营在敌人回合行动时（#445）在敌人回合开始（startEnemyPhase） */
+function playerTurnStart(u, notes) {
+  // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
+  if (u.stunned) bossShrugStun(u, notes);
+  const wasStun = !!u.stunned;
+  refreshEconomy(u);
+  if (wasStun) {
+    recoverFromStun(u, notes);
+    notes.push(`${u.name} 晕眩：本回合不获得行动点与附赠动作。`);
+  }
+  if (u.resources && u.resources.gambitArmed) {
+    u.resources.gambitArmed = false;
+    u.resources.gambitStrike = true;
+    u.resources.gambitWound = false;   // 受伤翻倍到这里（自己下一次行动前）为止
+    notes.push(`${u.name} 破釜沉舟：本回合攻击双倍；受伤翻倍结束。`);
+  }
+  if (u.kit === "ras" && u.resources && !u.stunned && (typeof passiveOn !== "function" || passiveOn(u))) {
+    addRasEnergy(20, "玩家回合开始");
+    notes.push("拉斯缪尔回合开始累积能量 +20%。");
+  }
+  if (u.resources && u.resources.preparedPending) {
+    u.resources.preparedActive = true;
+    u.resources.preparedPending = false;
+    notes.push(`${u.name} 「准备」生效：本回合第一次攻击的第一击基础包 +1d${prepDieSides(u)}，吃倍率和克制。`);
+  }
+}
+/** 一方的回合结束时，这一方玩家角色自己回合结束的结算：拉斯缪尔「汲取」、没用掉的「准备」/「磨刀」消失。
+ *  phase：哪一方的回合（"player" / "enemy"）——在敌人回合行动的玩家阵营（#445）在敌人回合结束时结算 */
+function playerTurnEnd(phase) {
+  // 我方回合结束：除了在敌人回合行动的玩家阵营，都在这时结算（和以前一样）；敌人回合结束：只结算在敌人回合行动的玩家阵营
+  const turnOf = u => (typeof unitTurnPhase === "function" ? unitTurnPhase(u) : "player");
+  const atEnd = u => !!u && (phase === "player" ? !(u.isPlayer && turnOf(u) !== "player") : !!u.isPlayer && turnOf(u) === "enemy");
+  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能
+  {
+    const ras = findKit("ras", state.units);
+    if (atEnd(ras) && !ras.dead && ras.resources && ras.resources.siphon && (Number(ras.resources.energyPct) || 0) > 0) {
+      appendLog("汲取：拉斯缪尔回合结束，20% 累积能量转为光能。");
+      convertRasLight(20);
+    }
+  }
+  state.units.forEach(u => {
+    if (u.resources && u.resources.preparedActive && atEnd(u)) {
+      u.resources.preparedActive = false;
+      appendLog(`${u.name} 本回合未打出第一次攻击，「${u.resources.whetDice ? "磨刀" : "准备"}」消失。`);
+      delete u.resources.whetDice;
+    }
+  });
+}
 
 function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
   if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
   state.combatPhase = "enemy";
+  // 在敌人回合行动的玩家阵营（#445）：这时补行动点 / 附赠（和我方回合开始一样结算），玩家角色比非玩家单位先动
+  state.units.forEach(u => {
+    if (!u.isPlayer || u.hidden || u.dead || typeof unitTurnPhase !== "function" || unitTurnPhase(u) !== "enemy") return;
+    playerTurnStart(u, notes);
+  });
   // 首领机制（boss-mechanics.js）：落在敌人回合开始的死刑等。要在失衡恢复之前判（首领失衡 → 推迟一回合）
   if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("enemy", notes);
   // 废铁墙（回防命令）撑过了一个玩家回合，敌人回合开始时撤掉
@@ -2148,21 +2217,8 @@ function startEnemyPhase() {
 
 function endPlayerTurn() {
   snapshot();
-  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能
-  {
-    const ras = findKit("ras", state.units);
-    if (ras && !ras.dead && ras.resources && ras.resources.siphon && (Number(ras.resources.energyPct) || 0) > 0) {
-      appendLog("汲取：拉斯缪尔回合结束，20% 累积能量转为光能。");
-      convertRasLight(20);
-    }
-  }
-  state.units.forEach(u => {
-    if (u.resources && u.resources.preparedActive) {
-      u.resources.preparedActive = false;
-      appendLog(`${u.name} 本回合未打出第一次攻击，「${u.resources.whetDice ? "磨刀" : "准备"}」消失。`);
-      delete u.resources.whetDice;
-    }
-  });
+  // 汲取、没用掉的「准备」：在敌人回合行动的玩家阵营（#445）到敌人回合结束再结算
+  playerTurnEnd("player");
   // 流沙：我方这回合花过行动点就陷得更深，没花就浮出来一点
   { const sk = []; quicksandTurnEnd(true, sk); sk.forEach(t => appendLog(t)); }
   appendLog("玩家回合结束。");
@@ -2173,7 +2229,8 @@ function endPlayerTurn() {
 
 function endEnemyTurn() {
   snapshot();
-  { const sk = []; quicksandTurnEnd(false, sk); sk.forEach(t => appendLog(t)); }   // 流沙：敌人一方
+  playerTurnEnd("enemy");   // 在敌人回合行动的玩家阵营（#445）：自己回合结束的结算
+  { const sk = []; quicksandTurnEnd(false, sk); sk.forEach(t => appendLog(t)); }   // 流沙：敌人一方（含在敌人回合行动的玩家阵营）
   appendLog("敌人回合结束。");
   turnEnd();
 }
@@ -2277,11 +2334,12 @@ function turnEnd() {
         // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
         // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
         // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣。
-        // 瑞比开着友伤（enemies.js · friendlyFirePick，#432）：她以外的队友也在名单里，挑法照旧（高能的优先，再挑血量最少的）
-        const foes = fieldUnits().filter(x => (!x.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(u, x))) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
+        // 瑞比开着友伤（enemies.js · friendlyFirePick，#432）：她以外的队友也在名单里，挑法照旧（高能的优先，再挑血量最少的）；
+        // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，她的阵营单独设成友好的敌人阵营不在
+        const foes = fieldUnits().filter(x => (typeof autoFoe === "function" ? autoFoe(u, x) : !x.isPlayer) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
           zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
           !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
-          !(typeof playerAllied === "function" && playerAllied(x)));
+          !(typeof playerAllied === "function" && playerAllied(x, u)));   // 友军按瑞比的玩家阵营看（#445）
         const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
         const pool = high.length ? high : foes;
         const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
@@ -2405,7 +2463,9 @@ function turretShot(p, hitPlayers, notes, by) {
   // 我方炮台的主人（友伤开关看他的操控者）：没有主人的拿一个不在场上的我方替身去问，归没分配的那一个开关
   const owner = hitPlayers ? null : by && by.isPlayer ? by : (p.hackedBy && unitById(p.hackedBy)) || { isPlayer: true, name: p.name };
   const ff = (u) => !!owner && typeof friendlyFirePick === "function" && friendlyFirePick(owner, u);
-  const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && (!!u.isPlayer === !!hitPlayers || ff(u)) && u.kit !== "ironwall";
+  // 我方炮台按主人的玩家阵营挑（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也打，主人的阵营单独设成友好的敌人阵营不打；敌方炮台照旧打我方
+  const side = (u) => !u.hidden && !u.dead && !u.fused && !u._removed && u.kit !== "ironwall" &&
+    (hitPlayers ? !!u.isPlayer : (typeof autoFoe === "function" ? autoFoe(owner, u) : (!u.isPlayer || ff(u))));
   const foes = state.units.filter(u => side(u) && !(u.statuses && u.statuses.hide) && !u.submerged && !(u.dying && !u.upOnShp) &&
     u.kit !== "ufo_body" &&   // 飞碟本体不能被通常手段攻击，锁它就是白打
     !lineBlocked(p.zone, u.zone));
@@ -3033,6 +3093,7 @@ function resetBattleRecords() {
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
   state.ffHurt = {};              // 友伤打掉、还没补回来的血（ffHurtOf，#428）
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
+  state.playerFactions = null;    // 玩家阵营（enemies.js · PVP_CFG，#445）：每场回到默认（全部在「我方」）
 }
 /** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
  *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。
@@ -3268,17 +3329,20 @@ function barrierSideOf(u) { return u && (u.isPlayer || u.kit === "ironwall") ? "
 /* 屏障按阵营判断敌我（作者 10/19 试玩反馈：多阵营混战里铁壁 / 废铁墙挡错、被自己人的范围攻击波及）。
  * 以前按「是不是玩家」一刀切：废铁墙护着同区所有敌人（包括和盗匪敌对的安保），范围攻击不管谁放的屏障都挨打。
  * 现在：屏障只护自己那一伙（barrierGuards），只挡和那一伙敌对的单位打过来的攻击（barrierFoe，按 hostileTo）。 */
-/** 屏障护着的那一伙的代表（拿来按阵营判断）：铁壁 / 防护罩是我方；废铁墙是筑墙的人那一伙（回防命令记下 ownerKit）。
- *  没记的（主持人放的、旧存档里的）照旧当成护着所有敌人、只挡我方 */
+/** 屏障护着的那一伙的代表（拿来按阵营判断）：铁壁 / 防护罩是我方——展开它的人（ownerId，#445：按他的玩家阵营看）；
+ *  废铁墙是筑墙的人那一伙（回防命令记下 ownerKit）。没记的（主持人放的、旧存档里的）照旧：我方的当成「我方」，敌方的护着所有敌人、只挡我方 */
 function barrierOwner(p) {
-  if (BARRIER_SIDE[p && p.kind] === "player") return { isPlayer: true };
+  if (BARRIER_SIDE[p && p.kind] === "player") {
+    const by = p.ownerId != null && typeof unitById === "function" ? unitById(p.ownerId) : null;
+    return by && by.isPlayer ? by : { isPlayer: true };
+  }
   return { isPlayer: false, kit: (p && p.ownerKit) || null };
 }
-/** 屏障 p 护不护着单位 u：铁壁 / 防护罩护同区的我方单位；废铁墙护和筑墙的人一伙的敌人
+/** 屏障 p 护不护着单位 u：铁壁 / 防护罩护同区的我方单位（敌对玩家阵营的角色不护，#445）；废铁墙护和筑墙的人一伙的敌人
  *  （不护和它敌对的阵营、中立生物、立场和它不一样的友军） */
 function barrierGuards(p, u) {
   if (!p || !u || u.kind || u.isStructure) return false;
-  if (BARRIER_SIDE[p.kind] === "player") return barrierSideOf(u) === "player";
+  if (BARRIER_SIDE[p.kind] === "player") return barrierSideOf(u) === "player" && !(typeof pvpFoe === "function" && pvpFoe(barrierOwner(p), u));
   if (u.isPlayer) return false;
   if (!p.ownerKit) return true;
   const owner = barrierOwner(p);
@@ -4763,10 +4827,13 @@ function destroyProp(p, attacker) {
 
 function triggerLeaveOpportunity(mover, fromZone, notes) {
   if (!mover || mover.kind) return;
+  // 敌人的借机攻击打离开的玩家角色；场上有两个以上玩家阵营（#445，pvpSplit）时只打和它敌对的（单独设成友好的玩家阵营不打）。
+  // 只有一个玩家阵营时照旧（友军那一下由 dealTo 挡下）
+  const preyOf = u => !!mover.isPlayer && !(pvpSplit() && !hostileTo(u, mover));
   fieldUnits().forEach(u => {
     if (u.id === mover.id || u.dead || u.hidden || u.stunned) return;
     if (Number(u.zone) !== Number(fromZone)) return;
-    if (u.kit === "captain_wolf" && mover.isPlayer) {
+    if (u.kit === "captain_wolf" && preyOf(u)) {
       const n = addedDiceByLevel(u.level);
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       // 借机是近战：目标已经走到隔壁才结算，带上 atkRange 免得被当成高地远程（±25%）
@@ -4774,7 +4841,7 @@ function triggerLeaveOpportunity(mover, fromZone, notes) {
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
     }
     if (typeof bpLeaveOpportunity === "function") bpLeaveOpportunity(u, mover, notes);
-    if (u.kit === "thug_knife" && mover.isPlayer) {
+    if (u.kit === "thug_knife" && preyOf(u)) {
       notes.push(`${u.name} 对离开区域的 ${mover.name} 发动借机攻击。`);
       opportunityStrike(u, mover, fromZone, { atk: effectiveAtk(u, state.units), mult: 1, diceN: 1, diceS: 8, element: "physical", baseBreak: 1, atkRange: "melee", flags: { action: true, opportunity: true, blockResolved: true } });
       if (window.GAME && window.GAME.tape) window.GAME.tape.push({ type: "opp", attackerId: u.id, targetId: mover.id, name: u.name });
@@ -5562,10 +5629,12 @@ function sweepDeadEnemies() {
 }
 
 /** 这一区看得见的敌人。by：是谁的攻击在挑人——by 开着友伤（enemies.js · friendlyFireHit，#428）时，这一区 by 以外还在场上的队友也算进来
- *  （范围攻击、挑目标都打得到）；不给 by（不是攻击挑人的地方）照旧只有敌人 */
+ *  （范围攻击、挑目标都打得到）；不给 by（不是攻击挑人的地方）照旧只有敌人。
+ *  玩家阵营（#445）：和 by 敌对的玩家阵营的角色也算进来（friendlyFireHit 认它们）；by 的玩家阵营单独设成友好的敌人阵营不算 */
 function visibleEnemies(zone, by) {
   return state.units.filter(u => !u.hidden && !u._removed && Number(u.zone) === Number(zone) &&
-    (!u.isPlayer || (!!by && !u.dead && !u.fused && typeof friendlyFireHit === "function" && friendlyFireHit(by, u))));
+    (!u.isPlayer ? !(by && typeof pvpFriendlyEnemy === "function" && pvpFriendlyEnemy(by, u))
+      : (!!by && !u.dead && !u.fused && typeof friendlyFireHit === "function" && friendlyFireHit(by, u))));
 }
 /** actor 的攻击能选的在场单位（技能分步里「选敌人」那几步的名单）：敌人；actor 开着友伤（enemies.js · attackFoe，#428）时加上他以外的队友 */
 function fieldFoes(actor) {
@@ -6895,28 +6964,50 @@ function assistBreaker(breaker, broken) {
   return breaker;
 }
 
-function eligibleAssisters(breaker, broken) {
+/** 能接这次失衡发动协助攻击的单位。job：排在协助队列里的那一项（PvP 分两轮问，看 job.pvpStage） */
+function eligibleAssisters(breaker, broken, job) {
   if (!broken || assistTargetGone(broken)) return [];
   breaker = assistBreaker(breaker, broken);
+  // 场上有两个以上玩家阵营（PvP，#445，docs/pvp.md 第 1.1 节；pvpSplit）：先问打出失衡的那一方阵营里的玩家角色，玩家都不选，才轮到同阵营的非玩家单位。
+  // 只有一个玩家阵营（全部在「我方」，配没配置都一样）时照旧走下面
+  if (pvpSplit()) {
+    const stage = job && (job.pvpStage === "players" || job.pvpStage === "npc") ? job.pvpStage : pvpAssistStage(breaker, broken);
+    return stage === "npc" ? npcAssisters(breaker, broken, true) : playerAssisters(breaker, broken, true);
+  }
   // 敌人那边出手：我方失衡，或者敌人把敌对阵营的敌人打失衡（异星生物 ↔ 安保）。
   // 只有和打出失衡的那一方是一伙、又和失衡的人敌对的敌人才协助
-  if (broken.isPlayer || (breaker && !breaker.isPlayer)) {
-    const hostile = (x, y) => typeof hostileTo === "function" ? hostileTo(x, y) : !!x.isPlayer !== !!y.isPlayer;
-    return fieldUnits().filter(u =>
-      !u.isPlayer &&
-      !u.trainingDummy &&   // 训练假人不协助攻击（training.js）
-      hostile(u, broken) &&
-      (!breaker || breaker.isPlayer || u.id === breaker.id || !hostile(u, breaker)) &&
-      !u.dead && !u.hidden && !u.stunned &&
-      (unitCanFight(u) || u.kit === "ufo_body") &&
-      u.kit !== "ufo_leg" &&
-      (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
-      !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
-      (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
-      !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u)) &&   // 沙鱼每回合只群起一次
-      !lineBlocked(u.zone, broken.zone)                                 // #44：协助攻击不能穿墙（危墙 / 关着的机关门）
-    );
-  }
+  if (broken.isPlayer || (breaker && !breaker.isPlayer)) return npcAssisters(breaker, broken, false);
+  return playerAssisters(breaker, broken, false);
+}
+/** PvP 的协助攻击先问哪一轮（#445）：打出失衡的那一方阵营里有能接的玩家角色就先问他们（"players"），没有就直接轮到非玩家单位（"npc"）。
+ *  breaker 已经过 assistBreaker（不敌对的、替身打出的算 null：按失衡的人敌对的一方算） */
+function pvpAssistStage(breaker, broken) {
+  return playerAssisters(breaker, broken, true).length ? "players" : "npc";
+}
+/** 非玩家单位里能接这次失衡协助攻击的：和失衡的人敌对、和打出失衡的那一方是一伙的。
+ *  pvp：按玩家阵营问的第二轮（#445）——打出失衡的是玩家角色时，只有和他那一方不敌对的非玩家单位（同阵营的友军）能接
+ *  （以前这一路只有「我方失衡」会走到，打的人不会是玩家） */
+function npcAssisters(breaker, broken, pvp) {
+  const hostile = (x, y) => typeof hostileTo === "function" ? hostileTo(x, y) : !!x.isPlayer !== !!y.isPlayer;
+  return fieldUnits().filter(u =>
+    !u.isPlayer &&
+    !u.trainingDummy &&   // 训练假人不协助攻击（training.js）
+    hostile(u, broken) &&
+    (!breaker || (breaker.isPlayer && !pvp) || u.id === breaker.id || !hostile(u, breaker)) &&
+    !u.dead && !u.hidden && !u.stunned &&
+    (unitCanFight(u) || u.kit === "ufo_body") &&
+    u.kit !== "ufo_leg" &&
+    (!breaker || u.id !== breaker.id || u.kit === "ufo_body" || u.kit === "chixia") &&   // 飞碟触灵、赤牙（剿灭）可以接自己打出的失衡
+    !(typeof touDuelVictim === "function" && touDuelVictim(u) && broken.kit !== "tou") &&
+    (typeof enemyMayAssist !== "function" || enemyMayAssist(u)) &&   // 被挟持的王、哗变的狂徒不对我方出手（enemies.js）
+    !(typeof fishFrenzyUsed === "function" && fishFrenzyUsed(u)) &&   // 沙鱼每回合只群起一次
+    !lineBlocked(u.zone, broken.zone)                                 // #44：协助攻击不能穿墙（危墙 / 关着的机关门）
+  );
+}
+/** 玩家角色里能接这次失衡协助攻击的。
+ *  pvp：按玩家阵营问的第一轮（#445）——只有和失衡的人敌对、和打出失衡的那一方不敌对的玩家角色（打的人的同阵营队友；
+ *  打的是同阵营友军时，和它友好的那个玩家阵营）；没配置阵营时照旧：我方全员（敌人失衡才走到这里） */
+function playerAssisters(breaker, broken, pvp) {
   // 只列真正能出手的人：濒死没起身、失衡、抓在敌人身上的不行（以前飞碟本体失衡时这些人也列进来，
   // 选上了先回满架势再被拒）；空手又没有能召回的武器（武器人已倒、耐久归零）的不行；
   // 敌方单位不进我方名单（以前「飞碟触灵·本体」自己也在里面，选它 = 给首领回满架势）
@@ -6930,6 +7021,7 @@ function eligibleAssisters(breaker, broken) {
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
     (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
+    (!pvp || (hostileTo(u, broken) && (!breaker || u.id === breaker.id || !hostileTo(u, breaker)))) &&
     (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u)) &&
     !lineBlocked(u.zone, broken.zone)                       // #44：协助攻击无论远近都不能穿墙，被墙隔开的不能选
   );
@@ -7092,8 +7184,12 @@ function queueAssistAttack(breaker, broken) {
   if (typeof preyBroken === "function" && preyBroken(breaker, broken)) return;   // 尘虫 / 管虫失衡：被沙鱼吞掉（desert.js）
   if (broken.isPlayer && typeof bpFirstBreakGuard === "function" && bpFirstBreakGuard(broken)) return;
   breaker = assistBreaker(breaker, broken);
-  const list = eligibleAssisters(breaker, broken);
-  const side = broken.isPlayer || (breaker && !breaker.isPlayer) ? "敌人" : "玩家角色";
+  // 场上有两个以上玩家阵营（PvP，#445；pvpSplit）：先问打出失衡的那一方阵营里的玩家角色（pvpStage "players"，玩家来选），
+  // 玩家都不选（finishAssist）或者没有能接的玩家，才轮到同阵营的非玩家单位（"npc"，AI 选人）
+  const pvpStage = pvpSplit() ? pvpAssistStage(breaker, broken) : null;
+  const list = eligibleAssisters(breaker, broken, pvpStage ? { pvpStage } : null);
+  const vsPlayer = pvpStage ? pvpStage === "npc" : !!broken.isPlayer || !!(breaker && !breaker.isPlayer);   // 敌人那边出手协助（AI 选人）
+  const side = vsPlayer ? (pvpStage ? "非玩家单位" : "敌人") : "玩家角色";
   if (!list.length) {
     appendLog(`${broken.name} 失衡，但没有可发动协助攻击的${side}。`);
     return;
@@ -7104,11 +7200,11 @@ function queueAssistAttack(breaker, broken) {
     presentAssistModal();
     return;
   }
-  state.assistQueue.push({
+  state.assistQueue.push(Object.assign({
     breakerId: breaker ? breaker.id : null,
     targetId: broken.id,
-    vsPlayer: !!broken.isPlayer || !!(breaker && !breaker.isPlayer)   // 敌人那边出手协助（AI 选人）
-  });
+    vsPlayer
+  }, pvpStage ? { pvpStage } : {}));
   appendLog(`${broken.name} 失衡。可协助攻击的${side}：${list.map(u => u.name).join("、")}。`);
   presentAssistModal();
 }
@@ -7125,7 +7221,7 @@ function presentAssistModal() {
   const job = state.assistQueue[0];
   const breaker = unitById(job.breakerId);
   const target = unitById(job.targetId);
-  const list = eligibleAssisters(breaker, target);
+  const list = eligibleAssisters(breaker, target, job);
   const modal = uiEl("assistModal");
   const text = uiEl("assistModalText");
   const box = uiEl("assistModalBtns");
@@ -7165,6 +7261,16 @@ function finishAssist(helperId, extra) {
     return;
   }
   if (!helperId) {
+    // PvP（#445）：打出失衡的那一方阵营里的玩家角色都不选，才轮到同阵营的非玩家单位协助攻击（AI 选人）
+    if (job.pvpStage === "players" && pvpSplit()) {
+      const npc = eligibleAssisters(unitById(job.breakerId), target, { pvpStage: "npc" });
+      if (npc.length) {
+        state.assistQueue.unshift(Object.assign({}, job, { pvpStage: "npc", vsPlayer: true }));
+        appendLog(`没有玩家角色发动协助攻击。可协助攻击的非玩家单位：${npc.map(u => u.name).join("、")}。`);
+        presentAssistModal();
+        return;
+      }
+    }
     target._bossAssistWindow = false;
     appendLog("没有人发动协助攻击。");
     presentAssistModal();
@@ -7173,7 +7279,7 @@ function finishAssist(helperId, extra) {
   const helper = unitById(helperId);
   if (!helper || !target) { if (target) target._bossAssistWindow = false; presentAssistModal(); return; }
   // 先确认这个人真能出手，再召回武器、回满架势（以前先回满架势再判，空手 / 濒死的人选上了白回架势、啥也没打）
-  if (!eligibleAssisters(unitById(job.breakerId), target).some(u => u.id === helper.id)) {
+  if (!eligibleAssisters(unitById(job.breakerId), target, job).some(u => u.id === helper.id)) {
     appendLog(`${helper.name} 现在不能发动协助攻击，请另选。`);
     state.assistQueue.unshift(job);
     presentAssistModal();
@@ -7276,7 +7382,8 @@ function tryOxAutoBlock(attacker, target, atkRange) {
 }
 
 /** job：正在等格挡的那一击；已经试过（失败）的人不再列出（连续协助格挡）。
- *  打这一击的人（job.attackerId）不能格挡自己的攻击（开着友伤打队友时他也在我方名单里，#428） */
+ *  打这一击的人（job.attackerId）不能格挡自己的攻击（开着友伤打队友时他也在我方名单里，#428）。
+ *  只有和被打的人同一个玩家阵营的才能帮忙挡（enemies.js · samePlayerFaction，#445；没配置阵营时都在「我方」，照旧） */
 function eligibleBlockers(target, job) {
   if (!target || !target.isPlayer) return [];
   const tried = ((job && job.tried) || []).concat(job ? [job.attackerId, job.fakeAttacker && job.fakeAttacker.creditTo].filter(Boolean) : []);
@@ -7285,6 +7392,7 @@ function eligibleBlockers(target, job) {
   const canStand = (u) => !u.dead && !(u.dying && !u.upOnShp && standUpBlocked(u));
   return state.units.filter(u =>
     u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
+    (typeof samePlayerFaction !== "function" || samePlayerFaction(u, target)) &&
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
     blockChance(u) != null && tried.indexOf(u.id) < 0 &&
@@ -8531,14 +8639,15 @@ function dealToInner(attacker, target, opt) {
   // 导体的额外目标是随机击中的，不受射程限制
   // 配置物（防卫炮台）的自动攻击不限距离
   // 维塔斯对刺入目标出手（扯下 / 加压灌输）：针尖就在目标身上，不受距离限制（viaPierce）
-  // 友军（和我方同阵营的敌人）：我方的攻击不打它（单体攻击打不出去，范围攻击跳过它）
-  if (attacker && attacker.isPlayer && target && !target.isPlayer && typeof playerAllied === "function" && playerAllied(target) && !opt.flags.environment) {
+  // 友军（和我方同阵营的敌人）：我方的攻击不打它（单体攻击打不出去，范围攻击跳过它）。
+  // 按打的人 / 被打的人所在的玩家阵营看（enemies.js · playerAllied 的第二个参数，#445）：玩家阵营和这个敌人阵营单独设过敌友就照设的
+  if (attacker && attacker.isPlayer && target && !target.isPlayer && typeof playerAllied === "function" && playerAllied(target, attacker) && !opt.flags.environment) {
     const msg = `${target.name} 是友军，不会被我方攻击。`;
     if (!opt.flags.aoe) appendLog(msg);
     return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: opt.flags.aoe ? [] : [msg] };
   }
   // 友军的攻击（包括原本打「同区所有我方」的范围攻击）不打我方
-  if (attacker && !attacker.isPlayer && target && target.isPlayer && typeof playerAllied === "function" && playerAllied(attacker) && !opt.flags.environment) {
+  if (attacker && !attacker.isPlayer && target && target.isPlayer && typeof playerAllied === "function" && playerAllied(attacker, target) && !opt.flags.environment) {
     return { res: { ok: false, total: 0, breakDealt: 0, log: [], perHit: [] }, extra: [] };
   }
   // 友伤（enemies.js · friendlyFireHit，#428）：开着友伤的人打到队友——和打敌人完全一样结算（克制、减伤、格挡 / 协助格挡、失衡……），
@@ -12175,7 +12284,8 @@ function skillTargetError(a, id, t) {
     const hint = sk ? (sk.hint || "") + " " + (sk.name || "") : "";
     const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[id]) ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
-    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t)) return `${t.name} 是友军，不会被我方攻击`;
+    // 友军按出手的人所在的玩家阵营看（enemies.js · playerAllied 的第二个参数，#445：玩家阵营单独设成友好的敌人阵营也在这里拦下）
+    if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t, a)) return `${t.name} 是友军，不会被我方攻击`;
     const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
     if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
         t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
@@ -13374,6 +13484,7 @@ function runSkillInner(id, optRun) {
         wall.name = "铁壁";
         wall.movable = false;
         wall.faction = "player";
+        wall.ownerId = a.id;   // 展开它的人：铁壁按他的玩家阵营护人、挡人（barrierOwner，#445）
         if (extraShield) { wall.shield = wall.shieldMax = Math.floor(atk); }
         state.props.push(wall);
         lines.push(`铁壁展开：配置物装甲 ${hp}（${r.text}）${extraShield ? `，外层护盾 ${wall.shield}（多耗 1 电能）` : ""}，不可移动。同区敌方攻击行动只打铁壁一次。`);
@@ -13911,6 +14022,7 @@ function runSkillInner(id, optRun) {
         state.props = (state.props || []).filter(p => !(p.kind === "dome" && Number(p.zone) === Number(a.zone)));
         const wall = makeProp("dome", a.zone, a.level);
         wall.hp = wall.maxHp = hp;
+        wall.ownerId = a.id;   // 展开它的人：防护罩按他的玩家阵营护人、挡人（barrierOwner，#445）
         state.props.push(wall);
         lines.push(`防护罩展开：护盾 ${hp}。同区我方受到的攻击由罩承受，范围攻击完全挡住。`);
       }
@@ -14670,8 +14782,9 @@ function runSkillInner(id, optRun) {
       const pickRandom = (list) => list[Math.floor(Math.random() * list.length)];
       for (let k = 0; k < (redRun >= 3 ? 2 : redRun >= 2 ? 1 : 0); k++) {
         // 只在打得到的敌人里随机：距离 1 以内、不隔危墙 / 关着的门、没在躲藏（以前从全场随机，抽到射程外的就打空）。
-        // 龙哥开着友伤（enemies.js · friendlyFirePick，#432）：他以外的队友也在里面一起随机
-        const foes = fieldUnits().filter(u => (!u.isPlayer || (typeof friendlyFirePick === "function" && friendlyFirePick(a, u))) && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) && !u.submerged &&
+        // 龙哥开着友伤（enemies.js · friendlyFirePick，#432）：他以外的队友也在里面一起随机；
+        // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，他的阵营单独设成友好的敌人阵营不在
+        const foes = fieldUnits().filter(u => (typeof autoFoe === "function" ? autoFoe(a, u) : !u.isPlayer) && !u.dead && !u.hidden && !u.fused && !(u.statuses && u.statuses.hide) && !u.submerged &&
           zoneDist(a.zone, u.zone, state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
         const f = pickRandom(foes);
         if (!f) { if (k === 0) lines.push("洗牌：连续红弹，但附近没有打得到的敌人。"); break; }

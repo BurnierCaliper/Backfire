@@ -141,6 +141,18 @@
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
     copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "upOnShp", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
+    // 玩家阵营（PvP 第一步，enemies.js · PVP_CFG，#445）：配置了阵营时每个单位带上它属于哪个阵营——玩家这一边是玩家阵营的
+    // id（faction）和名字（factionName），非玩家单位是图鉴里的敌人阵营名（enemyFaction）。只发阵营 id / 名字（过 text 过滤），
+    // 敌友关系、坚毅数值都不发；没配置阵营时一个字段都不加（和以前一样）
+    if (call("pvpOn") === true) {
+      const fid = call("playerFactionOf", unit);
+      if (typeof fid === "string") {
+        const f = text(fid, 16), name = text(get(call("playerFactionInfo", fid), "name"), 16);
+        if (f) { out.faction = f; if (name) out.factionName = name; }
+      } else {
+        const fe = text(call("factionOf", unit), 24); if (fe) out.enemyFaction = fe;
+      }
+    }
     // 带着高能被打死的敌人：高能自爆演完之前先不算死（和本机画面一样，卡片等自爆后才淡出）
     if (out.dead && !out.isPlayer && (number(call("highBoomValue", unit)) || 0) > 0) { out.dead = false; out.hidden = false; }
     // 中立生物（desert.js）：新画面的「沙下动静」（#358）要的——是不是中立生物、下潜的几回合后离开、小标签（失衡 / 摊平 / 已发现）。

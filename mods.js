@@ -115,8 +115,9 @@ function bpAtkAdjust(unit, base) {
     const kit = unit.weaponOf ? unit.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(unit) : null);
     if (kit) atk += bigKillAtk(kit);
   }
+  // 玩家阵营（#445）：敌对玩家阵营的角色也吃这一下（friendlyFireHit 认它们）；装着它的人的阵营单独设成友好的敌人阵营不吃
   const sup = (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(unit.zone) &&
-    (!unit.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(u, unit))))
+    (!unit.isPlayer ? !(typeof pvpFriendlyEnemy === "function" && pvpFriendlyEnemy(u, unit)) : (typeof friendlyFireHit === "function" && friendlyFireHit(u, unit))))
     .reduce((m, u) => Math.max(m, Number(bpMod(u).suppress) || 0), 0);
   atk -= sup;
   return Math.max(0, atk);

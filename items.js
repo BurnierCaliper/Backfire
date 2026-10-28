@@ -540,13 +540,16 @@ function effectItemOf(itemId) { const spec = ITEM_CATALOG[itemId]; return spec &
 function itemZoneDist(a, b) { return typeof zoneDist === "function" ? zoneDist(Number(a), Number(b), state.zoneMode) : Math.abs(Number(a) - Number(b)); }
 function itemPresent(u) { return !!u && !u.dead && !u.hidden && !u.fused && !u._removed; }
 /** 能被道具瞄准的敌人：在场、看得见、选得中（下潜、不可选中的不行）。
- *  用道具的人开着友伤（enemies.js · friendlyFireHit，按他的操控者的开关，#432）时，他以外的队友（含武器人、护送对象）也算 */
+ *  用道具的人开着友伤（enemies.js · friendlyFireHit，按他的操控者的开关，#432）时，他以外的队友（含武器人、护送对象）也算。
+ *  玩家阵营（#445）：敌对玩家阵营的角色也算（friendlyFireHit 认它们）；友军按用道具的人的阵营看（playerAllied 的第二个参数） */
 function itemEnemyOk(actor, u) {
   if (!itemPresent(u) || u.untargetable || u.submerged || u.kit === "ironwall") return false;
   if (u.isPlayer) return typeof friendlyFireHit === "function" && friendlyFireHit(actor, u);
   if (typeof isNeutralCreature === "function" && isNeutralCreature(u)) return true;
-  return !(typeof playerAllied === "function" && playerAllied(u));
+  return !(typeof playerAllied === "function" && playerAllied(u, actor));
 }
+/** 能被对友方用的道具选中的：玩家这一边、不和用道具的人敌对（enemies.js · allyOf，#445；没配置玩家阵营时就是全部玩家角色） */
+function itemAllyOk(actor, u) { return typeof allyOf === "function" ? allyOf(actor, u) : !!(u && u.isPlayer); }
 /* 友伤道具（#432）：开着友伤的人把对敌人用的效果道具用在自己以外的队友身上。和友伤打队友一样照常结算、不计分数：
  * 这一下结算里落在我方单位身上的伤害、倒地（冰锥弹的刺骨、中和凝胶引爆的状态……）都按友伤算（app.js · applyTypedDotIn /
  * applyKnockdown 问 itemFriendlyFireNow），让队友血量变多的（超频针翻倍护盾）也不算治疗（battle-commands.js 不包 trackHealBy） */
@@ -575,7 +578,7 @@ function itemUseError(actor, itemId, target, zone) {
   }
   if (!target) return `${it.name}需要选一个${it.target === "ally" ? "友方" : "敌人"}。`;
   if (itemZoneDist(actor.zone, target.zone) > R) return `${it.name}只能用在距离 ${R} 以内的目标。`;
-  if (it.target === "ally") return itemPresent(target) && target.isPlayer ? null : `${it.name}要选在场的友方。`;
+  if (it.target === "ally") return itemPresent(target) && itemAllyOk(actor, target) ? null : `${it.name}要选在场的友方。`;
   if (!itemEnemyOk(actor, target)) return `${it.name}要选看得见、选得中的敌人。`;
   const block = typeof lineBlocked === "function" ? lineBlocked(actor.zone, target.zone) : null;
   if (block) return `${it.name}打不到 ${target.name}：${block}`;
@@ -586,10 +589,10 @@ function itemUseError(actor, itemId, target, zone) {
 function itemTargetUnits(actor, itemId) {
   const it = effectItemOf(itemId);
   const list = (state.units || []).filter(itemPresent);
-  if (!it) return list.filter(u => u.isPlayer);   // 旧道具（医疗包）：照旧任意友方
+  if (!it) return list.filter(u => itemAllyOk(actor, u));   // 旧道具（医疗包）：照旧任意友方（敌对玩家阵营的不算，#445）
   if (it.target === "self") return [actor];
   // 对敌人用的：开着友伤（#432）时自己以外的队友也列出来（itemEnemyOk）
-  return list.filter(u => (it.target === "ally" ? u.isPlayer : !u.isPlayer || itemEnemyOk(actor, u)) && !itemUseError(actor, itemId, u, null));
+  return list.filter(u => (it.target === "ally" ? itemAllyOk(actor, u) : !u.isPlayer || itemEnemyOk(actor, u)) && !itemUseError(actor, itemId, u, null));
 }
 function itemTargetZones(actor, itemId) {
   const all = typeof boardZoneIds === "function" ? boardZoneIds() : Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => i + 1);

@@ -68,7 +68,9 @@
     const keepChat = session ? session.snapshot().chat || [] : [];   // 重建会话时带上小队聊天记录
     const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
     session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
-      getUnits: () => state.units, canStand: u => !standUpBlocked(u) });
+      getUnits: () => state.units, canStand: u => !standUpBlocked(u),
+      // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，PvP 第一步 #445）：不排进我方回合的行动顺序（敌人回合里由房主操控）；没配置阵营时都排
+      inRound: u => typeof unitTurnPhase !== "function" || unitTurnPhase(u) === "player" });
     authority = HotseatAuthority.create({ session, validate, execute, afterCommand,
       getState: () => state, getTape: () => GAME.tape || [], viewFor: project });
     session.onChange(() => { if (!executing) authority.broadcast(); });
@@ -162,6 +164,8 @@
     if (orderTypes.has(cmd.type)) { if (cmd.type === "orderSwapAccept" && typeof cmd.accept !== "boolean") fail("互换回答必须为同意或拒绝"); return; }
     if (actionTypes.has(cmd.type)) {
       if (GAME.depth > 0 && !GAME.tape) fail("正在播放行动，请稍候");
+      // 敌人回合里先动的玩家阵营（#445）：这一步由房主操控，不看我方回合的行动顺序（分配给玩家、让玩家自己操控是第二步）
+      if (pvpHostTurn(unitById(cmd.actor))) { hostOnly(id); HotseatValidation.validateBattle(cmd, { session: { assertAction: () => true }, sender: id, game: GAME }); return; }
       HotseatValidation.validateBattle(cmd, { session, sender: id, game: GAME }); return;
     }
     if (cmd.type === "endTurn") { session.assertAction(id, session.snapshot().currentUnitId); return; }
@@ -173,10 +177,11 @@
     if (cmd.type === "retreat") { hostOnly(id); if (!state.combatStarted || state.combatPhase !== "player" || GAME.ended || !["selecting", "acting"].includes(session.snapshot().phase)) fail("现在不能撤退"); return; }
     // 联机单局（online-rogue.js）：单局的规则指令和开战 / 结算只由房主的流程执行；玩家的投票、需求、个人购买另走房主校验
     if (["run", "run.query", "run.session", "battle.setupRogue", "battle.continue", "screen"].includes(cmd.type)) { hostOnly(id); return; }
-    if (["battle.panel", "battle.setup", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
+    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友
+    if (["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
       hostOnly(id);
       if (cmd.type === "calc" && ["move", "skill", "skillPick", "skillCancel", "standUp", "blockAnswer", "assistAnswer", "koltSwap", "startCombat", "endTurn", "blade"].includes(cmd.action)) fail("热座战斗动作必须使用当前单位的技能与询问入口");
-      if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
+      if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
       if (cmd.type === "battle.panel" && cmd.action === "loadSlot" && state.combatStarted && !GAME.ended) fail("战斗中不能读档");
       if (cmd.action === "undo" || cmd.type === "calc" && /undo|restore/i.test(cmd.action)) fail("热座不能撤销");
       return;
@@ -217,10 +222,15 @@
     try { if (cmd.type === "battle.endEnemyTurn") newRoundSpends = []; const result = Commands.dispatch(cmd, context || authorityContext); if (active()) { if (cmd.type === "battle.finish") session.endBattle(); session.reconcile(); } return result; }
     finally { executing--; if (active() && !executing) authority.broadcast(); }
   }
+  /** 敌人回合里、在敌人回合行动的玩家阵营的单位（PvP 第一步，enemies.js · unitTurnPhase，#445）：这一步由房主操控 */
+  function pvpHostTurn(u) {
+    return !!u && !!u.isPlayer && !!state.combatStarted && state.combatPhase === "enemy" && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy";
+  }
   function reason(unit) {
     if (!active()) return "";
     if (choice) return "正在等待其他操作者选择";
     if (network && root.OnlineGame?.isPaused()) return "房主连接中断，等待恢复";
+    if (pvpHostTurn(unit)) return (commandOperator || playerId) === gm() ? (session.snapshot().ask ? "正在等待协助回应" : "") : "敌人回合里由房主操控";
     try { session.assertAction(commandOperator || playerId, unit?.id); return ""; } catch (e) { return e.message; }
   }
   function beginRound() { if (!active()) return; session.beginRound(state.turnNo); if (newRoundSpends?.length) session.markSpent(newRoundSpends); newRoundSpends = null; GAME.disarm(); refresh(); }
