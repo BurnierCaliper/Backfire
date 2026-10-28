@@ -174,7 +174,7 @@ test("范围攻击打到敌对玩家阵营的角色，自己阵营的队友、�
   assert.ok(!S.battleScore.hurt);
 });
 
-test("协助格挡只有同阵营的能挡：敌对阵营的人、敌人打过来都一样；以身作盾也只同阵营；没配置阵营时照旧全队都能挡", () => {
+test("协助格挡：敌对阵营的人不能挡（敌对阵营的人、敌人打过来都一样）；以身作盾也一样；没配置阵营时照旧全队都能挡（友好的阵营能挡，见 #463 那几条）", () => {
   const { c, S, heroes: [kolt, helu, hiaki, tou], foe } = field();
   // 我方的柯尔特打乙队的绯秋：同区的灯（乙）能挡，赫鲁米卡（我方）不能
   const out = strike(c, kolt, hiaki);
@@ -192,7 +192,7 @@ test("协助格挡只有同阵营的能挡：敌对阵营的人、敌人打过�
   assert.deepEqual(ids(c.eligibleBlockers(hiaki, j2)), [tou.id]);
   const j3 = { attackerId: foe.id, targetId: kolt.id, tried: [] };
   assert.deepEqual(ids(c.eligibleBlockers(kolt, j3)), [helu.id]);
-  // 以身作盾（专长）：也只有同阵营的能替他挡
+  // 以身作盾（专长）：敌对阵营的人也不能替他挡
   helu.feats = ["ironwall"]; tou.feats = ["ironwall"];
   assert.deepEqual(ids(c.featIronwallDeclarers(hiaki, foe)), [tou.id]);
   assert.deepEqual(ids(c.featIronwallDeclarers(kolt, foe)), [helu.id]);
@@ -1526,4 +1526,108 @@ test("单体选友方 / 连锁伤害：同一种子整场自动对打，不配�
     ["保释", "拉出流沙", "双重奏", "高能自爆", "余波", "感电波及"].forEach(k => assert.match(pvp.log, MARKS[k], `${cs.seed}（两个阵营）：这一场有${k}`));
     assert.deepEqual(pvp.cross, [], cs.seed + "：给友方的效果、连锁伤害没有落到敌对阵营的人身上");
   }
+});
+
+/* ===== 协助格挡、载具代挡按阵营（#463）=====
+ * 协助格挡（含掩护 / 挺身的免费格挡、以身作盾）：被打的人的自己人（enemies.js · teammateOf：同阵营或友好的阵营）都能挡，敌对阵营的人照旧不能；
+ * 友好不传递时不在两个自己人之间出手（enemies.js · otherFactionFriend，和 #460 的防守反击同一个判断）。
+ * 载具代挡（vehicle.js · vehicleGuards / vehicleGuard）：有人驾驶的车按驾驶员的阵营——只替驾驶员的自己人挡，自己人打的不挡；
+ * 空车在场上有两个以上玩家阵营（app.js · pvpSplit）时谁都不替挡，只有一个玩家阵营时照旧替最后坐在车上的一方。
+ * 局面同上（trio：前两人在「我方」，第三人在「乙」（和我方友好），第四人在「丙」（和两边都敌对）），每条都拿不配置阵营的同一个局面对照。 */
+const blockersOf = (c, target, attacker) => idsOf(c.eligibleBlockers(target, { attackerId: attacker.id, targetId: target.id, tried: [] }));
+
+test("协助格挡：互相友好的玩家阵营也能替被打的人挡（连续协助格挡、以身作盾同一个判断），敌对阵营的人照旧不能；没配置阵营时照旧全队都能挡（#463）", () => {
+  // 狂徒真的打出去的那几下不带灯（灯的决一死战：同区只有一个敌人时它只打得到灯）
+  {
+    // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），川川在「丙」（敌对）
+    const { c, S, heroes: [kolt, helu, hiaki, chuan], foe } = trio(["kolt", "helu", "hiaki", "chuan"], true);
+    // 狂徒打乙的绯秋：友好的我方两人都能挡，敌对的丙不能（以前只有乙自己的人能挡：同区没有，直接落下）
+    const h0 = hp(c, hiaki);
+    const out = strike(c, foe, hiaki);
+    assert.equal(out.pending, true, "等友好阵营的人协助格挡");
+    assert.deepEqual(idsOf(c.eligibleBlockers(hiaki, S.blockQueue[0])), idsOf([kolt, helu]), "友好的我方两人能挡，丙的川川不能");
+    // 连续协助格挡：柯尔特没挡住，赫鲁米卡接着挡住
+    c.finishBlock(kolt.id, { roll: 100, ok: false });
+    assert.equal(S.blockQueue.length, 1, "柯尔特没挡住：这一击还没落下");
+    assert.deepEqual(ids(c.eligibleBlockers(hiaki, S.blockQueue[0])), [helu.id], "剩下赫鲁米卡能接着挡");
+    c.finishBlock(helu.id, { roll: 1, ok: true });
+    assert.equal(S.blockQueue.length, 0);
+    assert.match(logText(c), new RegExp(`${helu.name} 协助格挡 ${hiaki.name}：d100=1 .*→ 成功`));
+    assert.equal(hp(c, hiaki), h0, "赫鲁米卡挡住：绯秋没受伤");
+    // 丙的川川打我方的柯尔特：同阵营的赫鲁米卡、友好的乙的绯秋都能挡
+    assert.deepEqual(blockersOf(c, kolt, chuan), idsOf([helu, hiaki]));
+    assert.deepEqual(blockersOf(c, kolt, foe), idsOf([helu, hiaki]), "狂徒打过来也一样");
+    // 狂徒打丙的川川：我方、乙都和丙敌对，谁都不能挡
+    assert.deepEqual(blockersOf(c, chuan, foe), [], "敌对阵营的人照旧不能帮忙挡");
+    // 以身作盾（专长）：同一个判断（宣布的人自己挨打也能宣布）
+    [helu, hiaki, chuan].forEach(u => { u.feats = ["ironwall"]; });
+    assert.deepEqual(idsOf(c.featIronwallDeclarers(kolt, foe)), idsOf([helu, hiaki]), "以身作盾：同阵营、友好的乙能替柯尔特挡，丙不能");
+    assert.deepEqual(idsOf(c.featIronwallDeclarers(hiaki, foe)), idsOf([helu, hiaki]), "替友好的乙挡");
+    assert.deepEqual(idsOf(c.featIronwallDeclarers(chuan, foe)), [chuan.id], "丙：只有自己");
+  }
+  {
+    // 对照：没配置阵营——同区的人都能挡
+    const { c, heroes: [kolt, helu, hiaki, chuan], foe } = trio(["kolt", "helu", "hiaki", "chuan"], false);
+    assert.deepEqual(blockersOf(c, hiaki, foe), idsOf([kolt, helu, chuan]));
+    assert.deepEqual(blockersOf(c, chuan, foe), idsOf([kolt, helu, hiaki]));
+    [helu, hiaki, chuan].forEach(u => { u.feats = ["ironwall"]; });
+    assert.deepEqual(idsOf(c.featIronwallDeclarers(kolt, foe)), idsOf([helu, hiaki, chuan]));
+  }
+});
+
+test("掩护、挺身：给友好阵营的人掩护 / 挺身以后能免费替他挡（不花附赠）；敌对阵营的人照旧挡不了（#463）", () => {
+  // 柯尔特（护卫：掩护）、赫鲁米卡（专长挺身）在「我方」，绯秋在「乙」（友好），川川在「丙」（敌对）
+  const { c, S, heroes: [kolt, helu, hiaki, chuan], foe } = trio(["kolt", "helu", "hiaki", "chuan"], true);
+  kolt.roles = { primary: "护卫", secondary: "护卫" }; c.resetBattleFlags(kolt); kolt.ap = 4; kolt.bonus = 4;
+  helu.feats = ["standin"];
+  skill(c, kolt, "role_cover", hiaki);
+  assert.equal(hiaki.coverBy, kolt.id, "掩护友好的乙（#460 起就选得上）");
+  kolt.bonus = 0; helu.bonus = 0;   // 都没有附赠了：只有掩护的人能免费挡
+  const h0 = hp(c, hiaki);
+  assert.equal(strike(c, foe, hiaki).pending, true, "等掩护的人格挡（以前给友好阵营的人掩护了也挡不了，直接落下）");
+  assert.deepEqual(ids(c.eligibleBlockers(hiaki, S.blockQueue[0])), [kolt.id], "掩护的柯尔特没附赠也能挡");
+  c.finishBlock(kolt.id, { roll: 1, ok: true });
+  assert.match(logText(c), new RegExp(`${kolt.name} 因掩护免费格挡`));
+  assert.equal(kolt.bonus, 0, "不花附赠");
+  assert.equal(hp(c, hiaki), h0, "绯秋没受伤");
+  // 挺身（专长）：一样
+  helu.bonus = 4;
+  skill(c, helu, "feat_standin", hiaki);
+  assert.equal(hiaki.coverBy, helu.id, "挺身：友好的乙");
+  helu.bonus = 0;
+  assert.equal(strike(c, foe, hiaki).pending, true);
+  assert.deepEqual(ids(c.eligibleBlockers(hiaki, S.blockQueue[0])), [helu.id], "挺身的赫鲁米卡没附赠也能挡");
+  c.finishBlock(helu.id, { roll: 1, ok: true });
+  assert.match(logText(c), new RegExp(`${helu.name} 因掩护免费格挡`));
+  // 敌对阵营的人：掩护选不上（#460），硬记上也挡不了
+  assert.ok(c.skillTargetError(kolt, "role_cover", chuan), "掩护敌对阵营的人：扣点之前就拦下");
+  chuan.coverBy = kolt.id;
+  assert.deepEqual(blockersOf(c, chuan, foe), [], "丙的川川：柯尔特挡不了");
+  assert.ok(!strike(c, foe, chuan).pending, "没人能挡：直接落下");
+});
+
+test("友好不传递：我方和乙、乙和丙友好（我方和丙敌对）——丙打我方时乙的人不出手（不替一个自己人去挡另一个自己人），敌人打过来照常能挡；同阵营开着友伤打队友时照旧只有同阵营的能挡（#463）", () => {
+  // 柯尔特、赫鲁米卡、川川在「我方」，绯秋在「乙」，灯在「丙」
+  const { c, heroes: [kolt, helu, chuan, hiaki, tou], foe } = field({ party: ["kolt", "helu", "chuan", "hiaki", "tou"], seed: "PVP463-CHAIN", factions: (c, h) => {
+    faction(c, { faction: "乙", unit: h[3].id });
+    faction(c, { faction: "丙", unit: h[4].id });
+    faction(c, { faction: "乙", other: "我方", hostile: false });
+    faction(c, { faction: "乙", other: "丙", hostile: false });
+  } });
+  assert.deepEqual([c.hostileTo(tou, kolt), c.hostileTo(tou, hiaki), c.hostileTo(kolt, hiaki)], [true, false, false]);
+  assert.deepEqual(blockersOf(c, kolt, tou), idsOf([helu, chuan]), "丙的灯打柯尔特：乙的绯秋和灯也友好，不出手；我方的照常");
+  assert.deepEqual(blockersOf(c, tou, kolt), [], "柯尔特打丙的灯：乙的绯秋也不出手");
+  assert.deepEqual(blockersOf(c, kolt, foe), idsOf([helu, chuan, hiaki]), "狂徒打柯尔特：友好的乙照常能挡");
+  assert.deepEqual(blockersOf(c, tou, foe), [hiaki.id], "狂徒打丙的灯：友好的乙能挡，我方（和丙敌对）不能");
+  hiaki.feats = ["ironwall"];
+  assert.deepEqual(ids(c.featIronwallDeclarers(kolt, tou)), [], "以身作盾也一样：乙不替柯尔特挡丙");
+  assert.deepEqual(ids(c.featIronwallDeclarers(kolt, foe)), [hiaki.id], "狂徒打过来照常");
+  hiaki.coverBy = null; kolt.coverBy = hiaki.id;   // 乙的绯秋掩护柯尔特：丙打过来照样不出手
+  hiaki.bonus = 0;
+  assert.deepEqual(blockersOf(c, kolt, tou), idsOf([helu, chuan]));
+  assert.deepEqual(blockersOf(c, kolt, foe), idsOf([helu, chuan, hiaki]), "狂徒打过来：掩护照常免费挡");
+  // 我方的赫鲁米卡开着友伤打柯尔特：同阵营的川川照旧能挡（#428），友好的乙不插手
+  hiaki.bonus = 4; kolt.coverBy = null;
+  c.Commands.dispatch({ type: "battle.friendlyFire", on: true });
+  assert.deepEqual(blockersOf(c, kolt, helu), [chuan.id]);
 });
