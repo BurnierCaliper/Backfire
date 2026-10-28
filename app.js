@@ -6765,9 +6765,9 @@ function longgeOpeningAmmo() {
   }
   return longgeAmmoFresh();
 }
-/** 手杖协助攻击带的治疗给谁：所在区里血量比例最低的友方（含自己） */
+/** 手杖协助攻击带的治疗给谁：所在区里血量比例最低的友方（含自己；和龙哥同一个玩家阵营的人，enemies.js · teammateOf，#456） */
 function longgeHealPick(a) {
-  const pool = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(a.zone));
+  const pool = fieldUnits().filter(u => teammateOf(a, u) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(a.zone));
   pool.sort((x, y) => totalHp(x) / Math.max(1, totalMaxHp(x)) - totalHp(y) / Math.max(1, totalMaxHp(y)));
   return pool[0] || a;
 }
@@ -7576,7 +7576,8 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (helper.kit === "niu" || helper.kit === "naruto") {
       notes.push(...returnWeapon(helper));
     }
-    const reflector = fieldUnits().find(u => u.isPlayer && u.resources && u.resources.allReflect);
+    // 全反击 / 防守反击是「全队」的：只算和格挡者同一个玩家阵营的人放的（enemies.js · teammateOf，#456）
+    const reflector = fieldUnits().find(u => u.isPlayer && u.resources && u.resources.allReflect && teammateOf(u, helper));
     if (reflector && attacker) {
       const pkt = Number((state.lastResult && state.lastResult.intended) || (state.lastResult && state.lastResult.total) || attacker.atk || 0);
       if (pkt > 0) {
@@ -7584,7 +7585,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
         notes.push(`全反击：把伤害与击破反打给 ${attacker.name}。`);
       }
     }
-    const striker = fieldUnits().find(u => u.isPlayer && !u.dead && u.resources && u.resources.guardStrike);
+    const striker = fieldUnits().find(u => u.isPlayer && !u.dead && u.resources && u.resources.guardStrike && teammateOf(u, helper));
     if (striker && attacker && !striker.resources.guardStrikeUsed) {
       striker.resources.guardStrikeUsed = true;
       const sid = assistSkillId(striker);
@@ -13374,7 +13375,8 @@ function runSkillInner(id, optRun) {
       }
       if (!cruel) {
         const heal = Math.floor((Number(atk) || 0) * 0.5);
-        fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => healUnit(u, heal));
+        // 同区友方：和维塔斯同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        fieldUnits().filter(u => teammateOf(a, u) && Number(u.zone) === Number(a.zone)).forEach(u => healUnit(u, heal));
         lines.push(`温和：同区友方各恢复 ${heal} 点生命。`);
       }
     } else if (id === "vitas_return") {
@@ -13559,7 +13561,8 @@ function runSkillInner(id, optRun) {
         c.resources.charge -= boost ? 2 : 1;
         const r = takeDice(1, 4, 0);
         const sh = effectiveAtk(a, state.units) + r.total + (boost ? (Number(c.level) || 1) : 0);
-        fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => addShieldLayer(u, sh));
+        // 同区友方：和哔哩哩同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        fieldUnits().filter(u => teammateOf(a, u) && Number(u.zone) === Number(a.zone)).forEach(u => addShieldLayer(u, sh));
         lines.push(`磁场盾：同区友方各获得 ${sh} 护盾（atk+${r.text}${boost ? ` + 等级 ${Number(c.level) || 1}` : ""}），电能 −${boost ? 2 : 1}。`);
       }
     } else if (id === "bili_storm") {
@@ -13637,12 +13640,12 @@ function runSkillInner(id, optRun) {
         const dmg = dmgR.total;
         lines.push(`酸萃掷骰 治疗 ${healR.text} / 伤害 ${dmgR.text}`);
         // 结人开着友伤（enemies.js · friendlyFireHit，#440）：区域里结人以外的队友（含武器人、护送对象）算敌人——挨同样骰数的酸液、不治疗；
-        // 结人自己照旧治疗。打到队友照常结算、不计分数（dealTo 记成友伤）
+        // 结人自己照旧治疗。打到队友照常结算、不计分数（dealTo 记成友伤）。治疗只给和结人同一个玩家阵营的人（enemies.js · teammateOf，#456）
         const foes = visibleEnemies(z, a);
         fieldUnits().filter(u => Number(u.zone) === Number(z)).forEach(u => {
           // 区域效果是范围攻击：打飞行敌人不用逐个多付附赠（以前对每只飞行敌人各扣 1 个，不够时后面的不受伤）
           if (foes.includes(u)) hitOne(a, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: true, aoe: true } });
-          else if (u.isPlayer && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
+          else if (teammateOf(a, u) && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
             const hb = bondHealDice(a, u, nd, 4, 0);   // 被牵挂的人：骰子取最大值
             const amt = hb.maxed ? hb.total : heal;
             healUnit(u, amt); lines.push(`${u.name} 恢复 ${amt}${hb.maxed ? "（牵挂取最大值）" : ""}`);
@@ -13776,11 +13779,11 @@ function runSkillInner(id, optRun) {
       lines.push(ferr || `${z} 区变为冻土。`);
       markAoeZone(z);
       // 结人开着友伤（enemies.js · friendlyFireHit，#440）：那一区结人以外的队友（含武器人、护送对象）算敌人——挨 0.5atk 冰 +1 击破、不加架势；
-      // 结人自己照旧 +1 架势。打到队友照常结算、不计分数（dealTo 记成友伤）
+      // 结人自己照旧 +1 架势。打到队友照常结算、不计分数（dealTo 记成友伤）。架势只给和结人同一个玩家阵营的人（enemies.js · teammateOf，#456）
       const foes = visibleEnemies(z, a);
       fieldUnits().filter(u => Number(u.zone) === z && !u.dead).forEach(u => {
         if (foes.includes(u)) hitOne(a, u, { element: "ice", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } });
-        else if (u.isPlayer && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
+        else if (teammateOf(a, u) && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
           u.def = Math.min(u.defMax || u.def, (Number(u.def) || 0) + 1); lines.push(`${u.name} 架势 +1。`);
         }
       });
@@ -14113,8 +14116,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_sturdy") {
       const fl = state.skillFlow;
       if (roleSkillLv(a) >= 15 && fl && fl.picks && fl.picks.mode === "all") {
-        // 15 级：用行动点让全部友方此回合获得坚挺（skillCost 按这个分步改收行动点）
-        const all = fieldUnits().filter(u => u.isPlayer && !u.fused);
+        // 15 级：用行动点让全部友方此回合获得坚挺（skillCost 按这个分步改收行动点）。全部友方：和施放者同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        const all = fieldUnits().filter(u => teammateOf(a, u) && !u.fused);
         all.forEach(u => { u.statuses = u.statuses || {}; u.statuses.sturdy = true; });
         lines.push(`不倒战意：全部友方（${all.map(u => u.name).join("、")}）本回合获得坚挺。`);
       } else {
@@ -14142,7 +14145,8 @@ function runSkillInner(id, optRun) {
       else if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
       else {
         a.resources.rallyOn = true;
-        fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines, a));
+        // 同区队员：和施放者同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        fieldUnits().filter(u => teammateOf(a, u) && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines, a));
         lines.push("全队集结：同区队员获得主职责增益，直到你晕眩或濒死。");
       }
     } else if (id === "role_firstaid") {
@@ -14672,7 +14676,8 @@ function runSkillInner(id, optRun) {
         if (c === "blue") {
           lines.push(`冷气穿刺（霰弹枪 · 蓝弹）：${t.name} 获得刺骨。`);
           applyInstantEffect(t, "sting", lines);
-          const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(t.zone));
+          // 那一区的友方：和龙哥同一个玩家阵营的人（enemies.js · teammateOf，#456）
+          const allies = fieldUnits().filter(u => teammateOf(a, u) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(t.zone));
           if (!allies.length) lines.push(`${t.zone} 区没有友方可以治疗。`);
           allies.forEach(u => longgeBulletHeal("blue", u, lines));
         } else {
@@ -14723,9 +14728,9 @@ function runSkillInner(id, optRun) {
         a.zone = t.zone;
         hitOne(a, t, { element: "ice", mult: 0.5, baseBreak: 0, atk, flags: { action: true, assist: true } });
         if (r.ammo.length) {
-          // 治疗对象：自己选的同区友方（含自己）；没选或已经不在同区就给血量比例最低的
+          // 治疗对象：自己选的同区友方（含自己）；没选或已经不在同区就给血量比例最低的。友方：和龙哥同一个玩家阵营的人（teammateOf，#456）
           const picked = healId ? unitById(healId) : null;
-          const ok = picked && picked.isPlayer && !picked.dead && !picked.hidden && Number(picked.zone) === Number(a.zone);
+          const ok = picked && teammateOf(a, picked) && !picked.dead && !picked.hidden && Number(picked.zone) === Number(a.zone);
           const c = longgeTakeBullet(a, lines);
           longgeBulletHeal(c, ok ? picked : longgeHealPick(a), lines);
         }
@@ -14741,7 +14746,8 @@ function runSkillInner(id, optRun) {
       if (longgeMode(a) === "gun") {
         const c = longgeTakeBullet(a, lines);
         const z = Number(a.zone);
-        const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
+        // 同区友方（红弹治疗、蓝弹击破）：和龙哥同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        const allies = fieldUnits().filter(u => teammateOf(a, u) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
         if (c === "red") {
           lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
           // 龙哥开着友伤（enemies.js · friendlyFireHit，#437）：同区龙哥以外的队友也熔融；红弹治疗照旧给同区全部友方
@@ -14793,7 +14799,8 @@ function runSkillInner(id, optRun) {
         hitOne(a, f, { element: "fire", mult: 1, baseBreak: 0, atk, atkRange: "any", flags: { action: true, flyFree: true }, usePrep: false });
       }
       for (let k = 0; k < (blueRun >= 3 ? 2 : blueRun >= 2 ? 1 : 0); k++) {
-        const pals = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused);
+        // 队友：和龙哥同一个玩家阵营的人（enemies.js · teammateOf，#456）
+        const pals = fieldUnits().filter(u => teammateOf(a, u) && !u.dead && !u.hidden && !u.fused);
         const ratio = u => totalHp(u) / Math.max(1, totalMaxHp(u));
         const target = k === 0 ? pals.slice().sort((x, y) => ratio(x) - ratio(y))[0] : pickRandom(pals.filter(u => totalHp(u) < totalMaxHp(u)));
         if (!target) break;

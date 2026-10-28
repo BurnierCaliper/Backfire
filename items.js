@@ -643,7 +643,9 @@ function useEffectItem(actor, it, target, zone, notes) {
       return;
     }
     notes.push(`${actor.name} 向 ${z} 区使用${it.name}。`);
-    const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" && (!it.alliesOnly || u.isPlayer));
+    // 只给友方的（烟雾弹）：和用道具的人同一个玩家阵营的人（enemies.js · teammateOf，#456）
+    const units = (state.units || []).filter(u => itemPresent(u) && Number(u.zone) === z && u.kit !== "ironwall" &&
+      (!it.alliesOnly || (typeof teammateOf === "function" ? teammateOf(actor, u) : u.isPlayer)));
     if (!units.length) notes.push(`${z} 区没有单位。`);
     units.forEach(u => {
       // 下潜中的单位范围攻击打不到（effects.js · 下潜）；投掷罐不是谐波，也不例外
