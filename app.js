@@ -1394,10 +1394,11 @@ function tickQuicksandFor(u, notes) {
     : `${u.name} 下陷 ${sinkOf(u)} 层，窒息：失去生命上限 ${Math.round(pct * 100)}%（${dmg}）。`);
   applyKnockdown(u, notes, { shpLoss: dmg, cause: "窒息" });
 }
-/** 拉出流沙（我方通用动作，附赠）：同区或相邻区一名下陷的友方，下陷清零；在相邻区就把他拉到自己这一区 */
+/** 拉出流沙（我方通用动作，附赠）：同区或相邻区一名下陷的友方，下陷清零；在相邻区就把他拉到自己这一区。
+ *  友方：a 的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460；分步名单和扣点前的检查、结算都用这一份） */
 function sandPullTargets(a) {
   if (!a) return [];
-  return fieldUnits().filter(u => u.isPlayer && u.id !== a.id && !u.dead && inQuicksand(u) && sinkOf(u) > 0 &&
+  return fieldUnits().filter(u => teammateOf(a, u) && u.id !== a.id && !u.dead && inQuicksand(u) && sinkOf(u) > 0 &&
     zoneDist(Number(a.zone), Number(u.zone), state.zoneMode) <= 1 && !lineBlocked(a.zone, u.zone));
 }
 function runSandPull(a, t, lines) {
@@ -8010,13 +8011,13 @@ function hasAnyStatus(u) {
 }
 /** 保释分步里依次选的几名友方（联机只转发 online-view.js 白名单里的分步名，所以用现成的这几个） */
 const SHELTER_PICKS = ["target", "target2", "ally"];
-/** 保释能选的友方：除自己以外在场、这一回合还没被保释的友方 */
+/** 保释能选的友方：除自己以外在场、这一回合还没被保释的友方（a 的自己人：同阵营或友好的阵营，enemies.js · teammateOf，#460） */
 function shelterAllies(a) {
-  return fieldUnits().filter(u => u.isPlayer && (!a || u.id !== a.id) && !u.fused && !u.shelterTurn);
+  return fieldUnits().filter(u => teammateOf(a, u) && (!a || u.id !== a.id) && !u.fused && !u.shelterTurn);
 }
-/** 借力能移动的友方：任意位置的其他友方（被定住、千钧这类不能被移动的不算） */
+/** 借力能移动的友方：任意位置的其他友方（被定住、千钧这类不能被移动的不算；a 的自己人，enemies.js · teammateOf，#460） */
 function boostAllies(a) {
-  return fieldUnits().filter(u => u.isPlayer && (!a || u.id !== a.id) && !u.fused && canDisplace(u));
+  return fieldUnits().filter(u => teammateOf(a, u) && (!a || u.id !== a.id) && !u.fused && canDisplace(u));
 }
 
 /** 目标身上可以被「激活」的状态。返回 [{ key, label }]，空数组表示没有可激活的东西。 */
@@ -9966,7 +9967,8 @@ function heluScanAct(a, picks, lines) {
         lines.push(...destroyProp(p, a));
       } else {
         const ally = unitById(picks.ally);
-        if (!ally || !ally.isPlayer) { lines.push("先选一名友方。"); return; }
+        // 友方：Helumica 的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+        if (!ally || !teammateOf(a, ally)) { lines.push("先选一名友方。"); return; }
         const amt = 5 + 2 * (p.level || 1);
         addShieldLayer(ally, amt, false);   // 不是川川给的护盾，不触发「磁场护盾」
         lines.push(`环境扫描：从 ${p.name} 提取 ${amt} 点护盾给 ${ally.name}。`);
@@ -10134,13 +10136,14 @@ function skillFlowStepsAll(id, actor, picks) {
   }
   if (id === "kolt_mod") {
     // 「非法」改装：废料（所有来源合计）达到上限时，先选目标；目标是我方单位再选只施加过载，还是再消耗等于上限的废料让它 +1 行动点。
-    // 废料没到上限就没有分步（照常直接选目标）；目标是敌人也没有后一项
+    // 废料没到上限就没有分步（照常直接选目标）；目标是敌人也没有后一项。我方单位：出手的人的自己人（同阵营或友好的阵营，
+    // enemies.js · teammateOf，#460：敌对玩家阵营的人照样能过载，但不能给行动点）
     const k = findKit("kolt", state.units) || actor;
     if (!koltScrapFull(k)) return [];
     const steps = [{ key: "target", type: "unit", optional: false, label: "施加过载的目标（1 距离以内任意单位，含自己）",
       units: fieldUnits().filter(u => !u.fused && zoneDist(actor.zone, u.zone, maxZ) <= 1) }];
     const tgt = picks.target ? unitById(picks.target) : null;
-    if (tgt && tgt.isPlayer) {
+    if (tgt && teammateOf(actor, tgt)) {
       const cap = koltScrapCap(k), ap = KOLT_SCRAP.modAp;
       steps.push({ key: "mode", type: "choice", optional: false, label: `废料已达到上限（${koltScrapTotal(k)} / ${cap}）：要不要消耗 ${cap} 废料，让 ${tgt.name} 获得 ${ap} 行动点`,
         options: [{ value: "overload", label: "只施加过载" }, { value: "ap", label: `过载 + 消耗 ${cap} 废料：${tgt.name} 行动点 +${ap}（可以超过上限）` }] });
@@ -10175,8 +10178,9 @@ function skillFlowStepsAll(id, actor, picks) {
         options: [{ value: "ally", label: "转移给一名同区友方" }, { value: "scrap", label: "变成柯尔特的废料（单独计算，不受上限）" }] });
     }
     if (picks.mode !== "scrap") {
+      // 友方：扭矩的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460；武器人跟着柯尔特的阵营）
       steps.push({ key: "ally", type: "unit", optional: false, label: "接收外层血量的同区友方",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && Number(u.zone) === Number(actor.zone)) });
+        units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && Number(u.zone) === Number(actor.zone)) });
     }
     return steps;
   }
@@ -10208,8 +10212,9 @@ function skillFlowStepsAll(id, actor, picks) {
         steps.push({ key: "mode", type: "choice", optional: false, label: "超充能电池",
           options: [{ value: "shield", label: `提取 ${5 + 2 * (p.level || 1)} 点护盾给一名友方` }, { value: "boom", label: "直接引爆" }] });
         if (picks.mode === "shield") {
+          // 友方：Helumica 的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
           steps.push({ key: "ally", type: "unit", optional: false, label: "护盾给谁（任意友方）",
-            units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused) });
+            units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && !u.hidden && !u.fused) });
         }
       }
       if (p && p.kind === "scrap") {
@@ -10417,7 +10422,8 @@ function skillFlowStepsAll(id, actor, picks) {
         type: "unit",
         optional: false,
         label: "振奋目标（其他友方）",
-        units: fieldUnits().filter(u => u.isPlayer && u.id !== actor.id && !u.dead && !u.hidden)
+        // 友方：出手的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+        units: fieldUnits().filter(u => teammateOf(actor, u) && u.id !== actor.id && !u.dead && !u.hidden)
       }
     ];
   }
@@ -10536,8 +10542,9 @@ function skillFlowStepsAll(id, actor, picks) {
     return steps;
   }
   if (id === "xiaoxiao_burst") {
+    // 友方：小朋友的自己人（跟着龙哥的阵营；同阵营或友好的阵营，enemies.js · teammateOf，#460）
     return [{ key: "target", type: "unit", optional: false, label: "治疗谁（同区友方）",
-      units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone)) }];
+      units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(actor.zone)) }];
   }
   if (id === "tou_aa") {
     const spend = picks.rangeMode === "far";
@@ -10585,8 +10592,9 @@ function skillFlowStepsAll(id, actor, picks) {
       zones: zones.filter(z => zoneDist(actor.zone, z, state.zoneMode) <= 1 && !fieldChangeWhy(z, "ice")) }];
   }
   if (id === "yuito_duet") {
+    // 友方：结人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
     return [{ key: "target", type: "unit", optional: false, label: "治疗谁（任意友方）",
-      units: fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused) }];
+      units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && !u.hidden && !u.fused) }];
   }
   if (id === "tou_start") {
     const dest = picks.dest != null ? Number(picks.dest) : Number(actor.zone);
@@ -10667,14 +10675,14 @@ function skillFlowStepsAll(id, actor, picks) {
         { value: "atk", label: "对目标所在区敌人 0.75atk 冰伤 +1击破" }
       ]
     }];
-    // 射程照说明：治疗「距离 1 以内的同伴」；清场「距离 1 的一个区域」（以前不限距离）
+    // 射程照说明：治疗「距离 1 以内的同伴」；清场「距离 1 的一个区域」（以前不限距离）。同伴：结人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
     if (picks.mode === "heal") {
       steps.push({
         key: "target",
         type: "unit",
         optional: false,
         label: "治疗谁（距离 1 以内的同伴）",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
+        units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
       });
     } else if (picks.mode === "atk") {
       steps.push({
@@ -10699,12 +10707,13 @@ function skillFlowStepsAll(id, actor, picks) {
       ]
     }];
     if (picks.mode === "ap") {
+      // 友方：结人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
       steps.push({
         key: "target",
         type: "unit",
         optional: false,
         label: "给谁加行动点",
-        units: fieldUnits().filter(u => u.isPlayer && !u.dead && zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
+        units: fieldUnits().filter(u => teammateOf(actor, u) && !u.dead && zoneDist(actor.zone, u.zone, state.zoneMode) <= 1)
       });
     } else if (picks.mode === "atk") {
       steps.push({
@@ -12211,6 +12220,18 @@ function touSonicPicks(a, t) {
   return { t1, t2 };
 }
 
+/** 分步里选「给友方」的那一步（#460）：技能 → 这一步的 key（写了 mode 的只在分步里选了那一项时才算）。
+ *  名单本身在 skillFlowSteps 里只列自己人（enemies.js · teammateOf）；skillTargetError 照这张表在扣点之前拦下绕过名单直接发的、
+ *  选了敌对玩家阵营的人的指令。爆发治疗、「非法」改装、拉出流沙、保释、借力在各自的检查里看（不在这张表里） */
+const FRIENDLY_PICK_STEPS = {
+  torque_strip: { key: "ally" },                     // 拆卸模式：接收外层血量的同区友方
+  helu_scan: { key: "ally", mode: "shield" },        // 环境扫描：超充能电池的护盾给谁
+  yuito_inspire: { key: "target" },                  // 助威（10 级起走分步）：振奋目标
+  yuito_duet: { key: "target" },                     // 双重奏：治疗谁
+  yuito_amer: { key: "target", mode: "heal" },       // 冰美式：治疗谁
+  yuito_espresso: { key: "target", mode: "ap" }      // 意式浓缩：给谁加行动点
+};
+
 /** 职责技能的目标检查（skillTargetError 用）：分步里选的对象不合法返回原因。
  *  主目标还没选时返回 null，交给技能里的「先选……」（画面靠它判断还要选目标） */
 function roleTargetError(a, id, t) {
@@ -12276,7 +12297,8 @@ function skillTargetError(a, id, t) {
     const tgt = fl && fl.id === id && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
     if (!tgt || sandPullTargets(a).indexOf(tgt) < 0) return "要选距离 1 以内陷在流沙里的友方";
   }
-  if (id === "role_renew" && t && !t.isPlayer) return "续命只能对友方使用";
+  // 友方：出手的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+  if (id === "role_renew" && t && !teammateOf(a, t)) return "续命只能对友方使用";
   // 战-L1：攻击友军 / 近战打飞行目标附赠不够，以前都是 dealTo 里才拒绝，行动点早扣了还记行动分；这里在扣点前拦下。
   // 开着友伤（#428）打队友也一样先查（近战打飞行中的队友照样要多付附赠）
   if (a.isPlayer && t && t.id && (!t.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) && !isStructureToken(t.id) && !(typeof featOfSkill === "function" && featOfSkill(id))) {
@@ -12287,6 +12309,14 @@ function skillTargetError(a, id, t) {
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
     // 友军按出手的人所在的玩家阵营看（enemies.js · playerAllied 的第二个参数，#445：玩家阵营单独设成友好的敌人阵营也在这里拦下）
     if (side === "enemy" && sk && typeof playerAllied === "function" && playerAllied(t, a)) return `${t.name} 是友军，不会被我方攻击`;
+    // 给友方用的技能：敌对玩家阵营的人不算友方（enemies.js · teammateOf），扣点之前就拦下（#460；本机名单、联机出手前的校验 #445 起就按阵营：
+    // game.js · candidateUnits、hotseat-validation.js · checkTarget）。走到这里的玩家角色是 friendlyFireHit 认的人，没配置阵营时这里一个都不拦。
+    // 分步里选单位的技能不看这一条（和 checkTarget 一样以分步名单为准）：冷气穿刺、热能轰击、拆卸模式这类说明里写着友方、目标却是敌人的，
+    // 照样能打敌对阵营的人；分步里给友方的那一个在下面 FRIENDLY_PICK_STEPS 和各自的检查里看
+    if ((side === "ally" || side === "allySelf") && t.isPlayer && !teammateOf(a, t) &&
+        !(skillFlowSteps(id, a, (state.skillFlow && state.skillFlow.id === id && state.skillFlow.picks) || {}) || []).some(st => st && st.type === "unit")) {
+      return `${t.name} 在敌对的玩家阵营，只能对友方使用`;
+    }
     const rg = skillRangeFor(a, id) || (typeof parseSkillRange === "function" ? parseSkillRange(hint) : null);
     if (side === "enemy" && sk && rg && rg.max === 0 && !/所有|全部|范围|每名/.test(hint) &&
         t.flying && !a.flying && Number(t.zone) === Number(a.zone) && !(typeof featHas === "function" && featHas(a, "wanderer")) &&
@@ -12350,7 +12380,8 @@ function skillTargetError(a, id, t) {
   if (id === "xiaoxiao_burst") {
     const fl = state.skillFlow;
     const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
-    if (tgt && (!tgt.isPlayer || Number(tgt.zone) !== Number(a.zone))) return "爆发治疗只能给同区的友方";
+    // 友方：小朋友的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+    if (tgt && (!teammateOf(a, tgt) || Number(tgt.zone) !== Number(a.zone))) return "爆发治疗只能给同区的友方";
   }
   if (id === "tou_aa" && !isStructureToken(state.targetId)) {
     const fl = state.skillFlow;
@@ -12361,12 +12392,19 @@ function skillTargetError(a, id, t) {
     if (zoneDist(a.zone, tgt.zone, state.zoneMode) > (far ? 1 : 0)) return "目标超出本次射程";
   }
   const flp = (state.skillFlow && state.skillFlow.picks) || {};
-  // 「非法」改装选了「过载 + 消耗废料」：要废料达到上限、目标是我方单位（分步里才有这一项），不然在扣行动点之前拦下
+  // 「非法」改装选了「过载 + 消耗废料」：要废料达到上限、目标是我方单位（分步里才有这一项），不然在扣行动点之前拦下。
+  // 我方单位：出手的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
   if (id === "kolt_mod" && flp.mode === "ap") {
     const k = findKit("kolt", state.units) || a;
     const tgt = flp.target ? unitById(flp.target) : t;
-    if (!tgt || !tgt.isPlayer) return "只有目标是我方单位时才能消耗废料给行动点";
+    if (!tgt || !teammateOf(a, tgt)) return "只有目标是我方单位时才能消耗废料给行动点";
     if (!koltScrapFull(k)) return `废料还没达到上限（${koltScrapTotal(k)} / ${koltScrapCap(k)}），不能消耗废料给行动点`;
+  }
+  // 分步里选的给友方的对象（FRIENDLY_PICK_STEPS）：敌对玩家阵营的人扣点之前就拦下（#460）。只拦玩家这一边的人，没配置阵营时一个都不拦
+  {
+    const fp = FRIENDLY_PICK_STEPS[id];
+    const pk = fp && (!fp.mode || flp.mode === fp.mode) && flp[fp.key] ? unitById(flp[fp.key]) : null;
+    if (pk && pk.isPlayer && !teammateOf(a, pk)) return `${pk.name} 在敌对的玩家阵营，只能对友方使用`;
   }
   // 规则干涉：区要在 1 距离以内、场地改得了；要给附赠动作时，拿附赠的单位要在那一区（敌我都行）。不合法就在扣行动点之前拦下
   if (id === "helu_rule") {
@@ -12394,8 +12432,9 @@ function skillTargetError(a, id, t) {
   }
   // 补充能源选了压缩：没有纳米可以压缩就不白花附赠动作（纳米是 0 时分步里本来就不给这个选项）
   if (id === "ruby_refuel" && flp.mode === "compress" && !(Number(res(a).nano) > 0)) return "没有纳米能源可以压缩";
-  // 回收护盾：目标身上要有能回收的护盾（电池的机械护盾、当作最内层的护盾不算），不白花附赠动作
-  if (id === "chuan_reclaim" && t && t.id && t.isPlayer &&
+  // 回收护盾：目标身上要有能回收的护盾（电池的机械护盾、当作最内层的护盾不算），不白花附赠动作。
+  // 敌对玩家阵营的人在上面「只能对友方使用」就拦下了（选目标的一边是 allySelf，#460）
+  if (id === "chuan_reclaim" && t && t.id && teammateOf(a, t) &&
       !(t.layers || []).some(l => l.type === "shield" && !l.batteryShield && !l.inner && (Number(l.current) || 0) > 0)) return `${t.name} 身上没有能回收的护盾`;
   // 诺拉普攻：没有刺入时只能打敌人（距离 1 的友方也在射程里，以前扣完行动点才说不行）
   if (id === "nora_aa" && t && t.id && t.isPlayer && !piercedTargets(a).length && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return "没有刺入目标时，普通攻击只能打敌人";
@@ -13494,7 +13533,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "chuan_reclaim") {
       // 回收护盾（发电站… 磁场护盾+）：清除一名友方的护盾，得到 2 电能，并触发磁场护盾
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.isPlayer) { lines.push("只能对友方使用。"); return paintSkillLog(lines.join("\n")); }
+      // 友方：川川的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+      if (!teammateOf(a, t)) { lines.push("只能对友方使用。"); return paintSkillLog(lines.join("\n")); }
       // 只清护盾的当前值：技能给的 / 临时的护盾层整层去掉，叠在单位自带护盾层上的那部分去掉，自带的护盾层留着
       //（以前整层删掉，维塔斯自带的 6 护盾这场再也回不来）。电池给的机械护盾、当作最内层的护盾不算
       const shields = (t.layers || []).filter(l => l.type === "shield" && !l.batteryShield && !l.inner);
@@ -13791,7 +13831,8 @@ function runSkillInner(id, optRun) {
       // 双重奏：2 咖啡液。任意友方恢复 等级×1d6；溢出的治疗变成等量 atk，下回合开始失去
       const fl = state.skillFlow;
       const tgt = fl && fl.picks.target ? unitById(fl.picks.target) : t;
-      if (!tgt || !tgt.isPlayer) { lines.push("先选要治疗的友方。"); return paintSkillLog(lines.join("\n")); }
+      // 友方：结人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+      if (!tgt || !teammateOf(a, tgt)) { lines.push("先选要治疗的友方。"); return paintSkillLog(lines.join("\n")); }
       a.resources.liquid -= 2;
       const r = bondHealDice(a, tgt, Math.max(1, Number(a.level) || 1), 6, 0);   // 牵挂：取最大值
       const got = healUnit(tgt, r.total);
@@ -14277,7 +14318,7 @@ function runSkillInner(id, optRun) {
       applyInstantEffect(tgt, "overload", lines);
       lines.push(`「非法」改装：${tgt.name} 过载。`);
       const k = findKit("kolt", state.units) || a;
-      if (fl && fl.picks && fl.picks.mode === "ap" && tgt.isPlayer && koltScrapFull(k)) {
+      if (fl && fl.picks && fl.picks.mode === "ap" && teammateOf(a, tgt) && koltScrapFull(k)) {   // 我方单位：自己人（enemies.js · teammateOf，#460）
         const cost = koltScrapSpend(k, koltScrapCap(k));
         lines.push(`「非法」改装：消耗 ${cost} 废料（还剩 ${koltScrapTotal(k)}）。`);
         grantAllyAp(a, tgt, KOLT_SCRAP.modAp, lines);   // 满了也加（可以超过上限）；用它打出的分数一半记给柯尔特，和意式浓缩一样
@@ -14820,7 +14861,8 @@ function runSkillInner(id, optRun) {
       // 爆发治疗：消耗 3 发。全红 → 同区友方生命回满；全蓝 → 获得 2×（龙哥等级 + 5）临时护盾。
       // 不用先窥探；接下来 3 发不同色时技能失败，行动点白扣，子弹不消耗
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("爆发治疗只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
+      // 友方：小朋友的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+      if (!teammateOf(a, t) || Number(t.zone) !== Number(a.zone)) { lines.push("爆发治疗只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
       const nx = (longgeRes(a) || { ammo: [] }).ammo.slice(0, 3);
       const sim = typeof window !== "undefined" && window.GAME && window.GAME.sim;
       if (!sim && !(nx.length === 3 && nx.every(c => c === nx[0]))) {
@@ -14865,7 +14907,8 @@ function runSkillInner(id, optRun) {
       }
     } else if (id === "xiaoxiao_heal") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      if (!t.isPlayer || Number(t.zone) !== Number(a.zone)) { lines.push("治疗支援只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
+      // 友方：小朋友的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#460）
+      if (!teammateOf(a, t) || Number(t.zone) !== Number(a.zone)) { lines.push("治疗支援只能给同区的友方。"); return paintSkillLog(lines.join("\n")); }
       const c = longgeTakeBullet(a, lines);
       if (!c) lines.push("没有子弹了。");
       else longgeBulletHeal(c, t, lines);

@@ -47,6 +47,10 @@ const FEAT_CFG = {
   rangerTravel: 2 / 3                           // 荒野向导：旅行时间 −1/3
 };
 
+/** 专长给友方用的（包扎、看天、打气、挺身、拉一把……）能不能对 t 用：a 的自己人（同阵营或友好的玩家阵营，enemies.js · teammateOf，#460；
+ *  没配置阵营时就是「是不是玩家角色」，和以前一样） */
+function featAllyOk(a, t) { return typeof teammateOf === "function" ? teammateOf(a, t) : !!(t && t.isPlayer); }
+
 const FEATS = {
   /* ===== 专长①（7 级） ===== */
   wanderer: { name: "荒原行者", kind: "passive", tier: 1,
@@ -102,7 +106,7 @@ const FEATS = {
       targetWhy(a, t) { return t && (t.dying || t.dead) ? "不能救濒死的人" : null; },
       run(a, ctx) {
         const t = ctx.t;
-        if (!t || !t.isPlayer) { ctx.lines.push("先选包扎的友方。"); return false; }
+        if (!t || !featAllyOk(a, t)) { ctx.lines.push("先选包扎的友方。"); return false; }
         const r = takeDice(1, FEAT_CFG.bandage.die, FEAT_CFG.bandage.flat + (Number(a.level) || 1));
         const got = healUnit(t, r.total);
         ctx.lines.push(`战地包扎：${t.name} 恢复 ${got}（${r.text}）。`);
@@ -112,7 +116,7 @@ const FEATS = {
     skill: { name: "看天", hint: "附赠 · 你或一名友方本回合豁免天气与场地", cost: { bonus: 1 }, uses: 1, side: "allySelf", range: { min: 0, max: 99 },
       run(a, ctx) {
         const t = ctx.t;
-        if (!t || !t.isPlayer) { ctx.lines.push("先选要豁免的友方。"); return false; }
+        if (!t || !featAllyOk(a, t)) { ctx.lines.push("先选要豁免的友方。"); return false; }
         t.isolate = true;
         t.shelterTurn = true;
         ctx.lines.push(`看天：${t.name} 本回合豁免天气与场地。`);
@@ -122,7 +126,7 @@ const FEATS = {
     skill: { name: "打气", hint: "附赠 · 一名其他友方本回合振奋", cost: { bonus: 1 }, uses: 2, side: "ally", range: { min: 0, max: 99 },
       run(a, ctx) {
         const t = ctx.t;
-        if (!t || !t.isPlayer || t.id === a.id) { ctx.lines.push("先选打气的友方。"); return false; }
+        if (!t || !featAllyOk(a, t) || t.id === a.id) { ctx.lines.push("先选打气的友方。"); return false; }
         t.statuses = t.statuses || {};
         t.statuses.inspire = true;
         t.statuses.inspireStay = false;
@@ -178,7 +182,7 @@ const FEATS = {
     skill: { name: "挺身", hint: "附赠 · 本回合内一名队友每次被单体攻击，你都免费为他协助格挡", cost: { bonus: 1 }, side: "ally", range: { min: 0, max: 99 },
       run(a, ctx) {
         const t = ctx.t;
-        if (!t || !t.isPlayer || t.id === a.id) { ctx.lines.push("先选要保护的队友。"); return false; }
+        if (!t || !featAllyOk(a, t) || t.id === a.id) { ctx.lines.push("先选要保护的队友。"); return false; }
         t.coverBy = a.id;
         ctx.lines.push(`挺身：本回合 ${t.name} 每次被单体攻击时，${a.name} 都可以免费协助格挡。`);
       } } },
@@ -224,7 +228,7 @@ const FEATS = {
     text: "每场 1 次，行动点：对同区一名濒死友方使用一件医疗道具，他以该道具的治疗量起身，不扣坚毅生命。",
     skill: { name: "拉一把", hint: "行动点 · 用医疗道具把同区濒死的友方拉起来", cost: { ap: 1 }, uses: 1,
       steps(a) {
-        const units = fieldUnits().filter(u => u.isPlayer && u.dying && !u.dead && Number(u.zone) === Number(a.zone) && u.id !== a.id);
+        const units = fieldUnits().filter(u => featAllyOk(a, u) && u.dying && !u.dead && Number(u.zone) === Number(a.zone) && u.id !== a.id);
         const items = featHealItems();
         return [
           { key: "target", type: "unit", optional: false, label: "拉谁起来（同区濒死的友方）", units },
@@ -235,7 +239,7 @@ const FEATS = {
       run(a, ctx) {
         const t = ctx.picks.target ? unitById(ctx.picks.target) : null;
         const it = featHealItems().find(x => x.id === ctx.picks.item);
-        if (!t || !t.dying || !it) { ctx.lines.push("先选同区濒死的友方和医疗道具。"); return false; }
+        if (!t || !t.dying || !featAllyOk(a, t) || !it) { ctx.lines.push("先选同区濒死的友方和医疗道具。"); return false; }
         bagAdd(it.id, -1);
         t.dying = false; t.upOnShp = false; t.dead = false;
         const inner = (t.layers || []).filter(l => l.type !== "shield").slice(-1)[0];
@@ -547,10 +551,11 @@ function featSkillTargetWhy(a, skillId, t, picks) {
     const why = featNerfed(a, f, () => skillTargetError(a, base, t));
     if (why) return why;
   }
-  // 另写的削弱版：目标选错边（友方技能点了敌人……）在扣点之前拦下；没选目标交给技能里的「先选……」
+  // 另写的削弱版：目标选错边（友方技能点了敌人……）在扣点之前拦下；没选目标交给技能里的「先选……」。
+  // 友方：自己人（featAllyOk：敌对玩家阵营的人不算，#460）
   const side = !base && f.skill.side;
   if (side && t && t.id) {
-    if ((side === "ally" || side === "allySelf") && !t.isPlayer) return "只能对友方使用";
+    if ((side === "ally" || side === "allySelf") && !featAllyOk(a, t)) return "只能对友方使用";
     if (side === "ally" && t.id === a.id) return "要选其他友方";
     // 开着友伤（#428）时敌人那一边的技能也能对自己以外的队友用
     if (side === "enemy" && t.isPlayer && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return "只能对敌人使用";
