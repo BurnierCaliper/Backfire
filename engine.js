@@ -1028,9 +1028,17 @@ function resolveAttack(ctx) {
       const pr = typeof flags.prideReduce === "number" ? flags.prideReduce : 0.25;
       pct -= pr; hAdd(`过度自信：血量不低于进入战斗时的上限，受伤 −${Math.round(pr * 100)}%。`);
     }
-    // 集结持续到自己失衡或濒死
-    if (t.resources && t.resources.rallyDr && (t.stunned || t.dying)) delete t.resources.rallyDr;
-    if (t.resources && t.resources.rallyDr && !noDr) { pct -= 0.15; hAdd("全队集结（坦克）：全属性减伤 +15%：−15%。"); }
+    // 全队集结（坦克）：减伤持续到施放者晕眩 / 濒死（app.js · endRallyIfCasterDown 清掉），不是自己失衡就没
+    // rallyDr 为份额数（多名辅助叠加；旧布尔 true 经 Number 仍为 1）
+    if (t.resources && t.resources.rallyDr && !noDr) {
+      const n = Math.max(0, Math.floor(Number(t.resources.rallyDr) || 0));
+      if (n) {
+        pct -= 0.15 * n;
+        hAdd(n > 1
+          ? `全队集结（坦克）×${n}：全属性减伤 +${15 * n}%：−${15 * n}%。`
+          : "全队集结（坦克）：全属性减伤 +15%：−15%。");
+      }
+    }
     if (h === 0 && t.instant && t.instant.iceNext && flags.action !== false) {
       pct += 0.5;
       hAdd("冰冻（冰属性击破失衡）：本动作第一击伤害 +50%。");

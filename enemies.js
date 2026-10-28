@@ -216,7 +216,11 @@ function kingExecutionGrab(king, m, notes) {
   const t = m && m.st && m.st.lastTargetId ? unitById(m.st.lastTargetId) : null;
   const boss = (state.units || []).find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead && !(u.resources && u.resources.mutinied));
   if (!t || t.dead || !boss) return;
-  if (Math.random() < KING_CFG.exec.grab) { t.stunned = true; notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`); }
+  if (Math.random() < KING_CFG.exec.grab) {
+    t.stunned = true;
+    notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, notes);
+  }
   else notes.push(`${boss.name} 擒拿 ${t.name} 失败。`);
 }
 /** 回防命令之后的齐射：标记我方每个角色，下一个敌人回合开始时王各开一枪（KING_CFG.volley） */
@@ -868,6 +872,7 @@ function crushSkullDown(t, lines) {
     if (typeof clearStunOnDown === "function") clearStunOnDown(t);
     lines.push(`${t.name} 被捏碎颅骨，倒地陷入濒死。`);
   }
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);
   if (typeof bossMechSync === "function") bossMechSync(lines);   // 死刑等标记：被标记的人倒下了就转标
 }
 
@@ -2466,7 +2471,11 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (ok && t) {
       a.def = Math.max(1, (a.def || 0) - 1);
       t.def = Math.max(0, (t.def || 0) - 1);
-      if (t.def <= 0) { t.stunned = true; lines.push(imbalanceLine(t)); }
+      if (t.def <= 0) {
+        t.stunned = true;
+        lines.push(imbalanceLine(t));
+        if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);
+      }
       lines.push(`成功：自身架势至少留 1，反击 1 击破 → ${t.name} 架势 ${t.def}`);
     }
     return true;
@@ -2565,6 +2574,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
       if (!enemyHitLanded(out) || u.dead || u.dying) return;
       u.stunned = true;
       lines.push(`${u.name} 被流沙困住，无法行动。`);
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, lines);
     });
     return true;
   }
@@ -2661,6 +2671,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     if (boss && Math.random() < 0.5) {
       t.stunned = true;
       lines.push("强盗头子擒拿成功，目标失去下回合行动。");
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);
     } else if (boss) lines.push("强盗头子擒拿失败。");
     return true;
   }

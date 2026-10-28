@@ -1100,7 +1100,7 @@ function roleSkillDef(role, n, unit) {
   if (role === "辅助" && n === 1) return { id: "yuito_inspire", name: "助威", bare: true, hint: (unit.level || 1) >= 10 ? "10级：附赠=本回合振奋，或行动点=持续振奋" : "附赠 · 一名其他友方 · 本回合振奋" };
   if (role === "辅助" && n === 2) return { id: "role_sturdy", name: "不倒战意", hint: lv >= 15 ? "附赠 · 同区友方本回合坚挺 · 15级可改用行动点让全部友方坚挺" : "附赠 · 同区友方本回合坚挺" };
   if (role === "辅助" && n === 3) return { id: "role_gold", name: "黄金时间", hint: "附赠 · 一个单位身上一种即时效果延长一回合 · 每场两次" };
-  if (role === "辅助" && n === 4) return { id: "role_rally", name: "全队集结", hint: "行动点 · 同区队员获得主职责增益直到自己晕眩或濒死 · 长休一次" };
+  if (role === "辅助" && n === 4) return { id: "role_rally", name: "全队集结", hint: "行动点 · 同区队员获得主职责增益直到施放者晕眩或濒死 · 长休一次" };
   return null;
 }
 
