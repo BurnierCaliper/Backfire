@@ -1717,7 +1717,7 @@ function friendlyFirePick(by, u) {
  *   }
  * 改它用指令 battle.playerFaction（battle-commands.js → setPlayerFaction）；主持人面板是第二步。
  * 敌我判断都接在这里：hostileTo / playerAllied（按谁的阵营看）/ attackFoe / friendlyFireHit（敌对玩家阵营的角色也算进来）/ autoFoe / allyOf；
- * 给友方的范围效果只给施放者同一个玩家阵营的人：teammateOf（#456）；
+ * 给友方的范围效果只给施放者的自己人（同一个玩家阵营，或者单独设成友好的玩家阵营）：teammateOf（#456 / #460；单体选友方的 allyOf 是同一个判断）；
  * 谁在哪个回合行动：unitTurnPhase（app.js · canControlUnit、回合开始补行动点）；胜负：factionHostileTo（app.js · pvpBattleOutcome） */
 const PVP_CFG = {
   defaultFaction: "我方",   // 默认阵营的 id：没分过阵营的玩家角色都在这里
@@ -1815,20 +1815,20 @@ function autoFoe(by, u) {
   if (!u.isPlayer) return !pvpFriendlyEnemy(by, u);
   return friendlyFirePick(by, u);
 }
-/** 给友方用的技能（治疗、振奋……）选目标时 b 算不算 a 的友方：b 在玩家这一边，而且不和 a 敌对（同阵营，或者单独设成友好的玩家阵营）。
+/** 给友方用的技能（治疗、振奋……）选目标时 b 算不算 a 的友方：和 teammateOf 是同一个判断（#460 起合成一个；这个名字留给 #445 的调用处）。
  *  没配置阵营时就是「b 在玩家这一边」，和以前一样 */
 function allyOf(a, b) {
-  if (!b || !b.isPlayer) return false;
-  return !playerFactionsHostile(playerFactionOf(a), playerFactionOf(b));
+  return teammateOf(a, b);
 }
-/** 给友方的范围效果（群体治疗、护盾、全队集结、全体坚挺、全反击……，#456）给不给 u：u 在玩家这一边，而且和施放者 by
- *  同一个玩家阵营（武器人跟着持有者、替身跟着操控它的人、护送对象按自己记的阵营：playerFactionOf）。
+/** u 算不算 by 的自己人：u 在玩家这一边，而且所在的玩家阵营不和 by 的敌对——同一个玩家阵营，或者单独设成友好的玩家阵营（#460，作者 10/28：
+ *  「互相友好的话就吃」；友好不传递：甲和乙、乙和丙友好，甲和丙照旧按它俩之间的设置）。武器人跟着持有者、替身跟着操控它的人、
+ *  护送对象按自己记的阵营（playerFactionOf）。给友方的范围效果（群体治疗、护盾、全队集结、全体坚挺、全反击……，#456）问这里；
+ *  单体选友方的技能 / 道具问 allyOf（#445），是同一个判断。
  *  by 不在玩家这一边（没有施放者……）时照旧只看 u 是不是玩家角色。没配置阵营 / 场上只有「我方」时就是「u 在玩家这一边」，和以前一样。
- *  友伤开关不管这里（开着友伤时同阵营的队友照旧吃增益）；单独设成友好的玩家阵营也不算（单体选友方照旧能选，见 allyOf） */
+ *  友伤开关不管这里（开着友伤时同阵营的队友照旧吃增益） */
 function teammateOf(by, u) {
   if (!u || !u.isPlayer) return false;
-  if (!by || playerFactionOf(by) == null) return true;
-  return samePlayerFaction(by, u);
+  return !playerFactionsHostile(playerFactionOf(by), playerFactionOf(u));
 }
 /** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
  *   { reset: true }                    清空配置：回到默认（全部在「我方」，一切照旧）

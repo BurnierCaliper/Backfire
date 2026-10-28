@@ -5,7 +5,8 @@
 // 规则在 enemies.js · PVP_CFG / playerFactionOf / hostileTo / attackFoe / friendlyFireHit / setPlayerFaction，
 // 接线见 app.js（canControlUnit、startEnemyPhase、eligibleAssisters、pvpSplit / pvpBattleOutcome）、battle-commands.js、sim.js、
 // hotseat*.js、online-view.js · projectUnit（白名单）
-// 给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者同一个玩家阵营的人（#456）：enemies.js · teammateOf，接线见文件最后几条
+// 给友方的范围效果（群体治疗、护盾、全队集结……）只给施放者的自己人（#456：同一个玩家阵营；#460：单独设成友好的玩家阵营也算）：
+// enemies.js · teammateOf（单体选友方的 allyOf 是同一个判断），接线见文件最后几条
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -674,9 +675,9 @@ test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩�
   assert.equal(p1.ok, true, "房主能操控：" + (p1.error || ""));
 });
 
-/* ===== 给友方的范围效果按玩家阵营分（#456）=====
- * 「同区友方 / 全部友方 / 全队」的效果只给施放者同一个玩家阵营的人（enemies.js · teammateOf）。下面每条先看两个敌对玩家阵营同区时
- * 只给施放者的阵营，再拿不配置阵营的同一个局面对照：照旧给同区全部玩家角色（和以前一样）。 */
+/* ===== 给友方的范围效果按玩家阵营分（#456 / #460）=====
+ * 「同区友方 / 全部友方 / 全队」的效果只给施放者的自己人（enemies.js · teammateOf：同一个玩家阵营，#460 起单独设成友好的玩家阵营也算）。
+ * 下面每条先看两个敌对玩家阵营同区时只给施放者的阵营，再拿不配置阵营的同一个局面对照：照旧给同区全部玩家角色（和以前一样）。 */
 const shieldOf = u => (u.layers || []).filter(l => l.type === "shield").reduce((s, l) => s + (Number(l.current) || 0), 0);
 /** 血量打到三分之一（留着治疗的空间，不会倒地） */
 const wound = (...us) => us.forEach(u => (u.layers || []).forEach(l => { if (l.type !== "shield") l.current = Math.max(1, Math.floor((Number(l.max) || 0) / 3)); }));
@@ -684,7 +685,7 @@ const skill = (c, a, id, t, picks) => c.Commands.dispatch({ type: "skill", actor
 /** 一组单位在 fn 前后各自变了没有：按顺序返回 changed(之前, 之后) */
 const diffOf = (us, read, fn, changed) => { const before = us.map(read); fn(); return us.map((u, i) => changed(before[i], read(u))); };
 
-test("teammateOf：同一个玩家阵营才算（武器人跟着持有者、护送对象按自己记的阵营）；单独设成友好的玩家阵营不算；没配置阵营时就是「是不是玩家角色」", () => {
+test("teammateOf：同一个玩家阵营算（武器人跟着持有者、护送对象按自己记的阵营），单独设成友好的玩家阵营也算（#460）；没配置阵营时就是「是不是玩家角色」", () => {
   const { c, S, heroes: [kolt, helu, hiaki, tou], foe } = field({ factions: null });
   assert.equal(c.teammateOf(kolt, hiaki), true, "没配置阵营：玩家角色都算");
   assert.equal(c.teammateOf(kolt, foe), false, "非玩家单位不算");
@@ -711,10 +712,31 @@ test("teammateOf：同一个玩家阵营才算（武器人跟着持有者、护�
   faction(c, { faction: "乙", unit: vip.id });
   assert.equal(c.teammateOf(hiaki, vip), true);
   assert.equal(c.teammateOf(kolt, vip), false);
-  // 单独设成友好的玩家阵营：单体选友方能选（allyOf，#445），给友方的范围效果不给（只给同一个阵营）
+  // 单独设成友好的玩家阵营：也算自己人（#460）——给友方的范围效果（teammateOf）和单体选友方（allyOf）是同一个判断
   faction(c, { faction: "乙", other: "我方", hostile: false });
+  assert.equal(c.teammateOf(kolt, hiaki), true, "友好的玩家阵营也算");
+  assert.equal(c.teammateOf(hiaki, kolt), true);
+  assert.equal(c.teammateOf(kolt, mochi), true, "武器人跟着持有者");
   assert.equal(c.allyOf(kolt, hiaki), true);
-  assert.equal(c.teammateOf(kolt, hiaki), false);
+});
+
+test("teammateOf：友好不传递——甲和乙、乙和丙友好，甲和丙照旧按它俩之间的设置（默认敌对）；改回默认又不算（#460）", () => {
+  // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」，灯在「丙」
+  const { c, heroes: [kolt, helu, hiaki, tou] } = field({ factions: (c, [, , hiaki, tou]) => {
+    faction(c, { faction: "乙", unit: hiaki.id });
+    faction(c, { faction: "丙", unit: tou.id });
+  } });
+  assert.deepEqual([c.teammateOf(kolt, hiaki), c.teammateOf(kolt, tou), c.teammateOf(hiaki, tou)], [false, false, false], "默认互相敌对");
+  faction(c, { faction: "乙", other: "我方", hostile: false });
+  faction(c, { faction: "乙", other: "丙", hostile: false });
+  assert.equal(c.teammateOf(kolt, hiaki), true, "我方 ↔ 乙：友好");
+  assert.equal(c.teammateOf(tou, hiaki), true, "丙 ↔ 乙：友好");
+  assert.equal(c.teammateOf(kolt, tou), false, "我方 ↔ 丙：没设过，照旧敌对（友好不传递）");
+  assert.equal(c.teammateOf(tou, helu), false);
+  assert.equal(c.allyOf(kolt, tou), false, "单体选友方也一样");
+  faction(c, { faction: "乙", other: "我方", hostile: null });
+  assert.equal(c.teammateOf(kolt, hiaki), false, "改回默认：又是敌对");
+  assert.equal(c.teammateOf(kolt, helu), true, "同阵营照旧");
 });
 
 /** 川川（哔哩哩）、诺拉（维塔斯，温和）、柯尔特、赫鲁米卡和狂徒同在 1 区。split：诺拉、赫鲁米卡分到「乙」（和我方敌对）；否则不配置阵营 */
@@ -886,7 +908,7 @@ test("专长「号召」（开战时同区我方护盾）、道具烟雾弹（�
   assert.deepEqual(smoke(q), [true, true, true, true]);
 });
 
-test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营（单独设成友好的阵营也不给）；敌对阵营的人照旧挨打；只有一个阵营时照旧", () => {
+test("结人酸萃 / 冷萃：给友方的那一份只给结人的自己人（同阵营、单独设成友好的阵营，#460）；敌对阵营的人照旧挨打；只有一个阵营时照旧", () => {
   // 结人、赫鲁米卡在「我方」，柯尔特、绯秋在「乙」（field 默认的分法）
   const mk = mode => {
     const f = field({ party: ["yuito", "helu", "kolt", "hiaki"], seed: "PVP456-YUITO", factions: mode ? undefined : null });
@@ -900,11 +922,11 @@ test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营�
   const hpOf = f => u => hp(f.c, u), def = u => u.def;
   const sign = (a, b) => Math.sign(b - a);
   {
-    // 乙设成和我方友好：不挨打，也不吃结人的治疗 / 架势
+    // 乙设成和我方友好：不挨打，也吃结人的治疗 / 架势（#460：互相友好的阵营也是自己人）
     const f = mk("friendly");
     wound(...f.heroes);
-    assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 0, 0], "酸萃：结人、赫鲁米卡恢复；友好的乙不恢复、不挨打");
-    assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 0, 0], "冷萃：结人、赫鲁米卡 +1 架势；友好的乙不变");
+    assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 1, 1], "酸萃：结人、赫鲁米卡恢复；友好的乙也恢复、不挨打");
+    assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 1, 1], "冷萃：结人、赫鲁米卡 +1 架势；友好的乙也 +1");
   }
   {
     // 乙和我方敌对：照旧挨打（#445），不吃治疗 / 架势（乙的两人满血：挨了酸液也不会倒地，冷萃照样打得到）
@@ -919,6 +941,67 @@ test("结人酸萃 / 冷萃：给友方的那一份只给结人的玩家阵营�
     wound(...f.heroes);
     assert.deepEqual(diffOf(f.heroes, hpOf(f), () => brew(f, "yuito_extract"), sign), [1, 1, 1, 1]);
     assert.deepEqual(diffOf(f.heroes, def, () => brew(f, "yuito_cold"), sign), [1, 1, 1, 1]);
+  }
+});
+
+test("互相友好的玩家阵营也吃给友方的范围效果（磁场盾、寒气剑舞、全队集结、不倒战意、号召、烟雾弹）；友好不传递，敌对的阵营照旧不吃（#460）", () => {
+  const more = (a, b) => b > a;
+  {
+    // 川川（哔哩哩）、赫鲁米卡在「我方」，诺拉（维塔斯）在「乙」（和我方友好），柯尔特在「丙」（和两边都敌对）
+    const f = field({ party: ["chuan", "nora", "kolt", "helu"], seed: "PVP460-FRIEND", factions: (c, [, nora, kolt]) => {
+      faction(c, { faction: "乙", unit: nora.id });
+      faction(c, { faction: "丙", unit: kolt.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const { c } = f;
+    const [chuan, nora, kolt, helu] = f.heroes;
+    const bili = c.spawnWeapon(chuan, "bili"), vitas = c.spawnWeapon(nora, "vitas");
+    [bili, vitas].forEach(w => { w.zone = 1; w.level = 6; w.ap = w.apMax = 4; w.bonus = w.bonusMax = 4; });
+    nora.resources.mood = "gentle";
+    const six = [chuan, bili, helu, nora, vitas, kolt];
+    const healable = six.filter(u => u !== bili);   // 哔哩哩只有护盾层，没有可以治疗的血量
+    chuan.resources.charge = 3;
+    assert.deepEqual(diffOf(six, shieldOf, () => skill(c, bili, "bili_field"), more), [true, true, true, true, true, false],
+      "磁场盾（哔哩哩在我方）：我方和友好的乙都有护盾，敌对的丙（柯尔特）没有");
+    wound(...healable);
+    assert.deepEqual(diffOf(healable, u => hp(c, u), () => skill(c, vitas, "vitas_dance", f.foe), more), [true, true, true, true, false],
+      "寒气剑舞（维塔斯在乙，温和）：乙和友好的我方都恢复，丙不恢复");
+    // 乙和丙也设成友好（我方和丙之间没设：照旧敌对）——乙的剑舞给丙，我方的磁场盾照旧不给丙
+    faction(c, { faction: "乙", other: "丙", hostile: false });
+    chuan.resources.charge = 3;
+    assert.deepEqual(diffOf([nora, kolt], shieldOf, () => skill(c, bili, "bili_field"), more), [true, false], "磁场盾（我方）：丙照旧没有（友好不传递）");
+    wound(...healable);
+    assert.deepEqual(diffOf([chuan, kolt], u => hp(c, u), () => skill(c, vitas, "vitas_dance", f.foe), more), [true, true], "寒气剑舞（乙）：丙也恢复了");
+  }
+  {
+    // 结人（辅助 15 级）、赫鲁米卡在「我方」，柯尔特在「乙」（友好），绯秋在「丙」（敌对）；三人都改成直伤，集结给 atk +15
+    const f = field({ party: ["yuito", "helu", "kolt", "hiaki"], seed: "PVP460-RALLY", factions: (c, [, , kolt, hiaki]) => {
+      faction(c, { faction: "乙", unit: kolt.id });
+      faction(c, { faction: "丙", unit: hiaki.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const [yuito, helu, kolt, hiaki] = f.heroes;
+    yuito.roles = { primary: "辅助", secondary: "辅助" }; yuito.level = 15; f.c.resetBattleFlags(yuito); yuito.ap = 4; yuito.bonus = 4;
+    [helu, kolt, hiaki].forEach(u => { u.roles = Object.assign({}, u.roles, { primary: "直伤" }); });
+    skill(f.c, yuito, "role_rally");
+    assert.deepEqual([helu, kolt, hiaki].map(u => u.rallyAtk || 0), [15, 15, 0], "全队集结：友好的乙（柯尔特）也拿到，丙（绯秋）不拿");
+    skill(f.c, yuito, "role_sturdy", null, { mode: "all" });
+    assert.deepEqual([yuito, helu, kolt, hiaki].map(u => !!u.statuses.sturdy), [true, true, true, false], "不倒战意·全部友方：友好的乙也坚挺");
+  }
+  {
+    // 柯尔特有号召；柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const f = field({ seed: "PVP460-FEAT", factions: (c, [kolt, , hiaki, tou]) => {
+      kolt.feats = ["rally"];
+      faction(c, { faction: "乙", unit: hiaki.id });
+      faction(c, { faction: "丙", unit: tou.id });
+      faction(c, { faction: "乙", other: "我方", hostile: false });
+    } });
+    const [kolt, helu, hiaki, tou] = f.heroes;
+    const m = logText(f.c).match(/号召：(.+) 获得 \d+ 点护盾/);
+    assert.deepEqual(m ? m[1].split("、").sort() : [], [kolt.name, helu.name, hiaki.name].sort(), "号召：友好的乙（绯秋）也拿到护盾，丙（灯）不拿");
+    f.c.bagAdd("fx_smoke", 1); kolt.bonus = 1;
+    f.c.useItemOn(kolt, "fx_smoke", null, 1);
+    assert.deepEqual([kolt, helu, hiaki, tou].map(u => !!u.statuses.hide), [true, true, true, false], "烟雾弹：友好的乙也躲藏，丙不躲");
   }
 });
 

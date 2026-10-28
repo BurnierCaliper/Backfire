@@ -250,7 +250,7 @@ const FEATS = {
     text: "每场开战时，你所在区域的我方（含自己）获得 等级÷2（向上取整）点护盾。",
     hooks: { battleStart(u, _, notes) {
       const amt = Math.ceil((Number(u.level) || 1) / 2);
-      // 所在区域的我方：和号召的人同一个玩家阵营的人（enemies.js · teammateOf，#456）
+      // 所在区域的我方：号召的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#456 / #460）
       const who = fieldUnits().filter(x => (typeof teammateOf === "function" ? teammateOf(u, x) : x.isPlayer) && !x.dead && !x.hidden && Number(x.zone) === Number(u.zone));
       who.forEach(x => addShieldLayer(x, amt, false));
       if (notes && who.length) notes.push(`${u.name} 号召：${who.map(x => x.name).join("、")} 获得 ${amt} 点护盾。`);
