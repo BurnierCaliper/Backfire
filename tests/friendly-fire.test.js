@@ -7,7 +7,9 @@
 // 主人开着友伤时候选名单里也有主人以外的队友，挑法照旧。测试在文件后面
 // 后续（三）（#437，作者 10/27）：音爆 / 探测模式触发的碎渣机炮开着友伤时在敌人和队友里随机挑（app.js · scrapAutoTarget）；
 // 川川「磁场护盾」、龙哥热能轰击（红弹）也打到范围里施放者以外的队友；借机攻击单元、警戒（反应）和近距离压制单元（光环）
-// 主人开着友伤时对主人以外的队友也起作用（mods.js · bpLeaveOpportunity / bpAtkAdjust、feats.js · featAlertOnEnter）。测试在文件最后
+// 主人开着友伤时对主人以外的队友也起作用（mods.js · bpLeaveOpportunity / bpAtkAdjust、feats.js · featAlertOnEnter）。测试在文件后面
+// 后续（四）（#440，作者 10/28）：结人「酸萃」「冷萃」开着友伤时，区域里结人以外的队友算敌人——挨打、不吃增益，结人自己照旧
+// （app.js · runSkillInner 的 yuito_extract / yuito_cold）。测试在文件最后
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -849,4 +851,157 @@ test("光环（#437）：近距离压制单元（图纸）——装着它的人�
   assert.equal(on.kolt, off.kolt, "装着它的人自己不受影响");
   assert.equal(on.tou, off.tou, "别区的队友不受影响");
   assert.equal(on.foe, off.foe, "同区敌人照旧");
+});
+
+/* ===== #440：友伤开关后续（四）——结人「酸萃」「冷萃」开着友伤时队友视为敌人（作者 10/28 定）===== */
+
+/** 只留一层 100 上限、60 血的最内层（缺 40：治疗看得出来），架势 3 / 5（+1、−1 都看得出来） */
+const hurt60 = u => {
+  const inner = u.layers[u.layers.length - 1];
+  inner.max = 100; inner.current = 60; u.layers = [inner];
+  u.defMax = 5; u.def = 3;
+};
+/** 结人、赫鲁米卡、灯、年糕（灯的武器人）、委托人（护送对象）和狂徒都在 1 区；结人 20 级（酸萃 5d4）。
+ *  结人对 1 区放 skill，返回每个人血量、架势的变化（d）和放完的评分 */
+function yuitoCast(skill, on) {
+  const { c, S, heroes: [y, helu, tou], foe } = field(["yuito", "helu", "tou"], "FF440-" + skill);
+  if (on) ffOn(c);
+  c.Commands.dispatch({ type: "skill", actor: tou.id, skill: "tou_summon" });
+  const mochi = c.findKit("mochi", S.units);
+  const escort = c.spawnEscort({ kind: "vip" }, 5, null, 1);
+  [y, helu, tou, mochi, escort].forEach(u => { u.zone = 1; hurt60(u); });
+  y.level = 20; y.resources.liquid = 1;
+  const before = new Map(S.units.map(u => [u.id, { hp: hp(c, u), def: u.def }]));
+  c.Commands.dispatch({ type: "skill", actor: y.id, skill, picks: { dest: 1 } });
+  const d = u => ({ hp: hp(c, u) - before.get(u.id).hp, def: u.def - before.get(u.id).def });
+  return { c, S, y, helu, tou, mochi, escort, foe, d, parts: plain(S.battleScore.parts) };
+}
+
+test("酸萃（#440）：结人开着友伤时，区域里结人以外的队友（含武器人、护送对象）挨同样骰数的酸液、不治疗，结人自己照旧治疗；照常结算、不计分数；关着照旧", () => {
+  const off = yuitoCast("yuito_extract", false), on = yuitoCast("yuito_extract", true);
+  // 关着：照旧——友方治疗（武器人、护送对象不治疗也不挨打，以前就是这样），敌人挨酸
+  const heal = off.d(off.y).hp, acid = -off.d(off.foe).hp;
+  assert.ok(heal > 0 && acid > 0);
+  for (const u of [off.helu, off.tou]) assert.equal(off.d(u).hp, heal, `关着：${u.name} 治疗`);
+  for (const u of [off.mochi, off.escort]) assert.equal(off.d(u).hp, 0, `关着：${u.name} 不治疗也不挨打`);
+  // 开着（同一种子：治疗、酸液掷出来的骰子和关着时一样）：结人自己照旧治疗，别的队友都挨酸、不治疗
+  assert.equal(on.d(on.y).hp, heal, "结人自己照旧治疗");
+  for (const u of [on.helu, on.tou, on.mochi, on.escort]) assert.ok(on.d(u).hp < 0, `开着：${u.name} 挨酸液、不治疗`);
+  assert.equal(on.d(on.helu).hp, -acid, "和敌人挨的是同样骰数的酸液（年糕是装甲、有灯的圣盾减半，照常结算）");
+  assert.equal(on.d(on.foe).hp, -acid, "敌人照旧");
+  // 不计分数：不记承受伤害、伤害分，打掉的血记进 state.ffHurt；评分只少了治疗队友的治疗分
+  for (const u of [on.helu, on.tou, on.mochi]) assert.equal(on.c.battleStat(u).taken, 0, `${u.name}：不记承受伤害`);
+  for (const u of [on.helu, on.tou, on.mochi, on.escort]) assert.equal(on.c.ffHurtOf(u), -on.d(u).hp, `${u.name}：打掉的血记进 state.ffHurt`);
+  assert.equal(on.c.battleStat(on.y).dmg, acid, "结人的伤害只记打敌人的那一下");
+  assert.equal(on.c.battleStat(on.y).heal, 0, "没有治疗队友");
+  const { heal: healPart, ...offParts } = off.parts;
+  assert.ok(healPart > 0 && !on.parts.heal);
+  assert.deepEqual(on.parts, offParts, "评分只有打敌人的那一份，和关着时一样");
+  assert.ok(!on.S.battleScore.hurt, "不丢「无伤」奖励");
+});
+
+test("冷萃（#440）：结人开着友伤时，那一区结人以外的队友（含武器人、护送对象）挨 0.5×atk 冰 + 1 击破、不加架势，结人自己照旧 +1 架势；照常结算、不计分数；关着照旧", () => {
+  const off = yuitoCast("yuito_cold", false), on = yuitoCast("yuito_cold", true);
+  const ice = -off.d(off.foe).hp;
+  assert.ok(ice > 0 && off.d(off.foe).def === -1, "敌人 0.5×atk 冰 + 1 击破");
+  for (const u of [off.y, off.helu, off.tou]) assert.deepEqual(off.d(u), { hp: 0, def: 1 }, `关着：${u.name} +1 架势`);
+  for (const u of [off.mochi, off.escort]) assert.deepEqual(off.d(u), { hp: 0, def: 0 }, `关着：${u.name} 不加架势也不挨打（以前就是这样）`);
+  assert.deepEqual(on.d(on.y), { hp: 0, def: 1 }, "开着：结人自己照旧 +1 架势");
+  for (const u of [on.helu, on.tou, on.mochi, on.escort]) {
+    assert.ok(on.d(u).hp < 0, `开着：${u.name} 挨冰`);
+    assert.equal(on.d(u).def, -1, `${u.name} 受 1 击破、不加架势`);
+  }
+  assert.equal(on.d(on.helu).hp, -ice, "和敌人挨的一样（0.5×atk 冰）");
+  assert.deepEqual(on.d(on.foe), off.d(off.foe), "敌人照旧");
+  for (const u of [on.helu, on.tou, on.mochi]) assert.equal(on.c.battleStat(u).taken, 0, `${u.name}：不记承受伤害`);
+  for (const u of [on.helu, on.tou, on.mochi, on.escort]) assert.equal(on.c.ffHurtOf(u), -on.d(u).hp, `${u.name}：打掉的血记进 state.ffHurt`);
+  assert.equal(on.c.battleStat(on.y).dmg, ice, "结人的伤害只记打敌人的那一下");
+  assert.equal(on.c.battleStat(on.y).brk, 1, "击破也只记打敌人的 1");
+  assert.deepEqual(on.parts, off.parts, "评分和关着时一样：打队友的伤害、击破都不加分");
+  assert.ok(!on.S.battleScore.hurt, "不丢「无伤」奖励");
+});
+
+test("酸萃 / 冷萃（#440）：看的是结人的操控者的开关——热座 / 联机别人开着、结人的操控者没开：照旧给队友治疗、加架势；结人的操控者开着：队友算敌人（经房主的规则流程结算）", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["yuito", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "FF440-OWNER" });
+  c.location = { search: "?hotseat=1" }; c.URLSearchParams = URLSearchParams;
+  c.document = { getElementById() { return null; } };
+  c.setInterval = () => 1;
+  c.setTimeout = () => 1;
+  c.GAME = { depth: 0, sim: false, tape: null, ended: false, undo: [], disarm() {}, refresh() {} };
+  for (const file of ["hotseat.js", "hotseat-authority.js", "hotseat-validation.js", "hotseat-game.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(H.ROOT, file), "utf8"), c, { filename: file });
+  }
+  const S = c.S.state, y = c.findKit("yuito", S.units), helu = c.findKit("helu", S.units);
+  const players = [{ id: "p1", name: "主持人", gm: true }, { id: "p2", name: "玩家 2" }];
+  assert.deepEqual(plain(c.HotseatGame.configure({ mode: "trpg", players, assignments: { [y.id]: "p2", [helu.id]: "p1" } })), { ok: true });
+  const send = (id, command) => { c.HotseatGame.switchPlayer(id); return c.HotseatGame.submit(command); };
+  assert.equal(send("p1", { type: "startCombat" }).ok, true);
+  c.HotseatGame.beginRound();
+  assert.equal(send("p2", { type: "orderPick", actor: y.id, index: 0 }).ok, true);
+  assert.equal(send("p1", { type: "orderPick", actor: helu.id, index: 1 }).ok, true);
+  assert.equal(send("p1", { type: "orderConfirm" }).ok, true);
+  assert.equal(send("p2", { type: "orderConfirm" }).ok, true);
+  y.zone = helu.zone = 1; y.level = 11; y.ap = 4; y.resources.liquid = 4;
+  [y, helu].forEach(hurt60);
+  const cast = skill => { const r = send("p2", { type: "skill", actor: y.id, skill, picks: { dest: 1 } }); assert.equal(r.ok, true, r.error); };
+  // 赫鲁米卡的操控者（p1）开着、结人的操控者（p2）没开：照旧
+  assert.equal(send("p1", { type: "battle.friendlyFire", on: true }).ok, true);
+  cast("yuito_cold");
+  assert.equal(helu.def, 4, "结人的操控者没开：冷萃照旧给赫鲁米卡 +1 架势");
+  cast("yuito_extract");
+  assert.ok(hp(c, helu) > 60, "酸萃照旧治疗");
+  // p2 也开：赫鲁米卡算敌人，结人自己照旧
+  assert.equal(send("p2", { type: "battle.friendlyFire", on: true }).ok, true);
+  const hp1 = hp(c, helu), yHp = hp(c, y), yDef = y.def;
+  cast("yuito_cold");
+  assert.equal(helu.def, 3, "结人的操控者开着：冷萃 1 击破、不加架势");
+  assert.ok(hp(c, helu) < hp1, "挨冰");
+  assert.equal(y.def, yDef + 1, "结人自己照旧 +1 架势");
+  const hp2 = hp(c, helu);
+  cast("yuito_extract");
+  assert.ok(hp(c, helu) < hp2, "酸萃挨酸液、不治疗");
+  assert.ok(hp(c, y) > yHp, "结人自己照旧治疗");
+  assert.equal(c.battleStat(helu).taken, 0, "不计分数");
+});
+
+test("悬停预演、联机房主的菜单（#440）：酸萃 / 冷萃选区时的预演跟着规则走——开着友伤时队友挨打、不治疗 / 不加架势，结人自己照旧；关着照旧；房主给的菜单照旧选区，确认后结算打到队友", () => {
+  const { Hotseat } = require("../hotseat");
+  const c = H.load();
+  c.BattleSim.setup({ party: ["yuito", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }], zoneMode: 3, seed: "FF440-MENU" });
+  c.startCombat();
+  c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; } };
+  for (const file of ["game.js", "hotseat-validation.js", "online-view.js", "online-actions.js"]) vm.runInContext(fs.readFileSync(path.join(H.ROOT, file), "utf8"), c, { filename: file });
+  const S = c.S.state, y = c.findKit("yuito", S.units), helu = c.findKit("helu", S.units), foe = S.units.find(u => !u.isPlayer);
+  [y, helu, foe].forEach(u => { u.zone = 1; });
+  [y, helu].forEach(u => { hurt60(u); u.ap = u.apMax = 4; u.bonus = u.bonusMax = 4; });
+  y.level = 11; y.resources.liquid = 3;
+  const session = Hotseat.create({ operators: ["p1"], gmId: "p1", assignments: { [y.id]: "p1", [helu.id]: "p1" }, getUnits: () => S.units, canStand: u => !c.standUpBlocked(u) });
+  session.beginRound(1); session.pick("p1", y.id, 0); session.pick("p1", helu.id, 1); session.forceStart("p1");
+  const service = c.OnlineActions.create({ game: c.GAME, validation: c.HotseatValidation, inspect: c.HotseatValidation.inspect,
+    assertAction: (sender, id) => session.assertAction(sender, id), getState: () => S });
+  const menu = (request = {}) => plain(service.menu({ requestId: 1, actor: y.id, ...request }, "p1"));
+  /** 悬停在 1 区上的预演（选区那一步每一区都这样预演） */
+  const pv = skill => { const p = c.GAME.previewOf(c.GAME.skillThunk(y.id, skill, null, { dest: 1 })); return { y: p.units.get(y.id), helu: p.units.get(helu.id), foe: p.units.get(foe.id) }; };
+  let ex = pv("yuito_extract"), cold = pv("yuito_cold");
+  assert.ok(ex.helu.healHi > 0 && !(ex.helu.dmgHi > 0), "关着：酸萃的预演里队友治疗");
+  assert.ok(!(cold.helu.dmgHi > 0) && cold.helu.defAfterHi === 4, "关着：冷萃的预演里队友 +1 架势");
+  ffOn(c);
+  ex = pv("yuito_extract"); cold = pv("yuito_cold");
+  assert.ok(ex.helu.dmgHi > 0 && !(ex.helu.healHi > 0), "开着：酸萃的预演里队友挨酸、不治疗");
+  assert.ok(ex.y.healHi > 0 && !(ex.y.dmgHi > 0), "结人自己照旧治疗");
+  assert.ok(ex.foe.dmgHi > 0, "敌人照旧");
+  assert.ok(cold.helu.dmgHi > 0 && cold.helu.brHi === 1 && cold.helu.defAfterHi === 2, "开着：冷萃的预演里队友挨冰 + 1 击破、不加架势");
+  assert.ok(!(cold.y.dmgHi > 0) && cold.y.defAfterHi === 4, "结人自己照旧 +1 架势");
+  // 联机房主：菜单照旧选区，确认后照规则结算
+  const zones = menu({ skill: "yuito_extract" });
+  assert.equal(zones.choices.kind, "zone");
+  assert.ok(zones.choices.options.some(o => o.value === 1));
+  const ready = menu({ skill: "yuito_extract", picks: { dest: 1 } });
+  assert.equal(ready.choices.kind, "ready");
+  const live = u => c.unitById(u.id);   // 预演会把局面换成拷贝：单位按 id 重新取
+  const before = { y: hp(c, live(y)), helu: hp(c, live(helu)) };
+  c.Commands.dispatch(ready.choices.command);
+  assert.ok(hp(c, live(helu)) < before.helu, "房主结算：队友挨酸");
+  assert.ok(hp(c, live(y)) > before.y, "结人自己治疗");
 });

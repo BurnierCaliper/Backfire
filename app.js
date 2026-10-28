@@ -13351,14 +13351,17 @@ function runSkillInner(id, optRun) {
         const heal = healR.total;
         const dmg = dmgR.total;
         lines.push(`酸萃掷骰 治疗 ${healR.text} / 伤害 ${dmgR.text}`);
+        // 结人开着友伤（enemies.js · friendlyFireHit，#440）：区域里结人以外的队友（含武器人、护送对象）算敌人——挨同样骰数的酸液、不治疗；
+        // 结人自己照旧治疗。打到队友照常结算、不计分数（dealTo 记成友伤）
+        const foes = visibleEnemies(z, a);
         fieldUnits().filter(u => Number(u.zone) === Number(z)).forEach(u => {
-          if (u.isPlayer && !isWeaponUnit(u)) {
+          // 区域效果是范围攻击：打飞行敌人不用逐个多付附赠（以前对每只飞行敌人各扣 1 个，不够时后面的不受伤）
+          if (foes.includes(u)) hitOne(a, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: true, aoe: true } });
+          else if (u.isPlayer && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
             const hb = bondHealDice(a, u, nd, 4, 0);   // 被牵挂的人：骰子取最大值
             const amt = hb.maxed ? hb.total : heal;
             healUnit(u, amt); lines.push(`${u.name} 恢复 ${amt}${hb.maxed ? "（牵挂取最大值）" : ""}`);
           }
-          // 区域效果是范围攻击：打飞行敌人不用逐个多付附赠（以前对每只飞行敌人各扣 1 个，不够时后面的不受伤）
-          else if (!u.isPlayer) hitOne(a, u, { atk: 0, mult: 0, flat: dmg, element: "acid", baseBreak: 0, flags: { action: true, aoe: true } });
         });
       }
     } else if (id === "latte_love") {
@@ -13487,10 +13490,14 @@ function runSkillInner(id, optRun) {
       const ferr = setZoneField(z, "ice", { by: a.id });
       lines.push(ferr || `${z} 区变为冻土。`);
       markAoeZone(z);
+      // 结人开着友伤（enemies.js · friendlyFireHit，#440）：那一区结人以外的队友（含武器人、护送对象）算敌人——挨 0.5atk 冰 +1 击破、不加架势；
+      // 结人自己照旧 +1 架势。打到队友照常结算、不计分数（dealTo 记成友伤）
+      const foes = visibleEnemies(z, a);
       fieldUnits().filter(u => Number(u.zone) === z && !u.dead).forEach(u => {
-        if (u.isPlayer) {
-          if (!isWeaponUnit(u)) { u.def = Math.min(u.defMax || u.def, (Number(u.def) || 0) + 1); lines.push(`${u.name} 架势 +1。`); }
-        } else hitOne(a, u, { element: "ice", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+        if (foes.includes(u)) hitOne(a, u, { element: "ice", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } });
+        else if (u.isPlayer && !isWeaponUnit(u) && !(typeof friendlyFireHit === "function" && friendlyFireHit(a, u))) {
+          u.def = Math.min(u.defMax || u.def, (Number(u.def) || 0) + 1); lines.push(`${u.name} 架势 +1。`);
+        }
       });
     } else if (id === "yuito_duet") {
       // 双重奏：2 咖啡液。任意友方恢复 等级×1d6；溢出的治疗变成等量 atk，下回合开始失去
