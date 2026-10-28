@@ -128,7 +128,8 @@ const BattleSim = (function () {
    * 画面里这些会弹窗让玩家选；这里按 policy 自动选。 */
   function withPhaseOf(u, fn) {
     const prev = state.combatPhase;
-    if (u) state.combatPhase = u.isPlayer ? "player" : "enemy";
+    // 按这个单位在哪个回合行动（enemies.js · unitTurnPhase，#445：在敌人回合行动的玩家阵营算敌人回合）
+    if (u) state.combatPhase = typeof unitTurnPhase === "function" ? unitTurnPhase(u) : (u.isPlayer ? "player" : "enemy");
     try { fn(); } finally { state.combatPhase = prev; }
   }
 
@@ -176,7 +177,7 @@ const BattleSim = (function () {
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
         const target = unitById(job.targetId), breaker = unitById(job.breakerId);
-        const list = target ? eligibleAssisters(breaker, target) : [];
+        const list = target ? eligibleAssisters(breaker, target, job) : [];   // job：PvP 分两轮问（job.pvpStage，#445）
         let choice = null;
         if (list.length) choice = job.vsPlayer ? EnemyAI.pickAssister(list, target) : policy.pickAssister(list, target);
         const helper = unitById(choice);

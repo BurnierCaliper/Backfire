@@ -1903,8 +1903,8 @@
   /* ================= 7. 格挡与协助 ================= */
   function withPhaseOf(u, fn) {
     const prev = state.combatPhase;
-    if (u && u.isPlayer) state.combatPhase = "player";
-    if (u && !u.isPlayer) state.combatPhase = "enemy";
+    // 按这个单位在哪个回合行动（enemies.js · unitTurnPhase，#445：在敌人回合行动的玩家阵营算敌人回合）
+    if (u) state.combatPhase = typeof unitTurnPhase === "function" ? unitTurnPhase(u) : (u.isPlayer ? "player" : "enemy");
     try { fn(); } finally { state.combatPhase = prev; }
   }
 
@@ -2080,7 +2080,7 @@
       if (state.assistQueue && state.assistQueue.length) {
         const job = state.assistQueue[0];
         const target = unitById(job.targetId), breaker = unitById(job.breakerId);
-        const list = target ? eligibleAssisters(breaker, target) : [];
+        const list = target ? eligibleAssisters(breaker, target, job) : [];   // job：PvP 分两轮问（job.pvpStage，#445）
         let choice = null, hotseatExtra = {};
         if (list.length) {
           if (hotseat() && !job.vsPlayer) {
@@ -2098,7 +2098,7 @@
               if (!blades.length) blades.push("niu", "naruto");
               return blades.map(blade => ({ helper: h.id, label: h.name + " · " + (blade === "niu" ? "丹生谷" : "鳴門"), sub: "协助攻击", extra: { blade } }));
             });
-            const answer = await HotseatGame.requestAsk("assist", target.name + " 失衡 · 协助攻击", options, () => eligibleAssisters(breaker, target), job);
+            const answer = await HotseatGame.requestAsk("assist", target.name + " 失衡 · 协助攻击", options, () => eligibleAssisters(breaker, target, job), job);
             choice = answer.unitId; hotseatExtra = answer.extra;
           } else choice = job.vsPlayer ? aiPickAssister(list) : await promptAssist(job, target, list);
           if (abandoned(gen)) return;
@@ -3007,9 +3007,12 @@
     const side = (typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[sk.id]) ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
     let all = state.units.filter(u => unitAlive(u) && (u.id !== actor.id || side === "allySelf" || side === "anySelf"));
-    if (side === "ally" || side === "allySelf") all = all.filter(u => u.isPlayer);
-    // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428）时自己以外的队友也能选（自己已经在上面去掉了）
-    else if (side === "enemy") all = all.filter(u => !u.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(actor, u)));
+    // 给友方用的技能：敌对玩家阵营的角色不算友方（enemies.js · allyOf，#445；没配置阵营时就是全部玩家角色）
+    if (side === "ally" || side === "allySelf") all = all.filter(u => typeof allyOf === "function" ? allyOf(actor, u) : u.isPlayer);
+    // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428）时自己以外的队友也能选（自己已经在上面去掉了）；
+    // 玩家阵营（#445）：敌对玩家阵营的角色也能选，自己的阵营单独设成友好的敌人阵营不能选（enemies.js · pvpFriendlyEnemy）
+    else if (side === "enemy") all = all.filter(u => !u.isPlayer ? !(typeof pvpFriendlyEnemy === "function" && pvpFriendlyEnemy(actor, u))
+      : (typeof friendlyFireHit === "function" && friendlyFireHit(actor, u)));
     // 写明了射程（engine.js · SKILL_RANGE）的技能以表为准，不从提示文字里猜
     const ov = typeof skillRangeFor === "function" ? skillRangeFor(actor, sk.id) : null;
     // 抵近射击（专长）：写着距离 1 的攻击也能打同区

@@ -174,9 +174,12 @@
     const side = typeof SKILL_TARGET_SIDE !== "undefined" && SKILL_TARGET_SIDE[cmd.skill] ||
       (/任意单位|拉到|磁力/.test(hint) ? "any" : /友方|队友/.test(hint) ? "ally" : "enemy");
     // 打敌人的技能：开着友伤（enemies.js · friendlyFireHit，#428；按 actor 的操控者的开关）时自己以外的队友也能选
+    // 玩家阵营（#445）：敌对玩家阵营的角色也算打得到的（friendlyFireHit 认它们）；给友方用的技能不能选它们（enemies.js · allyOf）
     const friendly = side === "enemy" && target.isPlayer && typeof friendlyFireHit === "function" && friendlyFireHit(actor, target);
+    const ally = typeof allyOf === "function" ? allyOf(actor, target) : !!target.isPlayer;
+    const friendlyEnemy = side === "enemy" && !target.isPlayer && typeof pvpFriendlyEnemy === "function" && pvpFriendlyEnemy(actor, target);
     if (!target.isStructure && ((target.id === actor.id && side !== "allySelf" && side !== "anySelf") ||
-      (["ally", "allySelf"].includes(side) && !target.isPlayer) || (side === "enemy" && target.isPlayer && !friendly))) fail("这项技能不能选择这一方的目标", "invalid_target");
+      (["ally", "allySelf"].includes(side) && !ally) || (side === "enemy" && target.isPlayer && !friendly) || friendlyEnemy)) fail("这项技能不能选择这一方的目标", "invalid_target");
     if (target.isStructure && ["ally", "allySelf", "anySelf"].includes(side)) fail("这项技能需要以单位为目标", "invalid_target");
     const ov = skillRangeFor(actor, cmd.skill), zones = target.zones || [target.zone];
     const reachable = zones.some(zone => {

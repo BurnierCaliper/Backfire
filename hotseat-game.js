@@ -173,10 +173,11 @@
     if (cmd.type === "retreat") { hostOnly(id); if (!state.combatStarted || state.combatPhase !== "player" || GAME.ended || !["selecting", "acting"].includes(session.snapshot().phase)) fail("现在不能撤退"); return; }
     // 联机单局（online-rogue.js）：单局的规则指令和开战 / 结算只由房主的流程执行；玩家的投票、需求、个人购买另走房主校验
     if (["run", "run.query", "run.session", "battle.setupRogue", "battle.continue", "screen"].includes(cmd.type)) { hostOnly(id); return; }
-    if (["battle.panel", "battle.setup", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
+    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友
+    if (["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
       hostOnly(id);
       if (cmd.type === "calc" && ["move", "skill", "skillPick", "skillCancel", "standUp", "blockAnswer", "assistAnswer", "koltSwap", "startCombat", "endTurn", "blade"].includes(cmd.action)) fail("热座战斗动作必须使用当前单位的技能与询问入口");
-      if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
+      if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
       if (cmd.type === "battle.panel" && cmd.action === "loadSlot" && state.combatStarted && !GAME.ended) fail("战斗中不能读档");
       if (cmd.action === "undo" || cmd.type === "calc" && /undo|restore/i.test(cmd.action)) fail("热座不能撤销");
       return;
