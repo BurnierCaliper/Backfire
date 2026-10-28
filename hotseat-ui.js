@@ -111,9 +111,12 @@
     }
     function renderBar() {
       const labels = { setup: "战前分配", picking: "选择行动顺序", acting: "我方行动", enemy: "敌方行动", ended: "战斗结束" };
+      // 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）：选顺序、行动都写明是敌人回合
+      const segLabels = { picking: "敌人回合 · 选择行动顺序", acting: "敌人回合 · 玩家阵营行动" };
+      const enemySeg = view.segment === "enemy" && segLabels[view.phase];
       // 联机时不在战斗画面（探索 / 大厅）不显示「战前分配」
       const olScreen = view.network ? window.OnlineGame?.getView().screen : null;
-      const phaseText = olScreen && olScreen !== "battle" && (view.phase === "setup" || !view.phase) ? (olScreen === "lobby" ? "大厅" : olScreen === "ended" ? "遭遇结束" : "探索") : labels[view.phase] || "等待战斗";
+      const phaseText = olScreen && olScreen !== "battle" && (view.phase === "setup" || !view.phase) ? (olScreen === "lobby" ? "大厅" : olScreen === "ended" ? "遭遇结束" : "探索") : (enemySeg || labels[view.phase] || "等待战斗");
       // 联机单局没有主持人：房主 / 玩家；标签写「联机单局」（房主看 OnlineGame，玩家看收到的包）
       const rogue = view.network && (window.OnlineGame?.getView().mode === "rogue" || window.OnlineGame?.getView().packet?.mode === "rogue");
       const operator = view.network ? `<span>${esc(playerName(view.playerId))} · ${isHost() ? (rogue ? "房主" : "主持人") : "玩家"}</span>` : `<label for="hs-player">当前操作员</label><select id="hs-player">${players().map(p => option(p.id, p.name + (p.gm ? " · 主持人" : ""), p.id === view.playerId)).join("")}</select>`;
@@ -123,7 +126,7 @@
       byId("hs-order").hidden = !visible;
       if (!visible) return;
       const current = order().find(slot => slot.current) || order().find(slot => slot.actor === view.currentUnitId);
-      const text = view.phase === "acting" && current ? `现在轮到 ${unitName(current.actor)} · ${playerName(ownerOf(current))}` : view.phase === "enemy" ? "敌人行动中" : "为本回合选择行动顺序";
+      const text = (enemySeg ? "敌人回合（玩家阵营先动）：" : "") + (view.phase === "acting" && current ? `现在轮到 ${unitName(current.actor)} · ${playerName(ownerOf(current))}` : view.phase === "enemy" ? "敌人行动中" : "为本回合选择行动顺序");
       html(byId("hs-order"), `<div class="hs-turn" role="status">${esc(text)}</div><ol class="hs-strip">${order().map((slot, i) => {
         const movable = canMove(slot), actor = slot.actor || "", status = slot.done ? "已结束" : slot.locked ? "已用点数 · 锁定" : slot.current || actor === view.currentUnitId ? "当前" : "未行动";
         return `<li data-order-index="${i}" data-drag-actor="${esc(actor)}" draggable="${movable}" class="${slot.current || actor === view.currentUnitId ? "hs-current " : ""}${slotFixed(slot) ? "hs-locked" : ""}${!actor && view.phase !== "picking" ? " hs-vacated" : ""}"><span class="hs-slot-num">${i + 1}</span><div><b>${esc(actor ? unitName(actor) : "空位")}</b><small>${esc(actor ? `${playerName(ownerOf(slot))} · ${status}` : view.phase === "picking" ? "等待选择" : "已挪走")}</small></div>${view.phase === "acting" ? actingMoves(slot, i, movable) : movable ? `<div class="hs-moves">${button("前移", "move", `data-actor="${esc(actor)}" data-index="${i - 1}" aria-label="${esc(unitName(actor))}前移"`, !legalDestination(i, i - 1))}${button("后移", "move", `data-actor="${esc(actor)}" data-index="${i + 1}" aria-label="${esc(unitName(actor))}后移"`, !legalDestination(i, i + 1))}</div>` : ""}</li>`;

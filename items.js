@@ -580,6 +580,9 @@ function itemUseError(actor, itemId, target, zone) {
   if (itemZoneDist(actor.zone, target.zone) > R) return `${it.name}只能用在距离 ${R} 以内的目标。`;
   if (it.target === "ally") return itemPresent(target) && itemAllyOk(actor, target) ? null : `${it.name}要选在场的友方。`;
   if (!itemEnemyOk(actor, target)) return `${it.name}要选看得见、选得中的敌人。`;
+  // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，对敌人用的道具也只能用在嘲讽者身上（enemies.js · playerTauntTarget）
+  const taunt = typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
+  if (taunt && target.id !== taunt.id) return `${actor.name} 被 ${taunt.name} 嘲讽：只能对 ${taunt.name} 用`;
   const block = typeof lineBlocked === "function" ? lineBlocked(actor.zone, target.zone) : null;
   if (block) return `${it.name}打不到 ${target.name}：${block}`;
   if (it.kind === "stun" && typeof enemyRankOf === "function" && enemyRankOf(target) === "boss") return `${target.name} 是首领，闪光震撼弹对首领无效。`;

@@ -20,8 +20,10 @@
     return (u.focuses || []).map(f => "聚焦" + (LAYER_NAME[f.layerType] || f.layerType) + " " +
       (f.seq || []).map((e, i) => i === f.step ? "[" + (ELE_NAME[e] || e) + "]" : (ELE_NAME[e] || e)).join("→")).join(" · ");
   }
-  /** 投影过的单位 → 单位卡要的快照（字段和 game.js · snapUnit 一样；主机不发的就留空） */
-  function snapUnit(u) {
+  /** 阵营标记（PvP 第二步 #464，unit-card.js · factionMarks）：主机发来的阵营 id / 名字，场上有两个以上玩家阵营时才有 */
+  const factionMarksOf = units => (root.UnitCard && UnitCard.factionMarks ? UnitCard.factionMarks(units) : {});
+  /** 投影过的单位 → 单位卡要的快照（字段和 game.js · snapUnit 一样；主机不发的就留空）。marks：factionMarksOf 算好的阵营标记 */
+  function snapUnit(u, marks) {
     const d = u.display || {};
     const layers = (u.layers || []).map(l => ({ type: l.type || "flesh", cur: Math.max(0, Math.round(Number(l.current) || 0)), max: Math.max(0, Number(l.max) || 0) }));
     // 载具：和车合并的驾驶员画成车的卡片（主机 online-view.js 发来 vehicle）：卡片上的名字、等级、ATK 由 unit-card.js · headOf 按车写，和本机画面一样；
@@ -45,7 +47,8 @@
       iv: u.iv ? { hp: Number(u.iv.hp) || 0, atk: Number(u.iv.atk) || 0 } : null,
       race: u.race && u.race.race ? (u.race.branch ? u.race.race + "·" + u.race.branch : u.race.race) : "",
       racePerks: typeof racePerkLinesFor === "function" && u.race && u.race.race ? racePerkLinesFor(u.race.branch ? u.race.race + "·" + u.race.branch : u.race.race) : [],
-      badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : []
+      badges: root.HudIcons ? HudIcons.unitBadges(u, u.marks) : [],
+      faction: (marks && marks[u.id]) || null   // 阵营标记（#464）：只有一个玩家阵营时没有
     };
   }
   function snapProp(p) {
@@ -64,7 +67,8 @@
   /** 战场上要画的卡片：藏起来的单位（炮手、下潜……）和藏起来的配置物（有驾驶员的车：只画合并后的那张车的卡片）都不画 */
   function cardSnaps(data) {
     data = data || {};
-    return (data.units || []).filter(u => !u.hidden).map(snapUnit)
+    const units = (data.units || []).filter(u => !u.hidden), marks = factionMarksOf(units);
+    return units.map(u => snapUnit(u, marks))
       .concat((data.props || []).filter(p => !p.destroyed && !p.hidden).map(snapProp));
   }
   /** 区域的颜色和文字（和 app.js · fieldThemeClass / fieldTags 同样的判断；这里只看主机发来的展示字段，不碰规则） */
@@ -360,7 +364,8 @@
       if (root.HeroSheet && HeroSheet.hideTip && (ui.armed || ui.busy)) HeroSheet.hideTip();
       layout(data);
       paintZones(data, ui);
-      const units = (data.units || []).filter(u => !u.hidden).map(snapUnit);
+      const shown = (data.units || []).filter(u => !u.hidden), marks = factionMarksOf(shown);
+      const units = shown.map(u => snapUnit(u, marks));
       paintCards(data, ui, units);
       // 战场正上方的首领机制横幅（unit-card.js · paintBanner，和本地战斗画面同一套）
       if (root.UnitCard && UnitCard.paintBanner) UnitCard.paintBanner(field, units);

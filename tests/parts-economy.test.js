@@ -174,6 +174,8 @@ test("跑团存档带上图纸；摆队伍时按图纸重算", () => {
   const fs = require("node:fs"), path = require("node:path");
   const g = fs.readFileSync(path.join(H.ROOT, "game.js"), "utf8");
   assert.match(g, /weaponBlueprints: u\.weaponBlueprints \?/);
-  assert.match(g, /if \(s\.weaponBlueprints\) u\.weaponBlueprints =/);
+  // 摆队伍时把记忆盖回去的那一份搬到了 app.js · applyCampaignHero（#464：主持人「加入玩家角色」也用它），game.js · applyCampaignToField 调它
+  assert.match(fs.readFileSync(path.join(H.ROOT, "app.js"), "utf8"), /if \(s\.weaponBlueprints\) u\.weaponBlueprints =/);
+  assert.match(g, /applyCampaignHero\(u, s\)/);
   assert.match(fs.readFileSync(path.join(H.ROOT, "battle-commands.js"), "utf8"), /trpgSyncWeaponMods\(\)/);
 });

@@ -185,10 +185,12 @@
     if (cmd.type === "useItem") {
       // 开着友伤把对敌人用的道具用在队友身上（items.js · itemFriendlyFire，#432）：不计分数——超频针翻倍护盾这类让队友血量变多的也不算治疗
       const ff = typeof itemFriendlyFire === "function" && itemFriendlyFire(a, cmd.item, unitById(cmd.target));
+      const taunt = typeof playerTauntTarget === "function" ? playerTauntTarget(a) : null;   // 嘲讽对玩家（#464）：对嘲讽者用了道具也算出过手
       const notes = typeof trackHealBy === "function" && !ff
         ? trackHealBy(a, () => useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest))
         : useItemOn(a, cmd.item, unitById(cmd.target), cmd.dest);
       (notes || []).forEach(s => appendLog(s));
+      if (taunt && cmd.target === taunt.id && !(notes && notes.unused)) playerTauntDone(a, taunt);
       if (!a.dying && !(notes && notes.unused) && (a.bonus || 0) > 0) { a.bonus -= 1; if (typeof scoreSpend === "function") scoreSpend(a, 0, 1); }   // 濒死时用不了道具、道具没用出去（射程不够等），不扣附赠
       return;
     }

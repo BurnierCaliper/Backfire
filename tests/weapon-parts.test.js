@@ -87,7 +87,9 @@ test("改装槽进存档：跑团战役记忆和角色资料都带上", () => {
   assert.equal(w.atk, kolt.weaponAtk);
   const src = require("node:fs").readFileSync(require("node:path").join(H.ROOT, "game.js"), "utf8");
   assert.match(src, /weaponParts: u\.weaponParts \?/);
-  assert.match(src, /if \(s\.weaponParts\) u\.weaponParts =/);
+  // 读回记忆的那一份在 app.js · applyCampaignHero（#464 从 game.js · applyCampaignToField 搬过去共用）
+  assert.match(require("node:fs").readFileSync(require("node:path").join(H.ROOT, "app.js"), "utf8"), /if \(s\.weaponParts\) u\.weaponParts =/);
+  assert.match(src, /applyCampaignHero\(u, s\)/);
 });
 
 test("改装件固定加 atk：C / B 级 +1、A / S 级 +2，不随等级和属性变；两个槽叠加", () => {

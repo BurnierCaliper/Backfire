@@ -4,7 +4,8 @@
   "use strict";
   let adapter = {}, round = 0, manualAll = false;
   const metadata = new Map();
-  const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "copyUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn"].map(x => "gm." + x);
+  // addHero / removeHero：把玩家角色加入 / 移出战场（PvP 第二步 #464，docs/pvp.md 第 1.1 节）
+  const TYPES = ["spawnEnemy", "removeUnit", "editUnit", "copyUnit", "addProp", "editProp", "removeProp", "editGap", "setField", "setWeather", "setEncounter", "forceAttack", "setManual", "enemyAct", "enemyEndTurn", "addHero", "removeHero"].map(x => "gm." + x);
   const PROP_KINDS = ["button", "lever", "battery", "boom", "acid", "scrap", "turret", "ironwall", "scrapwall", "dome", "coral_branch", "coral_tentacle"];   // 沙珊瑚枝 / 触须：和沙漠遭遇同一套（props.js · desert.js）
   const WEATHERS = ["none", "heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
   const STATUS_NUM = ["burn"];
@@ -41,6 +42,17 @@
   function level(lv) { return number(lv, "等级", 1, 25, true); }
   function unit(id) { if (typeof id !== "string") fail("单位编号必须是字符串"); const u = unitById(id); if (!u) fail("没有这个单位"); return u; }
   function enemy(id, live = true) { const u = unit(id); if (u.isPlayer || (live && !present(u))) fail("没有这个可用敌人"); return u; }
+  /** 场上的玩家角色（武器人跟着持有者、护送对象不算） */
+  function hero(id) { const u = unit(id); if (!u.isPlayer || u.weaponOf || u.escort || (typeof isWeaponUnit === "function" && isWeaponUnit(u))) fail("只能移出玩家角色（武器人跟着角色一起）"); return u; }
+  /** 角色卡（livePartyCards 里不是武器的那些）；kit 不对返回 null */
+  function heroCard(kit) { return typeof kit === "string" && typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === kit && !c.weaponOf) || null : null; }
+  /** 队伍记忆里这张角色卡的那一份（跑团用过的才有；game.js · loadCampaignMem 经 battle.loadCampaign 取），没有返回 null */
+  function heroMemory(kit) {
+    let camp = null;
+    try { camp = root.BattleCommands ? root.BattleCommands.execute({ type: "battle.loadCampaign" }) : null; } catch (e) { camp = null; }
+    const row = camp && Array.isArray(camp.party) ? camp.party.find(s => s && s.kit === kit) : null;
+    return row ? copy(row) : null;
+  }
   function prop(id) { const p = (state.props || []).find(p => p.id === id); if (!p) fail("没有这个配置物"); return p; }
   function gapKeyCheck(k) { one(k, boardGapKeys(), "间隔"); }
   function requireHost(context) { if (typeof adapter.requireHost !== "function" || adapter.requireHost(context) !== true) fail("只有房间主持人可以操作", "gm_forbidden"); }
@@ -260,7 +272,8 @@
       addProp: ["kind", "zone", "level", "faction", "link"], editProp: ["id", "patch"], removeProp: ["id", "mode"],
       editGap: ["key", "patch"], setField: ["zone", "patch"], setWeather: ["weather", "sandDir", "phaseStep", "lock"],
       setEncounter: ["encounter", "zoneMode"], forceAttack: ["input"], setManual: ["actors", "enabled"],
-      enemyAct: ["actor", "action", "skill", "target", "picks", "dest"], enemyEndTurn: []
+      enemyAct: ["actor", "action", "skill", "target", "picks", "dest"], enemyEndTurn: [],
+      addHero: ["kit", "zone", "faction"], removeHero: ["actor"]
     };
     const type = cmd.type.slice(3); keys(cmd, ["type", "silent"].concat(fields[type]), "主持人指令");
     switch (type) {
@@ -294,6 +307,17 @@
         if (cmd.actors !== "all") { if (!Array.isArray(cmd.actors) || !cmd.actors.length || new Set(cmd.actors).size !== cmd.actors.length) fail("手动敌人列表非法"); cmd.actors.forEach(id => enemy(id)); } break;
       case "enemyAct": readOnly(() => checkEnemyAct(cmd)); break;
       case "enemyEndTurn": if (!state.combatStarted || state.combatPhase !== "enemy") fail("还没有到敌人回合"); if (typeof adapter.enemyEndTurn !== "function") fail("房间尚未接入敌人回合协调"); break;
+      case "addHero": {
+        // 任何一张角色卡（房间里有人在用的、没人用的都行）；同一张已经在场上（含倒下的）不能再加一份
+        const card = heroCard(cmd.kit); if (!card) fail("没有这张角色卡");
+        zone(cmd.zone);
+        if ((state.units || []).some(u => u.isPlayer && !u.weaponOf && !u._removed && u.kit === cmd.kit)) fail(card.name + " 已经在场上，同一张角色卡不能再加一份");
+        const rec = typeof LEDGER !== "undefined" && LEDGER && LEDGER.heroes ? LEDGER.heroes[cmd.kit] : null;
+        if (rec && rec.dead) fail(card.name + " 已经死亡，不能加入战场");
+        if (own(cmd, "faction") && (typeof cmd.faction !== "string" || typeof playerFactionInfo !== "function" || !playerFactionInfo(cmd.faction))) fail("没有这个玩家阵营");
+        break;
+      }
+      case "removeHero": hero(cmd.actor); break;
     }
     return true;
   }
@@ -419,6 +443,18 @@
           BattleCommands.execute({ type: cmd.action === "move" ? "move" : "skill", actor: cmd.actor, ...(cmd.action === "move" ? { dest: cmd.dest } : { skill: cmd.skill, target: cmd.target || null, picks: cmd.picks || {} }) });
           notes.push(...sweepDeadEnemies()); publicSummary = `主持人：操控 ${unit(cmd.actor).name} 行动。`; break;
         case "enemyEndTurn": adapter.enemyEndTurn(context); publicSummary = "主持人：结束了敌人回合。"; break;
+        case "addHero": {
+          // 带着角色卡原本的等级、装备、加点（队伍记忆），分到选的玩家阵营（app.js · spawnHeroCard）
+          const u = spawnHeroCard(cmd.kit, cmd.zone, heroMemory(cmd.kit), own(cmd, "faction") ? cmd.faction : null);
+          if (!u) fail("这张角色卡现在不能加入战场");
+          result = { id: u.id };
+          publicSummary = `主持人：在 ${cmd.zone} 区加入玩家角色 ${u.name} Lv${u.level}。`; break;
+        }
+        case "removeHero": {
+          // 和「移出」敌人一样：不算击杀，武器人跟着一起离场（app.js · removeHeroUnit）
+          const u = hero(cmd.actor); publicSummary = `主持人：移出 ${u.name}。`;
+          result = { ids: removeHeroUnit(u) }; break;
+        }
       }
     });
     notes.push(...captured);

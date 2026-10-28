@@ -91,9 +91,10 @@
     cover: { gap: 8, min: 12, max: 0.45, room: 0.3, steps: [1, 0.5, 0] },
     drag: 5,
     // 白卡（#316）的快照只带 unit-card.js 画卡要读的这些字段（UnitCard.create / update / headOf），别的一概不带——坚毅生命不在里面
+    // faction：阵营标记（PvP 第二步 #464，unit-card.js · factionMarks：只有阵营名字和颜色序号）
     cardKeys: ["id", "name", "vehicle", "level", "atk", "race", "racePerks", "iv", "isPlayer", "isProp", "isDevice", "neutral", "neutralTags",
       "layers", "highEnergy", "overkill", "killBig", "upOnShp", "def", "defMax", "dur", "ap", "apMax", "bonus", "bonusMax", "flying", "hung",
-      "status", "badges", "res", "intents", "marks", "casts", "stunned", "dying", "dead", "hidden"],
+      "status", "badges", "res", "intents", "marks", "casts", "stunned", "dying", "dead", "hidden", "faction"],
     quality: {
       storageKey: "backfire-hd2d-quality",
       choices: ["auto", "high", "low"], dflt: "auto",
@@ -234,9 +235,12 @@
     const live = (Array.isArray(pv.props) ? pv.props : []).filter(p => p && !p.destroyed && !p.hidden);
     const props = OB && typeof OB.snapProp === "function" && OV && typeof OV.projectUnit === "function"
       ? live.map(p => OV.projectUnit(OB.snapProp(p))).filter(Boolean) : [];
-    // 白卡（#316）：3D 铭牌画旧画面的单位卡，快照和联机玩家旧画面的单位卡同一份（online-battle.js · snapUnit / snapProp，只读这个包）
+    // 白卡（#316）：3D 铭牌画旧画面的单位卡，快照和联机玩家旧画面的单位卡同一份（online-battle.js · snapUnit / snapProp，只读这个包）；
+    // 阵营标记（#464）也照旧画面算（unit-card.js · factionMarks：场上有两个以上玩家阵营时才有）
+    const shown = pv.units.filter(u => u && !u.hidden);
+    const marks = root.UnitCard && typeof root.UnitCard.factionMarks === "function" ? root.UnitCard.factionMarks(shown) : {};
     const cards = OB && typeof OB.snapUnit === "function" && typeof OB.snapProp === "function"
-      ? cardsOf(pv.units.filter(u => u && !u.hidden).map(u => OB.snapUnit(u)).concat(live.map(p => OB.snapProp(p)))) : null;
+      ? cardsOf(shown.map(u => OB.snapUnit(u, marks)).concat(live.map(p => OB.snapProp(p)))) : null;
     return Object.assign({}, pv, { units: pv.units.filter(Boolean).concat(props), cards });
   }
   /**

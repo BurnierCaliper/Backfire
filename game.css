@@ -360,6 +360,24 @@ button:focus-visible { outline: 2px solid var(--bone); outline-offset: 2px; }
 }
 .u-lv { font-family: var(--num); font-size: 12px; color: var(--ink-soft); }
 .u-atk { margin-left: auto; font-family: var(--num); font-size: 12px; color: var(--ink-soft); }
+/* 阵营标记（PvP 第二步 #464，unit-card.js · factionMarks）：场上有两个以上玩家阵营时名字前面的小方块，写阵营名字的头一个字；
+   玩家阵营按顺序上色（默认阵营总是第 0 个颜色），非玩家单位（敌人阵营）灰色。只有一个玩家阵营时不画 */
+.u-fac {
+  --fac: #5b8def;
+  flex: none; align-self: center;
+  min-width: 16px; height: 16px; padding: 0 2px; border-radius: 3px;
+  font: 700 11px/16px var(--num, sans-serif); text-align: center; color: #fff;
+  background: var(--fac); box-shadow: 0 0 0 1px rgba(0, 0, 0, .35);
+}
+.u-fac[data-tone="0"] { --fac: #3d7be0; }
+.u-fac[data-tone="1"] { --fac: #d9473f; }
+.u-fac[data-tone="2"] { --fac: #2a9d5c; }
+.u-fac[data-tone="3"] { --fac: #c9940c; }
+.u-fac[data-tone="4"] { --fac: #8d5ad6; }
+.u-fac[data-tone="5"] { --fac: #1f9aa3; }
+.u-fac[data-tone="6"] { --fac: #e0702b; }
+.u-fac[data-tone="7"] { --fac: #c4498f; }
+.u-fac[data-tone="foe"] { --fac: #6f6a63; }
 
 /* 分层血条：外层在右边，先掉 */
 .u-hp {
