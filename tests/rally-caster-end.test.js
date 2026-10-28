@@ -1,4 +1,4 @@
-// 全队集结：施放者晕眩 / 濒死 / 死亡时全体增益结束（主人确认：看施放者）
+// 全队集结：施放者晕眩 / 濒死 / 死亡时，清掉这名施放者给每个队员的那一份（别人的份额保留）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -126,7 +126,7 @@ test("闪光震撼弹：施放者被 itemStun → 集结立刻结束", () => {
   assert.ok(notes.some(s => /全队集结结束：施放者晕眩/.test(s)), notes.join("\n"));
 });
 
-test("捏碎颅骨：力竭 3 施放者直接死亡 → 集结结束（beginRound 也能兜住）", () => {
+test("捏碎颅骨：力竭 3 施放者直接死亡 → 集结结束", () => {
   const { c, y, h } = field();
   castRally(c, y);
   c.S.state.exhaustTier = 3;   // exhaustTierOf 读 state.exhaustTier
@@ -189,10 +189,8 @@ test("载具驾驶员标记没攒满：stunShrugged 时集结不结束", () => {
   y._bossMarked = false;
   assert.equal(!!c.isBossUnit(y), true);
   assert.equal(!!c.stunShrugged(y), true);
-  y.stunned = true;
   const notes = [];
-  const ended = c.endRallyIfCasterDown(y, notes);
-  assert.equal(ended, false);
+  c.dealBreak(y, 99, "physical", notes, "测试");   // 真打一次：架势打空，但标记没攒满
   assert.equal(!!y.resources.rallyOn, true);
   assert.equal(h.rallyAtk, 15);
   assert.ok(!notes.some(s => /全队集结结束/.test(s)));
@@ -285,7 +283,7 @@ test("两人全队集结叠加：直伤 +30；一人倒下留 +15；两人都倒
   assert.ok(!h.rallyBy[y.id] && h.rallyBy[m.id]);
   assert.equal(c.effectiveAtk(h, S.units), beforeEff + 15);
 
-  // 薄荷也倒下：全清
+  // 诺拉也倒下：全清
   c.dealBreak(m, 99, "physical", notes, "测试");
   assert.equal(!!m.resources.rallyOn, false);
   assert.equal(h.rallyAtk || 0, 0);
@@ -348,4 +346,69 @@ test("直伤集结结束：atk 托底不用 effectiveAtk（不把 bond/duet 写�
   assert.equal(h.rallyAtk || 0, 0);
   assert.equal(h.atk, base, "清掉后 u.atk 回到基础，bond/duet 仍只在 effectiveAtk");
   assert.ok(!h.bondAtk || h.bondAtk === 10);
+});
+
+function twoCasters(seed, heluRole) {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["yuito", "nora", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 1 }], seed });
+  c.startCombat();
+  const S = c.S.state;
+  const y = kit(S, "yuito"), m = kit(S, "nora"), h = kit(S, "helu");
+  for (const u of [y, m, h]) u.zone = 1;
+  y.roles = { primary: "辅助", secondary: "辅助" }; y.level = 15;
+  m.roles = { primary: "辅助", secondary: "辅助" }; m.level = 15;
+  h.roles = Object.assign({}, h.roles, { primary: heluRole });
+  c.resetBattleFlags(y); y.ap = 3; y.bonus = 3;
+  c.resetBattleFlags(m); m.ap = 3; m.bonus = 3;
+  return { c, S, y, m, h };
+}
+
+test("两人集结·日志：一人倒下点名施放者、注明另一份还在；辅助份额不写", () => {
+  const { c, y, m, h } = twoCasters("RALLY-LOG", "坦克");
+  castRally(c, y); castRally(c, m);
+  const notes = [];
+  c.dealBreak(y, 99, "physical", notes, "测试");
+  const log = notes.join("\n");
+  assert.equal(h.resources.rallyDr, 1, "诺拉那份 −15% 还在");
+  assert.match(log, new RegExp(`${h.name} 失去${y.name}的全队集结增益（${m.name}的还在）`), log);
+  assert.ok(!notes.some(s => s.startsWith(`${m.name} 失去`)), "诺拉拿到的是辅助份额，没有效果，不写：\n" + log);
+  assert.ok(!/增益结束。/.test(log), log);
+  const iEnd = notes.findIndex(s => /全队集结结束：施放者晕眩/.test(s));
+  const iLose = notes.findIndex(s => /失去/.test(s));
+  assert.ok(iEnd >= 0 && iEnd < iLose, "先写集结结束，再写各人失去：\n" + log);
+});
+
+test("施放者倒下时已死亡的队员：份额也清掉，GM 复活后不再每回合 +1", () => {
+  const { c, y, h } = field({ heluRole: "异常" });
+  castRally(c, y);
+  assert.ok(h.rallyBy && h.rallyBy[y.id]);
+  h.dead = true; h.dying = false;
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(!!y.resources.rallyOn, false);
+  assert.ok(!h.rallyBy || !h.rallyBy[y.id], "死亡队员身上的份额也清了");
+  c.dmRevive(h);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 1, "复活后只有正常 1 个附赠");
+});
+
+test("异常集结：本回合已用掉 1 个附赠后施放者倒下（RALLY_REVOKE_BONUS_ON_DOWN 决定是否立刻收回）", () => {
+  const { c, y, h } = field({ heluRole: "异常" });
+  castRally(c, y);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 2);
+  h.bonus -= 1;   // 玩家回合用掉 1 个，留 1 个协助格挡
+  c.dealBreak(y, 99, "physical", [], "测试");
+  const revoke = require("vm").runInContext("RALLY_REVOKE_BONUS_ON_DOWN", c);
+  assert.equal(h.bonus, revoke ? 0 : 1);
+  c.refreshEconomy(h);
+  assert.equal(h.bonus, 1, "下一回合起不再加集结附赠");
+});
+
+test("GM 强制失衡：集结结束写进日志", () => {
+  const { c, y, h } = field();
+  castRally(c, y);
+  const notes = [];
+  c.dmForceStun(y, notes);
+  assert.equal(h.rallyAtk || 0, 0);
+  assert.ok(notes.some(s => /全队集结结束：施放者晕眩/.test(s)), notes.join("\n"));
 });

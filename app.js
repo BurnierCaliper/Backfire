@@ -3586,14 +3586,14 @@ function rasUnstableHit(target, res, notes) {
     target.upOnShp = false;
     target.dying = false;
     target.dead = true;
-    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
     notes.push(wasUp ? "不稳态：拉斯缪尔起身后再次受到伤害，立即死亡。" : "不稳态：拉斯缪尔受到伤害，力竭 3 下直接死亡。");
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   } else if (!target.dying) {
     target.dying = true;
     noteKnockdown(target);   // 战场数据：倒地次数
     if (typeof clearStunOnDown === "function") clearStunOnDown(target);
-    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
     notes.push("不稳态：拉斯缪尔受到伤害，倒地陷入濒死。");
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(target, notes);
   }
 }
 
@@ -4366,6 +4366,14 @@ function scrapTargets(p, u) {
     (typeof attackFoe === "function" ? attackFoe(u, t) : !!t.isPlayer !== !!u.isPlayer) && t.kit !== "ironwall" &&
     zoneDist(Number(p.zone), Number(t.zone), state.zoneMode) <= 2 &&
     !lineBlocked(p.zone, t.zone) && !(t.statuses && t.statuses.hide) && !t.submerged && !(t.dying && !t.upOnShp));
+}
+/** 音爆 / 探测模式自动触发的碎渣机炮打谁（#437，作者 10/27）：照旧挑名单（scrapTargets，场上单位的顺序）里的第一个。
+ *  a 开着友伤、名单里有 a 以外的队友时（我方排在敌人前面，挑第一个就一定先打队友），改成在整份名单（敌人和队友一起）里随机挑一个，
+ *  用游戏的种子随机数（Math.random：回放、联机同一种子结果一样）。开关关着、名单里没有队友时照旧挑第一个，不多掷随机数 */
+function scrapAutoTarget(p, a) {
+  const list = scrapTargets(p, a);
+  if (!list.some(t => typeof friendlyFireHit === "function" && friendlyFireHit(a, t))) return list[0] || null;
+  return list[Math.floor(Math.random() * list.length)];
 }
 /** 操控碎渣机炮（消耗 1 行动点）：玩家和狂徒都能用 */
 function controlScrap(a, p, t) {
@@ -6431,8 +6439,9 @@ function ecmoProbeTrigger(a, notes) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
-      const t = scrapTargets(p, a)[0];
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑），
+      // 名单里有队友就在敌人和队友里随机挑（scrapAutoTarget，#437）
+      const t = scrapAutoTarget(p, a);
       if (!t) { notes.push(`探测模式触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -6994,16 +7003,16 @@ function applyKnockdown(unit, notes, opt) {
       unit.dead = true;
       unit.upOnShp = false;
       unit.dying = false;
-      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       notes.push(`${unit.name} 起身中，${opt.cause ? opt.cause + "打光了坚毅生命" : "坚毅生命耗尽"}，死亡。`);
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       return "dead";
     }
     if (unit.dying) return "dying";
     if (exhaustTierOf(unit) >= 3) {
       unit.dead = true;
       unit.dying = false;
-      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       notes.push(`${unit.name} 力竭 3：被击倒后立刻死亡。`);
+      if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
       return "dead";
     }
     // 还魂（feats.js）：每场一次，留 1 点生命并免伤到自己下回合开始（高能自爆这种秒杀也一样救）
@@ -7012,9 +7021,9 @@ function applyKnockdown(unit, notes, opt) {
     // 战场数据：倒地次数（被队友友伤打倒的不算，#428；对敌人用的道具用在队友身上引起的倒地也不算，items.js · itemFriendlyFireNow，#432）
     if (!opt.friendlyFire && !(typeof itemFriendlyFireNow === "function" && itemFriendlyFireNow(unit))) noteKnockdown(unit);
     clearStunOnDown(unit);
-    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
     notes.push(opt.cause ? `${unit.name} ${opt.cause}导致最内层归零，陷入濒死。`
       : `${unit.name} 最内层生命归零，陷入濒死。不能靠治疗起身，可消耗起身改用坚毅生命继续战斗。`);
+    if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(unit, notes);
     return "dying";
   }
   unit.dead = true;
@@ -8028,7 +8037,16 @@ function syncRallyAggregates(u) {
   u.rallyBuff = entries[0].role;
 }
 
-/** 清掉一名施放者在该队员身上的那一份集结增益（幂等；atk 不低于 baseEffectiveAtk+itemAtkBonus+剩余 rallyAtk） */
+/** 施放者倒下时，是否立刻收回本回合已按其份额发下的异常附赠（+1）。
+ *  true = 立刻扣回（当前行为；若队员这回合已用掉 1 个附赠，可能扣掉留着协助格挡的那个）；
+ *  false = 本回合已发的保留，refreshEconomy 从下一回合起不再加。待主人确认，改这一个常量即可。 */
+const RALLY_REVOKE_BONUS_ON_DOWN = true;
+
+/** 会产生实际效果的集结职责（辅助等没有效果的份额，结束时不写日志） */
+const RALLY_EFFECT_ROLES = ["直伤", "击破", "坦克", "护卫", "生存", "环境手", "控场", "异常"];
+
+/** 清掉一名施放者在该队员身上的那一份集结增益（幂等；atk 不低于 baseEffectiveAtk+itemAtkBonus+剩余 rallyAtk）。
+ *  lines 给了就写日志：点名施放者；还有别人的份额时注明仍有效；无效果的份额（如辅助）不写。 */
 function clearRallyShare(u, casterId, lines) {
   if (!u || !u.rallyBy) return false;
   const cid = String(casterId);
@@ -8037,6 +8055,7 @@ function clearRallyShare(u, casterId, lines) {
   const atkG = Number(e.atkGranted) || 0;
   const bonusG = Number(e.bonusGranted) || 0;
   const wasEnv = e.role === "环境手" || e.env;
+  const hadEffect = RALLY_EFFECT_ROLES.includes(e.role) || !!(e.tank || e.env || atkG || bonusG);
   delete u.rallyBy[cid];
   if (!Object.keys(u.rallyBy).length) delete u.rallyBy;
 
@@ -8047,8 +8066,8 @@ function clearRallyShare(u, casterId, lines) {
       + (Number(u.itemAtkBonus) || 0) + (Number(u.rallyAtk) || 0);
     u.atk = Math.max(floor, (Number(u.atk) || 0) - atkG);
   }
-  if (bonusG) {
-    // Q1：refreshEconomy 每回合按份额加过；结束时精确扣回本施放者那份，不误伤正常附赠
+  if (bonusG && RALLY_REVOKE_BONUS_ON_DOWN) {
+    // Q1：refreshEconomy 每回合按份额加过。附赠不分来源：本回合若已用掉 1 个，这里扣的可能是正常那个
     u.bonus = Math.max(0, (Number(u.bonus) || 0) - bonusG);
   }
   syncRallyAggregates(u);
@@ -8057,11 +8076,17 @@ function clearRallyShare(u, casterId, lines) {
       .some(x => x && x.rallyBy && Object.values(x.rallyBy).some(en => en && (en.role === "环境手" || en.env)));
     if (!stillEnv && state.weatherLock && /集结锁定$/.test(String(state.weatherLock))) state.weatherLock = null;
   }
-  if (lines) lines.push(`${u.name} 的全队集结增益结束。`);
+  if (lines && hadEffect) {
+    const caster = (state.units || []).find(x => x && String(x.id) === cid);
+    const cName = caster ? caster.name : "施放者";
+    const others = Object.keys(u.rallyBy || {}).map(k => (state.units || []).find(x => x && String(x.id) === k))
+      .filter(Boolean).map(x => x.name);
+    lines.push(`${u.name} 失去${cName}的全队集结增益${others.length ? `（${others.join("、")}的还在）` : ""}。`);
+  }
   return true;
 }
 
-/** 清掉一名队员身上全部集结增益（所有施放者份额）；reset / 幂等再清走这里 */
+/** 清掉一名队员身上全部集结增益（所有施放者份额）。正式流程不调它（resetBattleFlags 直接删字段），供测试 / 工具一次清空 */
 function clearRallyBuff(u, lines) {
   if (!u) return;
   const ids = Object.keys(u.rallyBy || {});
@@ -8107,9 +8132,10 @@ function endRallyIfCasterDown(u, notes) {
   u.resources.rallyOn = false;
   const lines = notes || [];
   const cid = u.id;
-  fieldUnits().filter(x => x && x.isPlayer).forEach(x => clearRallyShare(x, cid, lines));
   const why = u.dead ? "死亡" : (u.dying ? "濒死" : "晕眩");
-  lines.push(`全队集结结束：施放者${why}。`);
+  lines.push(`${u.name} 的全队集结结束：施放者${why}。`);
+  // 含已死亡的队员：否则 GM 复活后份额还在，每回合继续 +1 附赠 / 整场 +15
+  (state.units || []).filter(x => x && x.isPlayer).forEach(x => clearRallyShare(x, cid, lines));
   return true;
 }
 
@@ -8127,7 +8153,7 @@ function applyRallyBuff(u, lines, caster) {
   } else if (p === "异常") {
     e.bonusGranted = 1;
     u.bonus = (u.bonus || 0) + 1;
-    (lines || []).push(`${u.name} 异常集结：附赠 +1。`);
+    (lines || []).push(`${u.name} 异常集结：每回合附赠 +1。`);
   } else if (p === "击破") {
     e.breakGranted = 1;
     (lines || []).push(`${u.name} 击破集结：造成击破 +1。`);
@@ -9083,7 +9109,8 @@ function triggerMagnetShield(broken) {
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
   const dest = magnetPushDest(c.zone);
   notes.push(`磁场护盾：${broken.name} 上由川川/哔哩哩施加的护盾被破坏，效果触发后解除。同区敌人${dest != null ? `被推向 ${dest} 区` : "无处可推"}并各受 1 击破。`);
-  visibleEnemies(c.zone).filter(u => !ignoresAoe(u)).forEach(u => {
+  // 川川开着友伤（enemies.js · friendlyFireHit，#437）：同区川川以外的队友也被推开、各受 1 击破（照常结算，不计分数）
+  visibleEnemies(c.zone, c).filter(u => !ignoresAoe(u)).forEach(u => {
     if (dest != null) displaceTo(u, dest, notes, "被磁场护盾推开");   // #44：走标准推人逻辑（墙、空隙、深渊、流沙……照常结算）
     dealBreak(u, 1, "electric", notes, "磁场护盾");
   });
@@ -9791,8 +9818,9 @@ function ecmoBoomTriggerProps(a, lines) {
     const picks = { dest: z, act: "prop:" + p.id };
     if (p.kind === "battery") picks.mode = "boom";
     if (p.kind === "scrap") {
-      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑）
-      const t = scrapTargets(p, a)[0];
+      // 自动挑名单里的第一个（场上单位的顺序）；a 开着友伤（#432）时 a 以外的队友也在名单里（scrapTargets 按 attackFoe 挑），
+      // 名单里有队友就在敌人和队友里随机挑（scrapAutoTarget，#437）
+      const t = scrapAutoTarget(p, a);
       if (!t) { lines.push(`音爆触发 ${p.name}：没有打得到的敌人。`); return; }
       picks.target = t.id;
     }
@@ -14596,7 +14624,8 @@ function runSkillInner(id, optRun) {
         const allies = fieldUnits().filter(u => u.isPlayer && !u.dead && !u.hidden && !u.fused && Number(u.zone) === z);
         if (c === "red") {
           lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
-          visibleEnemies(z).forEach(u => applyInstantEffect(u, "melt", lines));
+          // 龙哥开着友伤（enemies.js · friendlyFireHit，#437）：同区龙哥以外的队友也熔融；红弹治疗照旧给同区全部友方
+          visibleEnemies(z, a).forEach(u => applyInstantEffect(u, "melt", lines));
           allies.forEach(u => longgeBulletHeal("red", u, lines));
         } else {
           lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
@@ -15036,11 +15065,11 @@ function dmFillDef(u) {
   u._imbalanceLock = false;
 }
 
-function dmForceStun(u) {
+function dmForceStun(u, notes) {
   if (u.trainingDummy) return;   // 训练假人不会失衡
   u.def = 0;
   u.stunned = true;
-  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
 }
 
 function dmRevive(u) {

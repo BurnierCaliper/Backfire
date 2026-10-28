@@ -103,7 +103,8 @@ function bpAtkAfter(mod, base, bigKill) {
   if (mod.bigKill) a += Number(bigKill) || 0;
   return Math.max(0, a);
 }
-/** effectiveAtk 用：在基础 atk 上套图纸（atk 加值、比例、大杀器）和同区敌人的「近距离压制」 */
+/** effectiveAtk 用：在基础 atk 上套图纸（atk 加值、比例、大杀器）和同区敌人的「近距离压制」。
+ *  装着近距离压制单元的人开着友伤（enemies.js · friendlyFireHit，#437）时，同区他以外的队友也吃这一下（他自己不吃） */
 function bpAtkAdjust(unit, base) {
   if (!bpActive() || !unit) return base;
   let atk = base;
@@ -114,11 +115,10 @@ function bpAtkAdjust(unit, base) {
     const kit = unit.weaponOf ? unit.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(unit) : null);
     if (kit) atk += bigKillAtk(kit);
   }
-  if (!unit.isPlayer) {
-    const sup = (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(unit.zone))
-      .reduce((m, u) => Math.max(m, Number(bpMod(u).suppress) || 0), 0);
-    atk -= sup;
-  }
+  const sup = (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && Number(u.zone) === Number(unit.zone) &&
+    (!unit.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(u, unit))))
+    .reduce((m, u) => Math.max(m, Number(bpMod(u).suppress) || 0), 0);
+  atk -= sup;
   return Math.max(0, atk);
 }
 
@@ -301,9 +301,11 @@ function bpAfterEnemyMove(mover, notes) {
     notes.push(`稳妥的距离：${mover.name} 走进来，${u.name} 自动退到 ${dest} 区。`);
   });
 }
-/** 借机攻击单元：敌人离开你所在的区时，自动攻击 atk+1d6（武器属性） */
+/** 借机攻击单元：敌人离开你所在的区时，自动攻击 atk+1d6（武器属性）。
+ *  你开着友伤（enemies.js · attackFoe，#437）时，你以外的队友离开也一样挨这一下（照常结算，不计分数） */
 function bpLeaveOpportunity(u, mover, notes) {
-  if (!u || !u.isPlayer || !mover || mover.isPlayer || !bpMod(u).oppAttack) return;
+  if (!u || !u.isPlayer || !mover || !bpMod(u).oppAttack) return;
+  if (!(typeof attackFoe === "function" ? attackFoe(u, mover) : !mover.isPlayer)) return;
   const kit = u.weaponOf ? u.kit : (typeof heldWeaponKit === "function" ? heldWeaponKit(u) : null);
   const card = kit && typeof livePartyCards === "function" ? livePartyCards().find(c => c.kit === kit) : null;
   const element = (card && card.suggest && card.suggest.element) || (u.suggest && u.suggest.element) || "physical";

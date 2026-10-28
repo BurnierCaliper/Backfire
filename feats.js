@@ -747,13 +747,15 @@ function featAfterBlock(helper, attacker, target, extra, flags) {
   if (displaceTo(attacker, dest, extra, "被推开")) extra.push(`推搡：${helper.name} 挡下后把 ${attacker.name} 推到 ${dest} 区。`);
 }
 
-/** 警戒：敌人走进有警戒的人所在的区（app.js · doMoveInner）。留着附赠动作就打它一下 */
+/** 警戒：敌人走进有警戒的人所在的区（app.js · doMoveInner）。留着附赠动作就打它一下。
+ *  有警戒的人开着友伤（enemies.js · friendlyFireHit，#437）时，他以外的队友走进来也挨这一下（照常结算，不计分数）：
+ *  敌人照旧只在敌方回合触发；队友只在我方回合走得动（app.js · canControlUnit），走进来就触发，不看是谁的回合 */
 function featAlertOnEnter(unit, notes) {
-  if (!unit || unit.isPlayer || unit.dead || state.combatPhase !== "enemy") return;
+  if (!unit || unit.dead || (!unit.isPlayer && state.combatPhase !== "enemy")) return;
   // 只对和自己敌对的单位触发（友军、中立生物不算）；同区每个有警戒的人各自出手，各自扣自己的附赠动作
   (state.units || []).filter(u => u.isPlayer && !u.dead && !u.dying && !u.stunned && !u.hidden &&
     Number(u.zone) === Number(unit.zone) && featHas(u, "alert") && (Number(u.bonus) || 0) >= 1 &&
-    (typeof hostileTo !== "function" || hostileTo(u, unit))).forEach(u => {
+    (unit.isPlayer ? typeof friendlyFireHit === "function" && friendlyFireHit(u, unit) : (typeof hostileTo !== "function" || hostileTo(u, unit)))).forEach(u => {
     if (unit.dead) return;
     u.bonus -= 1;
     notes.push(`${u.name} 警戒：消耗 1 附赠动作，对走进来的 ${unit.name} 出手。`);
