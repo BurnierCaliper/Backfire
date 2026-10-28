@@ -7387,16 +7387,20 @@ function tryOxAutoBlock(attacker, target, atkRange) {
 
 /** job：正在等格挡的那一击；已经试过（失败）的人不再列出（连续协助格挡）。
  *  打这一击的人（job.attackerId）不能格挡自己的攻击（开着友伤打队友时他也在我方名单里，#428）。
- *  只有和被打的人同一个玩家阵营的才能帮忙挡（enemies.js · samePlayerFaction，#445；没配置阵营时都在「我方」，照旧） */
+ *  只有被打的人的自己人才能帮忙挡：同一个玩家阵营，或者单独设成友好的玩家阵营（enemies.js · teammateOf，#445 只认同阵营，#463 起友好的也算；
+ *  掩护 / 挺身的免费格挡也走这里）；友好不传递时不替一个自己人去挡另一个自己人（打的人是别的、和自己友好的阵营的：enemies.js · otherFactionFriend）。
+ *  没配置阵营时都在「我方」，照旧 */
 function eligibleBlockers(target, job) {
   if (!target || !target.isPlayer) return [];
   const tried = ((job && job.tried) || []).concat(job ? [job.attackerId, job.fakeAttacker && job.fakeAttacker.creditTo].filter(Boolean) : []);
+  const attacker = job ? blockJobAttacker(job) : null;
+  const sideOk = (u) => typeof teammateOf !== "function" || (teammateOf(target, u) && !otherFactionFriend(u, attacker));
   const crushOut = (u) => !(typeof isCrushing === "function" && isCrushing(u));
   // 倒下的不能格挡：死亡的（倒下的武器人、坚毅耗尽的角色）；濒死但起不来的（力竭、坚毅耗尽）也不给「起身并格挡」
   const canStand = (u) => !u.dead && !(u.dying && !u.upOnShp && standUpBlocked(u));
   return state.units.filter(u =>
     u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
-    (typeof samePlayerFaction !== "function" || samePlayerFaction(u, target)) &&
+    sideOk(u) &&
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
     blockChance(u) != null && tried.indexOf(u.id) < 0 &&
@@ -7589,9 +7593,9 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
         notes.push(`全反击：把伤害与击破反打给 ${attacker.name}。`);
       }
     }
-    // 防守反击不去打自己人：友好不传递（#460），放的人可能和格挡者友好、和进攻者也友好（进攻者在别的、和自己友好的阵营）——这个人不追加。
-    // 只有一个玩家阵营时都在同一个阵营，这一条不拦
-    const strikeOk = u => !(attacker && attacker.isPlayer && !samePlayerFaction(u, attacker) && teammateOf(u, attacker));
+    // 防守反击不去打自己人：友好不传递（#460），放的人可能和格挡者友好、和进攻者也友好（进攻者在别的、和自己友好的阵营）——这个人不追加
+    // （enemies.js · otherFactionFriend，协助格挡不替别人挡这样的进攻者也是这个判断，#463）。只有一个玩家阵营时都在同一个阵营，这一条不拦
+    const strikeOk = u => !otherFactionFriend(u, attacker);
     const striker = fieldUnits().find(u => u.isPlayer && !u.dead && u.resources && u.resources.guardStrike && teammateOf(u, helper) && strikeOk(u));
     if (striker && attacker && !striker.resources.guardStrikeUsed) {
       striker.resources.guardStrikeUsed = true;
@@ -8709,7 +8713,8 @@ function dealToInner(attacker, target, opt) {
       target = guard;
     }
   }
-  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算，范围攻击每人各掷）；成功就由车（驾驶员）承受这次攻击
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算——场上有两个以上玩家阵营时不算，#463；范围攻击每人各掷）；
+  // 成功就由车（驾驶员）承受这次攻击。玩家开的车按驾驶员的玩家阵营（vehicle.js · vehicleGuards / vehicleGuard）
   if (target && attacker && typeof vehicleGuard === "function") {
     const vg = vehicleGuard(attacker, target, opt);
     if (vg) {

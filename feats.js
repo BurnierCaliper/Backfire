@@ -693,10 +693,11 @@ function featUnbowedReset(u) {
 function featIronwallDeclarers(target, attacker) {
   if (!target || !target.isPlayer || typeof state === "undefined") return [];
   const self = attacker ? [attacker.id, attacker.creditTo].filter(Boolean) : [];
-  // 和协助格挡一样，只有同一个玩家阵营的能替他挡（enemies.js · samePlayerFaction，#445；没配置阵营时都在「我方」，照旧）
+  // 和协助格挡（app.js · eligibleBlockers）同一个判断：被打的人的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#463）能替他挡，
+  // 友好不传递时不替一个自己人去挡另一个自己人（enemies.js · otherFactionFriend）；没配置阵营时都在「我方」，照旧
   return (state.units || []).filter(u => u.isPlayer && !u.dead && !u.hidden && !u.stunned && !(u.dying && !u.upOnShp) &&   // 失衡中不能宣布
     Number(u.zone) === Number(target.zone) && featOnceLeft(u, "ironwall") && !self.includes(u.id) &&
-    (typeof samePlayerFaction !== "function" || samePlayerFaction(u, target)));
+    (typeof teammateOf !== "function" || (teammateOf(target, u) && !otherFactionFriend(u, attacker))));
 }
 
 /** 冲阵 / 硬骨头 / 无可阻挡：一击的击破加成（app.js · dealTo）。isMelee：这一击是近距离（同区）攻击 */
