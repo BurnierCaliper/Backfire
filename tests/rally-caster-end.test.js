@@ -75,8 +75,8 @@ test("全队集结：施放者濒死 → 全体加成结束", () => {
   assert.ok(notes.some(s => /全队集结结束：施放者濒死/.test(s)), notes.join("\n"));
 });
 
-test("异常集结：持续期间每回合 +1 附赠；倒下精确扣回不误伤正常附赠", () => {
-  // Q1：refreshEconomy 按 rallyBy 份额每回合加；倒下 clearRallyShare 扣 bonusGranted
+test("异常集结：持续期间每回合 +1 附赠；倒下不收回本回合已发的，下回合起不再加", () => {
+  // Q1：refreshEconomy 按 rallyBy 份额每回合加；主人 10/28：倒下不扣回
   const { c, y, h } = field();
   h.roles = Object.assign({}, h.roles, { primary: "异常" });
   castRally(c, y);
@@ -91,7 +91,7 @@ test("异常集结：持续期间每回合 +1 附赠；倒下精确扣回不误�
   assert.equal(!!y.stunned, true);
   assert.equal(!!y.resources.rallyOn, false);
   assert.equal(h.rallyBuff, undefined);
-  assert.equal(h.bonus, 1, "清集结只扣份额，正常附赠仍在");
+  assert.equal(h.bonus, 2, "本回合已发的附赠保留");
   c.refreshEconomy(h);
   assert.equal(h.bonus, 1, "结束后 refreshEconomy 不再加集结附赠");
 });
@@ -318,13 +318,13 @@ test("两人全队集结·异常：一人倒下留下另一人的 +1 附赠", ()
   assert.equal(Object.keys(h.rallyBy || {}).length, 2);
 
   c.dealBreak(y, 99, "physical", [], "测试");
-  assert.equal(h.bonus, 2, "扣回结人份额后剩 正常1+诺拉1");
+  assert.equal(h.bonus, 3, "本回合已发的保留");
   assert.ok(h.rallyBy && h.rallyBy[m.id] && !h.rallyBy[y.id]);
   c.refreshEconomy(h);
   assert.equal(h.bonus, 2, "诺拉还在时每回合仍 +1");
 
   c.dealBreak(m, 99, "physical", [], "测试");
-  assert.equal(h.bonus, 1);
+  assert.equal(h.bonus, 2, "本回合已发的保留");
   assert.equal(h.rallyBuff, undefined);
   c.refreshEconomy(h);
   assert.equal(h.bonus, 1);
@@ -391,15 +391,15 @@ test("施放者倒下时已死亡的队员：份额也清掉，GM 复活后不�
   assert.equal(h.bonus, 1, "复活后只有正常 1 个附赠");
 });
 
-test("异常集结：本回合已用掉 1 个附赠后施放者倒下（RALLY_REVOKE_BONUS_ON_DOWN 决定是否立刻收回）", () => {
+test("异常集结：本回合已用掉 1 个附赠后施放者倒下，留着的那个不被扣（主人 10/28）", () => {
   const { c, y, h } = field({ heluRole: "异常" });
   castRally(c, y);
   c.refreshEconomy(h);
   assert.equal(h.bonus, 2);
   h.bonus -= 1;   // 玩家回合用掉 1 个，留 1 个协助格挡
   c.dealBreak(y, 99, "physical", [], "测试");
-  const revoke = require("vm").runInContext("RALLY_REVOKE_BONUS_ON_DOWN", c);
-  assert.equal(h.bonus, revoke ? 0 : 1);
+  assert.equal(require("vm").runInContext("RALLY_REVOKE_BONUS_ON_DOWN", c), false);
+  assert.equal(h.bonus, 1, "留着协助格挡的附赠还在");
   c.refreshEconomy(h);
   assert.equal(h.bonus, 1, "下一回合起不再加集结附赠");
 });
@@ -411,4 +411,54 @@ test("GM 强制失衡：集结结束写进日志", () => {
   c.dmForceStun(y, notes);
   assert.equal(h.rallyAtk || 0, 0);
   assert.ok(notes.some(s => /全队集结结束：施放者晕眩/.test(s)), notes.join("\n"));
+});
+
+test("失衡的辅助不能施放全队集结：给出原因，不扣次数、不加增益", () => {
+  const { c, y, h } = field();
+  y.stunned = true;
+  assert.equal(c.skillRequirementError(y, "role_rally"), "失衡时不能施放全队集结");
+  const apBefore = y.ap;
+  cmd(c, { actor: y.id, skill: "role_rally" });
+  assert.ok(!(y.resources && y.resources.rallyOn), "没有施放");
+  assert.equal(h.rallyAtk || 0, 0);
+  assert.equal(y.ap, apBefore, "不扣行动点");
+  y.stunned = false;
+  assert.equal(c.skillRequirementError(y, "role_rally"), null, "恢复后可以施放（次数没被用掉）");
+});
+
+test("两人集结·坦克叠加：rallyDr = 2，实际结算 −30%，克制表也是 −30%；一人倒下回到 −15%", () => {
+  const { c, S, y, m, h } = twoCasters("RALLY-TANK2", "坦克");
+  castRally(c, y); castRally(c, m);
+  assert.equal(h.resources.rallyDr, 2);
+  const foe = S.units.find(u => !u.isPlayer);
+  const atk = () => c.resolveAttack({ attacker: foe, target: h, atk: 100, mult: 1, hits: 1, baseBreak: 0, element: "physical",
+    flags: { action: true }, weather: "none", zoneMode: 2, attackerField: {}, targetField: {}, dist: 0, atkRange: "any" });
+  assert.match(atk().log.join("\n"), /加算百分比合计 -30%/);
+  const ch = c.matchupDefenderOf ? c.matchupDefenderOf(h) : null;
+  if (ch) assert.equal(ch.resources.rallyDr, 2);
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(h.resources.rallyDr, 1);
+  assert.match(atk().log.join("\n"), /加算百分比合计 -15%/);
+});
+
+test("两人集结·击破叠加：rallyBreak = 2；一人倒下剩 1", () => {
+  const { c, y, m, h } = twoCasters("RALLY-BRK2", "击破");
+  castRally(c, y); castRally(c, m);
+  assert.equal(h.rallyBreak, 2);
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(h.rallyBreak, 1);
+  c.dealBreak(m, 99, "physical", [], "测试");
+  assert.equal(h.rallyBreak || 0, 0);
+});
+
+test("两人集结·护卫叠加：协助格挡 +30%；一人倒下剩 +15%", () => {
+  const { c, S, y, m, h } = twoCasters("RALLY-BLK2", "护卫");
+  const foe = S.units.find(u => !u.isPlayer);
+  const base = c.finalBlockChance(h, foe, y, "melee");
+  castRally(c, y); castRally(c, m);
+  assert.equal(h.rallyBlock, 30);
+  assert.equal(c.finalBlockChance(h, foe, y, "melee"), base + 30);
+  c.dealBreak(y, 99, "physical", [], "测试");
+  assert.equal(h.rallyBlock, 15);
+  assert.equal(c.finalBlockChance(h, foe, y, "melee"), base + 15);
 });

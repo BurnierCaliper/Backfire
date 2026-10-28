@@ -8038,9 +8038,9 @@ function syncRallyAggregates(u) {
 }
 
 /** 施放者倒下时，是否立刻收回本回合已按其份额发下的异常附赠（+1）。
- *  true = 立刻扣回（当前行为；若队员这回合已用掉 1 个附赠，可能扣掉留着协助格挡的那个）；
- *  false = 本回合已发的保留，refreshEconomy 从下一回合起不再加。待主人确认，改这一个常量即可。 */
-const RALLY_REVOKE_BONUS_ON_DOWN = true;
+ *  false（主人 10/28 确认）= 本回合已发的保留，refreshEconomy 从下一回合起不再加；
+ *  true = 立刻扣回（附赠不分来源，可能扣掉队员留着协助格挡的那个）。 */
+const RALLY_REVOKE_BONUS_ON_DOWN = false;   // 主人 10/28 确认：不收回
 
 /** 会产生实际效果的集结职责（辅助等没有效果的份额，结束时不写日志） */
 const RALLY_EFFECT_ROLES = ["直伤", "击破", "坦克", "护卫", "生存", "环境手", "控场", "异常"];
@@ -11992,7 +11992,7 @@ const SKILL_REQUIREMENT = {
   role_apocalypse:  (a) => roleCapWhy(a, "role_apocalypse"),
   role_shake:       (a) => roleCapWhy(a, "role_shake"),
   role_rearrange:   (a) => roleCapWhy(a, "role_rearrange"),
-  role_rally:       (a) => roleCapWhy(a, "role_rally"),
+  role_rally:       (a) => (a && a.stunned ? "失衡时不能施放全队集结" : null) || roleCapWhy(a, "role_rally"),   // 主人 10/28：失衡的施放者不能放
   role_double_dot:  (a) => roleCapWhy(a, "role_double_dot")
     || (fieldFoes(a).some(u => hasAnyStatus(u)) ? null : "场上没有带状态效果的敌人"),
   role_gold:        (a) => roleCapWhy(a, "role_gold")
@@ -14019,7 +14019,8 @@ function runSkillInner(id, optRun) {
         lines.push(`${tgt.name} 的${INSTANT_NAME[key]}将延长一回合。`);
       }
     } else if (id === "role_rally") {
-      if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
+      if (a.stunned) lines.push("失衡时不能施放全队集结。");   // 兜底：正常已在 SKILL_REQUIREMENT 拦下
+      else if (!roleSpend(a, "role_rally")) lines.push("全队集结本次长休已用过。");
       else {
         a.resources.rallyOn = true;
         fieldUnits().filter(u => u.isPlayer && Number(u.zone) === Number(a.zone)).forEach(u => applyRallyBuff(u, lines, a));
