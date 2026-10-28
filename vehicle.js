@@ -7,6 +7,7 @@
  * 数据：车是 state.props 里的一个配置物（kind = 载具表的键，isVehicle = true），身上的 veh 记着座位、阵营、架势和掩体：
  *   veh.seats  按上车顺序排的单位 id，第 0 个是驾驶员，其余是炮手
  *   veh.side   车现在属于哪一方（"enemy" / "player"）；空车 = 最后坐在车上的一方
+ *              （代挡按阵营：玩家开的车只替驾驶员的自己人挡；场上有两个以上玩家阵营时空车谁都不替挡，#463，见 vehicleGuards）
  *   veh.def / defMax / stunned / stunMarks  车的架势和晕眩标记。空车也不重置：车里的人走光时保留当时的值，之后谁上车就接着用
  *   p.hp / p.maxHp  车体装甲。没有驾驶员时它就是真值；有驾驶员时真值在驾驶员身上那一层 veh 装甲里，每次 vehicleSync 抄回来
  * 驾驶员和车合并成一个单位（照瑞比的银翼机甲，app.js · enterMecha / exitMecha）：
@@ -308,12 +309,24 @@ function vehicleRollCheck(u, chk) {
 }
 
 /* ---------- 代挡 ---------- */
-/** 车替 u 代挡的单位范围：车上的人不算（他们本来就在车里）；同区同阵营（敌方 = 车的阵营，我方 = 所有我方单位） */
+/** 车替 u 代挡的单位范围：车上的人不算（他们本来就在车里）；同区同阵营——
+ *    有人驾驶：敌方 = 车的阵营；我方 = 驾驶员的自己人（enemies.js · teammateOf：同一个玩家阵营，或者单独设成友好的玩家阵营，#463；
+ *      只有一个玩家阵营时就是所有我方单位，和以前一样）；
+ *    空车：场上有两个以上玩家阵营（app.js · pvpSplit）时谁都不算、谁都不替挡（作者 10/28，#463）；只有一个玩家阵营时照旧算最后坐在车上的一方 */
 function vehicleGuards(p, u) {
   if (!p || !u || u.kind || u.isStructure || u.vehId || u.dead || u._removed || u.hidden || u.fused) return false;
   if (Number(u.zone) !== Number(p.zone)) return false;
-  if (vehicleSide(p) === "player") return !!u.isPlayer;
+  const pilot = vehiclePilot(p);
+  if (!pilot && typeof pvpSplit === "function" && pvpSplit()) return false;
+  if (vehicleSide(p) === "player") return !!u.isPlayer && (!pilot || typeof teammateOf !== "function" || teammateOf(pilot, u));
   return !u.isPlayer && factionOf(u) === VEHICLES[p.kind].faction;
+}
+/** 这一下是不是车那一方的自己人打的（不代挡）：我方驾驶员按玩家阵营看——他的自己人（同阵营或友好的阵营）打的不挡，
+ *  敌对玩家阵营的人打过来照挡（#463）；其余照旧按「我方 / 敌方」两边 */
+function vehicleOwnHit(p, attacker) {
+  const pilot = vehiclePilot(p);
+  if (pilot && pilot.isPlayer && attacker.isPlayer && typeof teammateOf === "function") return teammateOf(pilot, attacker);
+  return vehicleSideOfUnit(attacker) === vehicleSide(p);
 }
 /** 这一下攻击打在 target 身上时，车要不要代挡。返回 null（不代挡），或 { vehicle, unit }（驾驶员替车挨打）/ { vehicle, struct }（空车） */
 function vehicleGuard(attacker, target, opt) {
@@ -323,11 +336,9 @@ function vehicleGuard(attacker, target, opt) {
   if (!(f.action || f.aoe)) return null;
   const props = vehicleProps();
   if (!props.length) return null;
-  const atkSide = vehicleSideOfUnit(attacker);
   for (const p of props) {
     if (p._destroyed || !vehicleGuards(p, target)) continue;
-    const side = vehicleSide(p);
-    if (atkSide === side) continue;   // 自己人打的不代挡
+    if (vehicleOwnHit(p, attacker)) continue;   // 自己人打的不代挡
     const pilot = vehiclePilot(p);
     if (!pilot && !(p.hp > 0)) continue;
     const c = VEHICLES[p.kind];
