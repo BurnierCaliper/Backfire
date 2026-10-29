@@ -529,7 +529,7 @@ test("单人模式：选主角、三名伙伴、第二副职责出发；战斗�
   assert.deepEqual(o.errors, []);
 });
 
-test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅生命起身", async (t) => {
+test("单人模式：主角倒地不判负，回合结束前问要不要起身（#470）；起身后接着打，自己的回合也能点「起身」", async (t) => {
   const o = await open(t); if (!o) return;
   const { page } = o;
   await page.click("#t-local"); await page.click("#t-solo");
@@ -558,12 +558,22 @@ test("单人模式：主角倒地不判负，下个玩家回合可以用坚毅�
     return h.id;
   });
   await page.click("#g-endturn");
-  await page.waitForFunction(() => state.combatPhase === "player" && state.turnNo >= 2 && GAME.depth === 0 || GAME.ended, null, { timeout: 30000 });
+  // 全员倒地还能起身（#470）：敌人回合打完、这一回合结束前弹询问，第一项是原地起身
+  await page.waitForSelector("#g-choice.show", { timeout: 30000 });
+  assert.match(await page.textContent("#g-choice h3"), /要不要起身/);
   assert.equal(await page.evaluate(() => GAME.ended), false, "倒地没有判负");
+  await page.locator("#g-choice.show .opts button").first().click();
+  await page.waitForFunction(() => state.combatPhase === "player" && state.turnNo >= 2 && GAME.depth === 0 || GAME.ended, null, { timeout: 30000 });
+  assert.equal(await page.evaluate(() => GAME.ended), false, "起身了：接着打");
+  assert.equal(await page.evaluate(i => state.units.find(u => u.id === i).upOnShp, hero), true);
+  // 自己的回合里倒地：照旧可以点「起身」（能翻滚时先选「起身」还是「起身并翻滚到 X 区」）
+  await page.evaluate(i => { const h = state.units.find(u => u.id === i); h.upOnShp = false; h.dying = true; GAME.refresh(); }, hero);
   await page.click(`.unit-wrap[data-id="${hero}"]`);
   const btn = page.locator("#g-skills button.sk", { hasText: "起身" });
   assert.equal(await btn.count(), 1);
   await btn.click();
+  await page.waitForFunction(i => state.units.find(u => u.id === i).upOnShp || !!document.querySelector("#g-choice.show"), hero, { timeout: 10000 });
+  if (await page.evaluate(() => !!document.querySelector("#g-choice.show"))) await page.locator("#g-choice.show .opts button").first().click();
   await page.waitForFunction(i => state.units.find(u => u.id === i).upOnShp, hero, { timeout: 10000 });
   assert.deepEqual(o.errors, []);
 });

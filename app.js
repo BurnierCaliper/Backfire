@@ -6002,7 +6002,50 @@ function applyOpeningBreaks(notes) {
   });
 }
 
-function standUp(u) {
+/* ---------- 起身翻滚（#470，作者 10/29） ----------
+ * 起身时可以选择（也可以不选）免费翻滚到一个相邻的区：
+ *   · 不花行动点 / 附赠，不看是谁的回合（回合结束前问要不要起身时也能翻）；
+ *   · 不触发任何反应：借机攻击、警戒、紧追，伏咬沙鱼、休眠的敌人被吵醒、蚁型剿灭兵种退开这类「谁动就打谁 / 谁进来就动」的都没有
+ *     （翻滚只换所在区，不走 doMoveInner 的那一串移动结算）；
+ *   · 无视场地效果：离开 / 进入酸液地面、冻土、流沙、高压场地……都不结算（不扣行动点、不检定、不挂状态、不受伤）；
+ *     间隔上的也一样：不稳桥梁不扣耐久，驻波墙不挂状态；
+ *   · 落地后照常在那一区，之后的回合照常受那一区的场地影响（离开流沙的那一区下陷清零，落进流沙不下陷）；
+ *   · 走不过去的照旧不能翻，和技能里移动 1 距离一样（skillMoveWhy）：危墙、关着的门、空隙（地面单位）、深渊（地面单位不能落进去）；
+ *     人被困住的也不能翻（和 doMoveInner 一样）：在车里、被禁足、被缠住、霜结、正抓着敌人、决一死战。
+ * 只有倒地（濒死、还没起身）的人起身时能翻；起身并协助格挡（performAssistBlock）不翻滚。
+ * 不能翻滚的原因；可以翻返回 null */
+function standRollBlocked(u, dest) {
+  if (!u || u.zone == null) return "没有这个单位";
+  if (!u.dying || u.upOnShp) return "只有倒地起身的时候才能翻滚";
+  dest = Number(dest);
+  const from = Number(u.zone);
+  if (!Number.isInteger(dest) || dest === from || !zonesAdjacent(from, dest)) return "只能翻到相邻的区";
+  if (u.vehId) return "在车里，不能翻滚";
+  if (u.noMove) return "被禁足，不能翻滚";
+  if (u.entangled) return `被${u.entangled.name || "触须"}缠住了，不能翻滚`;
+  if (u.self === "frost") return "霜结：不能翻滚";
+  if (typeof isCrushing === "function" && isCrushing(u)) return "正抓在敌人身上，不能翻滚";
+  if (typeof touDuelVictim === "function" && touDuelVictim(u)) return "决一死战中不能翻滚";
+  const why = skillMoveWhy(u, dest, 1);
+  return why ? String(why).replace(/。$/, "") : null;
+}
+/** 起身时能免费翻滚过去的相邻区（翻不过去的不列） */
+function standRollZones(u) {
+  if (!u || u.zone == null) return [];
+  return zoneNeighbors(Number(u.zone)).filter(z => !standRollBlocked(u, z));
+}
+/** 翻滚：只换所在区（能不能翻由调用方先用 standRollBlocked 看过） */
+function standRoll(u, dest, notes) {
+  const from = Number(u.zone);
+  u.zone = Number(dest);
+  // 驻波墙：翻滚不算穿墙——这次行动记着的位置直接改成落点，行动结束时不补算（和坠入深渊回来一样）
+  if (state._waveLedger && u.id != null && state._waveLedger[u.id] != null) state._waveLedger[u.id] = Number(dest);
+  if (sinkOf(u)) clearSink(u, notes, "翻出流沙");   // 离开了那一区：下陷清零；落进流沙不下陷
+  notes.push(`${u.name} 翻滚：${from} 区 → ${u.zone} 区（免费，不触发反应，不受场地影响）。`);
+}
+
+/** dest：起身时顺便免费翻滚到的相邻区（#470；不给 = 原地起身）。翻不过去时这次起身不做（界面只给能翻的区） */
+function standUp(u, dest) {
   if (!u || !u.isPlayer || isWeaponUnit(u) || u.dead) return;
   const blocked = standUpBlocked(u);
   if (blocked) {
@@ -6013,10 +6056,20 @@ function standUp(u) {
     appendLog(`${u.name} 还没濒死，不用起身。`);
     return;
   }
+  const roll = dest != null ? Number(dest) : null;
+  if (roll != null) {
+    const why = standRollBlocked(u, roll);
+    if (why) {
+      appendLog(`${u.name} 不能翻滚到 ${roll} 区：${why}。`);
+      return;
+    }
+  }
   snapshot();
   u.dying = false;
   u.upOnShp = true;
   u.dead = false;
+  // 回合结束前问过、都没有起身的记号（#470）：这一队有人起身了，就又回到战斗里——这一队的记号都清掉，以后再全员倒地照样先问
+  if (typeof wipeHeroes === "function") wipeHeroes().filter(x => x === u || wipeTeamOf(x) === wipeTeamOf(u)).forEach(x => { x.standGaveUp = false; });
   // 倒地时晕眩已经被清掉（clearStunOnDown），所以也要看架势是不是 0：倒地前失衡的人起身也有 1 架势
   if (u.stunned || (Number(u.def) || 0) <= 0) {
     u.stunned = false;
@@ -6024,6 +6077,11 @@ function standUp(u) {
     appendLog(`${u.name} 起身：解除晕眩，架势变为 1。之后受伤改打坚毅生命。`);
   } else {
     appendLog(`${u.name} 起身继续战斗。之后受伤改打坚毅生命。`);
+  }
+  if (roll != null) {
+    const notes = [];
+    standRoll(u, roll, notes);
+    appendLog(notes.join("\n"));
   }
   if (u.kit === "xia" && (typeof passiveOn !== "function" || passiveOn(u))) {
     u.resources = u.resources || {};
@@ -6034,6 +6092,92 @@ function standUp(u) {
     appendLog(tickSelfBurn(u, false).join("\n"));
   }
   renderAll();
+}
+
+/* ---------- 全员倒地还能起身：先问再判负（#470，作者 10/29） ----------
+ * 以前队伍里所有人都倒地（濒死）就立刻判负，只有单人模式的主角例外。现在所有模式都一样：
+ *   · 所有人都倒地，但还有人能起身（standUpBlocked 为 null：坚毅生命没耗尽、没有力竭……）时不立刻判负；
+ *   · 这一回合结束前（敌人回合打完、回合结束的结算之前：game.js / sim.js 在 battle.endEnemyTurn 之前发 battle.standCheck），
+ *     依次问每个能起身的人要不要起身，起身时可以顺便免费翻滚到相邻的区（见上面的起身翻滚）；
+ *   · 至少一个人起身就接着打；都不起身（或者没人能起身）才判负。
+ * 武器人、护送对象不算（isWeaponUnit 都认）。PvP（场上有两个以上玩家阵营，pvpSplit）按每个阵营分别看：一个阵营全员倒地但还有人能起身，
+ * 同样先问，不立刻判它出局。问过都不起身的那一队记 standGaveUp：不再算「还能起身」（判负 / 这个阵营出局），以后自己起身才清掉。
+ * 要问的人排在 state.standQueue（和协助格挡一样放在 state 里，联机房主刷新后接着问），一项 { unitId, team, turn }。 */
+/** 算进「全员倒地」的角色：场上的玩家角色（倒地的也算），不算武器人、护送对象 */
+function wipeHeroes() {
+  return (state.units || []).filter(u => u && u.isPlayer && !u.hidden && !u.dead && !u._removed && !isWeaponUnit(u));
+}
+/** 按哪一队看全员倒地：PvP 是玩家阵营 id；没分阵营（或者场上只有一个玩家阵营）整个队伍算一队（""） */
+function wipeTeamOf(u) {
+  return typeof pvpSplit === "function" && pvpSplit() && typeof playerFactionOf === "function" ? String(playerFactionOf(u)) : "";
+}
+function wipeTeamName(team) {
+  if (!team) return "队伍";
+  const info = typeof playerFactionInfo === "function" ? playerFactionInfo(team) : null;
+  return (info && info.name) || team;
+}
+/** 倒地了、还能起身、回合结束前也没说过不起身：还不算倒下 */
+function downButCanStand(u) {
+  return !!u && !u.dead && !!u.dying && !u.upOnShp && !u.standGaveUp && !isWeaponUnit(u) && !standUpBlocked(u);
+}
+/** 回合结束前要问「要不要起身」的人：全员倒地的那一队里还能起身的，按场上的顺序 */
+function wipeStandCandidates() {
+  const heroes = wipeHeroes();
+  const out = [];
+  [...new Set(heroes.map(wipeTeamOf))].forEach(team => {
+    const list = heroes.filter(u => wipeTeamOf(u) === team);
+    if (list.some(u => !u.dying)) return;   // 这一队还有人站着
+    list.filter(downButCanStand).forEach(u => out.push({ unitId: u.id, team }));
+  });
+  return out;
+}
+/** 回合结束前（指令 battle.standCheck）：把要问的人排进 state.standQueue（已经在排的不重复排）。返回还在排的人数 */
+function queueWipeStand() {
+  const q = state.standQueue = state.standQueue || [];
+  const add = wipeStandCandidates().filter(j => !q.some(x => x.unitId === j.unitId));
+  const turn = Number(state.turnNo) || 0;
+  [...new Set(add.map(j => j.team))].forEach(team => {
+    const names = add.filter(j => j.team === team).map(j => (unitById(j.unitId) || {}).name).filter(Boolean);
+    appendLog(`${wipeTeamName(team)}全员倒地，但还有人能起身：回合结束前问 ${names.join("、")} 要不要起身，都不起身才算${team ? "这个阵营出局" : "输"}。`);
+  });
+  add.forEach(j => q.push({ unitId: j.unitId, team: j.team, turn }));
+  return q.length;
+}
+/** 回答一个「要不要起身」（指令 standAnswer）：stand 起身（dest：顺便免费翻滚到的相邻区；翻不过去就原地起身），否则不起身。
+ *  这一队要问的人都问完了还没有人站起来：这一队记 standGaveUp（判负 / 这个阵营出局） */
+function answerWipeStand(unitId, stand, dest) {
+  const q = state.standQueue = state.standQueue || [];
+  const i = q.findIndex(j => j.unitId === unitId);
+  if (i < 0) return { executed: false };
+  const job = q.splice(i, 1)[0];
+  const u = unitById(unitId);
+  if (u && downButCanStand(u)) {
+    if (stand) {
+      const roll = dest != null && Number(dest) > 0 ? Number(dest) : null;
+      const why = roll != null ? standRollBlocked(u, roll) : null;
+      if (why) appendLog(`${u.name} 不能翻滚到 ${roll} 区（${why}），原地起身。`);
+      standUp(u, why ? null : roll);
+    } else appendLog(`${u.name} 没有起身。`);
+  }
+  if (!state.standQueue.some(j => j.team === job.team)) settleWipeTeam(job.team);
+  return { executed: true };
+}
+/** 这一队要问的人都问完了：有人站起来就接着打；还是全员倒地就记 standGaveUp（判负 / 这个阵营出局） */
+function settleWipeTeam(team) {
+  const list = wipeHeroes().filter(u => wipeTeamOf(u) === team);
+  if (!list.length || list.some(u => !u.dying)) return;
+  const gave = list.filter(downButCanStand);
+  gave.forEach(u => { u.standGaveUp = true; });
+  if (gave.length) appendLog(`${wipeTeamName(team)}没有人起身：${team ? "这个阵营出局" : "全员倒地，战斗失败"}。`);
+}
+/** 排着的人已经不用问了（自己起来了、被移出、死了、起不来了）：去掉；这一队没人要问了就结算。返回去掉了几个 */
+function pruneWipeStand() {
+  const q = state.standQueue = state.standQueue || [];
+  const gone = q.filter(j => !downButCanStand(unitById(j.unitId)));
+  if (!gone.length) return 0;
+  state.standQueue = q.filter(j => gone.indexOf(j) < 0);
+  [...new Set(gone.map(j => j.team))].forEach(team => { if (!state.standQueue.some(j => j.team === team)) settleWipeTeam(team); });
+  return gone.length;
 }
 
 /* ---------- 战斗结束 ---------- */
@@ -6871,7 +7015,7 @@ function soloSupportInfo() {
     next: full ? null : score + Math.max(0, cost - so.pool),
     partners: so.partners.filter(k => so.used.indexOf(k) < 0) };
 }
-/** 单人模式：主角倒地不算输。还能用坚毅生命起身就接着打（下个玩家回合点「起身」）；
+/** 单人模式：主角倒地还能起身就不算输（和所有模式一样，回合结束前问要不要起身，#470；自己的回合也能点「起身」）；
  *  起不来（坚毅生命耗尽、力竭）才算真正死亡，这时战斗失败、本局结束。 */
 function soloDownCheck(notes) {
   if (!state.solo) return notes;
@@ -6885,11 +7029,12 @@ function soloDownCheck(notes) {
   });
   return notes;
 }
-/** 这名角色还算「站着」吗：没倒地；或者单人模式的主角倒地了、但还能起身 */
+/** 这名角色还算「站着」吗：没倒地；或者倒地了、但还能起身，回合结束前也没说过不起身（#470：所有模式都这样算，
+ *  全员倒地时先问再判负；以前只有单人模式的主角这样算，多人模式全员倒地立刻判负） */
 function heroStillFighting(u) {
   if (!u || u.dead) return false;
   if (!u.dying) return true;
-  return isSoloHero(u) && !u.upOnShp && !standUpBlocked(u);
+  return downButCanStand(u);
 }
 function soloSupportSkill(unit) {
   if (!isSoloHero(unit)) return null;
@@ -7776,6 +7921,7 @@ function resetBattleFlags(u) {
   u.dying = false;
   u.dead = false;
   u.upOnShp = false;
+  u.standGaveUp = false;   // 全员倒地时问过、没有起身（#470）
   u.hidden = false;
   u.fused = false;
   u.tauntTo = null;

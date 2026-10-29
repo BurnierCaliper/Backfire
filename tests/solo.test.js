@@ -198,7 +198,7 @@ test("单人：主角倒地不算输，还能用坚毅生命起身就接着打�
   assert.equal(c.BattleSim.outcome(), "enemy");
 });
 
-test("单人：倒地时已经起不来（坚毅耗尽 / 力竭）就算死亡；多人模式照旧全员倒地即失败", () => {
+test("单人：倒地时已经起不来（坚毅耗尽 / 力竭）就算死亡；多人模式倒地不死，全员倒地问过都不起身才失败（#470）", () => {
   const { c, run, st } = soloRun("DOWN2");
   const { hero } = soloBattle(c, run, [{ id: "thug_knife", lv: 1, zone: 1 }]);
   const foe = st.units.find(u => !u.isPlayer);
@@ -211,7 +211,7 @@ test("单人：倒地时已经起不来（坚毅耗尽 / 力竭）就算死亡�
   c.Rogue.finishBattle(run, "lose");
   assert.equal(run.stage, "over");
 
-  // 多人：倒地就算失败（不变）
+  // 多人：全员倒地还能起身先不判负，回合结束前问过、都不起身才失败（#470，以前倒地立刻失败）；倒地不死（不变）
   const c2 = H.load();
   c2.BattleSim.setup({ party: ["ruby"], enemies: [{ id: "thug_knife", lv: 1, zone: 1 }] });
   c2.startCombat();
@@ -219,7 +219,9 @@ test("单人：倒地时已经起不来（坚毅耗尽 / 力竭）就算死亡�
   r.zone = 1; f.zone = 1;
   c2.dealTo(f, r, { atk: 999, mult: 1, element: "physical", baseBreak: 0, flags: { action: true, blockResolved: true } });
   assert.equal(r.dying, true);
-  assert.equal(c2.BattleSim.outcome(), "enemy");
+  assert.equal(c2.BattleSim.outcome(), null, "还能起身：先不判负");
+  c2.BattleSim.standCheck({ standAsk: () => ({ stand: false }) });
+  assert.equal(c2.BattleSim.outcome(), "enemy", "回合结束前问过、不起身才失败");
   assert.equal(r.dead, false, "多人模式倒地不死");
 });
 

@@ -632,7 +632,7 @@
   function gameSkills(u) {
     if (!u || !u.isPlayer) return [];
     if (u.dying && !isWeaponUnit(u)) {
-      return [{ id: "__stand", name: "起身", hint: "hp 归零后可以选择起身。之后受伤扣坚毅生命（shp），shp 归零即永久死亡。", cost: {} }];
+      return [{ id: "__stand", name: "起身", hint: "hp 归零后可以选择起身。之后受伤扣坚毅生命（shp），shp 归零即永久死亡。起身时可以免费翻滚到相邻的区（不触发反应，不受场地影响）。", cost: {} }];
     }
     if (!G.sim && typeof isSoloHero === "function" && isSoloHero(u)) dispatch({ type: "battle.supportInfo" });
     let list = [];
@@ -719,7 +719,7 @@
   function skillCommand(actorId, skillId, targetId, picks) {
     picks = picks || {};
     if (skillId === "__move") return { type: "move", actor: actorId, dest: picks.dest };
-    if (skillId === "__stand") return { type: "standUp", actor: actorId };
+    if (skillId === "__stand") return picks.dest ? { type: "standUp", actor: actorId, dest: Number(picks.dest) } : { type: "standUp", actor: actorId };   // dest：顺便免费翻滚到的相邻区（#470）
     if (skillId === "__item") return { type: "useItem", actor: actorId, target: targetId || null, item: picks.item, dest: picks.dest == null ? null : picks.dest };
     return { type: "skill", actor: actorId, skill: skillId, target: targetId || null, picks };
   }
@@ -2182,8 +2182,48 @@
         }, true);
         continue;
       }
+      // 全员倒地还能起身（#470，app.js · queueWipeStand）：回合结束前依次问每个能起身的人要不要起身，起身时可以顺便免费翻滚到相邻的区。
+      // 本机弹询问；热座 / 联机问操控这个角色的玩家，没分配的问主持人（hotseat-game.js · ownedChoice，和换刀头这类询问一样）
+      if (state.standQueue && state.standQueue.length) {
+        const job = state.standQueue[0];
+        const u = unitById(job.unitId);
+        if (!u || !downButCanStand(u)) { systemCommand({ type: "battle.cleanQueues", queue: "stand" }); continue; }
+        const opts = standAskOptions(u, job.team);
+        const title = `${u.name} · 要不要起身`;
+        const pick = hotseat() ? await HotseatGame.ownedChoice(u, title, opts)
+          : await openChoice(title, `${job.team ? `${wipeTeamName(job.team)}全员倒地` : "队伍全员倒地"}，还能起身：起身就接着打（不花行动点，之后受伤改打坚毅生命），` +
+            `可以顺便免费翻滚到相邻的区（不触发借机攻击等反应，不受场地影响）。${job.team ? "这个阵营都不起身就出局" : "都不起身，这场战斗就输了"}。`, opts, null, { dock: true });
+        if (abandoned(gen)) return;
+        if (!pick) continue;   // 没选（按了 Esc）：接着问，不当成「不起身」
+        await perform({ type: "standAnswer", actor: u.id, stand: !!pick.stand, dest: pick.dest || null },
+          { actorId: u.id, skillName: !pick.stand ? "不起身" : pick.dest ? `起身 · 翻滚到 ${pick.dest} 区` : "起身" }, true);
+        continue;
+      }
       return;
     }
+  }
+  /** 回合结束前问「要不要起身」的选项（#470）：起身 / 起身并翻滚到 X 区（能翻过去的相邻区）/ 不起身。
+   *  联机玩家也看得到这几行（online-view.js 的白名单会整句丢掉带「坚毅」的字样，这里不写） */
+  function standAskOptions(u, team) {
+    const zones = typeof standRollZones === "function" ? standRollZones(u) : [];
+    return [{ label: "起身", sub: "原地站起来接着打", value: { stand: true } }]
+      .concat(zones.map(z => ({ label: `起身并翻滚到 ${z} 区`, sub: "免费 · 不触发反应 · 不受场地影响", value: { stand: true, dest: z } })))
+      .concat([{ label: "不起身", sub: team ? "这个阵营都不起身就出局" : "都不起身这场战斗就输了", value: { stand: false } }]);
+  }
+  /** 回合结束前（battle.endEnemyTurn 之前）：全员倒地、还有人能起身的那一队，依次问能起身的人要不要起身（#470）。
+   *  问完分出了胜负（都不起身）、或者这场战斗被放弃了，返回 true */
+  async function standCheck(gen) {
+    const pending = () => !!((state.standQueue && state.standQueue.length) || (typeof wipeStandCandidates === "function" && wipeStandCandidates().length));
+    // 平时（没有全员倒地）什么都不做，不多发指令；问过都不起身的（房主刷新前已经问完）照样在最后的 checkEnd 判负
+    if (!pending() && !(state.units || []).some(u => u && u.standGaveUp)) return false;
+    if (pending() && Number(systemCommand({ type: "battle.standCheck" })) > 0) {
+      for (let guard = 0; guard < 20 && state.standQueue && state.standQueue.length; guard++) {
+        await resolveQueues();
+        if (abandoned(gen) || G.ended) return true;
+      }
+      refreshAll();
+    }
+    return checkEnd();
   }
 
   /** 龙哥手杖协助攻击能治疗的人：敌人所在区的友方（龙哥的自己人：同阵营或友好的阵营，enemies.js · teammateOf，#456 / #460），加上龙哥自己（他会移动过去） */
@@ -3108,8 +3148,19 @@
     const label = (id) => `${actor.name} · ${sk.name}${id ? " → " + targetName(id) : ""}`;
 
     if (sk.id === "__stand") {
+      // 起身时可以免费翻滚到相邻的区（#470）：有能翻过去的区就问一句「起身」还是「起身并翻滚到 X 区」
+      const zones = typeof standRollZones === "function" ? standRollZones(actor) : [];
+      let dest = null;
+      if (zones.length) {
+        const pick = await openChoice("起身", `${actor.name} 起身：不花行动点，之后受伤改打坚毅生命。可以顺便免费翻滚到相邻的区（不触发借机攻击、警戒、紧追等反应，也不受酸液地面、冻土等场地影响）。`,
+          [{ label: "起身", sub: "原地站起来", value: 0 }].concat(zones.map(z => ({ label: `起身并翻滚到 ${z} 区`, sub: "免费 · 不触发反应 · 不受场地影响", value: z }))),
+          { label: "取消", value: null }, { dock: true });
+        if (stale()) return;
+        if (pick == null) { cancel(); return; }
+        dest = pick || null;   // 0 = 原地起身
+      }
       G.arm = null;
-      return act(skillCommand(actor.id, "__stand"), { actorId: actor.id, skillName: "起身" });
+      return act(skillCommand(actor.id, "__stand", null, { dest }), { actorId: actor.id, skillName: dest ? `起身 · 翻滚到 ${dest} 区` : "起身" });
     }
     if (sk.id === "__item") {
       // 维修工具包（没开封的 + 开封的）合成一项，按维修点数显示
@@ -3478,6 +3529,8 @@
     if (!over && !G.ended) {
       await wait(250);
       if (abandoned(gen)) return;
+      // 全员倒地还能起身（#470）：这一回合结束前先问要不要起身；都不起身就判负，不再进下一回合
+      if (await standCheck(gen)) return;
       await perform({ type: "battle.endEnemyTurn" }, { skillName: "", phase: "敌人回合结束 · 玩家回合开始" }, true);
       if (abandoned(gen)) return;
       if (window.Sfx) Sfx.ui("turn");   // 我方回合开始
@@ -3530,7 +3583,7 @@
     const downNotes = dispatch({ type: "battle.checkSolo" });
     if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
-    // 多人模式（含热座 / 联机）：全员倒地即失败，和 README 一致；只有单人主角能靠起身撑着不算输
+    // 全员倒地：还有人能起身就先不算输（#470，所有模式都一样，app.js · heroStillFighting），回合结束前问过都不起身（standCheck）才判负
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     if (!foes().length && (state.chain || (state.waves || []).length) && standing.length) {
       // 还有援军 / 下一场（chain.js）：不结束，换了区域就重画战场
@@ -5781,6 +5834,7 @@
   G.showPendingIntro = () => { if (G.pendingIntro && !state.combatStarted) battleIntro(G.pendingIntro); };
   G.armSkill = armSkill;
   G.gameSkills = gameSkills;
+  G.standAskOptions = standAskOptions;   // 回合结束前问「要不要起身」的选项（#470）
   G.blockReason = blockReason;
   G.baseBlockReason = baseBlockReason;
   G.disarm = disarm;
@@ -5835,6 +5889,7 @@
         const over = await enemyPhase();
         if (abandoned(gen)) return;
         if (!over) {
+          if (await standCheck(gen)) return;   // 全员倒地还能起身（#470）：回合结束前先问（刷新前问到一半的接着问）
           await perform({ type: "battle.endEnemyTurn" }, { phase: "敌人回合结束 · 玩家回合开始" }, true);
           if (abandoned(gen)) return;
           await resolveQueues();

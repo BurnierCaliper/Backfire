@@ -369,6 +369,28 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **通用规则（所有模式）：全员倒地但还有人能起身时先问再判负；起身时可以免费翻滚到相邻的区**（#470，作者 10/29 定；app.js · `heroStillFighting`（改）/ `downButCanStand` / `wipeHeroes` / `wipeTeamOf` / `wipeTeamName` / `wipeStandCandidates` / `queueWipeStand` / `answerWipeStand` / `settleWipeTeam` / `pruneWipeStand`（新）、`standRollBlocked` / `standRollZones` / `standRoll`（新）、`standUp(u, dest)`（加翻滚）、`resetBattleFlags`（`standGaveUp`）；battle-commands.js · `standUp` 的 `dest`、指令 `battle.standCheck` / `standAnswer`（新）、`battle.cleanQueues` 的 `stand`、`battle.setup` 清空 `state.standQueue`；sim.js · `resolveQueues`（问 `state.standQueue`，问完再判胜负）/ `standCheck`（新）/ `BASIC_POLICY.standAsk`（新）/ `run`（`endEnemyTurn` 之前先问）/ `resetField`；game.js · `resolveQueues`（问 `state.standQueue`）/ `standCheck` / `standAskOptions`（新）/ `enemySide` / `G.resumeOnline`（`battle.endEnemyTurn` 之前先问）/ `armSkill`（起身可以选翻滚）/ `skillCommand` / `gameSkills`（说明）；hotseat-validation.js · `validateBattle`（起身的 `dest`）；online-actions.js · `menu`（起身菜单）；online-ui.js · `choose`；online-game.js · `actionLabel` / `onActionSettled` / `legacyAddedEnemies`；rulebook.js「倒地、起身与死亡」「移动与距离」；测试 tests/wipe-stand-roll.test.js（新）、tests/wipe-stand-ui.test.js（新，真浏览器的联机房主流程），tests/solo.test.js、tests/pvp-factions.test.js、tests/online-actions.test.js、tests/ui.test.js 各改 1 条）
+  - **以前**：队伍里所有人都倒地（濒死）就立刻判负，只有单人模式的主角例外（`heroStillFighting`：主角倒地还能起身就不算输，下个玩家回合点「起身」）；PvP 里一个阵营全员倒地就立刻出局。起身只能原地站起来。
+  - **现在**：
+    - **全员倒地先问再判负**（所有模式：本机、单人、热座、联机、单局、跑团）：
+      - 队伍里所有人都倒地，但还有人能起身（`standUpBlocked` 为 null：坚毅生命没耗尽、没有力竭……）时**不立刻判负**；倒地的人照旧不受伤害。
+      - **这一回合结束前**（敌人回合打完、「回合结束」的结算之前，也就是 `battle.endEnemyTurn` 之前）**依次问每个能起身的人要不要起身**：选项是「起身」「起身并翻滚到 X 区」（能翻过去的相邻区各一项）「不起身」。本机弹询问（没选不算「不起身」，接着问）；热座 / 联机问操控这个角色的玩家，没分配的问主持人（`HotseatGame.ownedChoice`，和换刀头这类询问一样；联机玩家掉线 60 秒照旧自动选第一项，第一项是「起身」）。选项的字都能原样发给玩家（不带坚毅字样，online-view.js 的白名单不会整句丢掉）。
+      - **至少一个人起身，战斗就继续**；都不起身（或者没人能起身）才判负。问过都不起身的人记 `standGaveUp`（不再算「还能起身」），这一队有人自己起身就清掉。
+      - 要问的人排在 `state.standQueue`（和协助格挡一样放在 state 里），联机房主刷新恢复后接着问；全部问完以前不判胜负（两个阵营同时全员倒地时两边都问完再看，不会先问的那边一说不起身、另一边没问就算赢）。
+      - **武器人、护送对象不算**（照旧 `isWeaponUnit`）：它们还站着也算全员倒地，也不问它们。
+      - 单人模式和别的模式一样：主角倒地还能起身不算输，回合结束前问；不起身就输掉这场（起不来——坚毅耗尽、力竭——才算死亡，照旧 `soloDownCheck`）。
+      - 倒在自己的回合里（例：被借机攻击打倒）：自己的回合照样能点「起身」，没起身的到这一回合结束前再问；被「回合结束」的结算（灼烧等）打倒的，下一回合照样能自己起身，到那一回合结束前再问。
+      - 连续战斗 / 援军（chain.js，game.js · `checkEnd`）：敌人打完时，倒地还能起身的人也算还站着，接着进下一场 / 等援军，回合结束前再问要不要起身（以前最后一个敌人和最后一个角色同时倒下就判胜利、不再往下打）。
+    - **PvP（#453 的玩家阵营）按每个阵营分别看**：一个阵营全员倒地但还有人能起身，同样先问、不立刻判它出局（`pvpBattleOutcome` 的「站着」用新的 `heroStillFighting`）；只问全员倒地的那个阵营的人，都不起身才出局（对面获胜；所有玩家阵营都倒下算敌人赢，和以前一样）。
+    - **起身时可以免费翻滚到相邻的区**（选不选都行）：本机点「起身」时弹「起身 / 起身并翻滚到 X 区 / 取消」（没有能翻的区就和以前一样直接起身）；热座同一台设备一样；联机玩家的起身菜单一样有这几项；回合结束前问要不要起身时也能选。
+      - 不花行动点 / 附赠，不看是谁的回合；
+      - 翻滚只换所在区、不走移动结算（`doMoveInner`），**不触发任何反应**：借机攻击、警戒、紧追，伏咬沙鱼、休眠的敌人被吵醒、蚁型剿灭兵种退开都没有；
+      - **无视场地效果**：离开酸液地面不扣行动点，离开冻土不检定、进冻土不受冰击破，进流沙不下陷（陷 2 层也翻得出去，离开那一区下陷清零），高压场地不把不稳转成晕眩；间隔上的也一样：不稳桥梁不扣耐久，穿过驻波墙不挂状态；
+      - 落地后照常在那一区，之后的回合照常受那一区的场地影响；
+      - 走不过去的照旧不能翻，和技能里移动 1 距离一样（`skillMoveWhy`）：危墙、关着的门、空隙（地面单位）、深渊（地面单位不能落进去）、隔一个区；人被困住的也不能翻（和 `doMoveInner` 一样）：在车里、被禁足、被缠住、霜结、正抓着敌人、决一死战；
+      - 只有倒地起身的时候能翻（站着的人不能借「起身」白翻）；「起身并协助格挡」不翻滚（照旧原地起身去挡）。
+      - 指令：`standUp` 多一个选填的 `dest`（区号，不给 = 原地起身）；热座 / 联机的校验只放行翻得过去的相邻区，翻不过去的整条拒绝。联机起身菜单是 `choice`：0 = 原地起身、区号 = 翻过去（online-view.js 本来就放行 `dest`）；回合结束前回答「起身并翻滚」时那一区刚好翻不过去，就原地起身（不当成不起身）。战场记录写「起身 · 翻滚到 X 区」/「没有起身」。
+
 - **PvP：只有一个人的玩家阵营可以给自己协助格挡、接自己打出的失衡做协助攻击**（#471，作者 10/29 定的，docs/pvp.md 第 1.3 节「单人队伍」；app.js · `pvpSoloHero`（新）/ `eligibleBlockers` / `playerAssisters`；测试 tests/pvp-factions.test.js（新增 5 条，#463 的 3 条按新规则改））
   - **以前**：只有单人模式的主角（`isSoloHero`）能给自己协助格挡、接自己打出的失衡。PvP 里一个人的阵营身边没有队友：被打时同区没有自己人，没人能挡，这一击直接落下；自己打出的失衡也没人接——两轮问的第一轮（打出失衡那一方的玩家角色）一个都没有，直接轮到同一方的非玩家单位，没有就作罢。
   - **现在**：

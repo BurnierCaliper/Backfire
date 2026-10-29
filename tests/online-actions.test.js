@@ -146,8 +146,13 @@ test("move and stand-up menus use actual legal zones and preserve the existing f
   const ready = unchanged(f, () => f.menu({ skill: "__move", dest: 2 })); assert.equal(ready.choices.command.type, "move");
   unchanged(f, () => assert.throws(() => f.menu({ skill: "__move", dest: 3 }), /相邻/));
   f.actor.layers.forEach(l => { l.current = 0; }); f.actor.dying = true; f.actor.shp = 20; f.actor.ap = f.actor.bonus = 0;
-  const stand = unchanged(f, () => f.menu({ skill: "__stand" }));
+  // #470：起身时可以免费翻滚到相邻的区——翻得过去就先问「起身」（0）还是「起身并翻滚到 X 区」；原地起身照旧不花点
+  const choose = unchanged(f, () => f.menu({ skill: "__stand" }));
+  assert.deepEqual(choose.choices.options.map(o => o.value), [0, 2]);
+  const stand = unchanged(f, () => f.menu({ skill: "__stand", dest: 0 }));
   assert.deepEqual(stand.choices.command, { type: "standUp", actor: f.actor.id });
+  f.state.gaps["1-2"].type = "wall";
+  assert.deepEqual(unchanged(f, () => f.menu({ skill: "__stand" })).choices.command, { type: "standUp", actor: f.actor.id }, "翻不过去：照旧直接起身");
   assert.equal(f.actor.upOnShp, false);
 });
 
