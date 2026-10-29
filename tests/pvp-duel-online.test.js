@@ -215,7 +215,10 @@ test("白名单：准备画面只发角色 kit / 名字 / 操控者 / 选的队�
   assert.equal(pr.result.outcome, "draw");
   assert.deepEqual(pr.result.duel, { draw: true, why: "rounds", pct: { "1队": 0.5, "2队": 0.5 }, rounds: 8 });
   assert.deepEqual(pr.result.teams.map(t => t.name), ["1 队", "2 队"], "一分没拿的那一队也列出来");
-  assert.deepEqual(plain(pr.result.teams[0].parts), { kill: d.S.SCORE_RULES.kill.elite }, "打进坚毅的伤害不算，打倒（再起不能）算击杀");
+  // 打进坚毅的伤害也照算（作者 10/29，PVP_TEAM_SCORE.shpCounts）；打倒（再起不能）算击杀。发出去的只有分值，没有坚毅数值（下面 LEAK 检查）
+  assert.equal(pr.result.teams[0].parts.kill, d.S.SCORE_RULES.kill.elite, "打倒（再起不能）算击杀");
+  assert.ok(pr.result.teams[0].parts.dmg > 0, "打进坚毅的伤害照算");
+  assert.deepEqual(Object.keys(pr.result.teams[0].parts).sort(), ["dmg", "kill"]);
   assert.deepEqual(plain(pr.result.teams[1]), { id: "2队", name: "2 队", total: 0, parts: {} });
   for (const t of pr.result.teams) assert.deepEqual(Object.keys(t).sort(), ["id", "name", "parts", "total"]);
   assert.doesNotMatch(JSON.stringify(pr), LEAK);
