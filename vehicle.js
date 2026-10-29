@@ -214,7 +214,14 @@ function vehicleRemoveSeat(p, u, notes) {
 }
 
 /* ---------- 上车 / 下车 / 拉人 ---------- */
-/** 这个单位现在不能上这台车的原因（能上返回 null）。只看座位和阵营，不看行动点 */
+/** a、b 在车上算不算对方的人（不能一起坐、可以把对方拉下车）。玩家和非玩家单位之间照旧按两边（vehicleSideOfUnit），非玩家单位之间是自己人；
+ *  玩家之间按玩家阵营（作者 10/28：「可以改成按阵营分」，#468）——enemies.js · teammateOf 的自己人（同阵营、友好的阵营）可以一起坐、不能拉，
+ *  敌对阵营的人反过来。只有一个玩家阵营时玩家都是自己人，和以前一样。上车、拉人下车、技能栏都问这里 */
+function vehicleRival(a, b) {
+  if (vehicleSideOfUnit(a) !== vehicleSideOfUnit(b)) return true;
+  return !!(a && a.isPlayer) && typeof teammateOf === "function" && !teammateOf(a, b);
+}
+/** 这个单位现在不能上这台车的原因（能上返回 null）。只看座位和阵营（车上有对方的人不能上：vehicleRival），不看行动点 */
 function vehicleBoardError(u, p) {
   if (!u || !isVehicleProp(p)) return "没有这台车。";
   const c = VEHICLES[p.kind];
@@ -223,7 +230,7 @@ function vehicleBoardError(u, p) {
   if (Number(u.zone) !== Number(p.zone)) return `要和${p.name}同区才能上车。`;
   if (!u.isPlayer && factionOf(u) !== c.faction) return `只有${c.faction}能上${p.name}。`;
   const occ = vehicleOccupants(p);
-  if (occ.some(o => vehicleSideOfUnit(o) !== vehicleSideOfUnit(u))) return `${p.name}上还有${u.isPlayer ? "敌人" : "对方的人"}，先把他们拉下车。`;
+  if (occ.some(o => vehicleRival(u, o))) return `${p.name}上还有${u.isPlayer ? "敌人" : "对方的人"}，先把他们拉下车。`;
   if (occ.length >= c.seats) return `${p.name}的座位满了（${occ.length} / ${c.seats}）。`;
   if (u.isPlayer && !vehicleCheckOdds(u, VEHICLE_RULES.boardCheck).chance) return `${u.name} 没有「${VEHICLE_RULES.boardCheck.prof}」熟练，做不了普通难度的检定。`;
   return null;
@@ -257,13 +264,13 @@ function vehicleLeave(u, notes) {
   notes.push(`${u.name} 下车。`);
   return vehicleRemoveSeat(p, u, notes);
 }
-/** 这个人现在不能把车上这个人拉下车的原因 */
+/** 这个人现在不能把车上这个人拉下车的原因（只能拉对方的人：vehicleRival） */
 function vehiclePullError(actor, p, occ) {
   if (!actor || !isVehicleProp(p)) return "没有这台车。";
   if (!occ || occ.vehId !== p.id) return "那个人不在这台车上。";
   if (actor.vehId) return `${actor.name} 自己在车上，不能拉人。`;
   if (Number(actor.zone) !== Number(p.zone)) return `要和${p.name}同区才能拉人下车。`;
-  if (vehicleSideOfUnit(actor) === vehicleSideOfUnit(occ)) return `${occ.name} 是自己人。`;
+  if (!vehicleRival(actor, occ)) return `${occ.name} 是自己人。`;
   if (actor.isPlayer && !vehicleCheckOdds(actor, VEHICLE_RULES.pullCheck).chance) return `${actor.name} 没有「${VEHICLE_RULES.pullCheck.prof}」熟练，做不了困难难度的检定。`;
   return null;
 }
@@ -458,14 +465,14 @@ function vehicleRideSkills(u) {
   out.push({ id: "veh_leave", name: "下车", hint: "不耗行动点 · 落在车所在的区" });
   return out;
 }
-/** 没坐车的人能做的车上动作：上车、拉人下车（同区的车） */
+/** 没坐车的人能做的车上动作：上车、拉人下车（同区的车；车上有对方的人（vehicleRival）就只列拉他们下车） */
 function vehicleGroundSkills(u) {
   const out = [];
   if (!u || u.vehId) return out;
   vehicleProps().forEach(p => {
     if (p._destroyed || Number(p.zone) !== Number(u.zone)) return;
     const occ = vehicleOccupants(p);
-    const foes = occ.filter(o => vehicleSideOfUnit(o) !== vehicleSideOfUnit(u));
+    const foes = occ.filter(o => vehicleRival(u, o));
     if (foes.length) {
       foes.forEach((o, i) => out.push({ id: `veh_pull:${p.id}:${o.id}`, name: `拉 ${o.name} 下车`, hint: `同区 · ${u.isPlayer ? `困难「${VEHICLE_RULES.pullCheck.prof}」检定` : `成功率 ${Math.round(VEHICLE_RULES.pullEnemyChance * 100)}%`} · 把对方一人拉下车${i === 0 && vehicleIsPilot(o) ? "（驾驶员）" : ""}` }));
     } else {

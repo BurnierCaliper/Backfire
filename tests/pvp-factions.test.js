@@ -1847,6 +1847,16 @@ test("协助格挡 / 载具代挡：同一种子整场自动对打（掩护、�
  * 敌对阵营的人不能一起坐、可以拉下车；自己人（teammateOf：同阵营、友好的阵营）可以一起坐、不能拉。玩家和敌人之间照旧。
  * 局面同上（trio：前两人在「我方」，第三人在「乙」（和我方友好），第四人在「丙」（和两边都敌对）），敌人换成两个镇压队员；每条都拿不配置阵营的同一个局面对照。 */
 const RIOTS468 = [{ id: "riot_baton", lv: 1, zone: 1 }, { id: "riot_rifle", lv: 1, zone: 1 }];
+/** 都会开车、会「运动」（三级熟练：普通「载具驾驶」检定必成，困难「运动」75%）：上车、拉人做不做得了只看阵营 */
+const drivers = us => us.forEach(u => { u.profs = { "载具驾驶": 3, "运动": 3 }; });
+/** 技能栏里同区的车给 u 的动作（上车 / 拉人下车，vehicle.js · vehicleGroundSkills） */
+const groundOf = (c, u) => plain(c.vehicleGroundSkills(u).map(s => s.id));
+/** 联机 / 热座出手前的校验（hotseat-validation.js）：返回 check(行动的人, 技能 id) */
+function onlineCheck(c) {
+  load(c, ["hotseat-validation.js"]);
+  const session = { assertAction: () => true }, game = { depth: 0, tape: null };
+  return (a, sk) => c.HotseatValidation.validateBattle({ type: "skill", actor: a.id, skill: sk, target: null, picks: {} }, { session, sender: "p1", game });
+}
 
 test("载具代挡：场上有两个以上玩家阵营时，镇压队留下的空车（开战时的空车、镇压队员下车以后）照旧替镇压队挡、镇压队打的不挡；玩家留下的空车照旧谁都不替挡（#468）", () => {
   // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
@@ -1880,4 +1890,233 @@ test("载具代挡：场上有两个以上玩家阵营时，镇压队留下的�
   c.vehicleBoard(baton, p);
   c.vehicleLeave(baton);
   assert.equal(guarded(c, tou, rifle), true, "镇压队员最后下车：又替镇压队挡");
+});
+
+test("上车按玩家阵营分：车上有敌对阵营的人不能上（提示先把他们拉下车，和车上有敌人时一样），自己人（同阵营、友好的阵营）可以一起坐；技能栏、联机出手前的校验跟着变；玩家和敌人之间照旧；没配置阵营时照旧（#468）", () => {
+  {
+    // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const f = trio(["kolt", "helu", "hiaki", "tou"], true, RIOTS468);
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [baton] } = f;
+    drivers([kolt, helu, hiaki, tou]);
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(kolt, p);   // 我方的柯尔特开车
+    assert.equal(c.vehicleBoardError(helu, p), null, "同阵营的赫鲁米卡可以一起坐");
+    assert.equal(c.vehicleBoardError(hiaki, p), null, "友好的乙（绯秋）可以一起坐");
+    assert.equal(c.vehicleBoardError(tou, p), `${p.name}上还有敌人，先把他们拉下车。`, "敌对的丙（灯）上不去（以前能坐进同一台车）");
+    // 技能栏：灯只有「拉柯尔特下车」，没有「上车」；绯秋有「上车」，没有「拉人」
+    assert.deepEqual(groundOf(c, tou), [`veh_pull:${p.id}:${kolt.id}`], "灯的技能栏：拉人下车");
+    assert.deepEqual(groundOf(c, hiaki), [`veh_board:${p.id}`], "绯秋的技能栏：上车");
+    const check = onlineCheck(c);
+    assert.throws(() => check(tou, `veh_board:${p.id}`), /没有这项可用技能/, "联机：灯上不去");
+    assert.doesNotThrow(() => check(hiaki, `veh_board:${p.id}`), "联机：绯秋上得去");
+    // 直接发指令：灯上不去、不扣行动点；绯秋坐上去当炮手（照旧花 1 行动点）
+    tou.ap = 4;
+    skill(c, tou, `veh_board:${p.id}`);
+    assert.ok(!tou.vehId, "灯没坐上去");
+    assert.equal(tou.ap, 4, "不扣行动点");
+    assert.match(logText(c), new RegExp(`${tou.name} 现在不能使用该技能：${p.name}上还有敌人，先把他们拉下车`));
+    hiaki.ap = 4;
+    skill(c, hiaki, `veh_board:${p.id}`);
+    assert.equal(hiaki.vehId, p.id, "绯秋坐上去");
+    assert.ok(hiaki.fused && !hiaki.vehMerged, "当炮手");
+    assert.equal(hiaki.ap, 3, "花 1 行动点");
+    assert.match(c.vehicleBoardError(tou, p), /还有敌人/, "车上有我方和乙的人：灯照样上不去");
+    // 灯先开的另一台车：我方、乙的人都上不去
+    const q = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(tou, q);
+    assert.match(c.vehicleBoardError(helu, q), /还有敌人，先把他们拉下车/, "我方的人上不了丙的车");
+    // 玩家和敌人之间照旧：镇压队上不了玩家的车，玩家上不了镇压队的车
+    assert.equal(c.vehicleBoardError(baton, p), `${p.name}上还有对方的人，先把他们拉下车。`);
+    const r = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(baton, r);
+    assert.match(c.vehicleBoardError(helu, r), /还有敌人/);
+  }
+  {
+    // 战斗画面的技能栏（game.js · gameSkills，联机的动作菜单也用它）：柯尔特、赫鲁米卡在「我方」，绯秋、灯在「乙」（敌对）
+    const { c, heroes: [kolt, helu, hiaki] } = screenField();
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(kolt, p);
+    const bar = u => plain(c.GAME.gameSkills(u).map(s => s.id).filter(id => /^veh_/.test(id)));
+    assert.deepEqual(bar(hiaki), [`veh_pull:${p.id}:${kolt.id}`], "乙的绯秋：只有「拉柯尔特下车」（以前是「上车」）");
+    assert.deepEqual(bar(helu), [`veh_board:${p.id}`], "同阵营的赫鲁米卡：上车");
+  }
+  {
+    // 友好不传递：我方—乙、乙—丙友好（我方—丙敌对）。乙的绯秋开车，我方、丙的人都能坐上去（都和绯秋友好）；
+    // 车上有了灯以后，我方的人（和灯敌对）上不去，技能栏里只有「拉灯下车」（绯秋是自己人）
+    const f = trio(["kolt", "helu", "hiaki", "tou"], true, RIOTS468);
+    const { c, heroes: [kolt, helu, hiaki, tou] } = f;
+    faction(c, { faction: "乙", other: "丙", hostile: false });
+    drivers([kolt, helu, hiaki, tou]);
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(hiaki, p);
+    assert.equal(c.vehicleBoardError(kolt, p), null, "我方和乙友好：可以坐绯秋的车");
+    assert.equal(c.vehicleBoardError(tou, p), null, "丙和乙友好：也可以");
+    c.vehicleBoard(tou, p);
+    assert.match(c.vehicleBoardError(kolt, p), /还有敌人/, "车上有和我方敌对的灯：柯尔特上不去");
+    assert.deepEqual(groundOf(c, helu), [`veh_pull:${p.id}:${tou.id}`], "只能拉灯，不能拉绯秋");
+  }
+  {
+    // 对照：没配置阵营——玩家都是自己人，都能坐同一台车，技能栏里没有「拉人」
+    const f = trio(["kolt", "helu", "hiaki", "tou"], false, RIOTS468);
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [baton] } = f;
+    drivers([kolt, helu, hiaki, tou]);
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(kolt, p);
+    [helu, hiaki, tou].forEach(u => assert.equal(c.vehicleBoardError(u, p), null, `${u.name} 可以一起坐`));
+    assert.deepEqual(groundOf(c, tou), [`veh_board:${p.id}`]);
+    assert.equal(c.vehicleBoardError(baton, p), `${p.name}上还有对方的人，先把他们拉下车。`);
+  }
+});
+
+test("拉人下车按玩家阵营分：敌对阵营的人可以拉下车（照旧 1 行动点、困难「运动」检定，失败照扣；拉下驾驶员按上车顺序换人），自己人（同阵营、友好的阵营）不能拉；玩家和敌人之间照旧；没配置阵营时照旧（#468）", () => {
+  {
+    // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），灯在「丙」（敌对）
+    const f = trio(["kolt", "helu", "hiaki", "tou"], true, RIOTS468);
+    const { c, heroes: [kolt, helu, hiaki, tou], foes: [baton, rifle] } = f;
+    drivers([kolt, helu, hiaki, tou]);
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(kolt, p); c.vehicleBoard(hiaki, p);   // 我方的柯尔特开车，乙的绯秋当炮手
+    // 自己人不能拉
+    assert.equal(c.vehiclePullError(helu, p, kolt), `${kolt.name} 是自己人。`, "同阵营");
+    assert.equal(c.vehiclePullError(helu, p, hiaki), `${hiaki.name} 是自己人。`, "友好的乙也是自己人");
+    assert.deepEqual(groundOf(c, helu), [`veh_board:${p.id}`], "赫鲁米卡的技能栏：上车，没有拉人");
+    // 敌对阵营的人可以拉（以前提示「是自己人」）：驾驶员、炮手都能拉
+    assert.equal(c.vehiclePullError(tou, p, kolt), null, "灯可以拉驾驶员柯尔特");
+    assert.equal(c.vehiclePullError(tou, p, hiaki), null, "也可以拉炮手绯秋");
+    assert.deepEqual(groundOf(c, tou), [`veh_pull:${p.id}:${kolt.id}`, `veh_pull:${p.id}:${hiaki.id}`], "灯的技能栏：拉两个人下车");
+    const check = onlineCheck(c);
+    assert.doesNotThrow(() => check(tou, `veh_pull:${p.id}:${kolt.id}`), "联机：灯拉得了柯尔特");
+    assert.throws(() => check(helu, `veh_pull:${p.id}:${kolt.id}`), /没有这项可用技能/, "联机：赫鲁米卡拉不了自己人");
+    // 走技能：照旧 1 行动点、困难「运动」检定；失败行动点照扣
+    tou.ap = 2;
+    c.Math.random = () => 0.9;
+    skill(c, tou, `veh_pull:${p.id}:${kolt.id}`);
+    assert.equal(tou.ap, 1, "失败：行动点照扣");
+    assert.ok(kolt.vehMerged && kolt.vehId === p.id, "没拉下来");
+    assert.match(logText(c), new RegExp(`${tou.name} 想把 ${kolt.name} 拉下车：困难「运动」检定（三级熟练，成功率 75%），失败。`));
+    c.Math.random = () => 0.1;
+    skill(c, tou, `veh_pull:${p.id}:${kolt.id}`);
+    assert.equal(tou.ap, 0, "花 1 行动点");
+    assert.ok(!kolt.vehId && kolt.zone === p.zone, "柯尔特被拉下车，落在车所在的区");
+    assert.ok(hiaki.vehMerged, "按上车顺序：绯秋接任驾驶员");
+    assert.match(logText(c), new RegExp(`${kolt.name} 被拉下${p.name}。`));
+    assert.match(logText(c), new RegExp(`${hiaki.name} 接任驾驶员。`));
+    // 没有「运动」熟练照旧做不了困难检定；拉下来的柯尔特和绯秋友好，不能拉
+    tou.profs = {};
+    assert.match(c.vehiclePullError(tou, p, hiaki), /没有「运动」熟练，做不了困难难度的检定/);
+    assert.equal(c.vehiclePullError(kolt, p, hiaki), `${hiaki.name} 是自己人。`);
+    // 玩家和敌人之间照旧：镇压队可以拉玩家，玩家可以拉镇压队；镇压队之间是自己人
+    assert.equal(c.vehiclePullError(baton, p, hiaki), null, "警棍盾可以拉绯秋");
+    const q = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(rifle, q);
+    assert.equal(c.vehiclePullError(kolt, q, rifle), null, "柯尔特可以拉镇压队员");
+    assert.equal(c.vehiclePullError(baton, q, rifle), `${rifle.name} 是自己人。`);
+  }
+  {
+    // 对照：没配置阵营——玩家拉不了玩家（都是自己人）
+    const f = trio(["kolt", "helu", "hiaki", "tou"], false, RIOTS468);
+    const { c, heroes: [kolt, , , tou] } = f;
+    drivers([kolt, tou]);
+    const p = c.vehicleSpawn("fortress", 1, 5, 2);
+    c.vehicleBoard(kolt, p);
+    assert.equal(c.vehiclePullError(tou, p, kolt), `${kolt.name} 是自己人。`);
+    assert.deepEqual(groundOf(c, tou), [`veh_board:${p.id}`]);
+  }
+});
+
+/** 会上车、拉人下车的打法（自动对打用）：没坐车的人先试着拉同区车上的人下车，再试着上车（车上每个人、每台车挨个试，
+ *  挑法不看阵营，能不能做交给规则自己拦）；坐在车上的人开炮打敌对的单位；其余照默认打法 */
+function vehPolicy(c) {
+  const range = run(c, "VEHICLES.fortress.cannon.range");
+  const usable = (u, id) => {
+    const cost = c.skillCost(id) || {};
+    return (cost.ap || 0) <= (u.ap || 0) && (cost.bonus || 0) <= (u.bonus || 0) && !c.skillRequirementError(u, id);
+  };
+  return {
+    act(u) {
+      if (u.dying || u.stunned) return c.BattleSim.BASIC_POLICY.act(u);
+      if (!u.vehId) {
+        const cars = c.vehicleProps().filter(p => !p._destroyed && Number(p.zone) === Number(u.zone));
+        const tries = [];
+        cars.forEach(p => c.vehicleOccupants(p).forEach(o => tries.push(`veh_pull:${p.id}:${o.id}`)));
+        cars.forEach(p => tries.push(`veh_board:${p.id}`));
+        const id = tries.find(x => usable(u, x));
+        return id ? () => skill(c, u, id) : c.BattleSim.BASIC_POLICY.act(u);
+      }
+      const t = usable(u, "veh_fire") ? c.vehiclePickTarget(u, c.vehicleTargetsFor(u, c.vehicleOf(u), range)) : null;
+      return t ? () => skill(c, u, "veh_fire", t) : null;
+    }
+  };
+}
+
+test("载具：同一种子整场自动对打（玩家会上车、拉人下车，镇压队开的车、空车），不配置 / 全在「我方」/ 多一个没人的阵营结果和整场记录一模一样；两个敌对阵营对打时敌对阵营的人没坐进同一台车过、拉过敌对阵营的人下车、没拉过自己人，镇压队留下的空车替镇压队挡过、玩家留下的空车没挡过；两个友好阵营一起坐过车、没互相拉过（#468）", () => {
+  const MARKS = { 上车: /坐上移动堡垒/, 拉人下车: /被拉下移动堡垒/, 代挡: /代挡了这次攻击/ };
+  const cases = [
+    { party: ["kolt", "helu", "hiaki", "tou"], seed: "PVP468-AUTO-A" },
+    { party: ["tou", "chuan", "helu", "kolt"], seed: "PVP468-AUTO-B" }
+  ];
+  // 两场合起来要真的走到的：上车、拉人下车、代挡；敌对阵营之间拉过人、镇压队留下的空车代挡过、友好阵营一起坐过车
+  const seen = { marks: new Set(), pvpPull: 0, enemyCar: 0, friendRide: 0 };
+  for (const cs of cases) {
+    const sim = mode => {
+      const c = H.load();
+      c.BattleSim.setup({ party: cs.party, seed: cs.seed, zoneMode: 3,
+        enemies: [{ id: "riot_baton", lv: 4, zone: 1 }, { id: "riot_rifle", lv: 4, zone: 2 }, { id: "riot_captain", lv: 4, zone: 2 }, { id: "thug_knife", lv: 4, zone: 2 }],
+        before(S) { S.units.filter(u => u.isPlayer).forEach(u => { u.level = 10; c.resetBattleFlags(u); }); } });
+      const S = c.S.state;
+      const heroes = S.units.filter(u => u.isPlayer && !u.hidden);
+      heroes.forEach(u => { u.zone = 1; u.profs = { "载具驾驶": 2, "运动": 2 }; });
+      // 车：一台空车（开战时属于镇压队）停在 1 区；2 区一台装甲只剩两成的空车（镇压队不上快炸的车：VEHICLE_RULES.aiLeavePct，
+      // 一直空着替镇压队挡）、一台镇压小队长开的
+      c.vehicleSpawn("fortress", 1, 4, 4);
+      const weak = c.vehicleSpawn("fortress", 2, 4, 4);
+      weak.hp = Math.floor(weak.maxHp * 0.2);
+      c.vehicleBoard(c.findKit("riot_captain", S.units), c.vehicleSpawn("fortress", 2, 4, 4));
+      if (mode === "all") faction(c, { faction: "我方" });
+      if (mode === "empty") faction(c, { faction: "乙", phase: "enemy" });
+      if (mode === "pvp" || mode === "friendly") heroes.slice(2).forEach(h => faction(c, { faction: "乙", unit: h.id }));
+      if (mode === "friendly") faction(c, { faction: "乙", other: "我方", hostile: false });
+      // 记下每一次上车（谁上去、车上原来有谁）、每一次拉人（谁拉谁、拉下来没有）、每一次代挡（哪台车的驾驶员、车属于哪一方、替谁挡）
+      const boards = [], pulls = [], guards = [];
+      const vb = c.vehicleBoard, vp = c.vehiclePull, vg = c.vehicleGuard;
+      c.vehicleBoard = function (u, p) {
+        boards.push({ u, crew: c.vehicleOccupants(p).slice() });
+        return vb.apply(this, arguments);
+      };
+      c.vehiclePull = function (actor, p, occ) {
+        const out = vp.apply(this, arguments);
+        pulls.push({ actor, occ, ok: occ.vehId !== p.id });
+        return out;
+      };
+      c.vehicleGuard = function (attacker, target) {
+        const out = vg.apply(this, arguments);
+        if (out) guards.push({ pilot: c.vehiclePilot(out.vehicle), side: c.vehicleSide(out.vehicle), target });
+        return out;
+      };
+      const r = plain(c.BattleSim.run({ maxRounds: 12, policy: vehPolicy(c) }));
+      return { c, r, log: logText(c), boards, pulls, guards };
+    };
+    const off = sim(null), all = sim("all"), empty = sim("empty");
+    Object.keys(MARKS).forEach(k => { if (MARKS[k].test(off.log)) seen.marks.add(k); });
+    assert.deepEqual(all.r, off.r, cs.seed + "：全部在「我方」——结果一样");
+    assert.equal(all.log, off.log, cs.seed + "：整场记录一样");
+    assert.deepEqual(empty.r, off.r, cs.seed + "：多一个没人的阵营——结果一样");
+    assert.equal(empty.log, off.log, cs.seed + "：整场记录一样");
+    // 两个敌对的玩家阵营：敌对阵营的人没坐进同一台车过、没拉过自己人；空车不替玩家挡，玩家留下的空车谁都不替
+    const pvp = sim("pvp"), pc = pvp.c;
+    const rival = (a, b) => a.isPlayer && b.isPlayer && !pc.teammateOf(a, b);
+    assert.deepEqual(pvp.boards.filter(b => b.crew.some(o => rival(b.u, o))).map(b => `${b.u.name} → ${b.crew.map(o => o.name).join("、")}`), [], cs.seed + "（两个敌对阵营）：敌对阵营的人没坐进同一台车过");
+    assert.deepEqual(pvp.pulls.filter(x => x.actor.isPlayer && x.occ.isPlayer && !rival(x.actor, x.occ)).map(x => `${x.actor.name} → ${x.occ.name}`), [], cs.seed + "：没拉过自己人");
+    seen.pvpPull += pvp.pulls.filter(x => x.ok && rival(x.actor, x.occ)).length;
+    assert.deepEqual(pvp.guards.filter(g => !g.pilot && (g.side === "player" || g.target.isPlayer)).map(g => g.target.name), [], cs.seed + "：玩家留下的空车没挡过、空车没替玩家挡过");
+    seen.enemyCar += pvp.guards.filter(g => !g.pilot && g.side === "enemy").length;
+    // 两个友好的玩家阵营：一起坐过车，没互相拉过
+    const fr = sim("friendly"), fc = fr.c;
+    seen.friendRide += fr.boards.filter(b => b.u.isPlayer && b.crew.some(o => o.isPlayer && !fc.samePlayerFaction(b.u, o))).length;
+    assert.deepEqual(fr.pulls.filter(x => x.actor.isPlayer && x.occ.isPlayer).map(x => `${x.actor.name} → ${x.occ.name}`), [], cs.seed + "（两个友好阵营）：没互相拉过");
+  }
+  assert.deepEqual([...seen.marks].sort(), Object.keys(MARKS).sort(), "两场合起来：上车、拉人下车、代挡都出现过");
+  assert.ok(seen.pvpPull > 0, "两个敌对阵营：把敌对阵营的人拉下车过");
+  assert.ok(seen.enemyCar > 0, "两个敌对阵营：镇压队留下的空车替镇压队挡过");
+  assert.ok(seen.friendRide > 0, "两个友好阵营：一起坐过车");
 });
