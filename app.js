@@ -10607,12 +10607,14 @@ function pushDest(a, t) {
  *  画面、联机 / 热座的校验（hotseat-validation.js · checkFlow）、模拟器都用这一份：下潜中的单位也选不进去 */
 function skillFlowSteps(id, actor, picks) {
   // 嘲讽对玩家（#464）：被敌对的人嘲讽时，分步里能选的敌对单位只剩嘲讽者——不管技能写的是打敌人、任意单位还是说明里写着友方
-  // （电能鞭、磁力移动、拆卸模式、霰弹枪的特殊射击……分步里选的照样是敌人）；自己人（同阵营、友好的阵营，开着友伤也算）一个不拿掉
+  // （电能鞭、磁力移动、拆卸模式、霰弹枪的特殊射击……分步里选的照样是敌人）。
+  // 自己人（#478）：攻击那几步也拿掉（开着友伤才列进来的队友、SKILL_ATTACKS_ANY 的技能选的，tauntStepOk）；给友方的、选任意单位的那几步一个不拿掉
   const taunt = tauntForSkill(actor, id);
+  const ok = taunt ? tauntStepOk(actor, id, picks, taunt) : null;
   return (skillFlowStepsAll(id, actor, picks) || []).map(st => {
     if (!st || st.type !== "unit" || !Array.isArray(st.units)) return st;
-    if (taunt) {
-      const kept = st.units.filter(u => !u || !tauntFoe(actor, u, taunt));
+    if (ok) {
+      const kept = st.units.filter(u => !u || ok(st, u));
       if (kept.length !== st.units.length) st = Object.assign({}, st, { units: kept });
     }
     const harmonic = st.harmonic != null ? !!st.harmonic : skillHitsSubmerged(id);
@@ -12849,24 +12851,64 @@ function skillSideOf(a, id) {
 function tauntReaction(a, id) {
   return /_opp$|_block$|assist/.test(String(id)) || (!!a && !!state._assistBy && state._assistBy === a.id);
 }
-/** 嘲讽对玩家（#464）：被 f 嘲讽着的 a 不能选 u——u 是和 a 敌对的单位（非玩家单位、敌对玩家阵营的人），又不是嘲讽者 f。
- *  自己人（同一个玩家阵营、单独设成友好的阵营）不拦：给友方用的那一步照常选，开着友伤打自己阵营的队友也照常（友伤开关照常可用） */
-function tauntFoe(a, u, f) {
-  return !!u && !!f && u.id !== f.id && attackFoe(a, u) && !teammateOf(a, u);
+/** 嘲讽对玩家（#464 / #478）：被 f 嘲讽着的 a 不能选 u（u 不是嘲讽者 f）——
+ *  u 和 a 敌对（非玩家单位、敌对玩家阵营的人）：不管什么技能都不能选（#464）；
+ *  u 是自己人（同一个玩家阵营、单独设成友好的阵营）：attack（这一下是拿攻击打 u）时也不能选——开着友伤也不能打队友（#478，作者 10/29：
+ *  「被嘲讽了就只能打嘲讽的」）；给友方用的治疗、增益这类不是攻击的照常 */
+function tauntFoe(a, u, f, attack) {
+  if (!u || !f || u.id === f.id) return false;
+  if (attackFoe(a, u) && !teammateOf(a, u)) return true;
+  return !!attack && teammateOf(a, u);
 }
-/** 嘲讽对玩家（PvP 第二步，docs/pvp.md 第 5 节，#464）：a 被嘲讽（enemies.js · playerTauntTarget）时，选单位只能选嘲讽它的那个——
+/** 嘲讽对玩家（#478）：a 拿这个技能选的单体目标（不是分步里选的）算不算攻击它——打敌人的技能（自己人只有开着友伤才选得到，就是友伤的攻击）、
+ *  「任意单位」里对选中的单位是攻击的（engine.js · SKILL_ATTACKS_ANY：电能鞭、磁力移动、诺拉的普攻……）。给友方的、别的「任意单位」技能不算 */
+function tauntAttackPick(a, id, side) {
+  side = side || skillSideOf(a, id);
+  return side === "enemy" || ((side === "any" || side === "anySelf") && typeof skillAttacksAny === "function" && skillAttacksAny(a, id));
+}
+/** 嘲讽对玩家（#464 / #478）：被 f 嘲讽着的 actor，这个技能的分步（picks 时的那一份）里每一步能选谁。返回 (这一步, u) => 能不能选。
+ *  和 actor 敌对的只能是嘲讽者（tauntFoe）；自己人：攻击那几步不行——「选敌人」的名单（fieldFoes / visibleEnemies）开着友伤才列进来的队友
+ *  （在 enemies.js · friendlyFireAside 里再算一遍分步、对照着看出来的），以及 SKILL_ATTACKS_ANY 的技能选中的；给友方的、选任意单位的那几步照常 */
+function tauntStepOk(actor, id, picks, f) {
+  const anyAttack = typeof skillAttacksAny === "function" && skillAttacksAny(actor, id);
+  const quiet = typeof friendlyFireAside === "function" && friendlyFireOn(actor) ? friendlyFireAside(actor, () => skillFlowStepsAll(id, actor, picks) || []) : null;
+  return (st, u) => {
+    if (!u || u.id === f.id) return true;
+    if (tauntFoe(actor, u, f)) return false;
+    if (!teammateOf(actor, u)) return true;
+    if (anyAttack) return false;
+    if (!quiet) return true;   // 没开友伤：分步里列着的自己人都不是友伤的攻击
+    const q = quiet.find(x => x && x.key === st.key && x.type === "unit" && Array.isArray(x.units));
+    return !!q && q.units.some(x => x && x.id === u.id);
+  };
+}
+/** 嘲讽对玩家（PvP 第二步，docs/pvp.md 第 5 节，#464 / #478）：a 被嘲讽（enemies.js · playerTauntTarget）时，攻击只能打嘲讽它的那个——
  *  单体目标、分步里选的单位，和 a 敌对的只能是嘲讽者（tauntFoe），不管技能写的是打敌人、任意单位，还是说明里写着友方、分步里选的却是敌人
  *  （电能鞭、磁力移动、拆卸模式、霰弹枪的特殊射击……）；打敌人 / 任意单位的技能也不能打配置物 / 危墙。
- *  给自己人用的、只选区域的（范围攻击打一个区）、反应（tauntReaction）不管。不合规矩返回原因 */
+ *  自己人（#478）：攻击也不能打（开着友伤也不行）——单体目标看 tauntAttackPick，分步里选的看那一步（tauntStepOk）；
+ *  给自己人的治疗、增益，只选区域的（范围攻击打一个区）、反应（tauntReaction）不管。不合规矩返回原因 */
 function playerTauntWhy(a, id, t) {
   const f = typeof playerTauntTarget === "function" ? playerTauntTarget(a) : null;
   if (!f || tauntReaction(a, id)) return null;
   const side = skillSideOf(a, id);
   const fl = state.skillFlow;
-  const picked = (fl && fl.id === id ? Object.values(fl.picks || {}) : []).map(v => (typeof v === "string" ? unitById(v) : null)).filter(Boolean);
+  const picks = fl && fl.id === id ? fl.picks || {} : {};
+  const picked = Object.values(picks).map(v => (typeof v === "string" ? unitById(v) : null)).filter(Boolean);
   const unitT = t && t.id ? unitById(t.id) : null;
   const structure = (side === "enemy" || side === "any") && !unitT && (t ? true : isStructureToken(state.targetId));
-  const wrong = structure || [unitT].concat(picked).some(u => tauntFoe(a, u, f));
+  let wrong = structure || [unitT].concat(picked).some(u => tauntFoe(a, u, f));
+  // 分步里选的自己人：按选它的那一步看；单体目标不是分步里选的，按技能写的那一边看
+  const stepPicked = new Set();
+  if (!wrong && (unitT || picked.length)) {
+    const ok = tauntStepOk(a, id, picks, f);
+    (skillFlowStepsAll(id, a, picks) || []).forEach(st => {
+      const u = st && st.type === "unit" && typeof picks[st.key] === "string" ? unitById(picks[st.key]) : null;
+      if (!u) return;
+      stepPicked.add(u.id);
+      if (!ok(st, u)) wrong = true;
+    });
+    if (unitT && !stepPicked.has(unitT.id) && tauntFoe(a, unitT, f, tauntAttackPick(a, id, side))) wrong = true;
+  }
   return wrong ? `${a.name} 被 ${f.name} 嘲讽：只能攻击 ${f.name}` : null;
 }
 /** 选这个技能的分步名单时 actor 被谁嘲讽着（反应不算；没有返回 null） */
