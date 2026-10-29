@@ -140,13 +140,14 @@ test("被打的那一队：减伤、协助格挡、格挡减免记进格挡 / �
   assert.ok(helu);
 });
 
-test("坚毅生命的数值不进分数：打进坚毅生命的伤害、那一下的减伤都不算（分数里看不出坚毅扣了多少）；打倒照算击杀", () => {
+test("打进坚毅生命的伤害、那一下的减伤也照算（作者 10/29：PVP_TEAM_SCORE.shpCounts）；分数里只有分值，没有坚毅数值；打倒照算击杀", () => {
   const { c, S, heroes: [kolt, , hiaki] } = field();
   (hiaki.layers || []).forEach(l => { l.current = 0; }); hiaki.upOnShp = true; hiaki.shp = 50; hiaki.shpMax = 60;
   hit(c, kolt, hiaki, 9, { flags: { dr50: true } });
   assert.ok(hiaki.shp < 50, "打进了坚毅");
-  assert.equal(team(S, "我方").parts.dmg || 0, 0, "打进坚毅的伤害不算");
-  assert.equal(team(S, "乙").parts.reduce || 0, 0, "那一下的减伤不算");
+  assert.equal(vm.runInContext("PVP_TEAM_SCORE.shpCounts", c), true, "配置表：打进坚毅的也算");
+  assert.ok((team(S, "我方").parts.dmg || 0) > 0, "打进坚毅的伤害照算");
+  assert.ok((team(S, "乙").parts.reduce || 0) > 0, "那一下的减伤照算");
   hit(c, kolt, hiaki, 200);
   assert.equal(hiaki.dead, true);
   assert.equal(team(S, "我方").parts.kill, c.S.SCORE_RULES.kill.elite, "打倒照算击杀");

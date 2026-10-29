@@ -1940,7 +1940,7 @@ function setPlayerFaction(cmd) {
  *     stand:   true / false     允许起身；不允许时倒地的人留在场上，只是不能自己起身（能被专长救起来）
  *     rounds:  null / 回合数      回合上限（开了才有）：打完这一回合还没分出胜负，剩余血量百分比多的一队赢，一样算平局
  *     first:   "1队" / "2队"     开战时抛硬币定的先手（startCombat → pvpDuelToss）：先手在我方回合行动，后手在敌人回合行动
- *     carry:   { 单位 id: 1 }    后手补偿：开战时给后手每个角色的 1 个附赠，没用掉的叠到后手自己的第一回合（refreshEconomy → pvpDuelCarry）
+ *     carry:   { 单位 id: 1 }    后手补偿：开战时给后手每个角色的 1 个附赠，没用掉的一直叠到后手自己的回合上、直到用掉（refreshEconomy → pvpDuelCarry；不能行动的回合先收着，carryHeld）
  *     out:     [单位 id…]        再起不能、移出战场的人
  *     result:  null / { over, winner, draw, why, pct }   分出的胜负（pvpDuelOutcome / pvpDuelRoundLimit）
  *     restore: { heroes, dur }   决斗前队伍档案（LEDGER）里的血量 / 坚毅 / 耐久，结束后盖回去（pvpDuelRestore）。只在房主本机，不发给玩家
@@ -2076,16 +2076,27 @@ function pvpDuelLateBonus() {
   d.carry = carry;
   appendLog(`后手补偿：${second.name}每个角色先有 ${n} 个附赠动作，先手的第一回合里就能用（主要拿来协助格挡）；没用掉的留到自己的第一回合。`);
 }
-/** 后手自己的第一回合开始补行动点时（app.js · refreshEconomy）：开战时给的补偿还剩几个（最多给的那么多），叠到这一回合的附赠上。
- *  只算一次：不管这一回合能不能行动（晕眩……）都用掉这个记号 */
+/** 后手补偿留着（作者 10/29：「补偿的附赠动作直到使用掉之前一直保存着」）：每次这个角色自己的回合开始补行动点时（app.js · refreshEconomy），
+ *  开战时给的补偿还剩几个——上一回合留下没用掉的附赠，最多给的那么多（附赠先用平常的，补偿的最后用）——就叠到这一回合的附赠上，一直留到用掉为止。
+ *  这一回合不能行动（晕眩……）时先收着（pvpDuelHold），不给附赠、也不作废，下一个能行动的回合照样叠上 */
 function pvpDuelCarry(u) {
   const d = pvpDuelState();
   if (!d || !u || !d.carry || !Object.prototype.hasOwnProperty.call(d.carry, u.id)) return 0;
-  const n = Math.max(0, Math.min(Number(d.carry[u.id]) || 0, Math.floor(Number(u.bonus) || 0)));
+  const held = !!(d.carryHeld && d.carryHeld[u.id]);
+  const left = held ? Number(d.carry[u.id]) || 0 : Math.floor(Number(u.bonus) || 0);
+  const n = Math.max(0, Math.min(Number(d.carry[u.id]) || 0, left));
   const next = Object.assign({}, d.carry);
-  delete next[u.id];
+  if (n > 0) next[u.id] = n; else delete next[u.id];
   d.carry = next;
+  if (held) { const h = Object.assign({}, d.carryHeld); delete h[u.id]; d.carryHeld = h; }
   return n;
+}
+/** 这一回合不能行动：补偿先收着，下一个能行动的回合再叠上（pvpDuelCarry） */
+function pvpDuelHold(u, n) {
+  const d = pvpDuelState();
+  if (!d || !u || !(n > 0)) return;
+  d.carry = Object.assign({}, d.carry || {}, { [u.id]: n });
+  d.carryHeld = Object.assign({}, d.carryHeld || {}, { [u.id]: true });
 }
 /** 决斗不允许起身时，决斗里的角色不能自己起身（app.js · standUpBlocked 认它）；专长「拉一把」这类别人来救的照常 */
 function pvpDuelNoStand(u) {

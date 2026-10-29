@@ -2807,13 +2807,14 @@ const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破"
  *   · 只算原本的分数（parts：伤害、治疗 / 护盾、击破、打出失衡、协助格挡、减伤、格挡减免、击杀、行动），分值照 SCORE_RULES；额外加成——
  *     速杀、无伤、遭遇战、克制大师、克制 / 大伤害加成——都不算。溢出伤害、招式疲劳也不算；环境（配置物、场地）打出的伤害 / 击破按原本的分值算进伤害、击破。
  *   · 队伍评分（state.battleScore）照旧记的那些（打非玩家单位、治疗、行动……）顺手也记一份进那个人的阵营（addScore → pvpTeamAdd）。
- *   · 打敌对玩家阵营的人（#453 起当友伤，不计分）：只记进打的人那一队——伤害（打进坚毅生命的不算）、击破、打出失衡、击杀（打倒一名角色：
- *     死亡，或决斗里再起不能）；被打的那一队的减伤（打进坚毅的那一下不算）、协助格挡、格挡减免，治回这样打掉的血也算治疗。
+ *   · 打敌对玩家阵营的人（#453 起当友伤，不计分）：只记进打的人那一队——伤害（打进坚毅生命的也算，作者 10/29）、击破、打出失衡、击杀（打倒一名角色：
+ *     死亡，或决斗里再起不能）；被打的那一队的减伤（打进坚毅的那一下也算）、协助格挡、格挡减免，治回这样打掉的血也算治疗。
  *     这些不进队伍评分、战场数据（state.battleStats）、最近 10 场（ledger.js · careerRecordBattle），不给奖励：分数只是显示，战斗结束后给所有人看。
  *   · 同阵营之间开着友伤打的照旧不计。只有一个玩家阵营（普通 PvE）时一份都不记，一切照旧。 */
 const PVP_TEAM_SCORE = {
   parts: ["dmg", "heal", "brk", "stagger", "block", "reduce", "blockSave", "kill", "action"],   // 只算这几项（原本的分数）
-  killHero: SCORE_RULES.kill.elite   // 打倒敌对玩家阵营的一名角色（死亡 / 决斗里再起不能）的击杀分：照精英的分值
+  killHero: SCORE_RULES.kill.elite,  // 打倒敌对玩家阵营的一名角色（死亡 / 决斗里再起不能）的击杀分：照精英的分值
+  shpCounts: true                    // 打进坚毅生命的伤害、那一下的减伤 / 空手格挡减免也照算（作者 10/29：「可以算，问题不大」）
 };
 /** 现在要不要每队单独计分：场上有两个以上玩家阵营，或者是决斗（一队全倒的那一下场上只剩一个阵营，也照记） */
 function pvpTeamScoring() {
@@ -2832,12 +2833,12 @@ function pvpTeamAdd(u, part, pts) {
   all[f] = row;
   state.pvpScore = all;
 }
-/** 打敌对玩家阵营的人这一击（dealToInner、环境伤害、行动里的连带伤害）：记进打的人那一队——伤害（打进坚毅生命的不算）、击破、打出失衡、
+/** 打敌对玩家阵营的人这一击（dealToInner、环境伤害、行动里的连带伤害）：记进打的人那一队——伤害（打进坚毅生命的也算，PVP_TEAM_SCORE.shpCounts）、击破、打出失衡、
  *  打倒一名角色的击杀分。by 是出手的人（环境 / 连带伤害是记给的那个人）；opt：{ broke 这一下打进了失衡, felled 这一下把角色打倒了（死亡 / 再起不能） } */
 function pvpTeamHit(by, target, res, opt) {
   if (!by || !target || !res || !target.isPlayer || typeof pvpFoe !== "function" || !pvpFoe(by, target) || !pvpTeamScoring()) return;
   opt = opt || {};
-  const hp = Math.max(0, Math.floor(Number(res.total) || 0) - Math.floor(Number(res.shpDealt) || 0));
+  const hp = Math.max(0, Math.floor(Number(res.total) || 0) - (PVP_TEAM_SCORE.shpCounts ? 0 : Math.floor(Number(res.shpDealt) || 0)));
   pvpTeamAdd(by, "dmg", hp * SCORE_RULES.dmg);
   const brk = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;
   pvpTeamAdd(by, "brk", brk * SCORE_RULES.brk);
@@ -5937,18 +5938,22 @@ function applyBonusPenalties(u, bonus, notes) {
 }
 function refreshEconomy(u, notes) {
   if (!u || !u.isPlayer) return;
-  // 决斗的后手补偿（enemies.js · pvpDuelCarry，#472）：开战时给的附赠没用掉的，叠到后手自己的第一回合（只这一次；这一回合不能行动就作废）
+  // 决斗的后手补偿（enemies.js · pvpDuelCarry，#472）：开战时给的附赠没用掉的，一直叠到自己的回合上，直到用掉（作者 10/29）；
+  // 这一回合不能行动时先收着（pvpDuelHold），下一个能行动的回合再叠
   const duelCarry = typeof pvpDuelCarry === "function" ? pvpDuelCarry(u) : 0;
+  const holdCarry = () => { if (duelCarry > 0 && typeof pvpDuelHold === "function") pvpDuelHold(u, duelCarry); };
   if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
   // 肉体操控（沙灵聚合体三阶段）：这一回合失去行动点（附赠动作照常）。标记只管一回合，不管这回合能不能行动都用掉
   const loseAp = !!u.loseApNext;
   u.loseApNext = false;
   if (u.escort) { u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0; return; }   // 护送对象玩家不能操作
   if (typeof isCrushing === "function" && isCrushing(u)) {
+    holdCarry();
     u.ap = 0; u.apMax = 0; u.bonus = 0; u.bonusMax = 0;
     return;
   }
   if (u.stunned || ambushSkipRound()) {
+    holdCarry();
     u.ap = 0;
     u.apMax = 0;
     u.bonus = 0;
@@ -5979,7 +5984,7 @@ function refreshEconomy(u, notes) {
   // 决斗的后手补偿：也是加成，在扣之前加（例：这一回合 1 + 1 = 2 个附赠）
   if (duelCarry > 0) {
     bonus += duelCarry;
-    if (notes) notes.push(`后手补偿：${u.name} 开战时的附赠没用掉，叠到这一回合（+${duelCarry}）。`);
+    if (notes) notes.push(`后手补偿：${u.name} 开战时的附赠还没用掉，叠到这一回合（+${duelCarry}，用掉之前一直留着）。`);
   }
   bonus = applyBonusPenalties(u, bonus);   // 所有加成算完再扣：不稳、空手格挡各 −1
   if (loseAp) ap = 0;
@@ -8055,8 +8060,8 @@ function finishBlockInner(helperId, forced) {
       saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
       if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), saverUnit);   // 评分：格挡减免的伤害
     } else if (pvpJob && saverUnit && out && out.res) {
-      // 空手格挡少挨的那一半落在坚毅生命上时不算（不能从分数里看出坚毅扣了多少）
-      const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" && !(Number(out.res.shpDealt) > 0) ? Math.round(Number(out.res.total) || 0) : 0;
+      // 空手格挡少挨的那一半落在坚毅生命上时也算（PVP_TEAM_SCORE.shpCounts，作者 10/29）
+      const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" && (PVP_TEAM_SCORE.shpCounts || !(Number(out.res.shpDealt) > 0)) ? Math.round(Number(out.res.total) || 0) : 0;
       if (saved > 0) pvpTeamAdd(saverUnit, "blockSave", Math.floor(saved * SCORE_RULES.blockSave));
     }
   }
@@ -9336,7 +9341,7 @@ function dealToInner(attacker, target, opt) {
   const wasStunnedT = !!target.stunned;
   // #340 第 15 条：这一下打进坚毅（游戏版）——结算之前记下：致命的一下、拉斯缪尔不稳态结算后 upOnShp 都清掉了
   const gritHitT = !!(target && target.isPlayer && target.upOnShp) && shpHidden();
-  const onShpT = !!(target && target.isPlayer && target.upOnShp);   // 每队单独计分（#472）：打进坚毅的那一下不算减伤分（不管画面藏不藏坚毅）
+  const onShpT = !!(target && target.isPlayer && target.upOnShp);   // 每队单独计分（#472）：打进坚毅的那一下算不算减伤分看 PVP_TEAM_SCORE.shpCounts（作者 10/29：照算）
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
@@ -9485,7 +9490,7 @@ function dealToInner(attacker, target, opt) {
       if (st && red > 0 && !(attacker && attacker.isPlayer)) {
         st.reduced = (st.reduced || 0) + red;
         addScore("reduce", Math.floor(red * SCORE_RULES.reduce), target);
-      } else if (red > 0 && pvpHit && !onShpT) pvpTeamAdd(target, "reduce", Math.floor(red * SCORE_RULES.reduce));   // 每队单独计分（#472）：打进坚毅的那一下不算
+      } else if (red > 0 && pvpHit && (PVP_TEAM_SCORE.shpCounts || !onShpT)) pvpTeamAdd(target, "reduce", Math.floor(red * SCORE_RULES.reduce));   // 每队单独计分（#472）：打进坚毅的那一下也算（PVP_TEAM_SCORE.shpCounts）
     }
     // 画面用：敌人被这一击打死时，记下「溢出」的伤害（血量显示成负数）和是不是一记重击（死后慢慢消失）
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {

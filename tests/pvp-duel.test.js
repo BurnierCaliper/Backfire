@@ -142,7 +142,7 @@ test("抛硬币：开战时抛，结果写进战斗记录；先手的队在我�
   assert.equal(S.pvpDuel.first, "2队", "已经抛过：不再抛");
 });
 
-test("后手补偿：开战时后手每个角色先有 1 个附赠（没有行动点），先手的第一回合里能拿来协助格挡；没用掉的叠到后手自己的第一回合（2 个），用掉的只剩平常的 1 个；第二回合起照常", () => {
+test("后手补偿：开战时后手每个角色先有 1 个附赠（没有行动点），先手的第一回合里能拿来协助格挡；没用掉的一直叠到后手自己的回合上（2 个）、直到用掉；不能行动的回合先收着（作者 10/29）", () => {
   const { c, S, heroes: [kolt, helu, hiaki, tou] } = duel({ first: "1队" });
   assert.deepEqual([hiaki.ap, hiaki.bonus, tou.ap, tou.bonus], [0, 1, 0, 1], "后手：没有行动点、1 个附赠");
   assert.deepEqual([kolt.bonus, helu.bonus], [1, 1], "先手照常");
@@ -162,24 +162,31 @@ test("后手补偿：开战时后手每个角色先有 1 个附赠（没有行�
   assert.equal(hiaki.ap, 1);
   assert.equal(hiaki.bonus, 2, "绯秋：这一回合 1 + 留下的 1 = 2 个附赠");
   assert.equal(tou.bonus, 1, "灯用掉了：只有平常的 1 个");
-  assert.match(logText(c), /后手补偿：绯秋 开战时的附赠没用掉，叠到这一回合（\+1）/);
+  assert.match(logText(c), /后手补偿：绯秋 开战时的附赠还没用掉，叠到这一回合（\+1，用掉之前一直留着）/);
   assert.ok(!/后手补偿：灯 开战时/.test(logText(c)));
-  assert.deepEqual(plain(S.pvpDuel.carry), {}, "补偿结算完了");
-  // 第二回合起照常
+  assert.deepEqual(plain(S.pvpDuel.carry), { [hiaki.id]: 1 }, "绯秋的补偿还没用：一直留着（作者 10/29）");
+  // 第二回合：绯秋一个附赠都没用 → 补偿照样叠上；用掉一个（先用平常的）→ 补偿还在；两个都用掉 → 补偿没了，之后照常
   c.endEnemyTurn();
   c.endPlayerTurn();
-  assert.equal(hiaki.bonus, 1, "第二回合：平常的 1 个");
+  assert.equal(hiaki.bonus, 2, "第二回合：补偿还没用，照样 1 + 1");
   assert.equal(tou.bonus, 1);
-  // 后手第一回合开始时晕眩（失衡）：这一回合没有行动，留下的补偿作废，之后也不再叠
+  hiaki.bonus = 1;   // 这一回合用掉一个附赠（平常的那个）
+  c.endEnemyTurn(); c.endPlayerTurn();
+  assert.equal(hiaki.bonus, 2, "用掉的是平常的：补偿还在");
+  hiaki.bonus = 0;   // 两个都用掉
+  c.endEnemyTurn(); c.endPlayerTurn();
+  assert.equal(hiaki.bonus, 1, "补偿用掉了：之后只有平常的 1 个");
+  assert.deepEqual(plain(S.pvpDuel.carry), {}, "补偿结算完了");
+  // 后手第一回合开始时晕眩（失衡）：这一回合没有行动，补偿先收着（不作废），下一个能行动的回合照样叠上
   const d2 = duel({ first: "2队" });
   const [k2, h2] = d2.heroes;
   assert.equal(k2.bonus, 1, "1 队后手：先有 1 个");
   k2.stunned = true; k2.def = 0;
   d2.c.endPlayerTurn();
-  assert.equal(k2.bonus, 0, "失衡：这一回合没有附赠");
+  assert.equal(k2.bonus, 0, "失衡：这一回合没有附赠（不能拿补偿去移动）");
   assert.equal(h2.bonus, 2, "赫鲁米卡照常叠上");
   d2.c.endEnemyTurn(); d2.c.endPlayerTurn();
-  assert.equal(k2.bonus, 1, "下一回合：平常的 1 个（补偿不会留到第二回合）");
+  assert.equal(k2.bonus, 2, "下一个能行动的回合：平常的 1 个 + 收着的补偿 1 个");
 });
 
 test("后手补偿只有决斗有：主持人分阵营（不是决斗）时在敌人回合行动的阵营开战照旧没有附赠，回合开始照常补", () => {
