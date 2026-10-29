@@ -2139,6 +2139,9 @@ function pvpDuelOutcome() {
   PVP_DUEL_CFG.teams.forEach(t => pvpDuelMembers(t.id).forEach(u => { if (u.dead && !u.pvpOut && !u._removed) pvpDuelKnockOut(u, late); }));
   if (late.length) appendLog(late.join("\n"));
   if (!d.result) {
+    // 全员倒地还能起身（#470，app.js · queueWipeStand）：回合结束前问「要不要起身」的人还没问完就先不判——分出的胜负会记下来不再改，
+    // 两队同时全员倒地时不能先问的那一队一说不起身、另一队还没问就算它赢（两边都不起身是平局）
+    if (state.standQueue && state.standQueue.length) return { over: false };
     const [a, b] = PVP_DUEL_CFG.teams;
     const upA = pvpDuelTeamUp(a.id), upB = pvpDuelTeamUp(b.id);
     if (upA && upB) return { over: false };

@@ -43,6 +43,8 @@ function duel(opt = {}) {
 function knockDown(u) { (u.layers || []).forEach(l => { l.current = 0; }); u.dying = true; u.upOnShp = false; }
 /** 起身中（靠坚毅生命战斗）、坚毅生命剩 shp */
 function upOn(u, shp) { (u.layers || []).forEach(l => { l.current = 0; }); u.dying = false; u.upOnShp = true; u.shp = shp; u.shpMax = Math.max(Number(u.shpMax) || 0, shp, 40); }
+/** 回合结束前问「要不要起身」（#470，sim.js · BattleSim.standCheck）：都不起身 */
+const decline = () => ({ standAsk: () => ({ stand: false }) });
 
 test("配置表：两队 1 队 / 2 队（开局站 1 区 / 3 区）、3 区制、每队最多 4 人至少 1 人、后手补偿 1 个附赠、默认允许起身、回合上限默认 10、坚毅保留 1", () => {
   const c = H.load();
@@ -309,7 +311,7 @@ test("不允许起身：倒地的人留在场上（不移出），自己起不�
   assert.ok(helu);
 });
 
-test("胜负：一队全部倒地（含再起不能移出的）另一队获胜；两队同时全倒算平局；不许起身时倒在场上的也算倒地；还有人站着就接着打", () => {
+test("胜负：一队全部倒地（含再起不能移出的）另一队获胜；两队同时全倒算平局；不许起身时倒在场上的也算倒地；还有人站着就接着打（倒地还能起身的照 #470 回合结束前先问，都不起身才算倒下）", () => {
   const outcome = d => plain(d.c.pvpDuelOutcome());
   {
     const d = duel();
@@ -319,6 +321,8 @@ test("胜负：一队全部倒地（含再起不能移出的）另一队获胜�
     assert.deepEqual(outcome(d), { over: false }, "2 队还有灯");
     upOn(tou, 1); tou.zone = kolt.zone; smash(d.c, kolt, tou, 10);
     assert.equal(tou.pvpOut, true);
+    assert.deepEqual(outcome(d), { over: false }, "2 队全员倒地，但绯秋还能起身（#470）：先不判");
+    d.c.BattleSim.standCheck(decline());   // 回合结束前问：绯秋不起身
     const r = outcome(d);
     assert.equal(r.over, true);
     assert.equal(r.winner, "1队", "2 队全倒（倒地 + 再起不能）：1 队获胜");
@@ -331,9 +335,11 @@ test("胜负：一队全部倒地（含再起不能移出的）另一队获胜�
   {
     const d = duel();
     d.heroes.forEach(knockDown);
+    assert.deepEqual(outcome(d), { over: false }, "两队同时全员倒地、都还能起身：先问");
+    d.c.BattleSim.standCheck(decline());   // 先问的 1 队都不起身时 2 队还没问：不能这时就判 2 队赢
     const r = outcome(d);
     assert.equal(r.winner, null);
-    assert.equal(r.draw, true, "两队同时全倒：平局");
+    assert.equal(r.draw, true, "两队同时全倒（问过都不起身）：平局");
     assert.equal(r.text, "平局：两队同时全部倒地。");
     assert.equal(d.c.BattleSim.outcome(), "draw");
   }
@@ -353,6 +359,58 @@ test("胜负：一队全部倒地（含再起不能移出的）另一队获胜�
     if (r.duel.winner) assert.deepEqual(r.pvpWinners, [r.duel.winner]);
     assert.ok(!d.heroes.some(h => h.dead && !h.pvpOut), "没有人真的死亡");
     assert.ok(r.heroes.every(h => !h.dead || d.heroes.find(x => x.name === h.name).pvpOut));
+  }
+});
+
+test("全员倒地还能起身（#470）：决斗照它按每一队分别看——一队全员倒地、还有人能起身时不立刻判，回合结束前只问这一队的人，有人起身就接着打、都不起身另一队获胜；两队同时倒下两边都问完再判；起身可以免费翻滚；不允许起身时谁都不问，全员倒地就判", () => {
+  { // 只问全员倒地的 2 队；灯起身 → 接着打
+    const d = duel();
+    const { c } = d;
+    const [, , hiaki, tou] = d.heroes;
+    knockDown(hiaki); knockDown(tou);
+    assert.deepEqual(plain(c.pvpDuelOutcome()), { over: false }, "2 队全员倒地，但还能起身：不立刻判");
+    assert.deepEqual(plain(c.wipeStandCandidates()), [{ unitId: hiaki.id, team: "2队" }, { unitId: tou.id, team: "2队" }], "只问 2 队的人");
+    const asked = [];
+    c.BattleSim.standCheck({ standAsk: u => { asked.push(u.id); return { stand: u === tou }; } });
+    assert.deepEqual(asked, [hiaki.id, tou.id]);
+    assert.equal(tou.upOnShp, true, "灯起身了");
+    assert.deepEqual(plain(c.pvpDuelOutcome()), { over: false }, "有人起身：接着打");
+    assert.match(logText(c), /2 队全员倒地，但还有人能起身：回合结束前问 绯秋、灯 要不要起身/);
+  }
+  { // 都不起身：2 队出局，1 队获胜
+    const d = duel();
+    const [, , hiaki, tou] = d.heroes;
+    knockDown(hiaki); knockDown(tou);
+    d.c.BattleSim.standCheck(decline());
+    assert.equal(plain(d.c.pvpDuelOutcome()).winner, "1队");
+    assert.match(logText(d.c), /2 队没有人起身：这个阵营出局。/);
+  }
+  // 两队同时全员倒地：两边都问到了才判（两边都不起身是平局，见上一条）
+  for (const standTeam of ["1队", "2队"]) {
+    const d = duel();
+    d.heroes.forEach(knockDown);
+    const asked = [];
+    d.c.BattleSim.standCheck({ standAsk: u => { const f = d.c.playerFactionOf(u); asked.push(f); return { stand: f === standTeam }; } });
+    assert.deepEqual(asked.slice().sort(), ["1队", "1队", "2队", "2队"], "两队的人都问到了");
+    assert.equal(plain(d.c.pvpDuelOutcome()).winner, standTeam, standTeam + " 有人起身、另一队都不起身：" + standTeam + " 获胜");
+  }
+  { // 起身翻滚：决斗里起身时也能顺便免费翻滚到相邻的区
+    const d = duel();
+    const [kolt] = d.heroes;
+    knockDown(kolt);
+    assert.deepEqual(plain(d.c.standRollZones(kolt)), [2], "1 区只能翻到 2 区");
+    d.c.Commands.dispatch({ type: "standUp", actor: kolt.id, dest: 2 });
+    assert.equal(kolt.upOnShp, true);
+    assert.equal(kolt.zone, 2, "翻到 2 区");
+  }
+  { // 不允许起身：谁都不问，全员倒地就判
+    const d = duel({ cmd: { stand: false } });
+    const [, , hiaki, tou] = d.heroes;
+    knockDown(hiaki); knockDown(tou);
+    assert.deepEqual(plain(d.c.wipeStandCandidates()), [], "起不来的人不问");
+    d.c.BattleSim.standCheck(decline());
+    assert.equal(plain(d.c.pvpDuelOutcome()).winner, "1队", "不允许起身：全员倒地就判");
+    assert.ok(!/要不要起身/.test(logText(d.c)));
   }
 });
 
