@@ -2213,8 +2213,10 @@
   /** 回合结束前（battle.endEnemyTurn 之前）：全员倒地、还有人能起身的那一队，依次问能起身的人要不要起身（#470）。
    *  问完分出了胜负（都不起身）、或者这场战斗被放弃了，返回 true */
   async function standCheck(gen) {
-    // 已经问完的（房主刷新前问完、都不起身）也在这里判负：最后照样看一次 checkEnd
-    if (Number(systemCommand({ type: "battle.standCheck" })) > 0) {
+    const pending = () => !!((state.standQueue && state.standQueue.length) || (typeof wipeStandCandidates === "function" && wipeStandCandidates().length));
+    // 平时（没有全员倒地）什么都不做，不多发指令；问过都不起身的（房主刷新前已经问完）照样在最后的 checkEnd 判负
+    if (!pending() && !(state.units || []).some(u => u && u.standGaveUp)) return false;
+    if (pending() && Number(systemCommand({ type: "battle.standCheck" })) > 0) {
       for (let guard = 0; guard < 20 && state.standQueue && state.standQueue.length; guard++) {
         await resolveQueues();
         if (abandoned(gen) || G.ended) return true;
