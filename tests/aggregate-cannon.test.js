@@ -67,6 +67,7 @@ test("开炮：每段可以协助格挡；同区的其他人被波及（不能�
   const m = a.mechanics.find(x => x.aggCannon);
   setTurn(S, m.st.due);
   S.combatPhase = "enemy";
+  S.lateRound = S.turnNo;   // 敌人回合开始时记的回合数（startEnemyPhase）：即时效果按它判施加时是谁的回合（#482）
   const k0 = hp(k), h0 = hp(h);
   c.bossMechPhaseStart("enemy", []);
   c.BattleSim.resolveQueues(noBlock);
@@ -75,13 +76,11 @@ test("开炮：每段可以协助格挡；同区的其他人被波及（不能�
   assert.match(logs(), /电能炮 波及 2 区/);
   assert.equal(a.instant.melt, true, "过热：自身熔融");
   assert.equal(m.st.due, S.turnNo + CFG(c).interval, "重新锁定，隔 interval 回合再开炮");
-  // 下一个我方回合熔融还在，再下一个回合开始才结束
+  // 正好持续到下一个我方回合结束：下一个我方回合熔融还在，下一个敌人回合开始时失效（#482；以前撑到再下一个整轮开始）
   c.endEnemyTurn();
   assert.equal(a.instant.melt, true, "开炮后的我方回合还熔融着");
   c.endPlayerTurn();
-  S.units.filter(u => !u.isPlayer).forEach(u => { u.ap = 0; });
-  c.endEnemyTurn();
-  assert.equal(a.instant.melt, false);
+  assert.equal(a.instant.melt, false, "下一个敌人回合开始时失效");
 });
 
 test("隔区开炮衰减（0.5×atk + 1d10），也不波及", () => {

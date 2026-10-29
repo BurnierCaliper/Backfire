@@ -3575,14 +3575,22 @@ function aggDisarmCannon(u, notes) {
   if (!u.mechanics.length) delete u.mechanics;
   if (had && notes) notes.push("机械躯散架，电能炮停止蓄力。");
 }
-/** 电能炮开完：机体过热，给自己上熔融（留到下一个我方回合结束，engine.js · beginRound 那边看 meltHoldTurn） */
+/** 电能炮开完：机体过热，给自己上熔融。和别的即时效果一样按施加时是谁的回合算（app.js · markTurnFx，#482）：在敌人回合开始时开炮，
+ *  正好持续到下一个我方回合结束（下一个敌人回合开始时失效）。以前另记 meltHoldTurn，实际撑到再下一个整轮开始 */
 function aggOverheat(boss, m, notes) {
   if (!boss || boss.dead) return;
   boss.instant = boss.instant || {};
+  if (typeof markTurnFx === "function") markTurnFx(boss, "melt", boss);
   boss.instant.melt = true;
   boss.resources = boss.resources || {};
-  boss.resources.meltHoldTurn = (Number(state.turnNo) || 1) + 1;
+  boss.resources.overheatTurn = Number(state.turnNo) || 1;   // 开炮的回合：只用来显示「过热」（aggOverheated）
   notes.push(`${boss.name} 开炮后机体过热：自身熔融（冰伤害 ×2、物理打装甲 +50%），持续到下一个我方回合结束。`);
+}
+/** 状态栏的「过热」（app.js · statusLine）：开炮后的熔融还在，从开炮那一回合的敌人回合起，到下一个我方回合结束 */
+function aggOverheated(u) {
+  const t = Number(u && u.resources && u.resources.overheatTurn) || 0, now = Number(state.turnNo) || 0;
+  if (!t || !(u.instant && u.instant.melt)) return false;
+  return now === t || (now === t + 1 && !(typeof lateRoundNow === "function" && lateRoundNow()));
 }
 
 function ufoPackId(u) {
