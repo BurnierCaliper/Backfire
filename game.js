@@ -3076,9 +3076,11 @@
       });
     }
     // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，和自己敌对的单位只剩嘲讽它的那个（打敌人、任意单位的技能都是；配置物 / 危墙也不行）；
-    // 自己人照常（app.js · tauntFoe，和扣点之前的检查同一个判断；enemies.js · playerTauntTarget）
+    // 自己人（#478）：攻击也不能选——打敌人的技能开着友伤选得到的队友、「任意单位」的攻击技能（电能鞭……）选的自己人都拿掉；
+    // 给自己人的「任意单位」技能（针尖、拉拽……）照常（app.js · tauntFoe / tauntAttackPick，和扣点之前的检查同一个判断；enemies.js · playerTauntTarget）
     const taunt = side !== "ally" && side !== "allySelf" && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
-    if (taunt) all = all.filter(u => { const real = unitById(u.id); return !!real && !tauntFoe(actor, real, taunt); });
+    const tauntAttack = !!taunt && typeof tauntAttackPick === "function" && tauntAttackPick(actor, sk.id, side);
+    if (taunt) all = all.filter(u => { const real = unitById(u.id); return !!real && !tauntFoe(actor, real, taunt, tauntAttack); });
     return all;
   }
 

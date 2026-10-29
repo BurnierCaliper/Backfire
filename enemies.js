@@ -1675,10 +1675,22 @@ function setFriendlyFire(owner, on) {
   state.friendlyFire = next;
   return !!on;
 }
-/** a 的攻击现在开着友伤没有（只看玩家一方的单位；敌人永远没有） */
+/* 被嘲讽的人选目标（PvP，#478，作者 10/29：「被嘲讽了就只能打嘲讽的」）：开着友伤也不能拿攻击去打队友。
+ * 技能分步里「选敌人」的那几步（app.js · fieldFoes / visibleEnemies）开着友伤时会把队友列进来——在 friendlyFireAside(u, fn) 里再算一遍
+ * （这一次 u 的操控者的开关当作关着），没列进来的队友就是「只因为开着友伤才选得到的」，算攻击（app.js · tauntStepOk）；
+ * 给友方的、选任意单位的那几步不看友伤，两次一样。只在 fn 里有效：不改开关、不影响结算 */
+let FRIENDLY_FIRE_ASIDE = null;   // 正在「当作没开友伤」算名单的操控者（friendlyFireOwner）
+function friendlyFireAside(u, fn) {
+  const prev = FRIENDLY_FIRE_ASIDE;
+  FRIENDLY_FIRE_ASIDE = friendlyFireOwner(u);
+  try { return fn(); } finally { FRIENDLY_FIRE_ASIDE = prev; }
+}
+/** a 的攻击现在开着友伤没有（只看玩家一方的单位；敌人永远没有）。friendlyFireAside 里算名单时，那个操控者的当作关着 */
 function friendlyFireOn(a) {
   if (!a || !a.isPlayer) return false;
-  return friendlyFireSetting(friendlyFireOwner(a));
+  const owner = friendlyFireOwner(a);
+  if (FRIENDLY_FIRE_ASIDE != null && owner === FRIENDLY_FIRE_ASIDE) return false;
+  return friendlyFireSetting(owner);
 }
 /** a 这一下打 b 是不是打到玩家这一边的人（替身打操控它的人也算打自己，不算）：
  *    a 开着友伤、b 是 a 以外的同阵营队友（友伤开关只管同阵营，#445）；
