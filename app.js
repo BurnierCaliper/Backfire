@@ -8724,7 +8724,7 @@ function dealToInner(attacker, target, opt) {
       target = guard;
     }
   }
-  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算——场上有两个以上玩家阵营时不算，#463；范围攻击每人各掷）；
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算——场上有两个以上玩家阵营时玩家留下的空车不算，#463 / #468；范围攻击每人各掷）；
   // 成功就由车（驾驶员）承受这次攻击。玩家开的车按驾驶员的玩家阵营（vehicle.js · vehicleGuards / vehicleGuard）
   if (target && attacker && typeof vehicleGuard === "function") {
     const vg = vehicleGuard(attacker, target, opt);
