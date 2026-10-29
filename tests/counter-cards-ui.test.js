@@ -1,6 +1,8 @@
 // High Flux（#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、游戏名、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
-// 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌。
-// Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（没装 Playwright 时跳过）
+// 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌；
+// 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）。
+// Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
+// 克制表的 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -15,13 +17,13 @@ const ROOT = path.resolve(__dirname, "..");
 const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 const LEVELS = ["easy", "normal", "hard"];
 
-/** game.html 的 <body> 解析进小 DOM，加载 High Flux 要的脚本（计分要 engine.js）。
+/** game.html 的 <body> 解析进小 DOM，加载 High Flux 要的脚本（计分要 engine.js；暂停菜单、克制表浮层照 game.html 的先后加载）。
  *  页面开着「减少动态效果」：雷鸣的闪电、酸雨的涟漪是一直自己排下一次的定时器，桌上留着这两种天气测试进程就退不出去（天气层照样摆） */
 function page() {
   const html = read("game.html"), body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
   const P = MD.create(body, { media: (q) => /prefers-reduced-motion: reduce/.test(q) });
   const ctx = vm.createContext(P.window);
-  ["engine.js", "icons.js", "weather-fx.js", "counter-cards.js", "counter-cards-ai.js", "counter-cards-ui.js"].forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
+  ["engine.js", "icons.js", "weather-fx.js", "pause-menu.js", "matchup-ui.js", "counter-cards.js", "counter-cards-ai.js", "counter-cards-ui.js"].forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
   const doc = P.document;
   return { w: P.window, doc, $: (s) => doc.querySelector(s), $$: (s) => doc.querySelectorAll(s), UI: P.window.CounterCardsUI, CC: P.window.CounterCards };
 }
@@ -395,6 +397,183 @@ test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按�
   assert.match(fin, want);
 });
 
+/* ---------- 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论） ---------- */
+const J = v => JSON.parse(JSON.stringify(v));
+const fmt = s => (s > 0 ? "+" + s : s < 0 ? "−" + -s : "0");
+/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉；天气堆第一张是酷暑 */
+function heatGame(p, seed) {
+  const game = p.CC.newGame({ seed, deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+  p.CC.act(game, "dealer", { type: "weather", op: "pass" });
+  p.CC.act(game, "dealer", { type: "play", card: "flesh" });
+  p.UI.start({ side: "player", level: "normal", game, seed, fast: true });
+  return game;
+}
+
+test("克制表：顶栏最前面是「菜单」（和战斗、单局的顶栏一样），点开暂停菜单有「克制表」，点了打开平时那个克制表浮层，格子是按场上天气的得分", () => {
+  const p = page();
+  const game = heatGame(p, "菜单");
+  const menu = p.$("#cc-top").firstElementChild;
+  assert.ok(menu.matches("button.pm-open[data-pause-open]"), "顶栏最前面是「菜单」");
+  assert.equal(menu.textContent, "菜单");
+  assert.match(menu.getAttribute("title"), /菜单（Esc）：克制表/);
+  click(menu);
+  assert.ok(p.w.PauseMenu.isOpen(), "点了打开暂停菜单");
+  const items = J(p.w.PauseMenu.list());
+  const row = items.find(r => r.id === "matchupCC");
+  assert.ok(row, "菜单里有克制表");
+  assert.equal(row.label, "克制表");
+  assert.match(row.hint, /按场上天气算好的得分（\+1 \/ 0 \/ −1），随时能看，不影响出牌和下注/);
+  assert.ok(!items.some(r => r.id === "matchup"), "战斗的那一项不在牌桌上出现");
+  const before = JSON.stringify(game);
+  click(p.$('#pm-overlay [data-pause-item="matchupCC"]'));
+  assert.ok(!p.w.PauseMenu.isOpen(), "点了一项，菜单收起");
+  const box = p.$("#mu-overlay");
+  assert.ok(visible(box) && p.UI.chartOpen());
+  assert.equal(box.parentNode, p.$("#cc-game"), "挂在牌桌下：#cc-game 上写着天气，卡片套得上天气底纹");
+  assert.ok(box.classList.contains("ovl") && box.querySelector(".mu-card.ovl-card.mu-score[role=dialog]"), "和平时同一个浮层");
+  assert.equal(box.querySelector(".ws-tape").textContent, "克制表");
+  assert.match(box.querySelector(".mu-weather").textContent, /天气 常态/);
+  assert.equal(box.querySelectorAll("[data-mu-cell]").length, 35);
+  assert.equal(box.querySelector('[data-mu-cell="0:0"]').textContent.trim(), "+1", "火 → 血肉 +1");
+  assert.equal(box.querySelector('[data-mu-cell="0:1"]').textContent.trim(), "−1", "火 → 装甲 −1");
+  assert.equal(box.querySelector('[data-mu-cell="5:0"]').textContent.trim(), "0", "物理 → 血肉 0");
+  assert.ok(box.querySelector('th.mu-row.mu-e-fire svg.eicon'), "行头有属性图标");
+  assert.equal(JSON.stringify(game), before, "打开克制表不动牌局");
+  click(box.querySelector("[data-mu-close]"));
+  assert.ok(!visible(box) && !p.UI.chartOpen(), "关掉");
+  assert.equal(JSON.stringify(game), before);
+  // 点浮层外面（暗底）也关掉，和平时一样
+  click(p.$('#cc-side [data-cc="chart"]'));
+  click(box);
+  assert.ok(!p.UI.chartOpen());
+});
+
+test("克制表：侧栏以前折叠的「克制速查」小表换成打开完整克制表的按钮（写着场上的天气）；直接打开时键盘焦点在「关闭」上，Esc 关掉", () => {
+  const p = page();
+  heatGame(p, "侧栏");
+  const side = p.$("#cc-side");
+  const b = side.firstElementChild;
+  assert.ok(b.matches('button.cc-chartbtn[data-cc="chart"]'), "侧栏最上面是克制表的按钮");
+  assert.match(b.textContent, /^克制表天气 常态 · 按场上天气的得分 \+1 \/ 0 \/ −1$/);
+  assert.ok(!side.querySelector("details.cc-chart, table"), "小表去掉了");
+  assert.ok(!read("counter-cards.css").includes(".cc-chart "), "小表的样式也去掉了");
+  click(b);
+  const close = p.$("#mu-overlay [data-mu-close]");
+  assert.ok(p.UI.chartOpen());
+  assert.equal(p.doc.activeElement, close, "焦点在「关闭」上");
+  MD.key(p.doc, "Escape", { target: close });
+  assert.ok(!p.UI.chartOpen(), "Esc 关掉");
+});
+
+test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）；场上天气没变表不重画（点开的格子还在），翻开新天气表跟着变", () => {
+  const p = page();
+  const game = heatGame(p, "跟着变");
+  click(p.$('#cc-side [data-cc="chart"]'));
+  const box = p.$("#mu-overlay");
+  const fireFlesh = () => box.querySelector('[data-mu-cell="0:0"]');
+  click(fireFlesh());
+  assert.match(box.querySelector(".mu-detail").textContent, /火 → 血肉：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
+  const td = fireFlesh();
+  click(p.$('#cc-board button.cc-can[data-card="ice"]'));
+  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.equal(game.stage, "weather", "人出了牌、下完注，庄家（AI）也走了");
+  assert.equal(fireFlesh(), td, "天气没变：表没重画");
+  assert.ok(box.querySelector(".mu-detail"), "点开的格子还在");
+  click(p.$('#cc-actions [data-cc="reveal"]'));
+  assert.equal(game.weather, "heat");
+  assert.ok(p.UI.chartOpen(), "还开着");
+  assert.match(box.querySelector(".mu-weather").textContent, /天气 酷暑/);
+  assert.match(fireFlesh().textContent, /\+1\s*→\s*\+2/, "火 → 血肉：+1 → +2");
+  assert.ok(fireFlesh().classList.contains("changed"));
+  assert.match(box.querySelector(".mu-detail").textContent, /玩家赢 \+2（原来 玩家赢 \+1） · 克制 \+1；酷暑：火 \+1/);
+  assert.equal(box.parentNode.dataset.weather, "heat", "卡片套上酷暑的底纹");
+  assert.match(p.$('#cc-side [data-cc="chart"]').textContent, /天气 酷暑/);
+});
+
+test("克制表：每轮开始问借不借的时候也能开，关掉以后借贷按钮照旧", () => {
+  const p = page();
+  p.UI.start({ side: "player", level: "normal", seed: "借时看表", fast: true, gameOpt: { playerChips: 1 } });
+  const g = p.UI.state().game, before = JSON.stringify(g);
+  assert.equal(g.stage, "loan");
+  click(p.$('#cc-side [data-cc="chart"]'));
+  assert.ok(p.UI.chartOpen());
+  click(p.$("#mu-overlay [data-mu-close]"));
+  assert.equal(JSON.stringify(g), before);
+  assert.ok(p.$('#cc-actions [data-cc="borrow"][data-amount="3"]'));
+});
+
+for (const side of ["player", "dealer"]) {
+  test(`克制表：整局任何阶段都能开、关（人当${side === "player" ? "玩家" : "庄家"}）——不动对局和操作栏（选着的暗弃 / 常态、改过的下注额都留着），结算横幅、总结算上也有按钮`, () => {
+    const p = page();
+    p.UI.start({ side, level: "hard", seed: "随时看表-" + side, fast: true });
+    const st = () => p.UI.state(), rng = p.CC.makeRng("随时看表" + side);
+    const seen = new Set();
+    let moded = false, bumped = false;
+    const peek = (where, opener) => {
+      const g = st().game, before = JSON.stringify(g), mode = st().mode, amount = st().amount, banner = st().banner, shown = visible(p.$("#cc-banner"));
+      click(opener);
+      const box = p.$("#mu-overlay");
+      assert.ok(visible(box) && p.UI.chartOpen(), where + "：打开了");
+      assert.equal(box.querySelector(".mu-weather").textContent, "天气 " + p.CC.weatherName(g.weather), where + "：按场上的天气");
+      assert.equal(box.querySelector('[data-mu-cell="0:0"] b').textContent, fmt(p.CC.score("fire", "flesh", g.weather)), where + "：火 → 血肉的得分");
+      click(box.querySelector("[data-mu-close]"));
+      assert.ok(!visible(box) && !p.UI.chartOpen(), where + "：关掉了");
+      assert.equal(JSON.stringify(g), before, where + "：对局没动");
+      assert.deepEqual([st().mode, st().amount, st().banner, visible(p.$("#cc-banner"))], [mode, amount, banner, shown], where + "：操作栏、横幅没动");
+      seen.add(where);
+    };
+    for (let guard = 0; guard < 500; guard++) {
+      const banner = p.$("#cc-banner");
+      if (visible(banner)) {
+        const fin = !!banner.querySelector(".cc-final");
+        peek(fin ? "总结算" : "结算横幅", banner.querySelector('[data-cc="chart"]'));
+        if (fin) break;
+        click(banner.querySelector('[data-cc="dismiss"]'));
+        continue;
+      }
+      const g = st().game;
+      peek(g.stage, p.$('#cc-side [data-cc="chart"]'));
+      const mode = p.$('#cc-actions [data-cc="mode"][data-mode]:not([disabled])');
+      if (mode && !st().mode && !moded) { click(mode); moded = true; peek("选着" + (st().mode === "skip" ? "暗弃" : "常态"), p.$('#cc-side [data-cc="chart"]')); }
+      const plus = p.$('#cc-actions [data-cc="amt"][data-d="1"]:not([disabled])');
+      if (plus && !bumped) { click(plus); bumped = true; peek("改过下注额", p.$('#cc-side [data-cc="chart"]')); }
+      const card = p.$("#cc-board button.cc-can");
+      if (card) { click(card); continue; }
+      const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && b.dataset.cc !== "amt" && b.dataset.cc !== "mode");
+      assert.ok(btns.length, "没有能点的按钮：" + g.stage);
+      const bet = btns.filter(b => ["check", "call", "bet", "raise"].includes(b.dataset.cc));
+      click(bet.length ? bet[Math.floor(rng() * bet.length)] : btns.find(b => b.classList.contains("primary")) || btns[0]);
+    }
+    assert.ok(st().game.over, "打完了");
+    const want = ["play", "bet1", "结算横幅", "总结算", "改过下注额"].concat(side === "player" ? ["weather", "选着暗弃"] : ["dealerWeather"]);
+    want.forEach(w => assert.ok(seen.has(w), `${w} 的时候开过：${[...seen].join("、")}`));
+  });
+}
+
+test("克制表：Esc——牌局中打开暂停菜单（里面有克制表）；设置页上不开；离开牌桌时开着的克制表一起收掉", async () => {
+  const p = page();
+  const tick = () => new Promise(r => setTimeout(r, 10));
+  click(p.$("#t-cc"));
+  assert.equal(p.doc.body.dataset.screen, "counter");
+  MD.key(p.doc, "Escape");
+  await tick();
+  assert.ok(!p.w.PauseMenu.isOpen(), "设置页上 Esc 不开菜单");
+  click(p.$('[data-cc="start"]'));
+  p.UI.stop();
+  MD.key(p.doc, "Escape");
+  await tick();
+  assert.ok(p.w.PauseMenu.isOpen(), "牌局中 Esc 打开暂停菜单");
+  assert.ok(J(p.w.PauseMenu.list()).some(r => r.id === "matchupCC"));
+  MD.key(p.doc, "Escape");
+  assert.ok(!p.w.PauseMenu.isOpen(), "再按一次关掉");
+  // 开着克制表回到标题：一起收掉
+  click(p.$('#cc-side [data-cc="chart"]'));
+  assert.ok(p.UI.chartOpen());
+  click(p.$('#cc-top [data-cc="title"]'));
+  assert.ok(!p.w.MatchupUI.isOpen(), "离开牌桌收掉克制表");
+  assert.equal(p.doc.body.dataset.screen, "title");
+});
+
 /* ---------- 真浏览器（没装 Playwright 时跳过） ---------- */
 function findPlaywright() {
   try { return require("playwright"); } catch (e) {}
@@ -456,5 +635,84 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     assert.ok(overflow <= 1, "横向溢出 " + overflow + "px");
     assert.deepEqual(errors, []);
     await context.close();
+  });
+}
+
+/* 克制表（真浏览器）：没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js，同 pause-menu.test.js），都没有才跳过 */
+let cdp = null, cdpWhy = "";
+async function chartBrowser() {
+  if (browser) return browser;
+  if (!cdp && !cdpWhy) {
+    try {
+      cdp = await require("./cdp-browser").launch();
+      if (!cdp) cdpWhy = "没装 Playwright，也没有能用的 Chrome，跳过画面测试";
+    } catch (e) { cdpWhy = "浏览器启动失败，跳过画面测试：" + String(e.message).split("\n")[0]; }
+  }
+  return cdp;
+}
+test.after(async () => { if (cdp) await cdp.close(); });
+/** 量一下开着的克制表（在页面里跑）：卡片在不在屏幕里、表要不要左右滑、「关闭」在不在屏幕里、焦点在哪、挂在哪、天气底纹 */
+function measureChart() {
+  const box = document.getElementById("mu-overlay"), card = box && box.querySelector(".mu-card");
+  if (!card || box.hidden) return null;
+  const r = card.getBoundingClientRect(), scroll = card.querySelector(".mu-scroll"), c = card.querySelector("[data-mu-close]").getBoundingClientRect();
+  return { left: r.left, right: r.right, vw: innerWidth, slide: scroll.scrollWidth - scroll.clientWidth, cells: card.querySelectorAll("[data-mu-cell]").length,
+    closeIn: c.top >= 0 && c.bottom <= innerHeight && c.left >= 0 && c.right <= innerWidth,
+    focus: !!document.activeElement && document.activeElement.hasAttribute("data-mu-close"), parent: box.parentNode.id,
+    texture: getComputedStyle(card, "::before").opacity, weather: card.querySelector(".mu-weather").textContent };
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：牌局中打开完整克制表——顶栏「菜单」→「克制表」、侧栏的按钮；表在屏幕里放得下、不用左右滑，Esc / 「关闭」关得掉，不动牌局`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    const game = () => page.evaluate(() => JSON.stringify(CounterCardsUI.state().game));
+    await page.goto(GAME_URL);
+    await page.click("#t-local", T);
+    await page.click("#t-cc", T);
+    await page.waitForSelector("#cc-setup:not([hidden])", T);
+    await page.click('[data-cc="start"]', T);
+    await page.waitForSelector("#cc-game:not([hidden])", T);
+    await page.evaluate(() => CounterCardsUI.setFast(true));   // 庄家（AI）先走完，轮到人出牌
+    const before = await game();
+    // 1. 和平时一样：顶栏最前面的「菜单」→ 暂停菜单 →「克制表」
+    await page.click("#cc-top [data-pause-open]", T);
+    await page.waitForSelector("#pm-overlay", Object.assign({ state: "visible" }, T));
+    await page.click('#pm-overlay [data-pause-item="matchupCC"]', T);
+    await page.waitForSelector("#mu-overlay .mu-card.mu-score", T);
+    let m = await page.evaluate(measureChart);
+    assert.equal(m.parent, "cc-game", "挂在牌桌下");
+    assert.equal(m.cells, 35);
+    assert.ok(m.left >= -1 && m.right <= m.vw + 1, `卡片在屏幕里：${m.left}–${m.right} / ${m.vw}`);
+    assert.ok(m.slide <= 1, `表不用左右滑（多出 ${m.slide}px）`);
+    assert.ok(m.closeIn, "「关闭」在屏幕里");
+    assert.ok(m.focus, "键盘焦点在「关闭」上");
+    // 2. Esc 关掉；这一下只关克制表，不接着开暂停菜单
+    await page.keyboard.press("Escape");
+    await page.waitForSelector("#mu-overlay", Object.assign({ state: "hidden" }, T));
+    await page.waitForTimeout(150);
+    assert.equal(await page.isVisible("#pm-overlay"), false, "Esc 只关克制表");
+    assert.equal(await game(), before, "开关克制表不动牌局");
+    // 3. 场上有天气：侧栏的按钮（手机上排在牌桌下面）打开，卡片套上天气底纹；天气改过的「原 → 现」也放得下
+    await page.evaluate(() => { CounterCardsUI.stop(); CounterCardsUI.state().game.weather = "acid"; CounterCardsUI.render(); });
+    const before2 = await game();
+    await page.click('#cc-side [data-cc="chart"]', T);
+    await page.waitForSelector("#mu-overlay .mu-card", T);
+    m = await page.evaluate(measureChart);
+    assert.equal(m.weather, "天气 酸雨");
+    assert.equal(m.texture, "1", "卡片套上酸雨的底纹");
+    assert.ok(m.slide <= 1, `酸雨（28 格「原 → 现」）也不用左右滑（多出 ${m.slide}px）`);
+    assert.ok(m.left >= -1 && m.right <= m.vw + 1 && m.closeIn);
+    await page.click("#mu-overlay [data-mu-close]", T);
+    await page.waitForSelector("#mu-overlay", Object.assign({ state: "hidden" }, T));
+    assert.equal(await game(), before2, "开关克制表不动牌局");
+    const overflow = await page.evaluate(() => document.getElementById("scr-cc").scrollWidth - innerWidth);
+    assert.ok(overflow <= 1, "牌桌没有横向溢出（顶栏多了「菜单」）：" + overflow + "px");
+    assert.deepEqual(errors, []);
   });
 }

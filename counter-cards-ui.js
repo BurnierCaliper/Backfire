@@ -7,6 +7,9 @@
  * 暗出的牌一律显示牌背（自己的那张在角上标一下是什么）；结算只显示胜负、分档和筹码变动，不亮牌。
  * 筹码不够时（每轮开始 / 轮到自己下注）操作栏里有「借 3 枚（还 4）」这样的按钮；借了多少、要还多少写在两边的座位上；
  * 总结算按最终筹码数（扣还借款之后）定胜负。
+ * 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论）——和平时一样，顶栏最前面的「菜单」（Esc 也行）→「克制表」；
+ *   侧栏、结算横幅上也有直接打开的按钮。用平时的克制表浮层（matchup-ui.js），格子是按场上天气算好的得分（counter-cards.js · chart）；
+ *   只读，不碰对局和操作栏的状态（出牌、下注、选着的暗弃 / 常态、下注额），AI 照常走；场上天气变了表跟着变。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
@@ -20,7 +23,13 @@
     dealMs: 1500,          // 开局发牌动画放完之前 AI 不动（不然整块重画会把动画打断）
     maxDiscs: 12,          // 筹码堆最多画几枚
     chipsPerDisc: 5,       // 每枚圆片代表几枚筹码
-    logLines: 14           // 侧栏记录显示最近几条
+    logLines: 14,          // 侧栏记录显示最近几条
+    // 克制表（得分）：入口按钮、暂停菜单那一项的说明
+    chart: {
+      label: "克制表",
+      sub: "按场上天气的得分 +1 / 0 / −1",
+      hint: "元素牌 × 层牌，按场上天气算好的得分（+1 / 0 / −1），随时能看，不影响出牌和下注"
+    }
   };
   const CC = () => root.CounterCards;
   const AI = () => root.CounterCardsAI;
@@ -115,7 +124,7 @@
 
   /* ---------- 状态 ---------- */
   const SETUP = { side: "player", level: "normal" };
-  let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg }
+  let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的） }
   let bound = false;
 
   function show(name) {
@@ -133,10 +142,12 @@
     if (scr) scr.hidden = false;
     const title = $("scr-title");
     if (title) title.hidden = true;
+    doc().body.dataset.screen = "counter";   // 和 Screens.show 一样记在 <body data-screen>（暂停菜单看它）
   }
   function open() {
     bind();
     stopTimer();
+    closeChart();
     enterScreen();
     renderSetup();
     show("setup");
@@ -161,6 +172,7 @@
   function stopTimer() { if (S && S.timer) { clearTimeout(S.timer); S.timer = null; } }
   function leave() {
     stopTimer();
+    closeChart();
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: "none" });
   }
   function toTitle() {
@@ -170,6 +182,50 @@
     const scr = $("scr-cc"), title = $("scr-title");
     if (scr) scr.hidden = true;
     if (title) title.hidden = false;
+    doc().body.dataset.screen = "title";
+  }
+
+  /* ---------- 克制表（得分）：和平时同一个浮层（matchup-ui.js），只读 ---------- */
+  const MU = () => root.MatchupUI || null;
+  const PM = () => root.PauseMenu || null;
+  const screenNow = () => (doc() && doc().body ? doc().body.dataset.screen : "");
+  /** 牌桌开着（不是设置页） */
+  function gameShown() { const g = $("cc-game"); return !!(S && g && !g.hidden && screenNow() === "counter"); }
+  /** 场上的天气（公开的，从人这一方的 view 取；null = 没有天气） */
+  function chartWeather() { return S ? CC().view(S.game, S.human).weather || null : null; }
+  /** 开着的克制表是不是牌桌上的这一张（挂在 #scr-cc 里） */
+  function chartOpen() {
+    const m = MU(), box = $("mu-overlay"), scr = $("scr-cc");
+    return !!(m && m.isOpen() && box && scr && scr.contains(box));
+  }
+  /** 打开：挂在牌桌 #cc-game 下（天气写在那里，卡片套上天气底纹）；每次重画按当时场上的天气算。键盘焦点给「关闭」，Esc 就能关。
+   *  只开浮层，对局、操作栏的状态（选着的暗弃 / 常态、下注额）都不动 */
+  function openChart() {
+    const m = MU();
+    if (!m || !S) return false;
+    S.chartWeather = chartWeather();
+    m.open(() => CC().chart(chartWeather()), { mount: $("cc-game") });
+    const close = $("mu-overlay") && $("mu-overlay").querySelector("[data-mu-close]");
+    if (close && typeof close.focus === "function") close.focus();
+    return true;
+  }
+  function closeChart() { if (chartOpen()) MU().close(); }
+  /** 入口按钮（侧栏）：写上现在场上的天气 */
+  function chartBtn(v) {
+    const T = UI_CONFIG.chart;
+    return `<button type="button" class="cc-btn cc-chartbtn" data-cc="chart" aria-haspopup="dialog" title="${esc(T.hint)}"><b>${esc(T.label)}</b><small>天气 ${esc(CC().weatherName(v.weather))} · ${esc(T.sub)}</small></button>`;
+  }
+  /** 顶栏最前面的「菜单」：和战斗、单局的顶栏同一个按钮（pause-menu.js 认 data-pause-open）；顶栏每次整块重画，按钮跟着画 */
+  function menuBtn() {
+    const P = PM();
+    if (!P) return "";
+    const T = P.CONFIG.text;
+    return `<button type="button" class="cc-btn pm-open" data-pause-open="1" title="${esc(T.openTitle)}">${esc(T.open)}</button>`;
+  }
+  // 暂停菜单里的「克制表」（名字、先后同平时那一项）：牌局中才有；设置页上 Esc 不开菜单
+  if (PM()) {
+    PM().register({ id: "matchupCC", config: "matchup", hint: UI_CONFIG.chart.hint, visible: () => !!MU() && gameShown(), run: openChart });
+    PM().addBlocker(() => screenNow() === "counter" && !gameShown());
   }
 
   /* ---------- 推进：人做一步 → 看有没有新的结算 / 新翻的天气 → AI 接着走 ---------- */
@@ -261,11 +317,13 @@
       banner.hidden = !h;
     }
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: v.weather || "none" });
+    // 克制表开着：场上的天气变了才重画（AI 照常走，别的变化不动它，免得点开的格子、键盘焦点被打断）
+    if (chartOpen() && S.chartWeather !== (v.weather || null)) { S.chartWeather = v.weather || null; MU().refresh(); }
     S.anim = {};
   }
   function topHtml(v) {
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮`;
-    return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
+    return `${menuBtn()}<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
   }
@@ -459,19 +517,10 @@
       return `<li class="cc-res ${o.cls}"><b>第 ${r.r} 轮</b><span>${esc(o.text)}</span><span class="cc-wxname">${esc(CC().weatherName(r.weather))}</span><span class="cc-delta">${signed(r.delta[S.human])}</span></li>`;
     }).join("");
     const log = v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
-    return `<h3>每轮结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
-      ${chartHtml(v.weather)}${rulesHtml()}
+    // 克制表的入口放在最上面（以前这里是折叠的「克制速查」小表，换成打开完整克制表的按钮）
+    return `${MU() ? chartBtn(v) : ""}<h3>每轮结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
+      ${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;
-  }
-  /** 克制速查：现在这个天气下，每张元素牌打每张层牌的得分（规则本身，公开的） */
-  function chartHtml(w) {
-    const C = CC().CC_CONFIG;
-    const head = C.layers.map(l => `<th style="--c:${cardColor(l)}">${esc(CC().cardName(l))}</th>`).join("");
-    const body = C.elements.map(el => `<tr><th style="--c:${cardColor(el)}">${esc(CC().cardName(el))}</th>${C.layers.map(l => {
-      const s = CC().score(el, l, w);
-      return `<td class="${s > 0 ? "pos" : s < 0 ? "neg" : ""}">${s ? signed(s) : "0"}</td>`;
-    }).join("")}</tr>`).join("");
-    return `<details class="cc-chart"><summary>克制速查（${esc(CC().weatherName(w))}，正数玩家占优）</summary><table><thead><tr><th></th>${head}</tr></thead><tbody>${body}</tbody></table></details>`;
   }
   /** 一轮的结果从 side 这一方看：只有胜负、分档 */
   function outcomeOf(r, side) {
@@ -493,8 +542,12 @@
       <p class="cc-tier">${esc(tierText)}</p>
       <p class="cc-deltas"><span class="${mine >= 0 ? "up" : "down"}">你 ${signed(mine)} 枚</span><span>${sideName(v.opponent)} ${signed(theirs)} 枚</span></p>
       <p class="cc-quiet">不亮牌：谁出了什么都不公开。</p>
-      ${btn("dismiss", v.over ? "看总结算" : "继续", { primary: true })}
+      <div class="cc-btns">${btn("dismiss", v.over ? "看总结算" : "继续", { primary: true })}${bannerChartBtn()}</div>
     </div>`;
+  }
+  /** 结算横幅盖住了顶栏的「菜单」：横幅上也放一个克制表的按钮 */
+  function bannerChartBtn() {
+    return MU() ? btn("chart", esc(UI_CONFIG.chart.label), { title: UI_CONFIG.chart.hint }) : "";
   }
   /** 总结算：按最终筹码数（扣还借款之后）定胜负，写清楚扣还了多少 */
   function finalHtml(v) {
@@ -511,7 +564,7 @@
       <h3>${big}</h3>
       <p class="cc-deltas"><span class="${tone}">你 ${fin[me]} 枚</span><span>${sideName(op)} ${theirs} 枚</span></p>
       <p class="cc-tier">${esc(rule)}${repaid.length ? `；已扣还借款：${esc(repaid.join("，"))}` : ""}。</p>
-      <div class="cc-btns">${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${btn("title", "回到标题")}</div>
+      <div class="cc-btns">${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${bannerChartBtn()}${btn("title", "回到标题")}</div>
     </div>`;
   }
 
@@ -528,6 +581,7 @@
       case "again": start({ side: S ? S.human : SETUP.side, level: S ? S.level : SETUP.level }); return;
       case "swap": start({ side: CC().other(S ? S.human : SETUP.side), level: S ? S.level : SETUP.level }); return;
       case "dismiss": if (S) { S.banner = null; render(); schedule(); } return;
+      case "chart": openChart(); return;   // 只开克制表，不动对局和操作栏
     }
     if (!S) return;
     switch (act) {
@@ -568,7 +622,8 @@
   }
 
   root.CounterCardsUI = {
-    UI_CONFIG, open, start, render, stop: stopTimer, setFast, cardHtml, backHtml, weatherCardHtml, chipsHtml, chartHtml, outcomeOf, weatherMods,
+    UI_CONFIG, open, start, render, stop: stopTimer, setFast, cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods,
+    openChart, closeChart, chartOpen,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
 })(typeof window !== "undefined" ? window : globalThis);

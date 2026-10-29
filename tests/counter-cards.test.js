@@ -149,6 +149,65 @@ test("现在的克制表和天气数值下单轮分差只在 −2…+2（「差 
   assert.equal(Math.min(...all), -2);
 });
 
+/* ---------- 克制表（得分）：牌局中随时能开的完整克制表（作者 10/29 在 PR #486 的评论） ---------- */
+
+test("克制表（得分）：格式同 matchup.js · matchupChart（行 = 7 张元素牌、列 = 5 张层牌），每一格就是这个天气下的 score()，天气改过的格子记着原来的分", () => {
+  const matchup = vm.runInContext("matchupChart('none')", c);
+  for (const w of ALL_WEATHER) {
+    const ch = CC.chart(w);
+    assert.equal(ch.unit, "score", "格子写得分，不写百分比");
+    assert.equal(ch.weather, w || "none");
+    assert.equal(ch.weatherName, w ? C.weatherNames[w] : "常态");
+    assert.deepEqual(Object.keys(ch).filter(k => k in matchup).sort(), Object.keys(matchup).sort(), "matchupChart 有的字段都有");
+    assert.deepEqual(J(ch.rows.map(r => r.id)), J(C.elements));
+    assert.deepEqual(J(ch.cols.map(k => [k.id, k.name])), J(C.layers.map(ly => [ly, CC.cardName(ly)])), "列名用层牌的名字");
+    assert.ok(ch.rows.every(r => r.pct === 0 && r.pctBase === 0), "天气修正算进格子，不放在整行");
+    let n = 0;
+    C.elements.forEach((el, i) => C.layers.forEach((ly, j) => {
+      const x = ch.cells[i][j], s = CC.score(el, ly, w), was = CC.score(el, ly, null);
+      assert.deepEqual([x.row, x.col, x.value, x.base], [el, ly, s, was], `${el}/${ly}/${w}`);
+      assert.equal(x.kindId, s > 0 ? "adv" : s < 0 ? "dis" : "neu", "按得分正负上色");
+      assert.equal(x.kind, s > 0 ? "玩家赢" : s < 0 ? "庄家赢" : "平局");
+      assert.equal(x.baseKind, was > 0 ? "玩家赢" : was < 0 ? "庄家赢" : "平局");
+      assert.equal(x.changed, s !== was);
+      assert.equal(x.chart + x.weather, s);
+      if (x.changed) n++;
+    }));
+    assert.equal(ch.changed.length, n);
+    if (!w || w === "phase") assert.equal(n, 0, "没有天气、相位：一格都没改");
+    assert.match(ch.notes[0], /^得分 = 克制（克制 \+1、被克制 −1、普通 0）\+ 天气修正（每 25% 记 ±1）。正分玩家赢，负分庄家赢，0 平局/);
+  }
+  const none = CC.chart(null);
+  assert.deepEqual(J(none.legend), { adv: "玩家赢（正分）", dis: "庄家赢（负分）", neu: "平局（0）" });
+  assert.equal(none.corner, "元素 \\ 层");
+  assert.equal(none.tag, "High Flux 得分");
+  assert.equal(CC.chart("没有这种天气").weather, "none");
+});
+
+test("克制表（得分）：格子的原因写这一分怎么来的——酷暑火打血肉 +1 → +2、微光反转、酸雨打装甲另 +1；表下面写这个天气的修正，相位写全押", () => {
+  const cellOf = (ch, el, ly) => ch.cells[C.elements.indexOf(el)][C.layers.indexOf(ly)];
+  const none = CC.chart(null);
+  assert.equal(cellOf(none, "fire", "flesh").reason, "克制 +1");
+  assert.equal(cellOf(none, "physical", "flesh").reason, "普通 0");
+  assert.equal(none.notes.length, 1, "没有天气：只有计分规则");
+  const heat = CC.chart("heat"), hot = cellOf(heat, "fire", "flesh");
+  assert.deepEqual([hot.base, hot.value, hot.changed], [1, 2, true]);
+  assert.equal(hot.reason, "克制 +1；酷暑：火 +1");
+  assert.ok(heat.notes.includes("酷暑天气修正：火、酸 +1；冰 −1"));
+  const glow = CC.chart("glow"), flip = cellOf(glow, "fire", "flesh");
+  assert.deepEqual([flip.base, flip.value, flip.kind, flip.baseKind], [1, -1, "庄家赢", "玩家赢"]);
+  assert.equal(flip.reason, "被克制 −1（微光：克制关系反转）");
+  assert.equal(cellOf(glow, "energy", "spirit").reason, "克制 +1；微光：能量 +1", "能量不反转");
+  assert.ok(glow.notes.includes("微光：克制关系反转（能量除外）"));
+  const acid = CC.chart("acid"), elec = cellOf(acid, "electric", "armor");
+  assert.deepEqual([elec.base, elec.value], [-1, 1]);
+  assert.equal(elec.reason, "被克制 −1；酸雨：电 +1；酸雨：打装甲另 +1");
+  assert.deepEqual([cellOf(acid, "ice", "armor").value, cellOf(acid, "acid", "armor").value], [-1, 2], "酸、冰打装甲不另加");
+  assert.ok(acid.notes.includes("酸雨：火、电、能量、物理、谐波打装甲另 +1"));
+  assert.ok(acid.notes.includes("酸雨天气修正：火、冰、物理、谐波 −1；酸、电 +1"));
+  assert.ok(CC.chart("phase").notes.some(n => /^相位：不改得分；翻到相位的那一轮双方全押/.test(n)));
+});
+
 /* ---------- 开局 ---------- */
 
 test("开局：双方各 50 枚筹码；庄家 5 张层牌，玩家 7 张元素牌 + 常态；天气堆 7 张洗混；第 1 轮先下底注", () => {

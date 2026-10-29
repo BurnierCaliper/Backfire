@@ -141,6 +141,48 @@ test("相位效果在 notes 里：数据写在 notes 或整行 pct 里都看得�
   assert.equal(M.allNotes(Object.assign({}, base, { rows: [{ id: "harmonic", name: "谐振", pct: 0.25, pctReason: "x" }], notes: [] }))[0], "相位伤害修正：谐波 +25%");
 });
 
+/* ---------- High Flux 的得分表（#485，counter-cards.js · chart；作者 10/29 在 PR #486 的评论） ---------- */
+test("High Flux 的得分表：同一个浮层、同样的表头 / 图标 / 配色，格子写 +1 / 0 / −1（不写百分比），天气改过的照样「原 → 现」；图例、左上角、表头标签按数据写", () => {
+  const c = setup(), M = c.MatchupUI;
+  vm.runInContext(read("counter-cards.js"), c, { filename: "counter-cards.js" });
+  const CC = c.CounterCards;
+  assert.deepEqual([M.score(1), M.score(2), M.score(0), M.score(-1), M.score(-2)], ["+1", "+2", "0", "−1", "−2"]);
+  const html = M.html(CC.chart("heat"));
+  assert.match(html, /<div class="mu-card ovl-card mu-score" role="dialog" aria-label="克制表">/);
+  assert.match(html, /<span class="ws-tape">克制表<\/span><span class="ws-sub"><span class="mu-tag mu-unit">High Flux 得分<\/span><span class="mu-tag mu-weather">天气 酷暑<\/span>/);
+  assert.equal((html.match(/data-mu-cell=/g) || []).length, 35);
+  for (let i = 0; i < 7; i++) for (let j = 0; j < 5; j++) {
+    assert.doesNotMatch(cell(html, i, j), /%|±/, `格子 ${i}:${j} 不写百分比`);
+    assert.match(cell(html, i, j), /<b>(\+[12]|0|−[12])<\/b><\/td>$/);
+  }
+  assert.match(cell(html, 0, 0), /mu-cell mu-adv changed[\s\S]*<s>\+1<\/s><span class="mu-arrow">→<\/span><b>\+2<\/b>/, "火 → 血肉：+1 → +2");
+  assert.match(cell(html, 0, 0), /title="火 → 血肉：玩家赢 \+2（原 \+1） · 克制 \+1；酷暑：火 \+1"/);
+  assert.match(cell(html, 4, 1), /mu-cell mu-dis"[\s\S]*<b>−1<\/b>/, "能量 → 装甲 −1，酷暑没改");
+  assert.match(cell(html, 5, 0), /mu-cell mu-neu"[\s\S]*<b>0<\/b>/, "物理 → 血肉 0");
+  assert.match(html, /<th class="mu-corner">元素 \\ 层<\/th><th class="mu-col mu-l-flesh">血肉<\/th><th class="mu-col mu-l-armor">装甲<\/th>/, "列是层牌（层的配色），左上角写元素 \\ 层");
+  assert.match(html, /<th class="mu-row mu-e-fire"><svg class="eicon"[^>]*aria-label="火"/, "行头带属性图标、属性色，和平时一样");
+  assert.match(html, /<p class="mu-legend"><span class="mu-adv">玩家赢（正分）<\/span><span class="mu-dis">庄家赢（负分）<\/span><span class="mu-neu">平局（0）<\/span><\/p>/);
+  assert.match(html, /<ul class="mu-notes"><li>得分 = 克制[\s\S]*<li>酷暑天气修正：火、酸 \+1；冰 −1<\/li>/);
+  // 点开一格看原因（和平时一样）
+  assert.match(M.html(CC.chart("glow"), { cell: [0, 0] }), /<p class="mu-detail"><b>火 → 血肉<\/b>：庄家赢 −1（原来 玩家赢 \+1） · 被克制 −1（微光：克制关系反转）<\/p>/);
+  // 平时的克制表照旧：百分比、「属性 \ 血量」、图例「克制 / 被克制 / 普通」，没有得分表的标签
+  const usual = M.html(M.chartWith("heat", {}));
+  assert.match(usual, /<div class="mu-card ovl-card" role="dialog"/);
+  assert.match(usual, /<th class="mu-corner">属性 \\ 血量<\/th>/);
+  assert.match(cell(usual, 0, 0), /<s>\+50%<\/s><span class="mu-arrow">→<\/span><b>\+75%<\/b>/);
+  assert.doesNotMatch(usual, /mu-unit|mu-score/);
+});
+
+test("High Flux 的得分表 · 样式：手机上整张表放得下（格子不留最小宽度，「原 → 现」改成上下两行），只管得分表，平时的克制表不变", () => {
+  const css = read("matchup.css");
+  const phone = css.slice(css.indexOf("@media (max-width: 760px)"));
+  assert.ok(css.indexOf("@media (max-width: 760px)") > 0);
+  assert.match(phone, /\.mu-score \.mu-grid td \{[^}]*min-width: 0/);
+  assert.match(phone, /\.mu-score \.mu-grid td s \{ display: block; \}/);
+  assert.match(phone, /\.mu-score \.mu-arrow \{ display: none; \}/);
+  phone.split("\n").filter(l => /\{/.test(l) && !/@media/.test(l)).forEach(l => assert.match(l, /\.mu-score/, "手机的规则只套得分表：" + l));
+});
+
 test("样式：没有格子边框、天气改过的格子不另上高亮色；窗口放大", () => {
   const css = read("matchup.css");
   assert.doesNotMatch(css, /outline|\.changed/);

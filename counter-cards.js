@@ -28,6 +28,8 @@
  *   CounterCards.act(g, "player", { type: "bet", amount: 2 })
  *   CounterCards.act(g, "player", { type: "borrow", amount: 3 })   → 向主持方借 3 枚（筹码不够时才能借）
  *   CounterCards.view(g, "player")           → 这一方能看到的东西（对方的手牌、暗出的牌、暗弃的牌、庄家偷看到的天气都不在里面）
+ *   CounterCards.chart(g.weather)            → 克制表（得分）：这个天气下每张元素牌打每张层牌的得分，格式同 matchup.js · matchupChart，
+ *                                              牌局中随时能开（counter-cards-ui.js 交给 matchup-ui.js 照平时克制表的样子画）
  */
 (function (root) {
   "use strict";
@@ -59,6 +61,13 @@
     },
     weatherNames: { heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" },
     sideNames: { dealer: "庄家", player: "玩家" },
+    // 克制表（得分，chart()）：牌局中随时能开的完整克制表，matchup-ui.js 照平时克制表的样子画，格子写得分。
+    // kinds：格子按得分正负分三种（上色照克制表：正分红、负分蓝、0 灰）；chartKinds：其中克制表那一项（克制 / 被克制 / 普通）
+    chart: {
+      corner: "元素 \\ 层",
+      kinds: { adv: "玩家赢", dis: "庄家赢", neu: "平局" },
+      chartKinds: { adv: "克制", dis: "被克制", neu: "普通" }
+    },
     // 赌场（预留接口，桌子的数值都是占位）：玩家坐「玩家」一方，用自己的筹码，买入不少于 minBuyIn；庄家筹码无限。
     // rate = 每枚筹码折多少奎支（不同桌子的筹码倍率）；difficulty = 庄家 AI 的难度，跟倍率挂钩
     casino: {
@@ -107,6 +116,60 @@
     const chart = chartScore(element, layer, weather), w = weatherScore(element, layer, weather);
     return { chart, weather: w, total: chart + w };
   }
+  /* ---------- 克制表（得分）：牌局中随时能开，matchup-ui.js 照平时克制表的样子画 ---------- */
+  const signed = (n) => (n > 0 ? "+" + n : n < 0 ? "−" + Math.abs(n) : "0");
+  /** 这个天气（null = 没有天气）下每张元素牌打每张层牌的得分，格式和 matchup.js · matchupChart 一样（行 = 元素牌，列 = 层牌），
+   *  另带 unit: "score"（格子写得分 +1 / 0 / −1，不写百分比）、legend / corner / tag（图例、左上角、表头标签）。
+   *  cells[行][列]：value = 这个天气下的得分，base = 没有天气时的得分，kindId 按得分正负（adv 玩家赢 / dis 庄家赢 / neu 平局），
+   *  changed = 天气改了得分，reason = 这一分怎么来的（克制那一项 + 天气修正）。rows 的 pct 都是 0（天气修正算进了格子）。
+   *  只用公开的东西（场上的天气、规则本身），谁都能看 */
+  function chart(weather) {
+    needEngine();
+    const C = CC_CONFIG, T = C.chart, w = C.weathers.indexOf(weather) >= 0 ? weather : null, W = weatherName(w);
+    const kindOf = (n) => (n > 0 ? "adv" : n < 0 ? "dis" : "neu");
+    // 天气修正拆成两项：整行的（weatherDamagePct，这一属性在这个天气里的增减伤）和酸雨打装甲那一项（加起来就是 weatherScore）
+    const rowPart = (el) => (w ? Math.round(weatherDamagePct(w, el) / C.pctStep) : 0);
+    const inverted = [], kept = [], armor = [];
+    const cells = C.elements.map(el => {
+      let flips = false;
+      const row = C.layers.map(ly => {
+        const now = scoreParts(el, ly, w), was = scoreParts(el, ly, null), rp = rowPart(el), ap = now.weather - rp;
+        const flip = now.chart !== was.chart;
+        if (flip) flips = true;
+        if (ap) armor.push({ el, ly, n: ap });
+        const reason = [`${T.chartKinds[kindOf(now.chart)]} ${signed(now.chart)}${flip ? `（${W}：克制关系反转）` : ""}`,
+          rp ? `${W}：${cardName(el)} ${signed(rp)}` : "", ap ? `${W}：打${cardName(ly)}另 ${signed(ap)}` : ""].filter(Boolean).join("；");
+        return { row: el, col: ly, base: was.total, value: now.total, kindId: kindOf(now.total), kind: T.kinds[kindOf(now.total)],
+          baseKind: T.kinds[kindOf(was.total)], changed: now.total !== was.total, reason, chart: now.chart, weather: now.weather };
+      });
+      if (flips) inverted.push(el);
+      else if (row.some(x => x.chart)) kept.push(el);
+      return row;
+    });
+    const changed = [];
+    cells.forEach(row => row.forEach(x => { if (x.changed) changed.push({ row: x.row, col: x.col }); }));
+    const notes = [`得分 = 克制（克制 +1、被克制 −1、普通 0）+ 天气修正（每 ${Math.round(C.pctStep * 100)}% 记 ±1）。正分${sideName("player")}赢，负分${sideName("dealer")}赢，0 平局；分数的绝对值就是分差（定分档）。`];
+    if (w) {
+      const groups = {};
+      C.elements.forEach(el => { const n = rowPart(el); if (n) (groups[signed(n)] = groups[signed(n)] || []).push(cardName(el)); });
+      const parts = Object.keys(groups).map(k => `${groups[k].join("、")} ${k}`);
+      if (parts.length) notes.push(`${W}天气修正：${parts.join("；")}`);
+      if (inverted.length) notes.push(`${W}：克制关系反转${kept.length ? `（${kept.map(cardName).join("、")}除外）` : ""}`);
+      const byLayer = {};
+      armor.forEach(a => { const k = a.ly + "|" + a.n; (byLayer[k] = byLayer[k] || { ly: a.ly, n: a.n, els: [] }).els.push(cardName(a.el)); });
+      Object.keys(byLayer).forEach(k => { const g = byLayer[k]; notes.push(`${W}：${g.els.join("、")}打${cardName(g.ly)}另 ${signed(g.n)}`); });
+      if (w === C.allInWeather) notes.push(`${W}：不改得分；翻到${W}的那一轮双方全押（上限是筹码较少一方的全部筹码），打平各自退回`);
+    }
+    return {
+      unit: "score", weather: w || "none", weatherName: W, envX: 1, phaseStep: null, field: null,
+      cols: C.layers.map(id => ({ id, name: cardName(id) })),
+      rows: C.elements.map(id => ({ id, name: cardName(id), pct: 0, pctBase: 0, pctReason: "" })),
+      cells, changed, notes,
+      legend: { adv: `${T.kinds.adv}（正分）`, dis: `${T.kinds.dis}（负分）`, neu: `${T.kinds.neu}（0）` },
+      corner: T.corner, tag: `${C.name} 得分`
+    };
+  }
+
   /** 分差 → 分档（1 / 2 / 3 = 「3 及以上」；0 = 平局） */
   function tierOf(diff) { return Math.min(Math.abs(Number(diff) || 0), CC_CONFIG.tierExtra.length - 1); }
   /** 输家额外赔出的筹码（不含底池）：自己这一轮的下注额 × 分档倍率，半枚按 extraRound 取整 */
@@ -699,7 +762,7 @@
 
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
-    chartScore, weatherScore, score, scoreParts, tierOf, extraOf, minBetOf, settle, repayOf,
+    chartScore, weatherScore, score, scoreParts, chart, tierOf, extraOf, minBetOf, settle, repayOf,
     newGame, toAct, legal, act, view, spareElements, resultText, casino, makeRng, hashSeed
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

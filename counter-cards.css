@@ -206,12 +206,10 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-res .cc-delta { font: 800 14px var(--num, var(--ui)); }
 .cc-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: #d6cdbb; }
 .cc-log .cc-private { color: #ffe08a; }
-.cc-chart summary { cursor: pointer; font-size: 12.5px; color: #c9d6c7; }
-.cc-chart table { margin-top: 6px; border-collapse: collapse; font-size: 11.5px; width: 100%; }
-.cc-chart th, .cc-chart td { padding: 2px 3px; text-align: center; border: 1px solid #3d332b; }
-.cc-chart th { color: var(--c); font-weight: 700; }
-.cc-chart td.pos { color: #8fe39a; font-weight: 700; }
-.cc-chart td.neg { color: #ff8a7a; font-weight: 700; }
+/* 克制表的入口（counter-cards-ui.js · chartBtn）：点了打开和平时一样的克制表浮层（matchup-ui.js / matchup.css），格子是得分 */
+.cc-chartbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; text-align: left; }
+.cc-chartbtn b { font-size: 16px; color: var(--sk-hazard, #f2c230); }
+.cc-chartbtn small { font: 400 12px/1.3 var(--sk-body, var(--ui)); color: var(--sk-muted, #a8977b); }
 
 /* ---------- 结算横幅：只有胜负、分档和筹码变动 ---------- */
 .cc-banner { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .55); }
@@ -230,6 +228,7 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-deltas .up { color: #8fe39a; }
 .cc-deltas .down { color: #ff8a7a; }
 .cc-quiet { margin: 0; font-size: 12px; color: var(--sk-muted, #a8977b); }
+.cc-banner-card .cc-btns { justify-content: center; }
 
 @media (prefers-reduced-motion: reduce) {
   .cc-deal, .cc-thrown, .cc-flip, .cc-flash, .cc-stack i, .cc-banner-card, .cc-peekcard { animation: none !important; }
