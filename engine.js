@@ -432,6 +432,22 @@ function skillHitsSubmerged(id) {
   return Object.prototype.hasOwnProperty.call(SKILL_HITS_SUBMERGED, id) && SKILL_HITS_SUBMERGED[id] === true;
 }
 
+/* 选「任意单位」的技能（SKILL_TARGET_SIDE 写 any / anySelf，或者提示文字猜成任意单位的）里，对选中的那个单位是攻击（伤害 / 击破）的。
+ * PvP 嘲讽对玩家（#478，作者 10/29：「被嘲讽了就只能打嘲讽的」）：被嘲讽时攻击只能打嘲讽者——这几个选中自己人也算攻击，不能选
+ * （它们开不开友伤都选得到队友）；没写在这里的「任意单位」技能对自己人不是攻击（针尖、拉拽、勾索、电站超频、「非法」改装、规则干涉、恶劣环境……），照常。
+ * 写函数的按出手的人当时的状态算 */
+const SKILL_ATTACKS_ANY = {
+  chuan_whip: true,    // 电能鞭：atk/2 能量 + 1 击破（提示里写着「拉到」，被猜成任意单位）
+  bili_magnet: true,   // 磁力移动：推远 / 拉到身边 + 1 击破
+  // 诺拉的普攻：没有刺入时打选中的目标（距离 1 的敌人，开着友伤也能打队友）；有刺入时打的是刺入目标、不是选中的那个，选中谁不算攻击它
+  nora_aa: (a) => !(typeof piercedTargets === "function" && piercedTargets(a).length)
+};
+/** actor 这一下（任意单位的技能）对选中的单位算不算攻击（SKILL_ATTACKS_ANY） */
+function skillAttacksAny(actor, id) {
+  const v = Object.prototype.hasOwnProperty.call(SKILL_ATTACKS_ANY, id) ? SKILL_ATTACKS_ANY[id] : null;
+  return typeof v === "function" ? !!v(actor) : v === true;
+}
+
 /** 射程随状态变的技能（例如绯秋的普攻按刀势）。返回 {min,max}，不在表里返回 null */
 const SKILL_RANGE_BY_STATE = {
   // 拔刀 / 胁构：只打同区；居合：先移动 1 距离再出刀，所以最远打到距离 1

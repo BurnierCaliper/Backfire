@@ -69,8 +69,8 @@
     const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
     session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
       getUnits: () => state.units, canStand: u => !standUpBlocked(u),
-      // 玩家阵营定在哪个回合行动（enemies.js · unitTurnPhase，PvP #445）：我方回合那一段只排在我方回合行动的，
-      // 敌人回合开始时先动的那一段（#464，beginRound("enemy")）只排在敌人回合行动的；没配置阵营时都在我方回合
+      // 玩家阵营定在哪个回合行动（enemies.js · unitTurnPhase，PvP #445）：这一轮开始时所有人一起排行动顺序（#478），我方回合里只轮到在我方回合行动的，
+      // 敌人回合开始时先动的那一段（#464，beginRound("enemy")）照排好的顺序轮到在敌人回合行动的；没配置阵营时都在我方回合
       inRound: (u, segment) => typeof unitTurnPhase !== "function" || unitTurnPhase(u) === (segment === "enemy" ? "enemy" : "player") });
     authority = HotseatAuthority.create({ session, validate, execute, afterCommand,
       getState: () => state, getTape: () => GAME.tape || [], viewFor: project });
@@ -279,7 +279,8 @@
     if (network && root.OnlineGame?.isPaused()) return "房主连接中断，等待恢复";
     try { session.assertAction(commandOperator || playerId, unit?.id); return ""; } catch (e) { return e.message; }
   }
-  /** 开始一段行动顺序：不给 = 这一回合的我方回合；"enemy" = 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464，game.js · endTurn 开始） */
+  /** 不给 = 这一轮开始：所有玩家角色一起排这一轮的行动顺序（#478），我方回合接着开始；"enemy" = 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段
+   *  （PvP #464，game.js · endTurn），照这一轮开始时排好的顺序接着动（这一轮从敌人回合开始的突袭开局才在这时排） */
   function beginRound(segment) {
     if (!active()) return;
     session.beginRound(state.turnNo, segment);

@@ -2,8 +2,8 @@
 //   · 已经分配给玩家的：敌人回合开始时由那名玩家在自己的画面上照常行动（技能、选目标、协助格挡的询问……和我方回合一样）；
 //   · 没分配的：由主持人操控；
 //   · 这些玩家角色全部行动完（或结束回合），才轮到敌人的 AI。
-// 做法：热座会话按「这一段谁行动」排行动顺序（hotseat.js · beginRound(回合, "enemy")）——敌人回合开始时给在敌人回合行动的玩家阵营单独排一段，
-// 和我方回合一样选顺序、轮到谁谁动；归谁操控对场上所有能操作的单位都记着（询问、掷骰发给真正的操控者）。
+// 做法：热座会话的行动顺序在这一轮开始时给所有玩家角色一起排（#478 起；#464 时敌人回合开始时给这一队单独再排一次），敌人回合开始时
+// （hotseat.js · beginRound(回合, "enemy")）照排好的顺序轮到在敌人回合行动的人；归谁操控对场上所有能操作的单位都记着（询问、掷骰发给真正的操控者）。
 // 这一份测会话和房主的校验（hotseat.js / hotseat-game.js / hotseat-validation.js，真的规则，没有画面）；
 // 房主的战斗流程（game.js：敌人回合开始停下来、这一段都结束了才跑敌人的 AI）在 tests/pvp-enemy-turn-ui.test.js（浏览器）
 "use strict";
@@ -44,7 +44,7 @@ function room(opt = {}) {
   const owner = u => (view().units.find(r => r.id === u.id) || {}).owner;
   return { c, S, kolt, helu, hiaki, tou, thug, send, view, owner };
 }
-/** 我方回合所有人结束行动，推进到敌人回合（房主的流程：battle.endPlayerTurn → 敌人回合开始时排在敌人回合行动的那一段） */
+/** 我方回合所有人结束行动，推进到敌人回合（房主的流程：battle.endPlayerTurn → 敌人回合开始时轮到在敌人回合行动的那一段）。还在选顺序就由主持人按当前格子开始 */
 function toEnemySegment(f) {
   const { c, send, view } = f;
   for (let i = 0; i < 10 && view().phase !== "enemy"; i++) {
@@ -58,26 +58,28 @@ function toEnemySegment(f) {
   c.HotseatGame.beginRound("enemy");
 }
 
-test("敌人回合：在敌人回合行动的阵营单独排一段行动顺序——分给玩家的由那名玩家自己行动，没分配的由主持人操控，别人不能动；全部结束以后才轮到敌人的 AI", () => {
+test("敌人回合：在敌人回合行动的阵营照这一轮开始时排好的顺序行动（#478 起不再另外排）——分给玩家的由那名玩家自己行动，没分配的由主持人操控，别人不能动；全部结束以后才轮到敌人的 AI", () => {
   const f = room();
   const { c, S, kolt, helu, hiaki, tou, thug, send, view } = f;
-  // 我方回合：乙的人不在行动顺序里，谁都动不了它们
-  assert.deepEqual(view().units.map(u => u.id).sort(), [kolt.id, tou.id].sort(), "我方回合只排在我方回合行动的");
-  const early = send("p2", { type: "skill", actor: helu.id, skill: "helu_aa", target: thug.id, picks: {} });
-  assert.equal(early.ok, false, "我方回合赫鲁米卡动不了");
-  toEnemySegment(f);
-  // 敌人回合先动的那一段：只排乙的人，和我方回合一样先选顺序
-  assert.equal(view().segment, "enemy");
-  assert.equal(view().phase, "picking");
-  assert.deepEqual(view().units.map(u => u.id).sort(), [helu.id, hiaki.id].sort(), "只排在敌人回合行动的乙");
-  assert.equal(c.HotseatGame.segmentDone(), false);
-  assert.equal(c.HotseatGame.needsEnemy(), false, "这一段没结束：不跑敌人的 AI");
+  // 这一轮开始：乙的人也排进行动顺序（#478；#464 时这时候不排），各自的操控者给自己的角色选格子
+  assert.deepEqual(view().units.map(u => u.id).sort(), [kolt.id, helu.id, hiaki.id, tou.id].sort(), "这一轮开始时所有玩家角色一起排");
   assert.equal(send("p2", { type: "orderPick", actor: hiaki.id, index: 0 }).ok, false, "玩家 2 不能替主持人的绯秋选格子");
   assert.equal(send("p2", { type: "orderPick", actor: helu.id, index: 0 }).ok, true);
   assert.equal(send("p1", { type: "orderPick", actor: hiaki.id, index: 1 }).ok, true);
-  assert.equal(send("p2", { type: "orderConfirm" }).ok, true);
-  assert.equal(send("p1", { type: "orderConfirm" }).ok, true);
+  assert.equal(send("p1", { type: "orderPick", actor: kolt.id, index: 2 }).ok, true);
+  assert.equal(send("p3", { type: "orderPick", actor: tou.id, index: 3 }).ok, true);
+  ["p1", "p2", "p3"].forEach(p => assert.equal(send(p, { type: "orderConfirm" }).ok, true));
   assert.equal(view().phase, "acting");
+  assert.equal(view().currentUnitId, kolt.id, "我方回合跳过排在前面的乙，轮到柯尔特");
+  // 我方回合：谁都动不了乙的人
+  const early = send("p2", { type: "skill", actor: helu.id, skill: "helu_aa", target: thug.id, picks: {} });
+  assert.equal(early.ok, false, "我方回合赫鲁米卡动不了");
+  toEnemySegment(f);
+  // 敌人回合先动的那一段：不再选顺序，照这一轮开始时的格子轮到乙的人
+  assert.equal(view().segment, "enemy");
+  assert.equal(view().phase, "acting", "敌人回合开始时不再另外排");
+  assert.equal(c.HotseatGame.segmentDone(), false);
+  assert.equal(c.HotseatGame.needsEnemy(), false, "这一段没结束：不跑敌人的 AI");
   assert.equal(view().currentUnitId, helu.id, "轮到赫鲁米卡");
   // 赫鲁米卡归玩家 2：主持人、玩家 3 都不能动；玩家 2 照常行动（技能、选目标：远程普攻打距离 1 的柯尔特）
   helu.zone = 2;
@@ -104,11 +106,12 @@ test("敌人回合：在敌人回合行动的阵营单独排一段行动顺序�
   assert.equal(last.result.roundDone, true, "这一段的人全部结束了");
   assert.equal(c.HotseatGame.segmentDone(), true, "该跑敌人的 AI 了");
   assert.equal(c.HotseatGame.needsEnemy(), false, "不会被当成我方回合结束、又跳过一个我方回合");
-  // 敌人回合结束 → 下一回合：我方回合照常，乙的人又不在顺序里
+  // 敌人回合结束 → 下一回合：又是这一轮开始，所有人一起排
   c.HotseatGame.system({ type: "battle.endEnemyTurn" });
   c.HotseatGame.beginRound();
   assert.equal(view().segment, "player");
-  assert.deepEqual(view().units.map(u => u.id).sort(), [kolt.id, tou.id].sort());
+  assert.equal(view().phase, "picking");
+  assert.deepEqual(view().units.map(u => u.id).sort(), [kolt.id, helu.id, hiaki.id, tou.id].sort());
   assert.equal(S.turnNo, 2);
 });
 
@@ -144,14 +147,14 @@ test("在敌人回合行动的阵营：协助格挡的询问（协助攻击是�
 
 test("敌人回合那一段：分到的玩家掷骰、申请检定照样是自己的角色；会话的检查点记着排到哪一段（房主恢复后接着这一段）", () => {
   const f = room();
-  const { c, helu, hiaki, send, view } = f;
+  const { c, kolt, helu, hiaki, tou, send, view } = f;
   toEnemySegment(f);
-  assert.equal(send("p2", { type: "orderPick", actor: helu.id, index: 0 }).ok, true);
+  assert.equal(view().phase, "acting");
   // 掷骰：归玩家 2（以前在敌人回合行动的人不在会话里，掷骰归主持人）
   const roll = send("p2", { type: "skillRoll", unitId: helu.id, prof: "侦察" });
   assert.equal(roll.ok, true, roll.error);
   assert.equal(send("p3", { type: "skillRoll", unitId: helu.id, prof: "侦察" }).ok, false, "玩家 3 不能替它掷");
-  // 检查点：记着这一段和已经选好的格子
+  // 检查点：记着这一段和这一轮排好的格子
   const saved = plain(c.HotseatGame.checkpoint());
   assert.equal(saved.session.segment, "enemy");
   const session = c.Hotseat.create({ operators: saved.config.players, gmId: "p1", getUnits: () => f.S.units,
@@ -159,23 +162,36 @@ test("敌人回合那一段：分到的玩家掷骰、申请检定照样是自�
   session.restore(saved.session);
   const snap = plain(session.snapshot());
   assert.equal(snap.segment, "enemy", "恢复以后还在敌人回合那一段");
-  assert.deepEqual(snap.roster.map(r => r.unitId).sort(), [helu.id, hiaki.id].sort());
-  assert.equal(snap.slots.find(r => r && r.unitId === helu.id) ? true : false, true, "选好的格子还在");
-  // 同一回合再叫一次「开始敌人回合那一段」：不会重开（已经选好的格子不丢）
+  assert.equal(snap.phase, "acting");
+  assert.deepEqual(snap.roster.map(r => r.unitId).sort(), [kolt.id, helu.id, hiaki.id, tou.id].sort(), "这一轮的行动顺序（#478：所有人一起排的）");
+  assert.equal(snap.slots.find(r => r && r.unitId === helu.id) ? true : false, true, "排好的格子还在");
+  assert.equal(snap.currentUnitId, view().currentUnitId, "轮到的人也一样");
+  // 同一回合再叫一次「开始敌人回合那一段」：不会重开（排好的格子不丢）
   c.HotseatGame.beginRound("enemy");
+  assert.equal(view().phase, "acting");
   assert.ok(view().order.some(r => r && r.actor === helu.id), "没有重开");
 });
 
-test("敌人回合那一段（自查）：选顺序的时候这一段的人都没了（主持人把乙改回我方回合行动）——这一段直接算结束、接着跑敌人的 AI，不停在「选择行动顺序」", () => {
+test("敌人回合那一段（自查）：这一段的人都没了（主持人把乙改回我方回合行动）——这一段直接算结束、接着跑敌人的 AI；突袭开局在敌人回合开始时选顺序的时候也一样，不停在「选择行动顺序」", () => {
   const f = room();
   const { c, send, view } = f;
   toEnemySegment(f);
-  assert.equal(view().phase, "picking");
+  assert.equal(view().phase, "acting");
   assert.equal(send("p1", { type: "battle.playerFaction", faction: "乙", phase: "player" }).ok, true);
-  assert.equal(view().units.length, 0, "这一段没有人了");
-  assert.equal(view().phase, "enemy", "不停在选顺序（以前要主持人点「按当前格子开始」）");
+  assert.equal(view().currentUnitId, null, "这一段没有能动的人了");
+  assert.equal(view().phase, "enemy");
   assert.equal(c.HotseatGame.segmentDone(), true, "该跑敌人的 AI 了");
   assert.equal(c.HotseatGame.needsEnemy(), false, "不会被当成我方回合结束");
+  // 突袭开局：这一轮从敌人回合开始，敌人回合开始时才选顺序；选的时候乙被改回我方回合行动
+  const g = room({ ambush: true });
+  g.c.HotseatGame.system({ type: "battle.endPlayerTurn" });
+  g.c.HotseatGame.beginRound("enemy");
+  assert.equal(g.view().phase, "picking");
+  assert.equal(g.send("p1", { type: "battle.playerFaction", faction: "乙", phase: "player" }).ok, true);
+  assert.equal(g.view().units.length, 0, "这一段没有要排的人了");
+  assert.equal(g.view().phase, "enemy", "不停在选顺序（以前要主持人点「按当前格子开始」）");
+  assert.equal(g.c.HotseatGame.segmentDone(), true);
+  assert.equal(g.c.HotseatGame.needsEnemy(), false);
 });
 
 test("突袭开局（自查）：开战就先进敌人回合时，敌人回合那一段里花了点数的单位照样锁住格子（不能再挪、不能转交）", () => {
@@ -195,10 +211,11 @@ test("突袭开局（自查）：开战就先进敌人回合时，敌人回合�
   assert.equal(gate.ok, false, "正在行动的单位花了点数：不能转交");
 });
 
-test("发给玩家的包带上场上所有单位归谁（operable，自查）：敌人回合那一段 units 只有乙的人，在我方回合行动的角色照样认得出是谁的（掷骰、角色资料、接管……都看这一份）", () => {
-  const f = room();
+test("发给玩家的包带上场上所有单位归谁（operable，自查）：突袭开局那一轮 units 只有乙的人，在我方回合行动的角色照样认得出是谁的（掷骰、角色资料、接管……都看这一份）", () => {
+  const f = room({ ambush: true });
   const { c, S, kolt, helu, hiaki, tou, view } = f;
-  toEnemySegment(f);
+  c.HotseatGame.system({ type: "battle.endPlayerTurn" });   // 突袭：这一轮从敌人回合开始，敌人回合开始时只排在敌人回合行动的（#478）
+  c.HotseatGame.beginRound("enemy");
   const v = view();
   assert.deepEqual(v.units.map(u => u.id).sort(), [helu.id, hiaki.id].sort(), "行动顺序只排乙的人");
   const owners = Object.fromEntries((v.operable || []).map(r => [r.id, r.owner]));
@@ -212,6 +229,9 @@ test("发给玩家的包带上场上所有单位归谁（operable，自查）：
   // 只有一个玩家阵营时 operable 和 units 一样（玩家画面和以前一样）
   const one = room({ split: false }).view();
   assert.deepEqual(one.operable, one.units);
+  // 平常（这一轮从我方回合开始）：units 就是这一轮所有人一起排的（#478），和 operable 是同样的人
+  const two = room().view();
+  assert.deepEqual(two.units.map(u => u.id).sort(), two.operable.map(u => u.id).sort());
 });
 
 test("只有一个玩家阵营（默认全在「我方」）时一切照旧：行动顺序、回合推进、询问和以前一样；敌人回合没有玩家先动的那一段", () => {

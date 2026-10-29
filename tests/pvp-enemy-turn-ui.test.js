@@ -1,6 +1,7 @@
-// PvP 第二步（#464）：敌人回合由玩家操控——房主的战斗流程（game.js）。会话和校验的细节在 tests/pvp-enemy-turn.test.js。
+// PvP 第二步（#464）：敌人回合由玩家操控——房主的战斗流程（game.js）。会话和校验的细节在 tests/pvp-enemy-turn.test.js、tests/pvp-round-order.test.js。
 // 真的 game.html 当联机跑团房主（假的转发连接，房间里还有一名玩家「甲」p-1，同 tests/phone-host-gm-ui.test.js 的搭法），旧画面：
-//   · 敌人回合开始时，在敌人回合行动的阵营单独排一段行动顺序（甲的角色、主持人没分配的角色），敌人的 AI 先不动；
+//   · 这一轮开始时所有玩家角色一起排行动顺序（#478）：甲在自己那边给他在敌人回合行动的角色选格子；我方回合里轮不到乙的人；
+//   · 敌人回合开始时不再另外排，照排好的顺序轮到在敌人回合行动的阵营（甲的角色、主持人没分配的角色），敌人的 AI 先不动；
 //   · 甲在自己那边照常行动（发来的移动 / 结束行动由房主执行），主持人替不了他；主持人操控没分配的那个；
 //   · 这一段的人全部结束行动，才跑敌人的 AI，然后照常进下一回合；发给甲的包里写着现在是敌人回合那一段、轮到谁。
 // 用 Playwright，没装时在 Linux 上用机器自带的 Chrome（tests/cdp-browser.js），都没有就跳过。
@@ -99,7 +100,7 @@ async function fromMate(page, command) {
 }
 const idle = page => page.waitForFunction(() => GAME.depth === 0 && !HotseatGame.hasAsk(), null, { timeout: 20000 });
 
-test("敌人回合由玩家操控（#464）：敌人回合开始时在敌人回合行动的阵营单独排一段——甲自己操控他的角色、主持人操控没分配的；这一段全部结束行动才跑敌人的 AI，然后进下一回合", { timeout: 120000 }, async t => {
+test("敌人回合由玩家操控（#464 / #478）：这一轮开始时所有人一起排顺序，敌人回合开始时照排好的顺序轮到乙——甲自己操控他的角色、主持人操控没分配的；这一段全部结束行动才跑敌人的 AI，然后进下一回合", { timeout: 120000 }, async t => {
   const o = await hostPage(t); if (!o) return; const { page } = o;
   // 头一名英雄归甲；它和第二名（主持人的、没分配）分到「乙」，乙在敌人回合行动
   const ids = await page.evaluate(async () => {
@@ -115,26 +116,30 @@ test("敌人回合由玩家操控（#464）：敌人回合开始时在敌人回�
   });
   await page.evaluate(() => GAME.startOrEnd());
   await page.waitForFunction(() => state.combatStarted && HotseatGame.getView().phase === "picking" && GAME.depth === 0, null, { timeout: 15000 });
-  // 我方回合：只排我方的人
-  assert.deepEqual((await page.evaluate(() => HotseatGame.getView().units.map(u => u.id))).sort(), ids.ours.slice().sort(), "我方回合不排乙的人");
-  assert.equal((await fromMate(page, { type: "move", actor: ids.mate, dest: 2 })).ok, false, "我方回合甲的角色动不了（在敌人回合行动）");
+  // 这一轮开始：所有人一起排（#478），乙的人也在；甲在自己那边给他的角色选第一格
+  const all = [ids.mate, ids.gmHero].concat(ids.ours).sort();
+  assert.deepEqual((await page.evaluate(() => HotseatGame.getView().units.map(u => u.id))).sort(), all, "这一轮开始时乙的人也排");
+  await page.waitForFunction(id => { const p = __last("p-1"); return p && p.view && p.view.phase === "picking" && (p.view.units || []).some(u => u.id === id); }, ids.mate, { timeout: 10000 });
+  assert.equal((await fromMate(page, { type: "orderPick", actor: ids.mate, index: 0 })).ok, true, "甲给自己在敌人回合行动的角色选格子");
+  assert.equal((await fromMate(page, { type: "orderConfirm" })).ok, true);
   await page.evaluate(() => HotseatGame.submit({ type: "orderStart" }));
+  await page.waitForFunction(() => HotseatGame.getView().phase === "acting" && GAME.depth === 0, null, { timeout: 15000 });
+  // 我方回合：轮不到排在第一格的甲的角色（在敌人回合行动），也动不了它
+  assert.ok(ids.ours.includes(await page.evaluate(() => HotseatGame.getView().currentUnitId)), "我方回合先轮到我方的人");
+  assert.equal((await fromMate(page, { type: "move", actor: ids.mate, dest: 2 })).ok, false, "我方回合甲的角色动不了（在敌人回合行动）");
   for (let i = 0; i < 8 && await page.evaluate(() => state.combatPhase === "player"); i++) {
     await page.evaluate(() => GAME.endTurn());
     await page.waitForFunction(() => GAME.depth === 0 || state.combatPhase === "enemy", null, { timeout: 15000 });
   }
-  // 敌人回合：先停下来排乙的这一段，敌人的 AI 不动
+  // 敌人回合：照这一轮开始时排好的顺序轮到乙的人（不再另外排），敌人的 AI 不动
   await page.waitForFunction(() => state.combatPhase === "enemy" && HotseatGame.segment() === "enemy" && GAME.depth === 0, null, { timeout: 20000 });
-  const seg = await page.evaluate(() => ({ phase: HotseatGame.getView().phase, units: HotseatGame.getView().units.map(u => u.id), turn: state.turnNo,
+  const seg = await page.evaluate(() => ({ phase: HotseatGame.getView().phase, current: HotseatGame.getView().currentUnitId, order: HotseatGame.getView().order.map(r => r && r.actor), turn: state.turnNo,
     foeAp: state.units.filter(u => !u.isPlayer && !u.dead).map(u => u.ap) }));
-  assert.equal(seg.phase, "picking", "和我方回合一样先选顺序");
-  assert.deepEqual(seg.units.sort(), [ids.mate, ids.gmHero].sort(), "只排乙的人");
-  // 发给甲的包：现在是敌人回合那一段（白名单带 segment），他自己的角色在里面
-  await page.waitForFunction(() => { const p = __last("p-1"); return p && p.view && p.view.segment === "enemy"; }, null, { timeout: 10000 });
-  assert.equal((await fromMate(page, { type: "orderPick", actor: ids.mate, index: 0 })).ok, true, "甲给自己的角色选格子");
-  await page.evaluate(() => HotseatGame.submit({ type: "orderStart" }));
-  await page.waitForFunction(id => HotseatGame.getView().phase === "acting" && HotseatGame.getView().currentUnitId === id && GAME.depth === 0, ids.mate, { timeout: 15000 });
-  await page.waitForFunction(id => { const p = __last("p-1"); return p && p.view.phase === "acting" && p.view.currentUnitId === id; }, ids.mate, { timeout: 10000 });
+  assert.equal(seg.phase, "acting", "敌人回合开始时不再选顺序");
+  assert.equal(seg.order[0], ids.mate, "还是这一轮开始时排的那一份");
+  assert.equal(seg.current, ids.mate, "排在第一格的甲的角色先动");
+  // 发给甲的包：现在是敌人回合那一段（白名单带 segment），轮到他的角色
+  await page.waitForFunction(id => { const p = __last("p-1"); return p && p.view && p.view.segment === "enemy" && p.view.phase === "acting" && p.view.currentUnitId === id; }, ids.mate, { timeout: 10000 });
   // 主持人替不了甲；甲自己动
   const zone0 = await page.evaluate(id => state.units.find(u => u.id === id).zone, ids.mate);
   await page.evaluate(id => GAME.act({ type: "move", actor: id, dest: 2 }, { actorId: id }), ids.mate);
@@ -158,6 +163,7 @@ test("敌人回合由玩家操控（#464）：敌人回合开始时在敌人回�
   // 主持人结束最后一个 → 敌人的 AI → 下一回合
   await page.evaluate(() => GAME.endTurn());
   await page.waitForFunction(turn => state.turnNo === turn + 1 && state.combatPhase === "player" && HotseatGame.segment() === "player" && GAME.depth === 0, seg.turn, { timeout: 30000 });
-  assert.deepEqual((await page.evaluate(() => HotseatGame.getView().units.map(u => u.id))).sort(), ids.ours.slice().sort(), "下一回合的我方回合照旧只排我方的人");
+  assert.equal(await page.evaluate(() => HotseatGame.getView().phase), "picking", "下一轮开始：又一起排顺序");
+  assert.deepEqual((await page.evaluate(() => HotseatGame.getView().units.map(u => u.id))).sort(), all, "所有人都排");
   assert.deepEqual(o.errors, []);
 });

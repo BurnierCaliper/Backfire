@@ -3116,9 +3116,11 @@
       });
     }
     // 嘲讽对玩家（PvP 第二步，#464）：被敌对的人嘲讽时，和自己敌对的单位只剩嘲讽它的那个（打敌人、任意单位的技能都是；配置物 / 危墙也不行）；
-    // 自己人照常（app.js · tauntFoe，和扣点之前的检查同一个判断；enemies.js · playerTauntTarget）
+    // 自己人（#478）：攻击也不能选——打敌人的技能开着友伤选得到的队友、「任意单位」的攻击技能（电能鞭……）选的自己人都拿掉；
+    // 给自己人的「任意单位」技能（针尖、拉拽……）照常（app.js · tauntFoe / tauntAttackPick，和扣点之前的检查同一个判断；enemies.js · playerTauntTarget）
     const taunt = side !== "ally" && side !== "allySelf" && typeof playerTauntTarget === "function" ? playerTauntTarget(actor) : null;
-    if (taunt) all = all.filter(u => { const real = unitById(u.id); return !!real && !tauntFoe(actor, real, taunt); });
+    const tauntAttack = !!taunt && typeof tauntAttackPick === "function" && tauntAttackPick(actor, sk.id, side);
+    if (taunt) all = all.filter(u => { const real = unitById(u.id); return !!real && !tauntFoe(actor, real, taunt, tauntAttack); });
     return all;
   }
 
@@ -3501,8 +3503,8 @@
       await wait(750);
       if (abandoned(gen)) return;
       // 在敌人回合行动的玩家阵营（PvP，#445）：同一回合里玩家角色总比非玩家单位先动——先停下来交给玩家操作，
-      // 结束以后再跑敌人的 AI（endPvpTurn）。热座 / 联机（#464）：会话给它们单独排一段行动顺序（和我方回合一样选顺序、轮到谁谁动、
-      // 询问发给操控者）——已经分配给玩家的由那名玩家在自己的画面上操控，没分配的由主持人操控
+      // 结束以后再跑敌人的 AI（endPvpTurn）。热座 / 联机（#464）：会话里这一段照这一轮开始时排好的行动顺序轮到谁谁动（#478：不再另外排；
+      // 突袭开局这一轮从敌人回合开始，才在这时排），询问发给操控者——已经分配给玩家的由那名玩家在自己的画面上操控，没分配的由主持人操控
       if (pvpWaiting()) {
         G.pvpTurn = true;
         if (hotseat()) HotseatGame.beginRound("enemy");
