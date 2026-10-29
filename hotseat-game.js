@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -139,11 +139,50 @@
       confirmed: s?.confirmed || [], swap: s?.pendingSwaps?.length ? { requestId: s.pendingSwaps[0].id, from: s.pendingSwaps[0].actor, to: s.pendingSwaps[0].target, recipient: s.pendingSwaps[0].responder } : null,
       ask: s?.ask || null, chat: (s?.chat || []).map(r => ({ id: r.id, operatorId: r.operatorId, name: r.operatorName, text: r.text, at: r.at, roll: r.roll ? (typeof r.roll === "object" ? { tier: r.roll.tier || null } : true) : false, tier: r.roll && r.roll.tier || null, secret: !!r.secret, title: !!r.title })),
       title: s?.table?.title ? copy(s.table.title) : null, checks: copy(s?.table?.checks || []), attrRequests: copy(s?.table?.attrs || []), checkRequests: copy(s?.table?.checkReqs || []),
+      // 决斗的申请 / 准备画面（#472）：每名能参加的角色（kit、名字、归谁操控、选了哪一队），只有这些，没有血量、坚毅
+      duel: duelView(s?.table?.duel),
       // 跑团地图：主持人在地图上标的队伍位置（玩家只能看，不能改）
       map: typeof LEDGER !== "undefined" && LEDGER ? { place: LEDGER.place || null, x: LEDGER.placePos ? LEDGER.placePos.x : null, y: LEDGER.placePos ? LEDGER.placePos.y : null } : null,
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
   const getView = () => getViewFor(playerId);
+  /* ---------- 决斗（PvP 第三步，#472，docs/pvp.md 第 1.2 节）----------
+   * 联机探索环节（不在战斗画面）里：玩家申请（duelRequest）→ 主持人同意（duelDecide），或者主持人直接开启（duelOpen）；
+   * 准备画面里各人给自己操控的角色选队（duelPick，主持人给没分配给玩家的选），主持人定选项（duelOptions）；
+   * 主持人点「开始决斗」→ trpg-ui.js · toDuel 按 duelSpec 布置战场，duelStarted 收起准备画面。规则在 hotseat.js（会话）和 enemies.js（战斗） */
+  /** 能参加决斗的角色：场上（探索时摆好的队伍）的英雄，倒下死亡的不算 */
+  const duelHeroes = () => heroes().filter(u => !u.dead);
+  function duelView(d) {
+    if (!d) return null;
+    return { id: d.id, status: d.status, by: d.by, byName: d.byName, at: d.at, stand: d.stand !== false, rounds: d.rounds || null,
+      heroes: duelHeroes().map(u => ({ kit: u.kit, name: u.name, owner: ownerByKit[u.kit] || gm(), team: (d.teams || {})[u.kit] || null })) };
+  }
+  /** 决斗只能在探索环节：房主在战斗画面（打着、打完还没回去）时不行 */
+  function duelExploring() {
+    if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能决斗");
+    if (root.Screens && Screens.is("battle")) fail("先回到探索环节再决斗");
+    if (typeof TRPG === "undefined" || !TRPG.active) fail("只有联机跑团的探索环节能决斗");
+  }
+  function duelHero(kit) {
+    const u = duelHeroes().find(x => x.kit === String(kit || ""));
+    if (!u) fail("没有这名角色");
+    return u;
+  }
+  /** 主持人点「开始决斗」：准备画面里选好的两队（角色 kit）和选项，人数不对就说原因 */
+  function duelSpec() {
+    if (!active()) fail("热座尚未配置");
+    duelExploring();
+    const d = session.snapshot().table.duel;
+    if (!d || d.status !== "prep") fail("决斗还没开始准备");
+    const C = typeof PVP_DUEL_CFG !== "undefined" ? PVP_DUEL_CFG : { teams: [{ id: "1队", name: "1 队" }, { id: "2队", name: "2 队" }], teamMax: 4, teamMin: 1 };
+    const list = duelHeroes(), teams = {};
+    for (const t of C.teams) {
+      teams[t.id] = list.filter(u => d.teams[u.kit] === t.id).map(u => u.kit);
+      if (teams[t.id].length < C.teamMin) fail(`${t.name}至少要 ${C.teamMin} 人才能开打`);
+      if (teams[t.id].length > C.teamMax) fail(`${t.name}最多 ${C.teamMax} 人`);
+    }
+    return { teams, stand: d.stand !== false, rounds: d.rounds || null };
+  }
   function validate(cmd, id) {
     if (!active()) fail("热座尚未配置或当前为单人模式");
     if (network && root.OnlineGame?.isPaused()) fail("房主连接中断，等待恢复");
@@ -181,8 +220,8 @@
     if (cmd.type === "retreat") { hostOnly(id); if (!state.combatStarted || state.combatPhase !== "player" || GAME.ended || !["selecting", "acting"].includes(session.snapshot().phase)) fail("现在不能撤退"); return; }
     // 联机单局（online-rogue.js）：单局的规则指令和开战 / 结算只由房主的流程执行；玩家的投票、需求、个人购买另走房主校验
     if (["run", "run.query", "run.session", "battle.setupRogue", "battle.continue", "screen"].includes(cmd.type)) { hostOnly(id); return; }
-    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友
-    if (["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
+    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友；布置决斗（battle.duel，#472）也只有房主
+    if (["battle.panel", "battle.setup", "battle.playerFaction", "battle.duel", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
       hostOnly(id);
       if (cmd.type === "calc" && ["move", "skill", "skillPick", "skillCancel", "standUp", "blockAnswer", "assistAnswer", "koltSwap", "startCombat", "endTurn", "blade"].includes(cmd.action)) fail("热座战斗动作必须使用当前单位的技能与询问入口");
       if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
@@ -356,6 +395,12 @@
     },
     skillRoll: c => session.skillRoll(sender, rollSpec(c), !!c.secret),
     showTitle: c => session.showTitle(sender, c),
+    // 决斗（#472）：只在探索环节；选队只能选自己操控的角色（没分配给玩家的归主持人）
+    duelRequest: () => { duelExploring(); return session.requestDuel(sender); },
+    duelDecide: c => { duelExploring(); if (!["approve", "reject", "cancel"].includes(c.decision)) fail("没有这种处理"); return session.decideDuel(sender, c.decision); },
+    duelOpen: () => { duelExploring(); return session.openDuel(sender); },
+    duelPick: c => { duelExploring(); const u = duelHero(c.kit); return session.pickDuel(sender, u.kit, c.team == null ? null : String(c.team), ownerByKit[u.kit] || gm()); },
+    duelOptions: c => { duelExploring(); const opt = {}; if ("stand" in c) opt.stand = c.stand; if ("rounds" in c) opt.rounds = c.rounds; return session.setDuelOptions(sender, opt); },
     // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到
     // 跑团商人（trpg-merchants.js）：只能在主持人开着的那家店买；钱从自己角色的钱包出（主持人可以替任何人付）
     shopBuy: c => {
@@ -562,6 +607,9 @@
       setupSession(); configured = true; executing++; try { session.restore(restorable(saved.session)); } finally { executing--; } authority.broadcast(); refresh(); },
     onPacket(fn) { packetListeners.add(fn); return () => packetListeners.delete(fn); },
     reason, beginRound, segmentDone, system, requestAsk, ownedChoice,
+    /** 决斗（#472）：主持人点「开始决斗」时要布置的两队（角色 kit）和选项；布好以后 duelStarted 收起准备画面、频道里写一句 */
+    duelSpec,
+    duelStarted(text) { if (active()) { executing++; try { session.closeDuel(gm(), text); } finally { executing--; } } },
     isHost: () => !active() || playerId === gm(), hasAsk: () => !!choice || !!session?.snapshot().ask,
     currentUnit: () => active() ? session.snapshot().currentUnitId : null,
     /** 我方回合的行动顺序都结束了（敌人回合先动的那一段结束看 segmentDone） */

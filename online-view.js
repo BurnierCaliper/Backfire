@@ -139,7 +139,8 @@
   function projectUnit(unit) {
     if (!obj(unit) || !id(get(unit, "id"))) return null;
     const out = identifiers(unit, {}, ["id", "kit", "weaponOf", "owner", "operatorId"]);
-    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "upOnShp", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral"]);
+    // pvpOut：决斗里「再起不能」（#472）——只发这个状态，坚毅数值不发
+    copyFields(unit, out, ["name", "escort"], ["level", "xp", "attrPoints", "zone", "atk", "def", "defMax", "ap", "apMax", "bonus", "bonusMax", "highEnergy", "stunMarks", "sink"], ["isPlayer", "weaponUnit", "isProp", "isGap", "isDevice", "dying", "stunned", "upOnShp", "flying", "dead", "hidden", "noMove", "dormant", "submerged", "neutral", "pvpOut"]);
     if (get(unit, "fused") || get(unit, "_removed")) out.hidden = true;
     // 玩家阵营（PvP 第一步，enemies.js · PVP_CFG，#445）：配置了阵营时每个单位带上它属于哪个阵营——玩家这一边是玩家阵营的
     // id（faction）和名字（factionName），非玩家单位是图鉴里的敌人阵营名（enemyFaction）。只发阵营 id / 名字（过 text 过滤），
@@ -295,6 +296,15 @@
       out.friendlyFire = map;
     }
     out.units = arr(get(state, "units")).slice(0, 200).map(projectUnit).filter(Boolean);
+    // 决斗（#472，enemies.js · state.pvpDuel）：允许起身没有、限定几回合、谁先手（抛硬币的结果，战斗记录里也写着）。
+    // 只放行这三样；两队是谁看单位的阵营（faction），决斗前的血量 / 坚毅（restore）这些一律不发
+    const duel = get(state, "pvpDuel");
+    if (obj(duel) && obj(get(duel, "teams"))) {
+      const dto = { stand: get(duel, "stand") !== false };
+      const rounds = number(get(duel, "rounds")); if (Number.isInteger(rounds) && rounds >= 1 && rounds <= 99) dto.rounds = rounds;
+      enumField(duel, dto, "first", ["1队", "2队"]);
+      out.duel = dto;
+    }
     // 连续战斗第几场 / 共几场、援军还有几回合到哪个区（chain.js · status 的格式）
     const chain = get(state, "chain"), waves = arr(get(state, "waves")).filter(w => obj(w) && !get(w, "done"));
     if (obj(chain) || waves.length) {
@@ -370,7 +380,7 @@
     for (const key of zoneKeys) { const zv = zoneViewOf(Number(key), state); if (zv) (out.zoneView = out.zoneView || {})[key] = zv; }
     return out;
   }
-  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆", "坚毅受创"]);
+  const popupWords = new Set(["无效", "失衡", "起身", "倒下", "刺入", "温和", "残忍", "登场支援！", "聚焦抹层", "灼烧", "感电", "腐蚀", "冻伤", "震荡", "共振", "高能", "虚弱", "振奋", "躲藏", "优势", "紧追", "熔融", "刺骨", "过载", "错位", "扩散", "折射", "红弹", "蓝弹", "导体", "霜结", "自焚", "溅射", "千钧", "蓄能", "多普勒", "狂暴", "爆燃", "破冰", "雷击", "蚀刻", "倒流", "惯性", "衍射", "穿刺", "猛击", "弱点特效", "超载", "中和", "被打倒", "克制", "引爆", "坚毅受创", "再起不能"]);   // 再起不能：决斗里伤害不会致死（#472），只是这个字
   function projectTape(tape, context = {}) {
     const units = arr(get(context.state, "units"));
     return arr(tape).slice(0, 256).flatMap(event => {
@@ -451,7 +461,8 @@
   function projectLogs(logs) {
     // Only host-created semantic events are accepted. Never accept generic
     // text/notes/logPages or a caller-supplied "public:true" escape hatch.
-    const templates = { action: "单位执行了行动", phase: "战斗阶段变化", gm: "主持人调整了战场", round: "回合开始", victory: "战斗胜利", defeat: "战斗结束", retreat: "队伍撤退", gmUpdate: "主持人调整了战场", spawn: "有单位加入战场", remove: "有单位离开战场", transfer: "主持人转交了角色" };
+    const templates = { action: "单位执行了行动", phase: "战斗阶段变化", gm: "主持人调整了战场", round: "回合开始", victory: "战斗胜利", defeat: "战斗结束", retreat: "队伍撤退", gmUpdate: "主持人调整了战场", spawn: "有单位加入战场", remove: "有单位离开战场", transfer: "主持人转交了角色", duel: "决斗" };
+    const duelTeam = t => ({ "1队": "1 队", "2队": "2 队" })[t] || "";
     return arr(logs).slice(-100).flatMap(row => {
       if (!obj(row) || get(row, "silent") === true || !Object.hasOwn(templates, get(row, "kind"))) return [];
       const out = identifiers(row, { kind: get(row, "kind"), text: templates[get(row, "kind")] }, ["id", "actorId"]);
@@ -473,6 +484,14 @@
           return parts.length ? [`${name}：${parts.join("，")}`] : [];
         });
         if (hits.length) out.text += " → " + hits.join("；");
+      }
+      // 决斗（#472）：开始、抛硬币谁先手、哪一队赢 / 平局——只认事件名和队伍 id，按模板写
+      if (out.kind === "duel") {
+        const ev = get(row, "event"), first = duelTeam(get(row, "first")), win = duelTeam(get(row, "winner"));
+        if (ev === "start") out.text = "决斗开始";
+        else if (ev === "toss" && first) out.text = `抛硬币：${first}先手（我方回合行动），${duelTeam(get(row, "first") === "1队" ? "2队" : "1队")}后手（敌人回合行动）`;
+        else if (ev === "end") out.text = (get(row, "why") === "rounds" ? "回合上限到了，按剩余血量百分比：" : "") + (win ? `${win}获胜` : "平局");
+        else return [];
       }
       if (out.kind === "transfer") {
         const hero = text(get(row, "heroName"), 60), to = text(get(row, "toName"), 60);
@@ -501,10 +520,65 @@
   function publicResult(result) {
     if (!obj(result)) return null;
     const out = copyFields(result, {}, [], [], ["accepted", "executed", "roundDone", "alreadySettled"]);
-    enumField(result, out, "outcome", ["win", "lose", "retreat"]);
+    enumField(result, out, "outcome", ["win", "lose", "retreat", "draw"]);   // draw：决斗平局（#472）
     const grade = get(result, "grade");
     if (obj(grade)) { out.grade = copyFields(grade, {}, [], ["score", "par", "xpMult"], []); enumField(grade, out.grade, "grade", ["D", "C", "B", "A", "S", "SS", "SSS"]); }
     const drops = projectDrops(get(result, "drops")); if (drops) out.drops = drops;
+    const duel = projectDuelResult(get(result, "duel")); if (duel) out.duel = duel;
+    const teams = projectTeamScores(get(result, "teams")); if (teams.length) out.teams = teams;
+    return out;
+  }
+  const DUEL_TEAMS = ["1队", "2队"];
+  /** 决斗分出的胜负（#472，enemies.js · pvpDuelPublic 的 result）：哪一队赢 / 平局、怎么分出来的（全倒 / 回合上限），
+   *  回合上限时两队的剩余血量百分比（只算血量层，不算坚毅生命）。决斗前的坚毅、谁再起不能这些不在这里 */
+  function projectDuelResult(d) {
+    const r = obj(d) ? get(d, "result") : null;
+    if (!obj(r) || get(r, "over") !== true) return null;
+    const out = { draw: get(r, "draw") === true };
+    enumField(r, out, "winner", DUEL_TEAMS);
+    enumField(r, out, "why", ["wipe", "rounds"]);
+    const pct = get(r, "pct");
+    if (obj(pct)) {
+      const p = {};
+      DUEL_TEAMS.forEach(k => { const v = number(get(pct, k)); if (v !== undefined) p[k] = Math.max(0, Math.min(1, v)); });
+      if (Object.keys(p).length) out.pct = p;
+    }
+    const rounds = number(get(d, "rounds")); if (Number.isInteger(rounds) && rounds >= 1 && rounds <= 99) out.rounds = rounds;
+    return out;
+  }
+  const TEAM_SCORE_PARTS = ["dmg", "heal", "brk", "stagger", "block", "reduce", "blockSave", "kill", "action"];
+  /** 每队单独计分（#472，app.js · pvpTeamScores）：阵营 id / 名字、总分、各项分数（只有这几项原本的分数）。都是给所有人看的；没有坚毅数值 */
+  function projectTeamScores(list) {
+    return arr(list).slice(0, 8).flatMap(t => {
+      if (!obj(t)) return [];
+      const name = text(get(t, "name"), 16), fid = text(get(t, "id"), 16), total = number(get(t, "total"));
+      if (!name || !fid || total === undefined) return [];
+      const parts = {};
+      const src = get(t, "parts");
+      TEAM_SCORE_PARTS.forEach(k => { const v = number(get(src, k)); if (v !== undefined && v > 0) parts[k] = Math.round(v); });
+      return [{ id: fid, name, total: Math.round(total), parts }];
+    });
+  }
+  /** 决斗的申请 / 准备画面（#472，hotseat-game.js · duelView）：状态、谁申请的、选项（允许起身、限定回合数）、
+   *  每名能参加的角色（kit、名字、归谁操控、选了哪一队）。没有血量、坚毅 */
+  function projectDuel(d) {
+    if (!obj(d)) return null;
+    const out = {};
+    enumField(d, out, "status", ["asked", "prep"]);
+    if (!out.status) return null;
+    identifiers(d, out, ["id", "by"]);
+    const byName = text(get(d, "byName"), 40); if (byName) out.byName = byName;
+    const at = number(get(d, "at")); if (at !== undefined) out.at = at;
+    out.stand = get(d, "stand") !== false;
+    const rounds = number(get(d, "rounds")); out.rounds = Number.isInteger(rounds) && rounds >= 1 && rounds <= 99 ? rounds : null;
+    out.heroes = arr(get(d, "heroes")).slice(0, 12).flatMap(h => {
+      if (!obj(h)) return [];
+      const row = identifiers(h, {}, ["kit", "owner"]), name = text(get(h, "name"), 40);
+      if (!row.kit || !name) return [];
+      row.name = name;
+      enumField(h, row, "team", DUEL_TEAMS);
+      return [row];
+    });
     return out;
   }
   /** 战斗掉落：奎支和物品名、数量 */
@@ -664,6 +738,8 @@
       enumField(r, dto, "status", ["pending", "approved", "rejected", "cancelled"]);
       return [dto];
     });
+    // 决斗的申请 / 准备画面（#472）：谁申请的、选项、每名角色选了哪一队
+    const duel = projectDuel(get(view, "duel")); if (duel) out.duel = duel;
     out.messages = projectMessages(get(view, "messages"), context);
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;
     const ask = get(view, "ask"); out.ask = null;

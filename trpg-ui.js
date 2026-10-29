@@ -1554,6 +1554,17 @@
     Screens.show("battle");
     GAME.setupBattle(level(), GAME.lastEncounter || null);
   }
+  /** 决斗（PvP 第三步，#472）：联机跑团主持人在准备画面点「开始决斗」——按选好的两队布置战场（game.js · setupDuel），
+   *  准备画面收起、小队频道写一句；之后照常点「开始战斗」。和进入战斗环节一样先存一次（没打完就回来时回到这里） */
+  function toDuel() {
+    if (!(window.HotseatGame && HotseatGame.isActive())) throw new Error("只有联机跑团能决斗");
+    const spec = HotseatGame.duelSpec();   // 人数不对、不在探索环节：直接说原因，不动战场
+    save();
+    Screens.show("battle");
+    const duel = GAME.setupDuel(spec);
+    const names = ids => ids.map(id => (state.units.find(u => u.id === id) || {}).name || id).join("、");
+    HotseatGame.duelStarted(`决斗开始：1 队（${names(duel.teams["1队"])}）对 2 队（${names(duel.teams["2队"])}），${duel.stand ? "允许起身" : "不允许起身"}，${duel.rounds ? `限定 ${duel.rounds} 回合` : "不限回合"}。`);
+  }
   function backFromBattle() {
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
@@ -1617,6 +1628,7 @@
     slots: openSlots,
     title() { leaveTrpg(); Screens.show("title"); },
     toBattle,
+    toDuel,
     backFromBattle,
     clearLog() { log = []; saveLog(); renderLog(); }
   };
@@ -1713,6 +1725,7 @@
     };
   }
   window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+    toDuel: () => uiCommand("toDuel"),   // 决斗（#472）：主持人在准备画面点「开始决斗」
     refresh: render,
     // 联机房主的房间检查点（online-game.js · save / doResume）：正在打的任务战斗也带上，刷新后接着打，打完照样推进任务、判护送对象（trpg-tasks.js · trpgTaskBattleNormalize）
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel, taskBattle: TRPG.taskBattle })),

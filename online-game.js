@@ -5,8 +5,9 @@
   const PROTOCOL = 1, BUILD = "backfire-d3-v1", KEY = "backfire-online-v1";
   const copy = v => JSON.parse(JSON.stringify(v));
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
-  // battle.friendlyFire：每人改自己的友伤开关（#428；hotseat-game.js 按发指令的人记），随时能改、不排在演出后面
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "battle.friendlyFire", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  // battle.friendlyFire：每人改自己的友伤开关（#428；hotseat-game.js 按发指令的人记），随时能改、不排在演出后面；
+  // duel*：探索环节里决斗的申请 / 同意 / 选队 / 选项（#472，hotseat-game.js 只在探索环节放行）
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "battle.friendlyFire", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
@@ -674,12 +675,17 @@
       const value = next();
       if (cmd.type === "battle.finish") {
         settledResult = { ...value, outcome: cmd.outcome };
-        // 战斗结果进公开记录（只写结果，不带评分 / 坚毅数值）
-        const kind = { win: "victory", lose: "defeat", retreat: "retreat" }[cmd.outcome];
-        if (kind && outer) { publicLogs.push({ kind, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+        // 战斗结果进公开记录（只写结果，不带评分 / 坚毅数值）；决斗（#472）写哪一队赢 / 平局
+        const r = value && value.duel && value.duel.result;
+        const kind = r ? "duel" : { win: "victory", lose: "defeat", retreat: "retreat" }[cmd.outcome];
+        if (kind && outer) { publicLogs.push(r ? { kind, event: "end", winner: r.winner, why: r.why, turn: state.turnNo, at: Date.now() } : { kind, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
       }
       if (cmd.type === "startCombat" || cmd.type === "battle.setup") settledResult = null;
-      if (outer && !GAME.tape && ["trpg", "trpg.ui", "backstage", "calc", "battle.panel"].includes(cmd.type) &&
+      // 决斗（#472）：开战时抛硬币的结果大家都看得到（online-view.js · projectLogs 只认队伍 id，按模板写）
+      if (outer && cmd.type === "startCombat" && state.pvpDuel && state.pvpDuel.first) { publicLogs.push({ kind: "duel", event: "toss", first: state.pvpDuel.first, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+      // 开始决斗（#472，trpg-ui.js · toDuel）：公开记录写「决斗开始」，不是「调整了队伍物资」
+      if (outer && cmd.type === "trpg.ui" && cmd.action === "toDuel") { publicLogs.push({ kind: "duel", event: "start", at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+      else if (outer && !GAME.tape && ["trpg", "trpg.ui", "backstage", "calc", "battle.panel"].includes(cmd.type) &&
           !/^(normalize|saveCaptured|recordBattle)/.test(cmd.action || "")) {
         // 战场配置里换所在区域 / 场景 / 光影：写「调整了战场」（不是队伍物资；online-view.js · projectLogs 认这句）
         const field = cmd.type === "battle.panel" && ["setRegion", "setScene", "setLight"].includes(cmd.action);

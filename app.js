@@ -2850,10 +2850,16 @@ function pvpHurtFill(u, fill) {
   if (take > 0) state.pvpHurt = Object.assign({}, m, { [u.id]: have - take });
   return take;
 }
-/** 各阵营的分数，给结算面板 / 联机玩家看：[{ id, name, total, parts }]（照阵营的顺序；只有分数和阵营名字，没有坚毅数值） */
+/** 各阵营的分数，给结算面板 / 联机玩家看：[{ id, name, total, parts }]（照阵营的顺序；只有分数和阵营名字，没有坚毅数值）。
+ *  一分没拿的阵营也列出来（决斗的两队、场上的玩家阵营）；只有一个玩家阵营时是空的 */
 function pvpTeamScores() {
   const all = state.pvpScore && typeof state.pvpScore === "object" ? state.pvpScore : {};
-  const ids = Object.keys(all);
+  const set = new Set(Object.keys(all));
+  if (pvpTeamScoring()) {
+    const d = typeof pvpDuelState === "function" ? pvpDuelState() : null;
+    (d ? Object.keys(d.teams) : pvpFieldFactions()).forEach(id => set.add(id));
+  }
+  const ids = [...set];
   if (!ids.length) return [];
   const order = (typeof playerFactionList === "function" ? playerFactionList().map(f => f.id) : []);
   ids.sort((a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)));

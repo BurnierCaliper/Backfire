@@ -3897,6 +3897,37 @@
     battleIntro(enc ? enc.tier : "normal");
   }
 
+  /** 决斗（PvP 第三步，#472，docs/pvp.md 第 1.2 节）：联机跑团主持人在准备画面点「开始决斗」（trpg-ui.js · toDuel）——
+   *  先照常摆好队伍（battle.setup，不带遭遇），再按选好的两队摆成两个互相敌对的玩家阵营（battle.duel：3 区制，1 队站 1 区、2 队站 3 区，
+   *  不参加的人、敌人都离场）。spec：{ teams: { "1队": [角色 kit…], "2队": [...] }, stand, rounds }。之后照常点「开始战斗」，开战时抛硬币定先手 */
+  function setupDuel(spec) {
+    if (window.OnlineGame?.isHost() && state.combatStarted && !G.ended) {
+      const error = new Error("战斗中不能开始决斗"); error.code = "HOTSEAT_REJECT"; throw error;
+    }
+    setRogueMode(null);
+    const online = window.OnlineGame?.isHost();
+    const setupCommand = { type: "battle.setup", level: Number(($("g-level") || {}).value) || 1, encounter: null, xpMult: 1 };
+    let result = online ? dispatch(setupCommand) : null;
+    resetBattleView();
+    if (!online) result = dispatch(setupCommand);
+    const teams = {};
+    Object.keys(spec.teams || {}).forEach(t => {
+      teams[t] = (spec.teams[t] || []).map(kit => (state.units.find(u => u.isPlayer && !u.weaponOf && !u.escort && u.kit === kit) || {}).id).filter(Boolean);
+    });
+    const duel = dispatch(Object.assign({ type: "battle.duel", teams }, spec.stand == null ? {} : { stand: !!spec.stand }, spec.rounds ? { rounds: spec.rounds } : {})).duel;
+    if ($("g-enc-name")) $("g-enc-name").textContent = "决斗";
+    if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
+    syncFieldDom();
+    setView(snapAll(), false);
+    (result.notes || []).forEach(t => addLogPhase(t));
+    addLogPhase(`决斗 · 1 队 ${duel.teams["1队"].length} 人 对 2 队 ${duel.teams["2队"].length} 人 · 点「开始战斗」抛硬币决定先手`);
+    autoSelect(true);
+    refreshAll();
+    idleBox();
+    battleIntro("normal");
+    return duel;
+  }
+
   /* ================= 11. HUD / 记录 ================= */
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
@@ -5790,6 +5821,7 @@
   G.skillThunk = skillThunk;
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
+  G.setupDuel = setupDuel;   // 决斗（#472，trpg-ui.js · toDuel）
   G.startCustomBattle = startCustomBattle;
   G.startRogueBattle = startRogueBattle;
   // 联机单局：房主刷新页面后，把结算面板的「继续」重新接回单局（rogue-ui.js · battleEnd）
