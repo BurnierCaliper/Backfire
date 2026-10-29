@@ -190,8 +190,14 @@
     if (!S) return;
     S.timer = null;
     if (S.banner || S.game.over) return;
-    AI().step(S.game, S.ai, S.level, S.rng);
+    if (!AI().step(S.game, S.ai, S.level, S.rng)) { render(); return; }   // 没走成（不该发生）：别一直重排
     afterChange();
+  }
+  /** fast：AI 不等、马上走（测试 / 真浏览器测试用）；打开时把正在等的那一步也马上走掉 */
+  function setFast(on) {
+    if (!S) return;
+    S.fast = !!on;
+    schedule();
   }
 
   /* ---------- 画面 ---------- */
@@ -418,7 +424,7 @@
     }).join("");
     const log = v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
     return `<h3>每轮结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
-      ${chartHtml(v.weather)}
+      ${chartHtml(v.weather)}${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;
   }
   /** 克制速查：现在这个天气下，每张元素牌打每张层牌的得分（规则本身，公开的） */
@@ -518,7 +524,7 @@
   }
 
   root.CounterCardsUI = {
-    UI_CONFIG, open, start, render, stop: stopTimer, cardHtml, backHtml, weatherCardHtml, chipsHtml, chartHtml, outcomeOf, weatherMods,
+    UI_CONFIG, open, start, render, stop: stopTimer, setFast, cardHtml, backHtml, weatherCardHtml, chipsHtml, chartHtml, outcomeOf, weatherMods,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
 })(typeof window !== "undefined" ? window : globalThis);

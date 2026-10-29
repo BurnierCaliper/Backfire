@@ -132,7 +132,6 @@ test("暗出的牌一律显示牌背：对方出的牌在画面里找不到，�
 test("结算横幅只有胜负、分档和筹码变动，不亮牌；点「继续」AI 接着走", () => {
   const p = page();
   p.UI.start({ side: "player", level: "normal", seed: "横幅", fast: true });
-  const rng = p.CC.makeRng("横幅点");
   let seen = 0;
   for (let i = 0; i < 400 && seen < 3 && !p.UI.state().game.over; i++) {
     const banner = p.$("#cc-banner");
@@ -150,14 +149,27 @@ test("结算横幅只有胜负、分档和筹码变动，不亮牌；点「继�
       click(banner.querySelector('[data-cc="dismiss"]'));
       continue;
     }
-    playThrough.step = (playThrough.step || 0) + 1;
     const card = p.$("#cc-board button.cc-can");
     if (card) { click(card); continue; }
     const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && !["amt", "fold", "mode"].includes(b.dataset.cc));
     click(btns.find(b => b.classList.contains("primary")) || btns[0]);
-    void rng;
   }
   assert.ok(seen >= 1, "看到了结算横幅");
+});
+
+test("AI 平时等一会儿再走（开局等发牌动画放完）；setFast(true) 把正在等的那一步马上走掉", () => {
+  const p = page();
+  p.UI.start({ side: "player", level: "normal", seed: "等一等" });
+  const st = p.UI.state();
+  assert.ok(st.timer, "庄家（AI）在等");
+  assert.equal(st.game.stage, "dealerWeather");
+  p.UI.setFast(true);
+  assert.equal(st.timer, null);
+  assert.equal(st.game.stage, "play", "庄家的天气行动走完了");
+  assert.ok(st.game.sides.dealer.card, "庄家也暗出了");
+  assert.ok(p.$("#cc-board .cc-slot .cc-back"), "桌上是牌背");
+  // 规则在对局里也能看
+  assert.ok(p.$("#cc-side .cc-rules"));
 });
 
 for (const side of ["player", "dealer"]) for (const level of LEVELS) {
@@ -284,7 +296,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     await page.click('[data-cc="set"][data-key="level"][data-val="hard"]');
     await page.click('[data-cc="start"]');
     await page.waitForSelector("#cc-game:not([hidden])");
-    await page.evaluate(() => { CounterCardsUI.state().fast = true; });
+    await page.evaluate(() => CounterCardsUI.setFast(true));
     for (let i = 0; i < 300; i++) {
       const done = await page.evaluate(() => {
         const banner = document.getElementById("cc-banner");
@@ -293,7 +305,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
           banner.querySelector('[data-cc="dismiss"]').click(); return false;
         }
         const st = CounterCardsUI.state();
-        if (CounterCards.toAct(st.game).indexOf(st.ai) >= 0) { CounterCardsUI.render(); return false; }
+        if (CounterCards.toAct(st.game).indexOf(st.ai) >= 0) { CounterCardsUI.setFast(true); return false; }
         const card = document.querySelector("#cc-board button.cc-can");
         if (card) { card.click(); return false; }
         const btns = [...document.querySelectorAll("#cc-actions button[data-cc]")].filter(b => !b.disabled && !["amt", "fold", "mode"].includes(b.dataset.cc));
