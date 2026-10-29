@@ -1,4 +1,4 @@
-// 克制卡牌（暂名，#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
+// High Flux（#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、游戏名、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
 // 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（没装 Playwright 时跳过）
 "use strict";
@@ -15,7 +15,7 @@ const ROOT = path.resolve(__dirname, "..");
 const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 const LEVELS = ["easy", "normal", "hard"];
 
-/** game.html 的 <body> 解析进小 DOM，加载克制卡牌要的脚本（计分要 engine.js）。
+/** game.html 的 <body> 解析进小 DOM，加载 High Flux 要的脚本（计分要 engine.js）。
  *  页面开着「减少动态效果」：雷鸣的闪电、酸雨的涟漪是一直自己排下一次的定时器，桌上留着这两种天气测试进程就退不出去（天气层照样摆） */
 function page() {
   const html = read("game.html"), body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
@@ -55,11 +55,11 @@ function playThrough(p, rng) {
   assert.fail("点了 400 下还没打完");
 }
 
-test("标题「本地玩法」里有克制卡牌的入口，点进去是设置页（扮演哪一方、对手难度、开局筹码 50）", () => {
+test("标题「本地玩法」里有 High Flux 的入口，点进去是设置页（扮演哪一方、对手难度、开局筹码 50）", () => {
   const p = page();
   const entry = p.$("#t-panel-local #t-cc");
   assert.ok(entry, "本地玩法里有入口");
-  assert.match(entry.textContent, /克制卡牌/);
+  assert.match(entry.textContent, /High Flux/);
   click(entry);
   assert.ok(visible(p.$("#scr-cc")));
   assert.ok(visible(p.$("#cc-setup")));
@@ -76,6 +76,24 @@ test("标题「本地玩法」里有克制卡牌的入口，点进去是设置�
   const st = p.UI.state();
   assert.equal(st.human, "dealer"); assert.equal(st.level, "hard");
   assert.match(p.$("#cc-top").textContent, /你是庄家/);
+});
+
+test("游戏名是 High Flux（作者 10/29 定名，以前暂名「克制卡牌」）：本地玩法的按钮、设置页标题、牌桌标题、规则说明都写 High Flux，界面上不再出现旧名", () => {
+  const p = page();
+  const OLD = "克制卡牌";
+  assert.equal(p.CC.CC_CONFIG.name, "High Flux");
+  const entry = p.$("#t-panel-local #t-cc");
+  assert.equal(entry.querySelector("b").textContent, "High Flux", "本地玩法的按钮");
+  assert.ok(!p.$("#t-panel-local").textContent.includes(OLD));
+  click(entry);
+  assert.equal(p.$("#cc-setup .cc-title").textContent, "High Flux", "设置页标题");
+  assert.equal(p.$("#cc-setup .cc-rules summary").textContent, "High Flux 规则", "设置页的规则说明");
+  assert.ok(!p.$("#scr-cc").textContent.includes(OLD));
+  click(p.$('[data-cc="start"]'));
+  p.UI.stop();   // 人当玩家：庄家（AI）在等发牌动画，这里不用它走
+  assert.equal(p.$("#cc-top .cc-brand").textContent, "High Flux", "牌桌标题");
+  assert.equal(p.$("#cc-side .cc-rules summary").textContent, "High Flux 规则", "对局中侧栏的规则说明");
+  assert.ok(!p.$("#scr-cc").textContent.includes(OLD));
 });
 
 test("牌桌：自己的手牌正面朝上（游戏里的图标和配色），对方的手牌是牌背；发牌动画；筹码堆；天气堆在桌边", () => {
@@ -399,7 +417,7 @@ test.before(async () => {
 test.after(async () => { if (browser) await browser.close(); });
 
 for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
-  test(`真浏览器（${vp.tag}）：标题 → 本地玩法 → 克制卡牌，和 AI 打完一局，没有报错、没有横向溢出`, async (t) => {
+  test(`真浏览器（${vp.tag}）：标题 → 本地玩法 → High Flux，和 AI 打完一局，没有报错、没有横向溢出`, async (t) => {
     if (!browser) { t.skip(skipWhy); return; }
     const context = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
     const page = await context.newPage();
@@ -410,9 +428,11 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     await page.click("#t-local");
     await page.click("#t-cc");
     await page.waitForSelector("#cc-setup:not([hidden])");
+    assert.equal(await page.textContent("#cc-setup .cc-title"), "High Flux");
     await page.click('[data-cc="set"][data-key="level"][data-val="hard"]');
     await page.click('[data-cc="start"]');
     await page.waitForSelector("#cc-game:not([hidden])");
+    assert.equal(await page.textContent("#cc-top .cc-brand"), "High Flux");
     await page.evaluate(() => CounterCardsUI.setFast(true));
     for (let i = 0; i < 300; i++) {
       const done = await page.evaluate(() => {

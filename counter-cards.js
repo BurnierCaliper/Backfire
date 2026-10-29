@@ -1,4 +1,6 @@
-/* 克制卡牌（暂名）· 回火里的卡牌小游戏（#485）：规则引擎
+/* High Flux · 回火里的卡牌小游戏（#485）：规则引擎
+ * 游戏名作者 10/29 定为 High Flux（以前暂名「克制卡牌」；中文译名暂不定，界面上直接写 High Flux，在 CC_CONFIG.name）；
+ * 代码里的模块名还是 counter-cards / CounterCards。
  *
  * 庄家拿 5 张层牌（每轮必须打出一张，5 轮正好打完）；玩家拿 7 张元素牌 + 1 张常态（每局只能用一次）；
  * 7 张天气牌开局洗混成一堆，抽完就没了，新翻出的天气顶替旧天气。
@@ -32,6 +34,7 @@
 
   /* ---------- 配置：所有数值都在这里 ---------- */
   const CC_CONFIG = {
+    name: "High Flux",                 // 游戏名（作者 10/29 定名）：设置页标题、牌桌标题、规则说明都读这个；标题「本地玩法」的按钮写在 game.html
     rounds: 5,                         // 一局 5 轮：庄家 5 张层牌正好打完
     startChips: 50,                    // 开局筹码，双方一样（作者 10/29 试玩后由 20 改为 50，和 AI 对局也是；赌场按买入额）
     ante: 1,                           // 每轮开始双方各下的底注
@@ -80,7 +83,7 @@
     return typeof chartMod === "function" && typeof weatherDamagePct === "function" && typeof matchupKind === "function";
   }
   function needEngine() {
-    if (!engineReady()) throw new Error("克制卡牌要先加载 engine.js（克制表、天气数值）");
+    if (!engineReady()) throw new Error(CC_CONFIG.name + " 要先加载 engine.js（克制表、天气数值）");
   }
   /** 克制表这一项：克制 +1 / 劣势 −1 / 其余 0（微光里能量以外的元素反转，engine.js · chartMod） */
   function chartScore(element, layer, weather) {

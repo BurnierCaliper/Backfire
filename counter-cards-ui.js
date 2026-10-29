@@ -1,4 +1,5 @@
-/* 克制卡牌（暂名，#485）· 界面：标题 → 本地玩法 → 克制卡牌 → 选边、难度 → 牌桌
+/* High Flux（#485）· 界面：标题 → 本地玩法 → High Flux → 选边、难度 → 牌桌
+ * 游戏名读 CounterCards.CC_CONFIG.name（设置页标题、牌桌标题、规则说明）；标题「本地玩法」的按钮写在 game.html 里。
  *
  * 规则在 counter-cards.js，AI 在 counter-cards-ai.js；画面只拿 CounterCards.view(对局, 人这一方)，人和 AI 看到的是同一份东西。
  * 牌桌：深色赌桌；元素牌 / 层牌用游戏里的图标和配色（icons.js、game.css 的 --fire / --flesh……）；筹码堆、发牌动画；
@@ -215,7 +216,7 @@
     const C = CC().CC_CONFIG;
     const opt = (key, val, label, sub) => `<button type="button" class="cc-opt${SETUP[key] === val ? " on" : ""}" data-cc="set" data-key="${key}" data-val="${val}" aria-pressed="${SETUP[key] === val}"><b>${esc(label)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
     box.innerHTML = `<div class="cc-setup-card">
-      <h2 class="cc-title">克制卡牌</h2>
+      <h2 class="cc-title">${esc(C.name)}</h2>
       <p class="cc-tagline">回火赌桌 · ${C.rounds} 轮暗牌，克制表定输赢</p>
       <div class="cc-pick"><span class="cc-pick-label">扮演</span>
         ${opt("side", "player", "玩家", `${C.elements.length} 张元素牌 + 常态，翻天气`)}
@@ -231,7 +232,7 @@
   }
   function rulesHtml() {
     const C = CC().CC_CONFIG;
-    return `<details class="cc-rules"><summary>规则</summary><ul>
+    return `<details class="cc-rules"><summary>${esc(C.name)} 规则</summary><ul>
       <li><b>牌</b>：庄家 ${C.layers.length} 张层牌（${C.layers.map(CC().cardName).join("、")}），每轮必须打出一张；玩家 ${C.elements.length} 张元素牌（${C.elements.map(CC().cardName).join("、")}）+ 1 张常态（每局一次）；天气堆 ${C.weathers.length} 张（${C.weathers.map(CC().weatherName).join("、")}），开局洗混，抽完就没了，新翻的天气顶替旧天气。</li>
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
       <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
@@ -264,7 +265,7 @@
   }
   function topHtml(v) {
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮`;
-    return `<b class="cc-brand">克制卡牌</b><span class="cc-round">${status}</span>`
+    return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
   }
