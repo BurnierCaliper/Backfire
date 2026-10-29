@@ -263,6 +263,12 @@
       assertBase(actor, sk, game, cmd);
       if (cmd.type === "standUp") {
         if (isWeaponUnit(actor) || (!actor.dying && totalHp(actor) > 0)) fail("这个单位现在不需要或不能起身");
+        // 起身并免费翻滚到相邻的区（#470）：只能翻到走得过去的相邻区，人被困住的不能翻（app.js · standRollBlocked）
+        if (cmd.dest != null) {
+          if (!Number.isInteger(cmd.dest)) fail("不合法的翻滚区域", "invalid_move");
+          const why = typeof standRollBlocked === "function" ? standRollBlocked(actor, cmd.dest) : "不能翻滚";
+          if (why) fail(why, "invalid_move");
+        }
       } else if (cmd.type === "move") checkMove(actor, cmd);
       else if (cmd.type === "useItem") checkItem(actor, cmd);
       else {
