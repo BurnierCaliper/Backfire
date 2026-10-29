@@ -1,7 +1,7 @@
 // 没装 Playwright 时的备用浏览器（#298 的画面测试用）：直接用 Chrome 的调试协议（CDP）开一个无界面的 Chrome，
 // 只实现测试里用到的那几个 Playwright 接口：
 //   browser.newContext({ viewport, isMobile, hasTouch }) / context.newPage() / context.close() / browser.close()
-//   context.addInitScript(fn) / page.addInitScript(fn)（每次打开页面之前先跑：tests/old-screen.js 用它在页面加载前记着「新画面 关」，#339）
+//   context.addInitScript(fn) / page.addInitScript(fn)（每次打开页面之前先跑：tests/old-screen.js 用它在页面加载前打开测试开关 __hd2dFieldOff（照旧画面），#339 / #438）
 //   page.goto / setContent / addScriptTag / addStyleTag / evaluate / click / tap（手指点，#429）/ hover / mouse.move / focus / fill / keyboard.press /
 //   waitForFunction / waitForSelector / waitForTimeout / isVisible / locator(sel).count / innerText / evaluate / click / on("pageerror")
 // 只在 Linux（GitHub 上跑测试的机器自带 Chrome）或者用环境变量 CHROME_PATH 指定了 Chrome 时才用；

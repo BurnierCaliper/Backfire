@@ -145,8 +145,10 @@
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
   /* ---------- 开关 ---------- */
-  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（FIELD.defaultOn：开） */
+  /** 本机记着的开关（"on" / "off"）；没记过、记了认不得的、读不了（隐私模式、被禁用）都按默认（FIELD.defaultOn：开）。
+   *  测试开关 root.__hd2dFieldOff（tests/old-screen.js，只给测试用，和 __noLevelUpPopup 一样）：照旧画面，不看本机记的（#438） */
   function enabled(storage) {
+    if (root && root.__hd2dFieldOff) return false;
     try {
       const v = storage ? storage.getItem(FIELD.storageKey) : null;
       return v === "on" ? true : v === "off" ? false : FIELD.defaultOn;
