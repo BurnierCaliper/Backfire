@@ -1545,15 +1545,16 @@ test("协助格挡：互相友好的玩家阵营也能替被打的人挡（连�
   {
     // 柯尔特、赫鲁米卡在「我方」，绯秋在「乙」（友好），川川在「丙」（敌对）
     const { c, S, heroes: [kolt, helu, hiaki, chuan], foe } = trio(["kolt", "helu", "hiaki", "chuan"], true);
-    // 狂徒打乙的绯秋：友好的我方两人都能挡，敌对的丙不能（以前只有乙自己的人能挡：同区没有，直接落下）
+    // 狂徒打乙的绯秋：友好的我方两人都能挡，敌对的丙不能（以前只有乙自己的人能挡：同区没有，直接落下）；
+    // 乙只有绯秋一个人，她自己也能挡（#471）
     const h0 = hp(c, hiaki);
     const out = strike(c, foe, hiaki);
     assert.equal(out.pending, true, "等友好阵营的人协助格挡");
-    assert.deepEqual(idsOf(c.eligibleBlockers(hiaki, S.blockQueue[0])), idsOf([kolt, helu]), "友好的我方两人能挡，丙的川川不能");
+    assert.deepEqual(idsOf(c.eligibleBlockers(hiaki, S.blockQueue[0])), idsOf([kolt, helu, hiaki]), "友好的我方两人能挡，丙的川川不能（绯秋自己也能，#471）");
     // 连续协助格挡：柯尔特没挡住，赫鲁米卡接着挡住
     c.finishBlock(kolt.id, { roll: 100, ok: false });
     assert.equal(S.blockQueue.length, 1, "柯尔特没挡住：这一击还没落下");
-    assert.deepEqual(ids(c.eligibleBlockers(hiaki, S.blockQueue[0])), [helu.id], "剩下赫鲁米卡能接着挡");
+    assert.deepEqual(idsOf(c.eligibleBlockers(hiaki, S.blockQueue[0])), idsOf([helu, hiaki]), "剩下赫鲁米卡（和绯秋自己）能接着挡");
     c.finishBlock(helu.id, { roll: 1, ok: true });
     assert.equal(S.blockQueue.length, 0);
     assert.match(logText(c), new RegExp(`${helu.name} 协助格挡 ${hiaki.name}：d100=1 .*→ 成功`));
@@ -1561,8 +1562,8 @@ test("协助格挡：互相友好的玩家阵营也能替被打的人挡（连�
     // 丙的川川打我方的柯尔特：同阵营的赫鲁米卡、友好的乙的绯秋都能挡
     assert.deepEqual(blockersOf(c, kolt, chuan), idsOf([helu, hiaki]));
     assert.deepEqual(blockersOf(c, kolt, foe), idsOf([helu, hiaki]), "狂徒打过来也一样");
-    // 狂徒打丙的川川：我方、乙都和丙敌对，谁都不能挡
-    assert.deepEqual(blockersOf(c, chuan, foe), [], "敌对阵营的人照旧不能帮忙挡");
+    // 狂徒打丙的川川：我方、乙都和丙敌对，谁都不能替他挡（丙只有川川一个人：只有他自己能挡，#471）
+    assert.deepEqual(blockersOf(c, chuan, foe), [chuan.id], "敌对阵营的人照旧不能帮忙挡");
     // 以身作盾（专长）：同一个判断（宣布的人自己挨打也能宣布）
     [helu, hiaki, chuan].forEach(u => { u.feats = ["ironwall"]; });
     assert.deepEqual(idsOf(c.featIronwallDeclarers(kolt, foe)), idsOf([helu, hiaki]), "以身作盾：同阵营、友好的乙能替柯尔特挡，丙不能");
@@ -1586,7 +1587,7 @@ test("掩护、挺身：给友好阵营的人掩护 / 挺身以后能免费替�
   helu.feats = ["standin"];
   skill(c, kolt, "role_cover", hiaki);
   assert.equal(hiaki.coverBy, kolt.id, "掩护友好的乙（#460 起就选得上）");
-  kolt.bonus = 0; helu.bonus = 0;   // 都没有附赠了：只有掩护的人能免费挡
+  kolt.bonus = 0; helu.bonus = 0; hiaki.bonus = 0; chuan.bonus = 0;   // 都没有附赠了：只有掩护的人能免费挡（乙、丙都只有一个人，有附赠就能给自己挡，#471）
   const h0 = hp(c, hiaki);
   assert.equal(strike(c, foe, hiaki).pending, true, "等掩护的人格挡（以前给友好阵营的人掩护了也挡不了，直接落下）");
   assert.deepEqual(ids(c.eligibleBlockers(hiaki, S.blockQueue[0])), [kolt.id], "掩护的柯尔特没附赠也能挡");
@@ -1620,9 +1621,9 @@ test("友好不传递：我方和乙、乙和丙友好（我方和丙敌对）�
   } });
   assert.deepEqual([c.hostileTo(tou, kolt), c.hostileTo(tou, hiaki), c.hostileTo(kolt, hiaki)], [true, false, false]);
   assert.deepEqual(blockersOf(c, kolt, tou), idsOf([helu, chuan]), "丙的灯打柯尔特：乙的绯秋和灯也友好，不出手；我方的照常");
-  assert.deepEqual(blockersOf(c, tou, kolt), [], "柯尔特打丙的灯：乙的绯秋也不出手");
+  assert.deepEqual(blockersOf(c, tou, kolt), [tou.id], "柯尔特打丙的灯：乙的绯秋也不出手（丙只有灯一个人：只有他自己能挡，#471）");
   assert.deepEqual(blockersOf(c, kolt, foe), idsOf([helu, chuan, hiaki]), "狂徒打柯尔特：友好的乙照常能挡");
-  assert.deepEqual(blockersOf(c, tou, foe), [hiaki.id], "狂徒打丙的灯：友好的乙能挡，我方（和丙敌对）不能");
+  assert.deepEqual(blockersOf(c, tou, foe), idsOf([hiaki, tou]), "狂徒打丙的灯：友好的乙能挡，我方（和丙敌对）不能（灯自己也能，#471）");
   hiaki.feats = ["ironwall"];
   assert.deepEqual(ids(c.featIronwallDeclarers(kolt, tou)), [], "以身作盾也一样：乙不替柯尔特挡丙");
   assert.deepEqual(ids(c.featIronwallDeclarers(kolt, foe)), [hiaki.id], "狂徒打过来照常");
@@ -2119,4 +2120,192 @@ test("载具：同一种子整场自动对打（玩家会上车、拉人下车�
   assert.ok(seen.pvpPull > 0, "两个敌对阵营：把敌对阵营的人拉下车过");
   assert.ok(seen.enemyCar > 0, "两个敌对阵营：镇压队留下的空车替镇压队挡过");
   assert.ok(seen.friendRide > 0, "两个友好阵营：一起坐过车");
+});
+
+/* ===== PvP 单人队伍：给自己协助格挡、接自己打出的失衡（#471，作者 10/29）=====
+ * 场上有两个以上玩家阵营（app.js · pvpSplit）时，一个玩家阵营里还在场上、没倒地的玩家角色只有一个（武器人、护送对象不算人数）：
+ * 这个角色照单人模式的主角（isSoloHero）那一套，被打时可以给自己协助格挡，自己打出失衡时可以自己接协助攻击
+ * （app.js · pvpSoloHero，eligibleBlockers / playerAssisters 用它）；花费、成功率、协助攻击的效果都和平时一样。
+ * 后来又加进来第二个人就不算单人，队友倒地 / 移出后只剩一个又算（按当时场上的人算）。只有一个玩家阵营时一切照旧。
+ * 局面：柯尔特、赫鲁米卡在「我方」（两个人），第三个人一个人在「乙」（和我方敌对），狂徒，都在 1 区。 */
+function soloSide(opt = {}) {
+  return field(Object.assign({ party: ["kolt", "helu", "yuito"], seed: "PVP471-SOLO", factions: (c, h) => faction(c, { faction: "乙", unit: h[2].id }) }, opt));
+}
+/** by 一下把 t 打进失衡（不等协助格挡） */
+const stagger = (c, by, t) => { t.def = 1; return c.dealTo(by, t, { atk: 1, mult: 1, element: "physical", baseBreak: 3, atkRange: "any", flags: { action: true, blockResolved: true } }); };
+
+test("PvP 单人队伍·协助格挡：只有一个人的玩家阵营被打时可以给自己挡（敌对阵营的人、敌人打过来都一样），花 1 附赠、成功率照常算；两个人的阵营照旧不能给自己挡（#471）", () => {
+  const { c, S, heroes: [kolt, helu, yuito], foe } = soloSide();
+  yuito.layers = [{ type: "flesh", current: 400, max: 400 }];   // 挨几下也不倒
+  // 我方的柯尔特打乙的结人：结人自己能挡（以前同区没有乙的队友，没人能挡，直接落下）
+  const h0 = hp(c, yuito), b0 = yuito.bonus;
+  assert.equal(strike(c, kolt, yuito).pending, true, "等结人给自己协助格挡");
+  assert.deepEqual(ids(c.eligibleBlockers(yuito, S.blockQueue[0])), [yuito.id], "只有结人自己（敌对阵营的赫鲁米卡不能）");
+  const chance = c.finalBlockChance(yuito, kolt, yuito, "any");
+  assert.match(logText(c), new RegExp(`同区可以格挡的：${yuito.name} ${chance}%`));
+  c.finishBlock(yuito.id, { roll: 1, ok: true });
+  assert.equal(S.blockQueue.length, 0);
+  assert.match(logText(c), new RegExp(`${yuito.name} 协助格挡 ${yuito.name}：d100=1 成功率 ${chance}% → 成功`), "成功率照平时算");
+  assert.equal(yuito.bonus, b0 - 1, "花 1 附赠（和平时一样）");
+  assert.equal(hp(c, yuito), h0, "挡住：没受伤");
+  // 没挡住：没有别人能接着挡，照常受伤
+  assert.equal(strike(c, kolt, yuito).pending, true);
+  c.finishBlock(yuito.id, { roll: 100, ok: false });
+  assert.equal(S.blockQueue.length, 0, "没挡住：这一击落下");
+  assert.ok(hp(c, yuito) < h0, "照常受伤");
+  assert.equal(yuito.bonus, b0 - 2);
+  // 狂徒打结人：一样能给自己挡；附赠用完了和平时一样挡不了
+  assert.deepEqual(blockersOf(c, yuito, foe), [yuito.id], "敌人打过来也能给自己挡");
+  yuito.bonus = 0;
+  assert.deepEqual(blockersOf(c, yuito, foe), [], "没有附赠：挡不了");
+  assert.ok(!strike(c, foe, yuito).pending, "没人能挡：直接落下");
+  // 我方两个人：被打时只有队友能挡，自己不能
+  assert.deepEqual(blockersOf(c, kolt, yuito), [helu.id], "两个人的阵营：柯尔特不能给自己挡");
+  assert.deepEqual(blockersOf(c, kolt, foe), [helu.id]);
+  assert.deepEqual(blockersOf(c, helu, foe), [kolt.id]);
+  assert.deepEqual(plain(c.__errors), []);
+});
+
+test("PvP 单人队伍·协助攻击：只有一个人的玩家阵营可以接自己打出的失衡（两轮问的第一轮问他，他不接才轮到同一方的非玩家单位），架势回满、打的是平时的协助攻击；两个人的阵营照旧只能由队友接（#471）", () => {
+  {
+    const { c, S, heroes: [kolt, , yuito] } = soloSide();
+    // 结人把我方的柯尔特打进失衡：第一轮问乙的玩家角色——就是结人自己（以前第一轮没有人，乙这一方也没有非玩家单位：没人接）
+    stagger(c, yuito, kolt);
+    assert.equal(kolt.stunned, true);
+    const job = S.assistQueue[0];
+    assert.ok(job && job.targetId === kolt.id, "排进协助攻击");
+    assert.equal(job.pvpStage, "players", "第一轮：问玩家角色");
+    assert.equal(job.vsPlayer, false, "玩家来选");
+    assert.deepEqual(ids(c.eligibleAssisters(yuito, kolt, job)), [yuito.id], "结人接自己打出的失衡（敌对阵营的赫鲁米卡不能）");
+    assert.match(logText(c), new RegExp(`可协助攻击的玩家角色：${yuito.name}。`));
+    yuito.def = 0;
+    const before = hp(c, kolt);
+    c.Commands.dispatch({ type: "assistAnswer", helper: yuito.id });
+    assert.equal(S.assistQueue.length, 0);
+    assert.match(logText(c), new RegExp(`${yuito.name} 发动协助攻击，架势回满。`));
+    assert.equal(yuito.def, c.postureCap(yuito), "架势回满（和平时一样）");
+    assert.ok(hp(c, kolt) < before, "结人的协助攻击打到柯尔特");
+    assert.deepEqual(plain(c.__errors), []);
+  }
+  {
+    // 乙和盗匪一伙：结人不接，才轮到和乙一伙的狂徒（两轮照旧）
+    const { c, S, heroes: [kolt, , yuito] } = soloSide({ enemies: [{ id: "thug_knife", lv: 1, zone: 1 }, { id: "thug_hammer", lv: 1, zone: 1 }],
+      factions: (c, h) => { faction(c, { faction: "乙", unit: h[2].id }); faction(c, { faction: "乙", enemy: "盗匪", hostile: false }); } });
+    const knife = c.findKit("thug_knife", S.units), hammer = c.findKit("thug_hammer", S.units);
+    stagger(c, yuito, kolt);
+    assert.deepEqual(ids(c.eligibleAssisters(yuito, kolt, S.assistQueue[0])), [yuito.id], "第一轮：结人自己");
+    c.Commands.dispatch({ type: "assistAnswer", helper: null });
+    assert.equal(S.assistQueue[0].pvpStage, "npc", "结人不接：轮到非玩家单位");
+    assert.deepEqual(idsOf(c.eligibleAssisters(yuito, kolt, S.assistQueue[0])), idsOf([knife, hammer]), "和乙一伙的狂徒");
+  }
+  {
+    // 我方两个人：柯尔特把结人打进失衡，只有赫鲁米卡能接，柯尔特自己不能
+    const { c, S, heroes: [kolt, helu, yuito] } = soloSide();
+    stagger(c, kolt, yuito);
+    assert.deepEqual(ids(c.eligibleAssisters(kolt, yuito, S.assistQueue[0])), [helu.id], "两个人的阵营：不能接自己打出的失衡");
+  }
+});
+
+test("PvP 单人队伍·人数按当时场上的人算：武器人、护送对象不算；队友倒地 / 死亡 / 被移出后只剩一个就算单人，起身、又加进来第二个人就不算（#471）", () => {
+  // 柯尔特、赫鲁米卡在「我方」，灯一个人在「乙」
+  const { c, S, heroes: [kolt, helu, tou], foe } = soloSide({ party: ["kolt", "helu", "tou"] });
+  const self = (u, attacker) => blockersOf(c, u, attacker || foe).includes(u.id);
+  assert.equal(self(tou), true, "乙只有灯一个人：能给自己挡");
+  // 武器人不算人数：灯叫出年糕（跟着灯在乙），灯照样算单人；年糕自己不能给自己挡
+  skill(c, tou, "tou_summon");
+  const mochi = c.findKit("mochi", S.units);
+  assert.ok(mochi && !mochi.hidden && c.playerFactionOf(mochi) === "乙", "年糕上场，在乙");
+  mochi.zone = 1; mochi.bonus = 4;
+  assert.equal(self(tou), true, "有武器人也算单人");
+  assert.ok(!blockersOf(c, mochi, foe).includes(mochi.id), "年糕不能给自己挡");
+  // 护送对象不算人数
+  const vip = c.spawnEscort({ kind: "vip" }, 5, null, 1);
+  faction(c, { faction: "乙", unit: vip.id });
+  assert.equal(self(tou), true, "有护送对象也算单人");
+  assert.ok(!blockersOf(c, vip, foe).includes(vip.id), "护送对象不能给自己挡");
+  assert.deepEqual([c.pvpSoloHero(tou), c.pvpSoloHero(mochi), c.pvpSoloHero(vip)], [true, false, false]);
+  // 我方：两个人都站着时都不算；赫鲁米卡倒地（濒死）→ 柯尔特只剩一个人，能给自己挡
+  assert.equal(self(kolt, tou), false, "两个人都站着：不能");
+  helu.dying = true;
+  assert.equal(self(kolt, tou), true, "赫鲁米卡倒地：柯尔特算单人");
+  c.standUp(helu);
+  assert.equal(helu.upOnShp, true, "赫鲁米卡起身");
+  assert.equal(self(kolt, tou), false, "起身了：又是两个人");
+  helu.dead = true;
+  assert.equal(self(kolt, tou), true, "赫鲁米卡死亡：柯尔特算单人");
+  helu.dead = false;
+  c.removeHeroUnit(helu);
+  assert.ok(!S.units.includes(helu));
+  assert.equal(self(kolt, tou), true, "赫鲁米卡被移出：柯尔特算单人");
+  // 乙后来又加进来第二个人（主持人「加入玩家角色」）：灯不再算单人，绯秋替他挡；绯秋被移出以后又算
+  const hiaki = c.spawnHeroCard("hiaki", 1, null, "乙");
+  assert.ok(hiaki && c.playerFactionOf(hiaki) === "乙", "绯秋加进乙");
+  assert.equal(self(tou), false, "乙有两个人了：灯不能给自己挡");
+  assert.ok(blockersOf(c, tou, foe).includes(hiaki.id), "绯秋能替灯挡");
+  assert.equal(c.pvpSoloHero(tou), false);
+  c.removeHeroUnit(hiaki);
+  assert.equal(self(tou), true, "绯秋被移出：灯又算单人");
+  // 协助攻击也按同一个人数：只剩柯尔特的我方能接自己打出的失衡
+  stagger(c, kolt, tou);
+  assert.deepEqual(ids(c.eligibleAssisters(kolt, tou, S.assistQueue[0])), [kolt.id], "我方只剩柯尔特：接自己打出的失衡");
+  assert.deepEqual(plain(c.__errors), []);
+});
+
+test("PvP 单人队伍：只有一个玩家阵营时一切照旧——不配置 / 全在「我方」/ 多一个没人的阵营，场上只剩一个玩家角色也不能给自己挡、不能接自己打出的失衡；对照：分成两个玩家阵营、我方只有一个人时能（#471）", () => {
+  for (const mode of [null, "all", "empty", "split"]) {
+    const split = mode === "split", tag = `（${mode || "不配置"}）`;
+    const { c, S, heroes: [kolt, helu], foe } = field({ party: ["kolt", "helu"], seed: "PVP471-PVE", factions: mode ? (c, h) => {
+      if (mode === "all") faction(c, { faction: "我方" });                     // 配置了，但全部在「我方」
+      if (mode === "empty") faction(c, { faction: "乙", phase: "enemy" });     // 多一个没人的阵营
+      if (split) faction(c, { faction: "乙", unit: h[1].id });                 // 对照：赫鲁米卡分到乙（和我方敌对），柯尔特一个人在我方
+    } : null });
+    if (!split) helu.dead = true;   // 只有一个玩家阵营：场上只剩柯尔特一个人
+    assert.equal(c.pvpSplit(), split, "几个玩家阵营" + tag);
+    assert.deepEqual(blockersOf(c, kolt, foe), split ? [kolt.id] : [], (split ? "能给自己挡" : "不能给自己挡") + tag);
+    assert.equal(!!strike(c, foe, kolt).pending, split, (split ? "等柯尔特给自己挡" : "没人能挡：直接落下") + tag);
+    if (split) c.finishBlock(null);
+    stagger(c, kolt, foe);
+    assert.equal(foe.stunned, true);
+    const job = (S.assistQueue || [])[0];
+    assert.deepEqual(job ? ids(c.eligibleAssisters(kolt, foe, job)) : [], split ? [kolt.id] : [], (split ? "接自己打出的失衡" : "自己打出的失衡没人接") + tag);
+    if (!split) assert.match(logText(c), /失衡，但没有可发动协助攻击的玩家角色/, tag);
+  }
+});
+
+test("PvP 单人队伍（整场自动对打）：一个人对两个人——一个人的那一边给自己协助格挡过、接过自己打出的失衡；两个人的那一边倒下一个以后，剩下的那个也给自己挡过 / 接过；每一次都是他的阵营里只剩他一个人站着的时候（#471）", () => {
+  const seen = { soloBlock: 0, soloAssist: 0, pair: 0 }, bad = [];
+  for (const seed of ["PVP471-AUTO", "PVP471-AUTO-1", "PVP471-AUTO-2"]) {
+    const c = H.load();
+    c.BattleSim.setup({ party: ["kolt", "yuito", "chuan"], enemies: [], seed });
+    const S = c.S.state;
+    const chuan = c.findKit("chuan", S.units);
+    faction(c, { faction: "乙", unit: chuan.id });   // 川川一个人在「乙」，柯尔特、结人在「我方」
+    // 这一刻和 u 同一个玩家阵营、还在场上没倒地的玩家角色（不算武器人、护送对象）有几个
+    const standing = u => S.units.filter(x => x.isPlayer && !c.isWeaponUnit(x) && !x.dead && !x.dying && !x._removed && c.playerFactionOf(x) === c.playerFactionOf(u)).length;
+    const note = (u, kind) => {
+      if (standing(u) !== 1) bad.push(`${seed}：${u.name} ${kind}时阵营里还有别人站着`);
+      if (u.id !== chuan.id) seen.pair++;
+      else if (kind === "给自己挡") seen.soloBlock++;
+      else seen.soloAssist++;
+    };
+    const fb = c.finishBlock;
+    c.finishBlock = function (helperId) {
+      const job = (S.blockQueue || [])[0];
+      if (job && helperId && helperId === job.targetId) note(c.unitById(helperId), "给自己挡");
+      return fb.apply(this, arguments);
+    };
+    const fa = c.finishAssist;
+    c.finishAssist = function (helperId) {
+      const job = (S.assistQueue || [])[0];
+      if (job && helperId && helperId === job.breakerId) note(c.unitById(helperId), "接自己的失衡");
+      return fa.apply(this, arguments);
+    };
+    const r = plain(c.BattleSim.run({ maxRounds: 30 }));
+    assert.equal(r.winner, "player", seed + "：分出了胜负（一个玩家阵营赢了）");
+    assert.deepEqual(plain(c.__errors), [], seed);
+  }
+  assert.ok(seen.soloBlock > 0, "川川给自己协助格挡过");
+  assert.ok(seen.soloAssist > 0, "川川接过自己打出的失衡");
+  assert.ok(seen.pair > 0, "我方倒下一个以后，剩下的那个也给自己挡过 / 接过自己的失衡");
+  assert.deepEqual(bad, [], "每一次都是阵营里只剩他一个人站着");
 });
