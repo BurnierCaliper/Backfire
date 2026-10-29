@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "standAnswer", "battle.standCheck", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setScene", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -94,6 +94,14 @@
     if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
     if (cmd.type === "skill" && typeof cmd.skill !== "string") throw new Error("skill must be a string");
     if (cmd.type === "move" && !Number.isFinite(cmd.dest)) throw new Error("dest must be a number");
+    // 起身时顺便免费翻滚到的相邻区（#470）：不给 / null = 原地起身
+    if (cmd.type === "standUp" && cmd.dest != null && !Number.isInteger(cmd.dest)) throw new Error("standUp dest must be a zone number");
+    // 全员倒地、回合结束前问「要不要起身」的回答（#470）：actor 是被问的人，stand 起不起身，dest 顺便翻滚到的相邻区
+    if (cmd.type === "standAnswer") {
+      if (typeof cmd.actor !== "string" || !cmd.actor) throw new Error("standAnswer actor must be a unit id");
+      if (typeof cmd.stand !== "boolean") throw new Error("standAnswer stand must be a boolean");
+      if (cmd.dest != null && !Number.isInteger(cmd.dest)) throw new Error("standAnswer dest must be a zone number");
+    }
     if (cmd.type === "battle.panel" && panelActions.indexOf(cmd.action) < 0) throw new Error("Unknown battle panel action: " + cmd.action);
     const oneOf = (value, values, field) => { if (!values.includes(value)) throw new Error("Unknown " + field + ": " + value); };
     // 首领机制的技能名（选填）：字符串，去掉首尾空格后最多 BOSS_MECH_NAME_MAX 个字（boss-mechanics.js）；空着 = 用机制原名。
@@ -107,7 +115,7 @@
     };
     if (cmd.type === "openingChoice" && cmd.mood == null) oneOf(cmd.bit, ["acid", "drill"], "opening bit");
     if (cmd.type === "openingChoice" && cmd.mood != null) oneOf(cmd.mood, ["gentle", "cruel"], "opening mood");
-    if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge"], "reaction queue");
+    if (cmd.type === "battle.cleanQueues") oneOf(cmd.queue, ["block", "assist", "kolt", "helu", "longge", "stand"], "reaction queue");
     // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：on 开 / 关；owner = 改谁的开关（热座 / 联机由 hotseat-game.js 按发指令的人填，本机不填）
     if (cmd.type === "battle.friendlyFire") {
       if (typeof cmd.on !== "boolean") throw new Error("friendly fire on must be a boolean");
@@ -181,7 +189,7 @@
     state.selectedId = cmd.actor;
     state.targetId = cmd.target || null;
     if (cmd.type === "move") return doMove(a, cmd.dest);
-    if (cmd.type === "standUp") return standUp(a);
+    if (cmd.type === "standUp") return standUp(a, cmd.dest == null ? null : cmd.dest);   // dest：起身并免费翻滚到相邻区（#470）
     if (cmd.type === "useItem") {
       // 开着友伤把对敌人用的道具用在队友身上（items.js · itemFriendlyFire，#432）：不计分数——超频针翻倍护盾这类让队友血量变多的也不算治疗
       const ff = typeof itemFriendlyFire === "function" && itemFriendlyFire(a, cmd.item, unitById(cmd.target));
@@ -212,7 +220,7 @@
     state.partySize = 2;
     state.weather = g.weather || "none"; state.weatherBy = null;
     if (typeof rollSandDir === "function") rollSandDir();
-    state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = [];
+    state.weatherLock = null; state.phaseStep = 0; state.assistQueue = []; state.blockQueue = []; state.standQueue = [];
     state.skillFlow = null; state.history = []; state.actionAcc = null; state.statusDmg = {};
     state.turnNo = 1; state.logPages = [{ turn: 1, lines: [] }]; state.logIndex = 0;
     state.combatPhase = "player"; state.combatStarted = false; state.exhaustTier = 0;
@@ -408,6 +416,9 @@
       case "koltSwapAnswer": return resolveKoltSwap(!!cmd.swap, cmd.target || null);
       case "heluScanAnswer": return resolveHeluScan(cmd.picks || null);
       case "longgeSafetyAnswer": return resolveLonggeSafety(!!cmd.front);
+      // 全员倒地还能起身（#470，app.js · queueWipeStand / answerWipeStand）：回合结束前（battle.endEnemyTurn 之前）排上要问的人，一个一个回答
+      case "battle.standCheck": return queueWipeStand();
+      case "standAnswer": return answerWipeStand(cmd.actor, cmd.stand, cmd.dest == null ? null : cmd.dest);
       case "retreat": {
         // 这场不许撤退（单局首领战 spec.retreat === false）：指令层也拒绝，不只靠界面把按钮变灰
         const g = env.game || root.GAME || {};
@@ -426,6 +437,7 @@
       case "battle.loadCampaign": return env.loadCampaignMem ? env.loadCampaignMem() : null;
       case "battle.cleanQueues": {
         if (cmd.queue === "assist") return pruneAssistQueue();
+        if (cmd.queue === "stand") return pruneWipeStand();   // 已经不用问的人（自己起来了、被移出……）去掉
         const queue = cmd.queue === "block" ? state.blockQueue : cmd.queue === "helu" ? state.heluScanQueue : cmd.queue === "longge" ? state.longgeSafetyQueue : state.koltSwapQueue;
         if (queue && queue.length) queue.shift();
         return;
