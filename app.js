@@ -2791,6 +2791,85 @@ const SCORE_COUNTER_MASTER = { ratio: 0.5, mult: 1.5 };
 const SCORE_LINE_MIX = { fixed: 0.65, par: 0.35 };
 const SCORE_ACT_STEP = 150;   // 之后每一幕，各条分数线（D 除外）+150
 const SCORE_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", overkill: "溢出伤害", kill: "击杀", bonus: "克制 / 大伤害加成", action: "行动", speed: "速杀奖励", flawless: "无伤奖励", ambush: "遭遇战加成", fatigue: "招式疲劳（扣分）", env: "环境", counterMaster: "克制大师" };
+/* ===== PvP 每队单独计分（#472，docs/pvp.md 第 4 节）=====
+ * 场上有两个以上玩家阵营（pvpSplit：主持人分阵营、决斗）时，每个玩家阵营另外记一份分数 state.pvpScore = { 阵营 id: { total, parts } }：
+ *   · 只算原本的分数（parts：伤害、治疗 / 护盾、击破、打出失衡、协助格挡、减伤、格挡减免、击杀、行动），分值照 SCORE_RULES；额外加成——
+ *     速杀、无伤、遭遇战、克制大师、克制 / 大伤害加成——都不算。溢出伤害、招式疲劳也不算；环境（配置物、场地）打出的伤害 / 击破按原本的分值算进伤害、击破。
+ *   · 队伍评分（state.battleScore）照旧记的那些（打非玩家单位、治疗、行动……）顺手也记一份进那个人的阵营（addScore → pvpTeamAdd）。
+ *   · 打敌对玩家阵营的人（#453 起当友伤，不计分）：只记进打的人那一队——伤害（打进坚毅生命的不算）、击破、打出失衡、击杀（打倒一名角色：
+ *     死亡，或决斗里再起不能）；被打的那一队的减伤（打进坚毅的那一下不算）、协助格挡、格挡减免，治回这样打掉的血也算治疗。
+ *     这些不进队伍评分、战场数据（state.battleStats）、最近 10 场（ledger.js · careerRecordBattle），不给奖励：分数只是显示，战斗结束后给所有人看。
+ *   · 同阵营之间开着友伤打的照旧不计。只有一个玩家阵营（普通 PvE）时一份都不记，一切照旧。 */
+const PVP_TEAM_SCORE = {
+  parts: ["dmg", "heal", "brk", "stagger", "block", "reduce", "blockSave", "kill", "action"],   // 只算这几项（原本的分数）
+  killHero: SCORE_RULES.kill.elite   // 打倒敌对玩家阵营的一名角色（死亡 / 决斗里再起不能）的击杀分：照精英的分值
+};
+/** 现在要不要每队单独计分：场上有两个以上玩家阵营，或者是决斗（一队全倒的那一下场上只剩一个阵营，也照记） */
+function pvpTeamScoring() {
+  return (typeof pvpSplit === "function" && pvpSplit()) || (typeof pvpDuelOn === "function" && pvpDuelOn());
+}
+/** 给 u 所在的玩家阵营记 pts 分（part 不是「原本的分数」的不记；武器人跟着持有者、替身跟着操控它的人；护送对象不记） */
+function pvpTeamAdd(u, part, pts) {
+  pts = Math.floor(Number(pts) || 0);
+  if (!u || u.escort || pts <= 0 || !PVP_TEAM_SCORE.parts.includes(part) || !pvpTeamScoring()) return;
+  const f = typeof playerFactionOf === "function" ? playerFactionOf(u) : null;
+  if (f == null) return;
+  const all = state.pvpScore && typeof state.pvpScore === "object" ? state.pvpScore : {};
+  const row = all[f] || { total: 0, parts: {} };
+  row.total += pts;
+  row.parts[part] = (row.parts[part] || 0) + pts;
+  all[f] = row;
+  state.pvpScore = all;
+}
+/** 打敌对玩家阵营的人这一击（dealToInner、环境伤害、行动里的连带伤害）：记进打的人那一队——伤害（打进坚毅生命的不算）、击破、打出失衡、
+ *  打倒一名角色的击杀分。by 是出手的人（环境 / 连带伤害是记给的那个人）；opt：{ broke 这一下打进了失衡, felled 这一下把角色打倒了（死亡 / 再起不能） } */
+function pvpTeamHit(by, target, res, opt) {
+  if (!by || !target || !res || !target.isPlayer || typeof pvpFoe !== "function" || !pvpFoe(by, target) || !pvpTeamScoring()) return;
+  opt = opt || {};
+  const hp = Math.max(0, Math.floor(Number(res.total) || 0) - Math.floor(Number(res.shpDealt) || 0));
+  pvpTeamAdd(by, "dmg", hp * SCORE_RULES.dmg);
+  const brk = res.breakSpent != null ? Number(res.breakSpent) || 0 : Number(res.breakDealt) || 0;
+  pvpTeamAdd(by, "brk", brk * SCORE_RULES.brk);
+  if (opt.broke) pvpTeamAdd(by, "stagger", SCORE_RULES.stagger);
+  if (opt.felled && !(typeof isWeaponUnit === "function" && isWeaponUnit(target))) pvpTeamAdd(by, "kill", PVP_TEAM_SCORE.killHero);
+}
+/** 敌对玩家阵营的人打掉的血（state.pvpHurt = { 单位 id: 血量 }）：它也记在友伤的账上（state.ffHurt，队伍评分照旧不算治回来的这部分），
+ *  治回来时这一部分照样算进治疗者那一队的治疗分（pvpHurtFill） */
+function notePvpHurt(u, n) {
+  n = Math.floor(Number(n) || 0);
+  if (!u || u.id == null || n <= 0 || !pvpTeamScoring()) return;
+  const m = Object.assign({}, state.pvpHurt || {});
+  m[u.id] = Math.max(0, Math.floor(Number(m[u.id]) || 0)) + n;
+  state.pvpHurt = m;
+}
+/** 治回来补掉的友伤账（fill）里，有多少是敌对玩家阵营的人打掉的（先补这一部分）：返回这么多，从账上扣掉 */
+function pvpHurtFill(u, fill) {
+  const m = state.pvpHurt || {};
+  const have = u && u.id != null ? Math.max(0, Math.floor(Number(m[u.id]) || 0)) : 0;
+  const take = Math.min(have, Math.max(0, Math.floor(Number(fill) || 0)));
+  if (take > 0) state.pvpHurt = Object.assign({}, m, { [u.id]: have - take });
+  return take;
+}
+/** 各阵营的分数，给结算面板 / 联机玩家看：[{ id, name, total, parts }]（照阵营的顺序；只有分数和阵营名字，没有坚毅数值） */
+function pvpTeamScores() {
+  const all = state.pvpScore && typeof state.pvpScore === "object" ? state.pvpScore : {};
+  const ids = Object.keys(all);
+  if (!ids.length) return [];
+  const order = (typeof playerFactionList === "function" ? playerFactionList().map(f => f.id) : []);
+  ids.sort((a, b) => (order.indexOf(a) < 0 ? 99 : order.indexOf(a)) - (order.indexOf(b) < 0 ? 99 : order.indexOf(b)));
+  return ids.map(id => {
+    const row = all[id] || {};
+    const parts = {};
+    PVP_TEAM_SCORE.parts.forEach(k => { const v = Math.floor(Number((row.parts || {})[k]) || 0); if (v > 0) parts[k] = v; });
+    const info = typeof playerFactionInfo === "function" ? playerFactionInfo(id) : null;
+    return { id, name: (info && info.name) || id, total: Math.floor(Number(row.total) || 0), parts };
+  });
+}
+/** 各阵营的分数写成一行字（「1 队 320 分（伤害 120、击破 60……）」），结算面板、探索记录用 */
+function pvpTeamScoreText(list) {
+  return (list || pvpTeamScores()).map(t => `${t.name} ${t.total} 分` +
+    (Object.keys(t.parts).length ? `（${PVP_TEAM_SCORE.parts.filter(k => t.parts[k]).map(k => `${SCORE_PART_NAMES[k]} ${t.parts[k]}`).join("、")}）` : "")).join("；");
+}
 /** 这个角色这回合用这个技能，算连续第几个回合（不改记录）。
  *  上回合用过 → 上回合的连续数 + 1；这回合已经用过 → 和这回合第一次一样；否则 1 */
 function fatigueStreak(u, skillId) {
@@ -2931,9 +3010,11 @@ function counterMasterInfo() {
 /** 旧接口：返回多出来的分 */
 function applySpeedBonus() { return applyFinishBonus().extra; }
 /** 加分。bonus：这一击的额外倍率之和（例如克制 0.25），多出来的部分单独记成「克制加成」 */
-function addScore(kind, pts, u, bonus) {
+function addScore(kind, pts, u, bonus, noTeam) {
   pts = Math.floor(Number(pts) || 0);
   if (pts <= 0) return;
+  // 每队单独计分（#472）：原本的分数（不含这一击的加成）也记一份进 u 的阵营；noTeam：这份不算给他的阵营（治疗敌对阵营的人……）
+  if (!noTeam) pvpTeamAdd(u, kind, pts);
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const extra = Math.floor(pts * (Number(bonus) || 0) + 1e-6);
   state.battleScore.total += pts + extra;
@@ -3072,6 +3153,9 @@ function scoreEnvHit(target, res, who, bonus, label) {
     st.dmg += dmg; st.brk += brk; st.env = (st.env || 0) + dmg;
     burstNote(st, null, dmg, `环境 · ${label || "配置物 / 场地"}`, res);
     addScore("env", (dmg * SCORE_RULES.dmg + brk * SCORE_RULES.brk) * SCORE_RULES.env * scoreTargetMul(target), who, bonus);
+    // 每队单独计分（#472）：环境的 ×1.2 不算，打出的伤害 / 击破按原本的分值记进他那一队
+    pvpTeamAdd(who, "dmg", dmg * SCORE_RULES.dmg * scoreTargetMul(target));
+    pvpTeamAdd(who, "brk", brk * SCORE_RULES.brk * scoreTargetMul(target));
   });
   return who;
 }
@@ -3105,6 +3189,8 @@ function resetBattleRecords() {
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
   state.playerFactions = null;    // 玩家阵营（enemies.js · PVP_CFG，#445）：每场回到默认（全部在「我方」）
   state.pvpDuel = null;           // 决斗（enemies.js · PVP_DUEL_CFG，#472）：每场开战前由指令 battle.duel 布置
+  state.pvpScore = {};            // 每队单独计分（PVP_TEAM_SCORE，#472）：{ 阵营 id: { total, parts } }
+  state.pvpHurt = {};             // 敌对玩家阵营的人打掉、还没治回来的血（notePvpHurt，#472）
 }
 /** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
  *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。
@@ -3176,14 +3262,16 @@ function settleBattleRewards(outcome) {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
     ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, trpgXp: bs.rewardSettlement.trpgXp || [], alreadySettled: true,
-    ...(bs.rewardSettlement.duel ? { duel: bs.rewardSettlement.duel } : {})
+    ...(bs.rewardSettlement.duel ? { duel: bs.rewardSettlement.duel } : {}), ...(bs.rewardSettlement.teams ? { teams: bs.rewardSettlement.teams } : {})
   };
+  // 每队单独计分（#472）：场上有两个以上玩家阵营时各阵营的分数（只是显示，不给奖励），结算面板给所有人看
+  const teams = pvpTeamScores();
   // 决斗（enemies.js · PVP_DUEL_CFG，#472）：没有掉落、经验、奎支，不评级、不升级，也不记进战场记录（最近 10 场）、图鉴。
-  // 只带上分出的胜负；两队各自的分数（每队单独计分）一起给结算面板看
+  // 只带上分出的胜负和两队各自的分数
   if (duelOn) {
     const duel = pvpDuelPublic();
-    bs.rewardSettlement = { outcome, grade: null, xpBonus: 0, ups: [], drops: null, trpgXp: [], duel };
-    return { outcome, grade: null, finishBonus: null, xpBonus: 0, totalXpBonus: 0, ups: [], drops: null, trpgXp: [], alreadySettled: false, duel };
+    bs.rewardSettlement = { outcome, grade: null, xpBonus: 0, ups: [], drops: null, trpgXp: [], duel, teams };
+    return { outcome, grade: null, finishBonus: null, xpBonus: 0, totalXpBonus: 0, ups: [], drops: null, trpgXp: [], alreadySettled: false, duel, teams };
   }
   const finishBonus = outcome === "win" ? applyFinishBonus() : null;
   const grade = battleGrade();
@@ -3220,7 +3308,8 @@ function settleBattleRewards(outcome) {
   const encName = typeof GAME !== "undefined" && GAME && GAME.encounter && GAME.encounter.name || "";
   if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade, { name: encName, drops });
   if (typeof bestiaryRecordBattle === "function") bestiaryRecordBattle(outcome);   // 敌人图鉴：这场出现过的敌人记为遭遇过
-  return { outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, trpgXp, alreadySettled: false };
+  if (teams.length) bs.rewardSettlement.teams = teams;
+  return Object.assign({ outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, trpgXp, alreadySettled: false }, teams.length ? { teams } : {});
 }
 
 /* 战斗掉落：主持人在「战场配置」或战斗模板里设好（奎支 + 物品），打赢才给，进背包。
@@ -3288,8 +3377,13 @@ function trackHealBy(actor, fn) {
   try { return fn(); } finally {
     (state.units || []).forEach(u => {
       if (before.has(u.id) && u !== actor) {
-        const gain = healAfterFriendlyHurt(u, hpNow(u) - before.get(u.id));   // 先补友伤打掉的部分，不计分（#428）
-        if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor); }
+        const raw = hpNow(u) - before.get(u.id);
+        const gain = healAfterFriendlyHurt(u, raw);   // 先补友伤打掉的部分，不计分（#428）
+        // 每队单独计分（#472）：只算给自己人的（同阵营、友好的阵营）；补回来的是敌对玩家阵营的人打掉的血，这一部分也算治疗者那一队的
+        const mate = !pvpTeamScoring() || teammateOf(actor, u);
+        if (gain > 0) { st.heal += gain; addScore("heal", gain * SCORE_RULES.heal, actor, 0, !mate); }
+        const pvpFill = pvpHurtFill(u, raw - gain);
+        if (pvpFill > 0 && mate) pvpTeamAdd(actor, "heal", pvpFill * SCORE_RULES.heal);
       }
       // 首领 / 精英没攒满标记的失衡会立刻恢复架势，这时按新记上的晕眩标记数算（一次行动打出两次也算两次）
       const n = marks.has(u.id) ? Math.max(0, (Number(u.stunMarks) || 0) - marks.get(u.id)) : (calm.has(u.id) && u.stunned ? 1 : 0);
@@ -3611,8 +3705,18 @@ function applyTypedDotIn(env, unit, amount, element, notes, label, opts) {
   // opts.friendlyFire：开着友伤的人的攻击连带打到队友（溅射、爆燃的灼烧……，#428）——规则照常，不计分数（markPartyHurt / 倒地次数 / 承受伤害都不记）
   if (opts.friendlyFire) res.flags = Object.assign({}, res.flags || {}, { friendlyFire: true });
   if (highGain) state._highDefer = (Number(state._highDefer) || 0) + 1;
+  const wasDeadDot = !!unit.dead;
   try { notes.push(...applyCombat(unit, res, null)); }
   finally { if (highGain) state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1); }
+  // 每队单独计分（#472）：玩家行动里顺带打到敌对玩家阵营的人（溅射、感电、场地……）——记进出手那一队（场地记给铺的人；
+  // 回合结束结算的持续伤害没有出手的人，不算）；这样打掉的血治回来也算治疗分
+  if (unit.isPlayer && pvpTeamScoring()) {
+    const by = env ? envCreditUnit(env.by) : "by" in opts ? (opts.by != null ? unitById(opts.by) : null) : unitById(actingPlayerId());
+    if (by && pvpFoe(by, unit)) {
+      pvpTeamHit(by, unit, res, { felled: !!unit.dead && !wasDeadDot });
+      if (opts.friendlyFire) notePvpHurt(unit, Math.floor(Number(res.total) || 0) - Math.floor(Number(res.shpDealt) || 0));
+    }
+  }
   if (rotOwner) {
     const after = byType();
     rotOwner.resources = rotOwner.resources || {};
@@ -7726,6 +7830,8 @@ function finishBlockInner(helperId, forced) {
   const target = unitById(job.targetId);
   // 挡的是开着友伤的队友打过来的（#428）：格挡照常结算，评分和战场数据（格挡次数、规避的伤害）都不记
   const ffJob = !!(job.opt && job.opt.flags && job.opt.flags.friendlyFire);
+  // 挡的是敌对玩家阵营的人打过来的（#472 每队单独计分）：协助格挡、格挡减免记进格挡者那一队（不进队伍评分、战场数据）
+  const pvpJob = ffJob && !!attacker && !!target && pvpFoe(attacker, target) && pvpTeamScoring();
   let block = "none", blockHelperId = null;
   if (helperId && String(helperId).indexOf("ironwall:") === 0) {
     // 以身作盾（feats.js · ironwall）：宣布这一击视为协助格挡成功：免伤，击破由宣布的人承担（最少留 1），不花附赠动作
@@ -7736,6 +7842,7 @@ function finishBlockInner(helperId, forced) {
       block = "assistOk";
       blockHelperId = wall.id;
       if (!ffJob) addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
+      else if (pvpJob) pvpTeamAdd(wall, "block", SCORE_RULES.block);
       const bst = ffJob ? null : battleStat(wall);
       if (bst) { bst.blocks = (bst.blocks || 0) + 1; bst.blockOk = (bst.blockOk || 0) + 1; }
     }
@@ -7744,6 +7851,7 @@ function finishBlockInner(helperId, forced) {
     const out = performAssistBlock(helper, target, attacker, forced, job.opt && job.opt.atkRange);
     appendLog(out.notes.join("\n"));
     if (out.ok && helper && helper.isPlayer && !ffJob) addScore("block", SCORE_RULES.block, helper);   // 评分：协助格挡成功
+    else if (out.ok && helper && helper.isPlayer && pvpJob) pvpTeamAdd(helper, "block", SCORE_RULES.block);
     const bst = out.invalid || ffJob ? null : battleStat(helper);   // 战场数据：发动协助格挡（含失败），成功次数；倒下 / 起不来的不算发动
     if (bst) { bst.blocks = (bst.blocks || 0) + 1; if (out.ok) bst.blockOk = (bst.blockOk || 0) + 1; }
     block = out.ok ? (out.bare ? "bareOk" : "assistOk") : "fail";
@@ -7784,6 +7892,10 @@ function finishBlockInner(helperId, forced) {
       const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" ? Math.round(Number(out.res.total) || 0) : 0;
       saver.avoided = (saver.avoided || 0) + Math.max(0, saved);
       if (saved > 0) addScore("blockSave", Math.floor(saved * SCORE_RULES.blockSave), saverUnit);   // 评分：格挡减免的伤害
+    } else if (pvpJob && saverUnit && out && out.res) {
+      // 空手格挡少挨的那一半落在坚毅生命上时不算（不能从分数里看出坚毅扣了多少）
+      const saved = block === "assistOk" ? Number(out.res.blockedRaw) || 0 : block === "bareOk" && !(Number(out.res.shpDealt) > 0) ? Math.round(Number(out.res.total) || 0) : 0;
+      if (saved > 0) pvpTeamAdd(saverUnit, "blockSave", Math.floor(saved * SCORE_RULES.blockSave));
     }
   }
 }
@@ -9061,6 +9173,7 @@ function dealToInner(attacker, target, opt) {
   const wasStunnedT = !!target.stunned;
   // #340 第 15 条：这一下打进坚毅（游戏版）——结算之前记下：致命的一下、拉斯缪尔不稳态结算后 upOnShp 都清掉了
   const gritHitT = !!(target && target.isPlayer && target.upOnShp) && shpHidden();
+  const onShpT = !!(target && target.isPlayer && target.upOnShp);   // 每队单独计分（#472）：打进坚毅的那一下不算减伤分（不管画面藏不藏坚毅）
   const wasFlyingT = !!target.flying;   // 击破飞行单位时引擎会先把它击落（engine.js · applyResultToUnit），荒原行者要看结算前的飞行状态
   const dopplerT = target.self === "doppler";   // 被这一下打进失衡、多普勒随晕眩结束，这一下的击破照样传出去
   const shieldBeforeT = shieldSum(target);
@@ -9177,8 +9290,13 @@ function dealToInner(attacker, target, opt) {
     // 战场数据
     // 配置物打在敌人身上：环境分数（×1.2，记在触发 / 操控它的人身上）
     const envWho = attacker && attacker.envSrc && target && !target.isPlayer ? envCreditUnit(attacker) : null;
+    // 每队单独计分（#472）：打敌对玩家阵营的人（配置物 / 环境打的记给触发它的人）——这一击打进失衡、把角色打倒了没有
+    const pvpHitOpt = () => ({ broke: brokeInto(target, wasStunnedT), felled: !!target.dead && !wasDeadForGhost });
     if (attacker && attacker.envSrc) {
       if (envWho && scoreEnvHit(target, res, envWho, scoreBonus, attacker.name)) scoreWeatherHelp(attacker, target, res, true);
+      else if (target && target.isPlayer) pvpTeamHit(envCreditUnit(attacker), target, res, pvpHitOpt());
+    } else if (attacker && target && attacker.isPlayer && target.isPlayer) {
+      pvpTeamHit(attacker, target, res, pvpHitOpt());   // 只记进打的人那一队，不进队伍评分、战场数据
     } else if (attacker && target && attacker.isPlayer && !target.isPlayer) {
       const st = battleStat(attacker);
       if (st) {
@@ -9197,12 +9315,14 @@ function dealToInner(attacker, target, opt) {
       // 被开着友伤的队友打的（#428）不计进战场数据（承受伤害）
       if (st && !flags.friendlyFire) st.taken += Math.floor(Number(res.total) || 0) + Math.floor(Number(res.shpDealt) || 0);
       if (flags.friendlyFire) noteFriendlyHurt(target, res.total);   // 友伤打掉的血：之后治回来先补这部分，不计分
+      const pvpHit = !!attacker && attacker.isPlayer && pvpFoe(attacker, target) && pvpTeamScoring();
+      if (flags.friendlyFire && pvpHit) notePvpHurt(target, Math.floor(Number(res.total) || 0) - Math.floor(Number(res.shpDealt) || 0));   // 敌对玩家阵营的人打掉的（#472）
       // 减伤得分：敌方（含配置物、环境）的攻击打在我方身上，被减伤减免掉的伤害 ×1.5
       const red = Math.floor(Number(res.reduced) || 0);
       if (st && red > 0 && !(attacker && attacker.isPlayer)) {
         st.reduced = (st.reduced || 0) + red;
         addScore("reduce", Math.floor(red * SCORE_RULES.reduce), target);
-      }
+      } else if (red > 0 && pvpHit && !onShpT) pvpTeamAdd(target, "reduce", Math.floor(red * SCORE_RULES.reduce));   // 每队单独计分（#472）：打进坚毅的那一下不算
     }
     // 画面用：敌人被这一击打死时，记下「溢出」的伤害（血量显示成负数）和是不是一记重击（死后慢慢消失）
     if (target && !target.isPlayer && (target.dead || totalHp(target) <= 0) && (res.intended || 0) > 0) {

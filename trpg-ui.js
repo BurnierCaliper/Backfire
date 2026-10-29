@@ -1630,8 +1630,10 @@
   function recordBattle(r) {
       if (!TRPG.active || slot < 0) return;
       // 决斗（#472）：只记胜负和「恢复成决斗前的样子」；没有经验、奎支、掉落，不记战场数据，也不算任务战斗
+      // 每队单独计分（#472）：各阵营的分数只是显示，写一行
+      const teamLine = (r.teams || []).length && typeof pvpTeamScoreText === "function" ? [`各阵营的分数（只是显示）：${pvpTeamScoreText(r.teams)}。`] : [];
       if (r.duel) {
-        log.push({ stamp: stampNow(), lines: [`决斗结束（第 ${r.turn} 回合）：${r.duel}`].concat(r.durNotes || []) });
+        log.push({ stamp: stampNow(), lines: [`决斗结束（第 ${r.turn} 回合）：${r.duel}`].concat(teamLine, r.durNotes || []) });
         return;
       }
       const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
@@ -1642,6 +1644,7 @@
       (r.stats || []).filter(x => x.dmg || x.brk || x.taken || x.kills || x.heal).forEach(x => {
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });
+      lines.push(...teamLine);
       (r.durNotes || []).forEach(t => lines.push(t));
       if (typeof trpgTaskAfterBattle === "function") lines.push(...trpgTaskAfterBattle(r.outcome));   // 任务战斗：护送对象血量、推进路线
       log.push({ stamp: stampNow(), lines });

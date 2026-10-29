@@ -160,7 +160,7 @@ test("友伤开关照旧只管同阵营：开着时能打自己阵营的队友�
   assert.equal(c.hostileTo(kolt, hiaki), true);
 });
 
-test("范围攻击打到敌对玩家阵营的角色，自己阵营的队友、施放者自己照旧不挨（绯秋一闪）；打对面不计分数", () => {
+test("范围攻击打到敌对玩家阵营的角色，自己阵营的队友、施放者自己照旧不挨（绯秋一闪）；打对面不进队伍评分、战场数据（每队单独计分只记进打的人那一队，#472）", () => {
   const { c, S, heroes: [kolt, helu, hiaki, tou], foe } = field();
   hiaki.resources.stance = "iai";
   const before = { kolt: hp(c, kolt), helu: hp(c, helu), hiaki: hp(c, hiaki), tou: hp(c, tou), foe: hp(c, foe) };
@@ -170,8 +170,10 @@ test("范围攻击打到敌对玩家阵营的角色，自己阵营的队友、�
   assert.equal(hp(c, tou), before.tou, "同阵营的灯不挨");
   assert.equal(hp(c, hiaki), before.hiaki, "施放者自己不挨");
   assert.ok(hp(c, foe) < before.foe, "狂徒照样挨");
-  assert.equal(c.battleStat(kolt).taken, 0, "PvP 每队单独计分是第三步：打对面先不计分数");
+  assert.equal(c.battleStat(kolt).taken, 0, "打对面不记进战场数据（承受伤害）");
   assert.ok(!S.battleScore.hurt);
+  assert.ok(S.pvpScore["乙"].parts.dmg > 0, "每队单独计分（#472）：打对面的伤害记进乙队的分数");
+  assert.equal(S.battleScore.parts.dmg, before.foe - hp(c, foe), "队伍评分只有打狂徒的伤害");
 });
 
 test("协助格挡：敌对阵营的人不能挡（敌对阵营的人、敌人打过来都一样）；以身作盾也一样；没配置阵营时照旧全队都能挡（友好的阵营能挡，见 #463 那几条）", () => {

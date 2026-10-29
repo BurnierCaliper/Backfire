@@ -3609,6 +3609,9 @@
     // 跑团：每场额外的「等级 × 20 / 人数」经验
     const trpgXpLine = (rewards.trpgXp || []).length ? "战斗奖励经验：" + rewards.trpgXp.map(x => `${x.name} +${x.xp}`).join("、") + "。" : "";
     if (trpgXpLine) addLogPhase(trpgXpLine);
+    // 每队单独计分（app.js · pvpTeamScores，#472）：场上有两个以上玩家阵营时各阵营的分数，只是显示（不评级、不给奖励）
+    const teamLine = (rewards.teams || []).length ? `各阵营的分数（只是显示）：${pvpTeamScoreText(rewards.teams)}。` : "";
+    if (teamLine) addLogPhase(teamLine);
     const ups = rewards.ups;
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记。
     // 训练场不结算也不存档（报告 H15：以前撤退 / 全员倒地照常扣耐久、写队伍记忆，跑团没退出时连跑团空位一起改坏）
@@ -3617,21 +3620,22 @@
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
         // 决斗（#472）：分数只是显示，不记进战场数据（不带 stats）
-        G.onBattleFinished(duelEnd ? { outcome: G.lastOutcome, turn: state.turnNo, xp: 0, kuizhi: 0, xpMult: 1, ups: [], durNotes, stats: [], grade: null, drops: null, duel: duelEnd.text }
-          : { outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null });
+        const teams = (rewards.teams || []).length ? { teams: rewards.teams } : {};
+        G.onBattleFinished(duelEnd ? { outcome: G.lastOutcome, turn: state.turnNo, xp: 0, kuizhi: 0, xpMult: 1, ups: [], durNotes, stats: [], grade: null, drops: null, duel: duelEnd.text, ...teams }
+          : { outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null, ...teams });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = trpgXpLine + (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
-    box.querySelector("p").textContent = duelEnd
+    box.querySelector("p").textContent = (duelEnd
       ? `第 ${state.turnNo} 回合结束。${duelEnd.text}决斗没有掉落、经验、奎支；血量、坚毅生命、武器耐久恢复成决斗前的样子（用掉的道具不恢复）。`
       : retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
         ? `第 ${state.turnNo} 回合结束。${gradeLine ? gradeLine + "。" : ""}${loot}。${lvline}`
-        : `队伍倒地。${loot}。${lvline}`;
+        : `队伍倒地。${loot}。${lvline}`) + teamLine;
     // 结算面板上的大号评价字母（决斗不评级：不显示）
     let badge = box.querySelector(".grade-badge");
     if (!badge) { badge = el("div", "grade-badge"); box.insertBefore(badge, box.querySelector("p")); }
