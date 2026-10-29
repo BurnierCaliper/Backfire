@@ -7,7 +7,8 @@
  * 数据：车是 state.props 里的一个配置物（kind = 载具表的键，isVehicle = true），身上的 veh 记着座位、阵营、架势和掩体：
  *   veh.seats  按上车顺序排的单位 id，第 0 个是驾驶员，其余是炮手
  *   veh.side   车现在属于哪一方（"enemy" / "player"）；空车 = 最后坐在车上的一方
- *              （代挡按阵营：玩家开的车只替驾驶员的自己人挡；场上有两个以上玩家阵营时空车谁都不替挡，#463，见 vehicleGuards）
+ *              （代挡按阵营：玩家开的车只替驾驶员的自己人挡；场上有两个以上玩家阵营时玩家留下的空车谁都不替挡，#463，
+ *               镇压队留下的空车照旧替镇压队挡，#468，见 vehicleGuards）
  *   veh.def / defMax / stunned / stunMarks  车的架势和晕眩标记。空车也不重置：车里的人走光时保留当时的值，之后谁上车就接着用
  *   p.hp / p.maxHp  车体装甲。没有驾驶员时它就是真值；有驾驶员时真值在驾驶员身上那一层 veh 装甲里，每次 vehicleSync 抄回来
  * 驾驶员和车合并成一个单位（照瑞比的银翼机甲，app.js · enterMecha / exitMecha）：
@@ -312,12 +313,13 @@ function vehicleRollCheck(u, chk) {
 /** 车替 u 代挡的单位范围：车上的人不算（他们本来就在车里）；同区同阵营——
  *    有人驾驶：敌方 = 车的阵营；我方 = 驾驶员的自己人（enemies.js · teammateOf：同一个玩家阵营，或者单独设成友好的玩家阵营，#463；
  *      只有一个玩家阵营时就是所有我方单位，和以前一样）；
- *    空车：场上有两个以上玩家阵营（app.js · pvpSplit）时谁都不算、谁都不替挡（作者 10/28，#463）；只有一个玩家阵营时照旧算最后坐在车上的一方 */
+ *    空车：算最后坐在车上的一方。玩家留下的空车在场上有两个以上玩家阵营（app.js · pvpSplit）时谁都不算、谁都不替挡（作者 10/28，#463）；
+ *      镇压队等敌人留下的空车（开战时的空车、敌人下车以后）照旧替车的阵营挡，和 PvE 一样（作者 10/28：「可以照旧挡」，#468） */
 function vehicleGuards(p, u) {
   if (!p || !u || u.kind || u.isStructure || u.vehId || u.dead || u._removed || u.hidden || u.fused) return false;
   if (Number(u.zone) !== Number(p.zone)) return false;
   const pilot = vehiclePilot(p);
-  if (!pilot && typeof pvpSplit === "function" && pvpSplit()) return false;
+  if (!pilot && vehicleSide(p) === "player" && typeof pvpSplit === "function" && pvpSplit()) return false;
   if (vehicleSide(p) === "player") return !!u.isPlayer && (!pilot || typeof teammateOf !== "function" || teammateOf(pilot, u));
   return !u.isPlayer && factionOf(u) === VEHICLES[p.kind].faction;
 }
