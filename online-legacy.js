@@ -6,7 +6,7 @@
   "use strict";
   const domains = new Set(["battle.panel", "battle.setup", "backstage", "calc", "trpg", "trpg.ui"]);
   const encounterActions = new Set(["setZones", "selectEncounter", "rollEncounter", "rollBossEncounter", "loadSlot"]);
-  const resets = new Set(["party", "reset", "enter", "new", "delete", "import", "title", "toBattle", "backFromBattle"]);
+  const resets = new Set(["party", "reset", "enter", "new", "delete", "import", "title", "toBattle", "toDuel", "backFromBattle"]);   // toDuel：开始决斗（#472）和进入战斗环节一样重摆战场
   // 回到探索环节（主持人确认过放弃这场战斗）：战斗中、演出 / 敌人回合中也马上执行，不拒绝、不排队——
   // 处理函数先停下战斗流程（trpg-ui.js · backFromBattle → game.js · abandonBattle，#322；以前这里当成「重置遭遇」拒绝，点了没反应）
   const leave = cmd => cmd.type === "trpg.ui" && cmd.action === "backFromBattle";

@@ -1554,6 +1554,17 @@
     Screens.show("battle");
     GAME.setupBattle(level(), GAME.lastEncounter || null);
   }
+  /** 决斗（PvP 第三步，#472）：联机跑团主持人在准备画面点「开始决斗」——按选好的两队布置战场（game.js · setupDuel），
+   *  准备画面收起、小队频道写一句；之后照常点「开始战斗」。和进入战斗环节一样先存一次（没打完就回来时回到这里） */
+  function toDuel() {
+    if (!(window.HotseatGame && HotseatGame.isActive())) throw new Error("只有联机跑团能决斗");
+    const spec = HotseatGame.duelSpec();   // 人数不对、不在探索环节：直接说原因，不动战场
+    save();
+    Screens.show("battle");
+    const duel = GAME.setupDuel(spec);
+    const names = ids => ids.map(id => (state.units.find(u => u.id === id) || {}).name || id).join("、");
+    HotseatGame.duelStarted(`决斗开始：1 队（${names(duel.teams["1队"])}）对 2 队（${names(duel.teams["2队"])}），${duel.stand ? "允许起身" : "不允许起身"}，${duel.rounds ? `限定 ${duel.rounds} 回合` : "不限回合"}。`);
+  }
   function backFromBattle() {
     const r = $("g-result"); if (r) r.classList.remove("show");
     const ro = $("g-reopen"); if (ro) ro.classList.remove("show");
@@ -1617,6 +1628,7 @@
     slots: openSlots,
     title() { leaveTrpg(); Screens.show("title"); },
     toBattle,
+    toDuel,
     backFromBattle,
     clearLog() { log = []; saveLog(); renderLog(); }
   };
@@ -1629,6 +1641,13 @@
 
   function recordBattle(r) {
       if (!TRPG.active || slot < 0) return;
+      // 决斗（#472）：只记胜负和「恢复成决斗前的样子」；没有经验、奎支、掉落，不记战场数据，也不算任务战斗
+      // 每队单独计分（#472）：各阵营的分数只是显示，写一行
+      const teamLine = (r.teams || []).length && typeof pvpTeamScoreText === "function" ? [`各阵营的分数（只是显示）：${pvpTeamScoreText(r.teams)}。`] : [];
+      if (r.duel) {
+        log.push({ stamp: stampNow(), lines: [`决斗结束（第 ${r.turn} 回合）：${r.duel}`].concat(teamLine, r.durNotes || []) });
+        return;
+      }
       const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
       if (r.grade) lines.push(`评价 ${r.grade.grade}：${r.grade.score} 分（基准 ${r.grade.par}）${r.outcome === "win" && r.grade.xpMult > 1 ? `，战斗经验 ×${r.grade.xpMult}（已含在上面的经验里）` : ""}。`);
@@ -1637,6 +1656,7 @@
       (r.stats || []).filter(x => x.dmg || x.brk || x.taken || x.kills || x.heal).forEach(x => {
         lines.push(`${x.sub ? "　" : ""}${x.name}${x.sub ? "（武器人）" : ""}：伤害 ${Math.round(x.dmg)} · 击破 ${Math.round(x.brk)} · 承伤 ${Math.round(x.taken)} · 击杀 ${x.kills} · 治疗 ${Math.round(x.heal)}`);
       });
+      lines.push(...teamLine);
       (r.durNotes || []).forEach(t => lines.push(t));
       if (typeof trpgTaskAfterBattle === "function") lines.push(...trpgTaskAfterBattle(r.outcome));   // 任务战斗：护送对象血量、推进路线
       log.push({ stamp: stampNow(), lines });
@@ -1705,6 +1725,7 @@
     };
   }
   window.TrpgFlow = { leave: leaveTrpg, titleFromBattle: requestTitleFromBattle, mapOptions, enter: index => uiCommand("enter", { index }), openSlots: () => uiCommand("slots"), toBattle: () => uiCommand("toBattle"), backFromBattle: requestBackFromBattle,
+    toDuel: () => uiCommand("toDuel"),   // 决斗（#472）：主持人在准备画面点「开始决斗」
     refresh: render,
     // 联机房主的房间检查点（online-game.js · save / doResume）：正在打的任务战斗也带上，刷新后接着打，打完照样推进任务、判护送对象（trpg-tasks.js · trpgTaskBattleNormalize）
     onlineCheckpoint: () => JSON.parse(JSON.stringify({ slot, slotName, log, tab, commandLevel, taskBattle: TRPG.taskBattle })),

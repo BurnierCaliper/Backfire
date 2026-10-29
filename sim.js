@@ -112,9 +112,17 @@ const BattleSim = (function () {
   /** 返回 "player"（我方 / 某个玩家阵营赢了）、"enemy"（全员倒地）或 null（还没分出来）。
    *  全员倒地但还有人能起身时还没分出来（#470，app.js · heroStillFighting）：回合结束前问过、都不起身才算 "enemy"。
    *  场上有两个以上玩家阵营的角色时按阵营判（app.js · pvpBattleOutcome，#445），赢的阵营记在 lastPvpWinners */
-  let lastPvpWinners = null;
+  let lastPvpWinners = null, lastDuel = null;
   function outcome() {
     if (typeof soloDownCheck === "function") soloDownCheck([]);   // 单人：倒地起不来才算死亡
+    // 决斗（enemies.js · pvpDuelOutcome，#472）：一队全倒（含再起不能）另一队赢、两队同时全倒或回合上限一样是平局（"draw"）
+    const duel = typeof pvpDuelOutcome === "function" ? pvpDuelOutcome() : null;
+    if (duel) {
+      if (!duel.over) return null;
+      lastDuel = duel;
+      if (duel.winner) { lastPvpWinners = [duel.winner]; return "player"; }
+      return "draw";
+    }
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeapon(u));
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
     const pvp = typeof pvpBattleOutcome === "function" && !!pvpBattleOutcome();
@@ -239,6 +247,8 @@ const BattleSim = (function () {
     /** 这个单位下一步做什么：返回 thunk，或 null 表示本回合不再行动 */
     act(u) {
       if (u.dying && !isWeapon(u)) {
+        // 决斗设成不允许起身（#472）：倒地的人不自己起身（只在决斗里看，别的时候和以前一样）
+        if (typeof pvpDuelNoStand === "function" && pvpDuelNoStand(u)) return null;
         return (Number(u.shp) || 0) > 0 && !u.upOnShp ? () => standUp(u) : null;
       }
       if (u.stunned) return null;
@@ -340,7 +350,7 @@ const BattleSim = (function () {
     const policy = Object.assign({}, BASIC_POLICY, opt.policy || {});
     const maxRounds = Number(opt.maxRounds) || 40;
     const stats = { actions: 0 };
-    lastPvpWinners = null;
+    lastPvpWinners = null; lastDuel = null;
     if (!state.combatStarted) startCombat();
     resolveQueues(policy);
     let winner = outcome();
@@ -368,6 +378,8 @@ const BattleSim = (function () {
     };
     // 按阵营分出胜负（#445）：赢的是哪几个玩家阵营
     if (winner === "player" && lastPvpWinners) out.pvpWinners = lastPvpWinners.slice();
+    // 决斗（#472）：怎么分出的胜负（全倒 / 回合上限）、剩余血量百分比
+    if (lastDuel) out.duel = { winner: lastDuel.winner || null, draw: !!lastDuel.draw, why: lastDuel.why, pct: lastDuel.pct || null };
     return out;
   }
 
