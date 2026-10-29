@@ -3401,6 +3401,7 @@
     if (hotseat() && (!HotseatGame.isHost() || HotseatGame.hasAsk())) return false;
     if (!state.combatStarted || G.ended || G.depth > 0) return false;
     if (state.combatPhase !== "player") return false;
+    if (typeof pvpDuelOn === "function" && pvpDuelOn()) return false;   // 决斗（#472）打到分出胜负，不能撤退（主持人可以「回到探索环节」放弃）
     return !(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
   }
   async function askRetreat() {
@@ -3584,6 +3585,15 @@
     // 单人：主角倒地后还能用坚毅生命起身就不算输；起不来才算真正死亡
     const downNotes = dispatch({ type: "battle.checkSolo" });
     if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
+    // 决斗（enemies.js · pvpDuelOutcome，#472）：一队全部倒地（含再起不能移出的）另一队获胜；两队同时全倒、回合上限两队一样是平局
+    const duel = typeof pvpDuelOutcome === "function" ? pvpDuelOutcome() : null;
+    if (duel) {
+      if (!duel.over) return false;
+      if (duel.why !== "rounds") addLogPhase(duel.text);   // 回合上限的那一句判的时候已经写进记录了（pvpDuelRoundLimit）
+      G.duelResult = duel;
+      G.pvpWinners = duel.winner ? [duel.winner] : null;
+      return finish(!!duel.winner, duel.winner ? "win" : "draw");
+    }
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
     // 全员倒地：还有人能起身就先不算输（#470，所有模式都一样，app.js · heroStillFighting），回合结束前问过都不起身（standCheck）才判负
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
@@ -3622,9 +3632,10 @@
     refreshTop();
     const box = $("g-result");
     const retreated = G.lastOutcome === "retreat";
-    // 按阵营分出胜负（#445）：写哪个阵营获胜
+    // 按阵营分出胜负（#445）：写哪个阵营获胜；决斗（#472）两队一样是平局
     const pvpNames = win && !retreated && G.pvpWinners && G.pvpWinners.length ? G.pvpWinners.map(id => (playerFactionInfo(id) || { name: id }).name).join("、") : "";
-    box.querySelector("h2").textContent = retreated ? "撤退" : pvpNames ? `${pvpNames} 获胜` : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
+    const duelEnd = G.duelResult && G.duelResult.over ? G.duelResult : null;
+    box.querySelector("h2").textContent = retreated ? "撤退" : G.lastOutcome === "draw" ? "平局" : pvpNames ? `${pvpNames} 获胜` : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
     const rewards = systemCommand({ type: "battle.finish", outcome: G.lastOutcome });
@@ -3654,6 +3665,9 @@
     // 跑团：每场额外的「等级 × 20 / 人数」经验
     const trpgXpLine = (rewards.trpgXp || []).length ? "战斗奖励经验：" + rewards.trpgXp.map(x => `${x.name} +${x.xp}`).join("、") + "。" : "";
     if (trpgXpLine) addLogPhase(trpgXpLine);
+    // 每队单独计分（app.js · pvpTeamScores，#472）：场上有两个以上玩家阵营时各阵营的分数，只是显示（不评级、不给奖励）
+    const teamLine = (rewards.teams || []).length ? `各阵营的分数（只是显示）：${pvpTeamScoreText(rewards.teams)}。` : "";
+    if (teamLine) addLogPhase(teamLine);
     const ups = rewards.ups;
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记。
     // 训练场不结算也不存档（报告 H15：以前撤退 / 全员倒地照常扣耐久、写队伍记忆，跑团没退出时连跑团空位一起改坏）
@@ -3661,23 +3675,29 @@
       const durNotes = systemCommand({ type: "battle.afterBattle" });
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
-        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null });
+        // 决斗（#472）：分数只是显示，不记进战场数据（不带 stats）
+        const teams = (rewards.teams || []).length ? { teams: rewards.teams } : {};
+        G.onBattleFinished(duelEnd ? { outcome: G.lastOutcome, turn: state.turnNo, xp: 0, kuizhi: 0, xpMult: 1, ups: [], durNotes, stats: [], grade: null, drops: null, duel: duelEnd.text, ...teams }
+          : { outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null, ...teams });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = trpgXpLine + (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
-    box.querySelector("p").textContent = retreated
+    box.querySelector("p").textContent = (duelEnd
+      ? `第 ${state.turnNo} 回合结束。${duelEnd.text}决斗没有掉落、经验、奎支；血量、坚毅生命、武器耐久恢复成决斗前的样子（用掉的道具不恢复）。`
+      : retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
         ? `第 ${state.turnNo} 回合结束。${gradeLine ? gradeLine + "。" : ""}${loot}。${lvline}`
-        : `队伍倒地。${loot}。${lvline}`;
-    // 结算面板上的大号评价字母
+        : `队伍倒地。${loot}。${lvline}`) + teamLine;
+    // 结算面板上的大号评价字母（决斗不评级：不显示）
     let badge = box.querySelector(".grade-badge");
     if (!badge) { badge = el("div", "grade-badge"); box.insertBefore(badge, box.querySelector("p")); }
     badge.className = "grade-badge g-" + (gr ? gr.grade : "C") + (win ? "" : " dim");
     badge.innerHTML = gr ? `<b>${gr.grade}</b><span>${gr.score} 分</span>` : "";
+    badge.hidden = !!(duelEnd && !gr);
     // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
     const token = G.endToken = {};
     const showResult = () => {
@@ -3785,6 +3805,7 @@
     G.pvpTurn = false;   // 敌人回合里玩家阵营先动的那一段（#445）
     G.pvpDone = null;
     G.pvpWinners = null;
+    G.duelResult = null;   // 决斗分出的胜负（#472）
     $("g-result").classList.remove("show");
     $("g-reopen").classList.remove("show");
     cards.forEach(c => c.wrap.remove());
@@ -3932,6 +3953,37 @@
     battleIntro(enc ? enc.tier : "normal");
   }
 
+  /** 决斗（PvP 第三步，#472，docs/pvp.md 第 1.2 节）：联机跑团主持人在准备画面点「开始决斗」（trpg-ui.js · toDuel）——
+   *  先照常摆好队伍（battle.setup，不带遭遇），再按选好的两队摆成两个互相敌对的玩家阵营（battle.duel：3 区制，1 队站 1 区、2 队站 3 区，
+   *  不参加的人、敌人都离场）。spec：{ teams: { "1队": [角色 kit…], "2队": [...] }, stand, rounds }。之后照常点「开始战斗」，开战时抛硬币定先手 */
+  function setupDuel(spec) {
+    if (window.OnlineGame?.isHost() && state.combatStarted && !G.ended) {
+      const error = new Error("战斗中不能开始决斗"); error.code = "HOTSEAT_REJECT"; throw error;
+    }
+    setRogueMode(null);
+    const online = window.OnlineGame?.isHost();
+    const setupCommand = { type: "battle.setup", level: Number(($("g-level") || {}).value) || 1, encounter: null, xpMult: 1 };
+    let result = online ? dispatch(setupCommand) : null;
+    resetBattleView();
+    if (!online) result = dispatch(setupCommand);
+    const teams = {};
+    Object.keys(spec.teams || {}).forEach(t => {
+      teams[t] = (spec.teams[t] || []).map(kit => (state.units.find(u => u.isPlayer && !u.weaponOf && !u.escort && u.kit === kit) || {}).id).filter(Boolean);
+    });
+    const duel = dispatch(Object.assign({ type: "battle.duel", teams }, spec.stand == null ? {} : { stand: !!spec.stand }, spec.rounds ? { rounds: spec.rounds } : {})).duel;
+    if ($("g-enc-name")) $("g-enc-name").textContent = "决斗";
+    if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
+    syncFieldDom();
+    setView(snapAll(), false);
+    (result.notes || []).forEach(t => addLogPhase(t));
+    addLogPhase(`决斗 · 1 队 ${duel.teams["1队"].length} 人 对 2 队 ${duel.teams["2队"].length} 人 · 点「开始战斗」抛硬币决定先手`);
+    autoSelect(true);
+    refreshAll();
+    idleBox();
+    battleIntro("normal");
+    return duel;
+  }
+
   /* ================= 11. HUD / 记录 ================= */
   function selectActor(id) {
     if (hotseat() && HotseatGame.reason(unitById(id))) return;
@@ -3977,7 +4029,8 @@
     const rt = $("g-retreat");
     if (rt) {
       const bossNoRetreat = !!(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
-      rt.hidden = bossNoRetreat;
+      const duelNoRetreat = typeof pvpDuelOn === "function" && pvpDuelOn();   // 决斗（#472）不能撤退：和不许撤退的首领战一样藏起来
+      rt.hidden = bossNoRetreat || duelNoRetreat;
       rt.disabled = !canRetreat();
     }
     paintUndo();
@@ -5825,6 +5878,7 @@
   G.skillThunk = skillThunk;
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
+  G.setupDuel = setupDuel;   // 决斗（#472，trpg-ui.js · toDuel）
   G.startCustomBattle = startCustomBattle;
   G.startRogueBattle = startRogueBattle;
   // 联机单局：房主刷新页面后，把结算面板的「继续」重新接回单局（rogue-ui.js · battleEnd）

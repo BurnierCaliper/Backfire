@@ -89,6 +89,7 @@
     const rollBox = make("section", "online-roll", "ol-overlay ol-bag ol-roll", { role: "dialog", "aria-label": "掷骰" });
     rollBox.hidden = true;
     let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
+    let duelUi = null;     // 决斗（duel-ui.js，#472）：探索环节申请 / 准备（选队、选项）的浮层，下面 mount
     let loreUi = null;     // NPC 资料（lore-ui.js）：主持人编辑 / 玩家只读的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
@@ -583,11 +584,30 @@
       if (data.weatherLocked) details.push("天气已锁定");
       return `<aside class="ol-weather ol-weather-${weather}" aria-label="天气"><span class="ol-weather-icon" aria-hidden="true">${symbols[weather]}</span><div><b>${esc(weather === "sand" ? "沙暴" : labels[weather])}</b>${details.length ? `<small>${esc(details.join(" · "))}</small>` : ""}</div></aside>`;
     }
+    // 决斗的两队（#472）、每队单独计分的几项（app.js · SCORE_PART_NAMES 里原本的分数；玩家画面自己写名字，不读规则）
+    const DUEL_TEAM_NAMES = { "1队": "1 队", "2队": "2 队" };
+    const TEAM_PART_NAMES = { dmg: "伤害", heal: "治疗 / 护盾", brk: "击破", stagger: "打出失衡", block: "协助格挡成功", reduce: "减伤", blockSave: "格挡减免", kill: "击杀", action: "行动" };
+    /** 决斗怎么分出的胜负（#472）：全倒，或者回合上限按剩余血量百分比（只算血量层） */
+    function duelResultLine(duel) {
+      const pct = v => `${Math.round((Number(v) || 0) * 1000) / 10}%`;
+      const why = duel.why === "rounds"
+        ? `回合上限到了，按剩余血量百分比判：${Object.keys(DUEL_TEAM_NAMES).map(k => `${DUEL_TEAM_NAMES[k]} ${pct((duel.pct || {})[k])}`).join("、")}${duel.winner ? "" : "，一样"}。`
+        : duel.winner ? `${DUEL_TEAM_NAMES[duel.winner === "1队" ? "2队" : "1队"]}全部倒地。` : "两队同时全部倒地。";
+      return `<p class="ol-duel-result">${esc(why)}</p><p class="ol-muted">决斗没有掉落、经验、奎支；血量、伤势、武器耐久恢复成决斗前的样子，用掉的道具不恢复。</p>`;
+    }
+    /** 每队单独计分（#472）：战斗结束后各阵营的分数给所有人看（只是显示） */
+    function teamScoresMarkup(teams) {
+      if (!Array.isArray(teams) || !teams.length) return "";
+      return `<section class="ol-team-scores" aria-label="各阵营的分数"><h3>各阵营的分数（只是显示）</h3><ul>${teams.map(t => {
+        const parts = Object.keys(TEAM_PART_NAMES).filter(k => (t.parts || {})[k]).map(k => `${TEAM_PART_NAMES[k]} ${t.parts[k]}`).join("、");
+        return `<li><b>${esc(t.name)}</b> ${esc(t.total)} 分${parts ? `<small>（${esc(parts)}）</small>` : ""}</li>`;
+      }).join("")}</ul></section>`;
+    }
     function resultMarkup() {
-      const result = view.packet?.result || {}, grade = result.grade || {};
-      const heading = { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
+      const result = view.packet?.result || {}, grade = result.grade || {}, duel = result.duel || null;
+      const heading = duel ? (duel.winner ? `${DUEL_TEAM_NAMES[duel.winner] || ""}获胜` : "平局") : { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
       const d = result.drops, dropText = d ? [d.kuizhi ? `${d.kuizhi} 奎支` : "", ...(d.items || []).map(x => `${x.name} ×${x.qty}`)].filter(Boolean).join("、") : "";
-      return `<section class="ol-result" aria-label="战斗结算"><h2>${heading}</h2>${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}${dropText ? `<p class="ol-drops">战斗掉落：<b>${esc(dropText)}</b>（已放进队伍背包）</p>` : ""}<div class="ol-info-tools">${button("查看这场的战斗记录", "showLog")}${button("最近 10 场战绩", "info", 'data-info="record"', pending)}</div><p class="ol-muted">${view.packet?.mode === "rogue" ? "等房主点「继续」回到单局。" : "等待主持人返回探索。"}</p></section>`;
+      return `<section class="ol-result" aria-label="战斗结算"><h2>${esc(heading)}</h2>${duel ? duelResultLine(duel) : ""}${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}${dropText ? `<p class="ol-drops">战斗掉落：<b>${esc(dropText)}</b>（已放进队伍背包）</p>` : ""}${teamScoresMarkup(result.teams)}<div class="ol-info-tools">${button("查看这场的战斗记录", "showLog")}${button("最近 10 场战绩", "info", 'data-info="record"', pending)}</div><p class="ol-muted">${view.packet?.mode === "rogue" ? "等房主点「继续」回到单局。" : "等待主持人返回探索。"}</p></section>`;
     }
     const ATTRS = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
     /** 升级的属性点：玩家自己选，主持人确认后才加上 */
@@ -867,7 +887,14 @@
       if (screen === "lobby" || !data) return '<div class="ol-wait"><h2>等待房间同步</h2><p>房主准备好后会更新这里。</p></div>';
       if (view.packet?.mode === "rogue" && view.packet.rogue && screen === "exploration") return rogueMarkup(view.packet.rogue);
       const units = (data.units || []).filter(u => !u.hidden), logs = view.packet?.publicLogs || [];
-      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? questsButton() : ""}${loreButton()}${(screen === "battle" || screen === "ended") && global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「菜单」里的「消息与成员」可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+      return `<header class="ol-stage-heading"><div><span class="ol-muted">${esc(view.roomCode)} · ${screen === "battle" ? `第 ${data.turnNo || 1} 回合` : screen === "ended" ? "遭遇结束" : "探索环节"}</span>${screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : ""}<h1>${screen === "battle" ? "战场" : screen === "ended" ? "战斗结算" : "与队伍同行"}</h1>${clockLine()}${duelHeadLine(data, screen)}<div class="ol-info-tools">${global.WorldMap ? button("地图", "map") : ""}${button("角色资料", "info", 'data-info="sheet"', pending)}${button("武器", "info", 'data-info="armory"', pending)}${button("背包", "info", 'data-info="bag" title="队伍的全部道具（材料、消耗品、改装件…）"')}${button("战绩", "info", 'data-info="record"', pending)}${suppliesButton()}${view.packet?.mode !== "rogue" ? questsButton() : ""}${loreButton()}${(screen === "battle" || screen === "ended") && global.HD2DField ? '<span class="ol-hd2d-slot"></span>' : ""}</div></div>${weatherMarkup(data)}</header>${screen === "ended" ? resultMarkup() : ""}${checksMarkup(screen === "battle")}${screen === "battle" || screen === "ended" ? '<div class="ol-battle-slot"></div>' : `<p class="ol-muted ol-explore-hint">主持人正在管理探索与遭遇。右侧「小队」频道可以和大家聊天，「菜单」里的「消息与成员」可以私下回复主持人。</p>${partyMarkup(units)}`}`;
+    }
+    /** 决斗（#472）打着的时候标题下面一行：允许起身没有、第几回合 / 限定几回合、谁先手（state.duel，online-view.js 白名单只放行这三样） */
+    function duelHeadLine(data, screen) {
+      const d = data && data.duel;
+      if (!d || screen !== "battle") return "";
+      const line = ["决斗", d.stand ? "允许起身" : "不允许起身", d.rounds ? `第 ${data.turnNo || 1} / ${d.rounds} 回合` : "不限回合", d.first ? `${DUEL_TEAM_NAMES[d.first] || ""}先手` : ""].filter(Boolean).join(" · ");
+      return `<p class="ol-muted ol-duel-line">${esc(line)}</p>`;
     }
     /** 「任务日志」按钮：进行中的任务带条数（舞台顶上那一排、纸片画面的「工具 ▾」同一个） */
     const questsButton = () => button(`任务日志${questList().some(q => q.status === "active") ? ` · ${questList().filter(q => q.status === "active").length}` : ""}`, "quests");
@@ -1493,6 +1520,7 @@
       paintDetail();   // 单位详情面板跟着这一包刷新（离开战斗画面、说明的东西不在战场上了就收起）
       paintSupplies();
       if (checkReq) checkReq.sync();
+      if (duelUi) duelUi.sync();
       if (loreUi) loreUi.sync();
       paperDress();   // 纸片画面（#308）：画完再贴纸纹（量得到大小）
       if (view.active && !view.isHost) scheduleAutoMenu();
@@ -2201,6 +2229,8 @@
     // 申请检定：规则在 hotseat.js · requestCheck / decideCheck；角色是自己操控的（可以好几名），主持人看全队
     if (global.CheckRequestUI) checkReq = global.CheckRequestUI.mount({ api, view: () => view, own, call, profLevel, playerName,
       units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
+    // 决斗（PvP 第三步，#472，duel-ui.js）：探索环节的申请 / 准备浮层；主持人点「开始决斗」由房主本机布置战场（trpg-ui.js · toDuel）
+    if (global.DuelUI) duelUi = global.DuelUI.mount({ api, view: () => view, own, call, playerName, toDuel: () => global.TrpgFlow.toDuel() });
     // NPC 资料：规则在 lore.js（主持人的写入走 api.submit），玩家看 packet.lore、点开一条用 api.loreEntry 要详细内容
     if (global.LoreUI) loreUi = global.LoreUI.mount({ api, view: () => view, confirm: askConfirm,
       toast: text => { toast.textContent = text; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); } });
@@ -2208,7 +2238,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (duelUi) { duelUi.destroy(); duelUi = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);

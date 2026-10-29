@@ -162,7 +162,99 @@
       t = t && typeof t === "object" ? t : {};
       return { seq: Number(t.seq) || 0, title: t.title && typeof t.title.text === "string" ? t.title : null, checks: (Array.isArray(t.checks) ? t.checks : []).filter(c => c && Array.isArray(c.targets)).slice(-TABLE_KEEP),
         attrs: (Array.isArray(t.attrs) ? t.attrs : []).filter(r => r && Array.isArray(r.attrs)).slice(-TABLE_KEEP),
-        checkReqs: trimReqs((Array.isArray(t.checkReqs) ? t.checkReqs : []).filter(r => r && typeof r.prof === "string")) };
+        checkReqs: trimReqs((Array.isArray(t.checkReqs) ? t.checkReqs : []).filter(r => r && typeof r.prof === "string")), duel: cleanDuel(t.duel) };
+    }
+    /* 决斗（PvP 第三步，#472，docs/pvp.md 第 1.2 节）：联机探索环节里玩家申请发起决斗 → 主持人同意，或者主持人直接开启；
+     * 准备画面里各人给自己操控的角色选 1 队 / 2 队（每队最多 4 人），主持人定「允许起身」「限定回合数」。table.duel：
+     *   { id, status: "asked" 等主持人同意 / "prep" 准备中, by 申请（开启）的人, byName, at, teams: { 角色 kit: "1队" / "2队" }, stand, rounds }
+     * 主持人点「开始决斗」时由房主按这一份布置战场（hotseat-game.js · duelSpec → trpg-ui.js · toDuel），然后清掉（closeDuel）。
+     * 队伍和数值照规则层的 PVP_DUEL_CFG（enemies.js）；没加载规则（单独测会话）时用下面的默认值 */
+    function duelCfg() {
+      const C = typeof PVP_DUEL_CFG !== "undefined" ? PVP_DUEL_CFG : null;
+      return { teams: C ? C.teams.map(x => ({ id: x.id, name: x.name })) : [{ id: "1队", name: "1 队" }, { id: "2队", name: "2 队" }],
+        max: C ? C.teamMax : 4, min: C ? C.teamMin : 1, roundsMax: C ? C.roundsMax : 99, stand: C ? !!C.standDefault : true };
+    }
+    function cleanDuel(d) {
+      if (!d || typeof d !== "object" || !["asked", "prep"].includes(d.status)) return null;
+      const ids = duelCfg().teams.map(x => x.id), teams = {};
+      if (d.teams && typeof d.teams === "object") for (const k of Object.keys(d.teams)) if (/^[\w-]{1,40}$/.test(k) && ids.includes(d.teams[k])) teams[k] = d.teams[k];
+      const rounds = Number.isInteger(d.rounds) && d.rounds >= 1 && d.rounds <= duelCfg().roundsMax ? d.rounds : null;
+      return { id: String(d.id || ""), status: d.status, by: typeof d.by === "string" ? d.by : null, byName: String(d.byName || "").slice(0, 40),
+        at: Number(d.at) || 0, teams, stand: d.stand !== false, rounds };
+    }
+    const duelTeamName = id => (duelCfg().teams.find(x => x.id === id) || { name: id }).name;
+    /** 玩家申请发起决斗（只在探索环节，hotseat-game.js 先查）：同一时间只有一场在申请 / 准备 */
+    function requestDuel(id) {
+      const op = operator(id);
+      if (id === gmId) fail("table_duel", "主持人直接开启决斗就行");
+      if (table.duel) fail("table_duel", table.duel.status === "asked" ? "已经有人申请了决斗，等主持人处理" : "决斗已经在准备了");
+      table.duel = { id: "duel-" + (++table.seq), status: "asked", by: id, byName: op.name, at: now(), teams: {}, stand: duelCfg().stand, rounds: null };
+      tableNote(id, `${op.name} 申请发起决斗，等主持人同意`);
+      return emit("table");
+    }
+    /** decision：approve（主持人同意：进准备画面）/ reject（主持人不同意）/ cancel（申请的人撤回申请；主持人取消申请或准备中的决斗） */
+    function decideDuel(id, decision) {
+      operator(id);
+      const d = table.duel;
+      if (!d) fail("table_duel", "没有决斗申请");
+      if (decision === "cancel") {
+        if (id !== gmId && !(d.status === "asked" && id === d.by)) fail("table_owner", "只能撤回自己的申请");
+        table.duel = null;
+        tableNote(id, id === gmId ? "主持人取消了决斗" : `${d.byName} 撤回了决斗申请`);
+        return emit("table");
+      }
+      if (id !== gmId) fail("table_gm", "只有主持人能处理决斗申请");
+      if (d.status !== "asked") fail("table_duel", "这条决斗申请已经处理过了");
+      if (decision === "approve") { d.status = "prep"; tableNote(id, `主持人同意了 ${d.byName} 的决斗申请：大家选进 1 队或 2 队`); }
+      else { table.duel = null; tableNote(id, `主持人没有同意 ${d.byName} 的决斗申请`); }
+      return emit("table");
+    }
+    /** 主持人直接开启决斗（有人在申请就当作同意了） */
+    function openDuel(id) {
+      const op = operator(id);
+      if (id !== gmId) fail("table_gm", "只有主持人能开启决斗");
+      if (table.duel && table.duel.status === "prep") fail("table_duel", "决斗已经在准备了");
+      if (table.duel) return decideDuel(id, "approve");
+      table.duel = { id: "duel-" + (++table.seq), status: "prep", by: id, byName: op.name, at: now(), teams: {}, stand: duelCfg().stand, rounds: null };
+      tableNote(id, "主持人开启了决斗：大家选进 1 队或 2 队");
+      return emit("table");
+    }
+    /** 准备画面里给角色（kit）选队：team = "1队" / "2队"，null 不参加。owner 是这名角色归谁操控（hotseat-game.js 按角色分配查好）：
+     *  只能给自己操控的角色选（主持人给没分配给玩家的选）；每队最多 max 人 */
+    function pickDuel(id, kit, team, owner) {
+      operator(id);
+      const d = table.duel, C = duelCfg();
+      if (!d || d.status !== "prep") fail("table_duel", "决斗还没开始准备");
+      if (typeof kit !== "string" || !/^[\w-]{1,40}$/.test(kit)) fail("table_duel", "没有这名角色");
+      if (id !== owner) fail("table_owner", "只能给自己操控的角色选队");
+      if (team != null && !C.teams.some(x => x.id === team)) fail("table_duel", "没有这一队");
+      if (team != null && d.teams[kit] !== team && Object.keys(d.teams).filter(k => d.teams[k] === team).length >= C.max) fail("table_duel", `${duelTeamName(team)}已经满 ${C.max} 人了`);
+      const next = Object.assign({}, d.teams);
+      if (team == null) delete next[kit]; else next[kit] = team;
+      d.teams = next;
+      return emit("table");
+    }
+    /** 主持人在准备画面定选项：stand 允许起身（布尔）、rounds 回合上限（null 不限，或 1 到 roundsMax 的整数） */
+    function setDuelOptions(id, opt) {
+      operator(id);
+      const d = table.duel, C = duelCfg();
+      if (id !== gmId) fail("table_gm", "只有主持人能定决斗的选项");
+      if (!d || d.status !== "prep") fail("table_duel", "决斗还没开始准备");
+      opt = opt || {};
+      if (opt.stand != null && typeof opt.stand !== "boolean") fail("table_duel", "允许起身只能是开或关");
+      if (opt.rounds != null && !(Number.isInteger(opt.rounds) && opt.rounds >= 1 && opt.rounds <= C.roundsMax)) fail("table_duel", `回合数要在 1 到 ${C.roundsMax} 之间`);
+      if (opt.stand != null) d.stand = opt.stand;
+      if ("rounds" in opt) d.rounds = opt.rounds == null ? null : opt.rounds;
+      return emit("table");
+    }
+    /** 决斗开打了（hotseat-game.js · duelStarted，房主已经布好战场）：准备画面收起，频道里写一句 */
+    function closeDuel(id, text) {
+      operator(id);
+      if (id !== gmId) fail("table_gm", "只有主持人能开始决斗");
+      if (!table.duel) return snapshot();
+      table.duel = null;
+      if (text) tableNote(id, String(text).slice(0, 300));
+      return emit("table");
     }
     /** 检定申请只保留最近 TABLE_KEEP 条，但待处理的一条都不丢（先丢最旧的已处理记录） */
     function trimReqs(list) {
@@ -678,6 +770,7 @@
     return { snapshot, reconcile, setAssignments, beginRound, pick: place, confirm, forceStart, move, acceptSwap,
       assertAction, finishUnit, markSpent, adopt, takeOver, transfer, transferState, openAsk, answer, tick, askFor, chat: chatMessage, endBattle, reset, checkpoint, restore,
       openCheck, rollCheck: rollCheckFor, closeCheck, requestAttr, decideAttr, requestCheck, decideCheck, skillRoll, showTitle,
+      requestDuel, decideDuel, openDuel, pickDuel, setDuelOptions, closeDuel,
       ownerOf: unitId => (ownerRow(unitId) || {}).operatorId || null,
       extendAsk(ms) { if (ask && ask.deadline != null && Number.isFinite(ms) && ms > 0) { ask.deadline += ms; emit("askResumed"); } },
       onChange(fn) { changes.add(fn); return () => changes.delete(fn); },

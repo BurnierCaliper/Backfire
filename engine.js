@@ -1483,7 +1483,10 @@ function applyResultToUnit(target, result, attacker) {
   if (result.shpDealt > 0 && target.upOnShp) {
     target.shp = Math.max(0, (Number(target.shp) || 0) - result.shpDealt);
     notes.push("起身状态受伤，伤害已打入坚毅生命。");
-    if (target.shp <= 0) {
+    // 决斗（enemies.js · pvpDuelShpFloor，#472）：伤害不会致死——坚毅生命打到 1 保留 1，再起不能、移出战场
+    if (typeof pvpDuelShpFloor === "function" && pvpDuelShpFloor(target, notes)) {
+      // 已经按决斗处理（不判死亡）
+    } else if (target.shp <= 0) {
       target.dead = true;
       target.upOnShp = false;
       target.dying = false;

@@ -554,6 +554,21 @@ body.online-player.ol-in-battle .ol-battle .sk.blocked .cost { color: #d9a07a; }
 .crq-res .ol-ok { color: var(--sk-mint, #39e6b4); } .crq-res .ol-bad { color: #ff8a70; }
 .crq-pill { position: fixed; inset: auto auto 12px 12px; z-index: 95; min-height: 44px; } /* 不带 .ovl：workshop.css 的 .ovl 是整屏遮罩 */
 @media (max-width: 760px) { .crq-state > .crq-btn { flex: 1 1 40%; } .crq-state label { flex: 1 1 100%; } .crq-state label select { flex: 1; } }
+/* 决斗（duel-ui.js，#472）：卡片、列表、按钮沿用申请检定（.crq-*），这里只补两队并排、选项一行、结算的各阵营分数 */
+.duel-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin: 6px 0; }
+.duel-team { padding: 8px 10px; background: #2a2520; border-top: 4px solid #655947; }
+.duel-team[data-duel-team="1队"] { border-top-color: var(--sk-hazard, #f2c230); }
+.duel-team[data-duel-team="2队"] { border-top-color: var(--sk-mint, #39e6b4); }
+.duel-team h3 { margin: 0 0 4px; font-size: 14px; }
+.duel-team p { margin: 0; overflow-wrap: anywhere; }
+.duel-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0; }
+.duel-opts label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.duel-opts input[type="number"] { width: 5em; min-height: 36px; font: inherit; }
+.duel-row .crq-btn[aria-pressed="true"] { outline: 2px solid currentColor; }
+.duel-rules summary { cursor: pointer; min-height: 32px; }
+#tr-duel[data-alert="1"], [data-duel="open-box"][data-alert="1"] { box-shadow: inset 0 0 0 2px var(--sk-hazard, #f2c230); }
+.ol-team-scores ul { list-style: none; padding: 0; margin: 4px 0 8px; display: grid; gap: 4px; }
+.ol-team-scores small { margin-left: 6px; opacity: .85; }
 /* NPC 资料（lore-ui.js，issue #264）：外框、卡片、按钮、表单沿用任务日志（.ol-quest-card / .ol-q-*）和申请检定（.crq-*），
    这里只补排版：详细内容保留换行、长串字母也折行；字数靠右 */
 .ol-lore-body { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

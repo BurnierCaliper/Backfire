@@ -403,6 +403,8 @@ function ledgerCapture() {
 /** 战斗结束：每把武器 −1（死亡角色的武器不扣），被击败的武器人再 −2，然后记下状态 */
 function ledgerAfterBattle(notes) {
   notes = notes || [];
+  // 决斗（enemies.js · pvpDuelRestore，#472）：不扣耐久、不记伤势——血量、坚毅生命、武器耐久盖回决斗前的样子；用掉的道具不恢复
+  if (typeof pvpDuelRestore === "function" && pvpDuelRestore(notes)) return notes;
   const heroes = partyHeroes();
   heroes.filter(h => !h.dead).forEach(h =>(h.linkedKits || []).forEach(k => spendDurability(k, 1, "战斗结束", notes)));
   (state.units || []).filter(u => u.isPlayer && isWeaponUnit(u) && !u.escort && u.dead && !u._durCounted).forEach(u => {
