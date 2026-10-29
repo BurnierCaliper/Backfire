@@ -1731,7 +1731,7 @@ function friendlyFirePick(by, u) {
  * 改它用指令 battle.playerFaction（battle-commands.js → setPlayerFaction）；主持人面板是第二步。
  * 敌我判断都接在这里：hostileTo / playerAllied（按谁的阵营看）/ attackFoe / friendlyFireHit（敌对玩家阵营的角色也算进来）/ autoFoe / allyOf；
  * 给友方的范围效果只给施放者的自己人（同一个玩家阵营，或者单独设成友好的玩家阵营）：teammateOf（#456 / #460；单体选友方的 allyOf 是同一个判断）；
- * 协助格挡（含掩护 / 挺身的免费格挡、以身作盾）由被打的人的自己人挡、载具代挡按驾驶员的自己人（#463）也是 teammateOf，友好不传递时不出手看 otherFactionFriend；
+ * 协助格挡（含掩护 / 挺身的免费格挡、以身作盾）由被打的人的自己人挡、载具代挡按驾驶员的自己人（#463）、上车 / 拉人下车按阵营（#468）也是 teammateOf，友好不传递时不出手看 otherFactionFriend；
  * 连锁伤害（高能自爆的余波、感电的波及）打的「同阵营」：chainSideOf（#460）；
  * 谁在哪个回合行动：unitTurnPhase（app.js · canControlUnit、回合开始补行动点）；胜负：factionHostileTo（app.js · pvpBattleOutcome） */
 const PVP_CFG = {
@@ -1839,7 +1839,8 @@ function allyOf(a, b) {
  *  「互相友好的话就吃」；友好不传递：甲和乙、乙和丙友好，甲和丙照旧按它俩之间的设置）。武器人跟着持有者、替身跟着操控它的人、
  *  护送对象按自己记的阵营（playerFactionOf）。给友方的范围效果（群体治疗、护盾、全队集结、全体坚挺、全反击……，#456）问这里；
  *  单体选友方的技能 / 道具问 allyOf（#445），是同一个判断；连锁伤害打的「同阵营」（chainSideOf）玩家这一边也按它；
- *  谁能替被打的人协助格挡（app.js · eligibleBlockers、feats.js · featIronwallDeclarers）、玩家开的车替谁代挡（vehicle.js · vehicleGuards，#463）也按它。
+ *  谁能替被打的人协助格挡（app.js · eligibleBlockers、feats.js · featIronwallDeclarers）、玩家开的车替谁代挡（vehicle.js · vehicleGuards，#463）、
+ *  玩家之间谁能一起坐车、谁能被拉下车（vehicle.js · vehicleRival，#468）也按它。
  *  by 不在玩家这一边（没有施放者……）时照旧只看 u 是不是玩家角色。没配置阵营 / 场上只有「我方」时就是「u 在玩家这一边」，和以前一样。
  *  友伤开关不管这里（开着友伤时同阵营的队友照旧吃增益） */
 function teammateOf(by, u) {

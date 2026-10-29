@@ -72,10 +72,15 @@
           const picks = request.picks || {};
           if (sk.id.startsWith("__") && Object.keys(picks).length) fail("这条动作不接受技能分步选项");
           if (sk.id !== "__item" && request.item != null) fail("这条动作不接受道具字段");
-          if (sk.id !== "__item" && sk.id !== "__move" && request.dest != null) fail("请在技能分步中选择区域");
+          if (sk.id !== "__item" && sk.id !== "__move" && sk.id !== "__stand" && request.dest != null) fail("请在技能分步中选择区域");
           if (sk.id === "__stand") {
             if (request.target != null) fail("起身不接受目标");
-            return ready({ type: "standUp", actor: request.actor });
+            // 起身时可以免费翻滚到相邻的区（#470）：有能翻过去的区就先问「起身」还是「起身并翻滚到 X 区」（0 = 原地起身，和引火烧身「留在原地」一样）
+            const command = dest => (dest ? { type: "standUp", actor: request.actor, dest } : { type: "standUp", actor: request.actor });
+            if (request.dest != null) return ready(command(request.dest));
+            const zones = (typeof standRollZones === "function" ? standRollZones(actor()) : []).filter(z => legal(command(z)));
+            if (!zones.length) return ready(command(null));
+            return emit({ kind: "choice", key: "dest", title: "起身", options: [{ value: 0, label: "起身" }].concat(zones.map(z => ({ value: z, label: `起身并翻滚到 ${z} 区` }))) });
           }
           if (sk.id === "__move") {
             if (request.target != null) fail("移动不接受单位目标");

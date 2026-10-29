@@ -35,6 +35,7 @@ const BattleSim = (function () {
     state.koltSwapQueue = [];
     state.heluScanQueue = [];
     state.longgeSafetyQueue = [];
+    state.standQueue = [];       // 全员倒地、回合结束前要问「要不要起身」的人（#470）
     state.skillFlow = null;
     state.history = [];
     state.actionAcc = null;
@@ -109,6 +110,7 @@ const BattleSim = (function () {
 
   /* ---------- 胜负 ---------- */
   /** 返回 "player"（我方 / 某个玩家阵营赢了）、"enemy"（全员倒地）或 null（还没分出来）。
+   *  全员倒地但还有人能起身时还没分出来（#470，app.js · heroStillFighting）：回合结束前问过、都不起身才算 "enemy"。
    *  场上有两个以上玩家阵营的角色时按阵营判（app.js · pvpBattleOutcome，#445），赢的阵营记在 lastPvpWinners */
   let lastPvpWinners = null;
   function outcome() {
@@ -144,9 +146,10 @@ const BattleSim = (function () {
 
   function resolveQueues(policy) {
     for (let guard = 0; guard < 60; guard++) {
-      // 敌人全灭时，还在等协助格挡的那一击照样落下（例：最后一只空投蜂群撞完就死了），不能直接丢掉
+      // 敌人全灭时，还在等协助格挡的那一击照样落下（例：最后一只空投蜂群撞完就死了），不能直接丢掉。
+      // 回合结束前问「要不要起身」（#470）也要问完再判：两个阵营同时全员倒地时，不能先问的那边一说不起身，另一边没问就算赢
       const done = outcome();
-      if (done && !(done === "player" && state.blockQueue && state.blockQueue.length)) return;
+      if (done && !(done === "player" && state.blockQueue && state.blockQueue.length) && !(state.standQueue && state.standQueue.length)) return;
       if (state.blockQueue && state.blockQueue.length) {
         const job = state.blockQueue[0];
         const attacker = blockJobAttacker(job), target = unitById(job.targetId);
@@ -199,8 +202,22 @@ const BattleSim = (function () {
         withPhaseOf(helper, () => finishAssist(choice, extra));
         continue;
       }
+      // 全员倒地还能起身（#470）：回合结束前一个一个问要不要起身（policy.standAsk 返回 { stand, dest }；不给就原地起身）
+      if (state.standQueue && state.standQueue.length) {
+        const job = state.standQueue[0];
+        const u = unitById(job.unitId);
+        const pick = u && policy.standAsk ? policy.standAsk(u, standRollZones(u)) : { stand: true };
+        answerWipeStand(job.unitId, !!(pick && pick.stand), pick && pick.dest ? Number(pick.dest) : null);
+        continue;
+      }
       return;
     }
+  }
+  /** 回合结束前（endEnemyTurn 之前）：全员倒地、还有人能起身的那一队，问每个能起身的人要不要起身（#470）。
+   *  policy 只给 standAsk 也行（其余照默认打法） */
+  function standCheck(policy) {
+    if (!queueWipeStand()) return;
+    resolveQueues(Object.assign({}, BASIC_POLICY, policy || {}));
   }
 
   /* ---------- 玩家一方的默认打法 ---------- */
@@ -265,6 +282,10 @@ const BattleSim = (function () {
     },
     pickAssister(list) {
       return list.slice().sort((a, b) => (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0))[0].id;
+    },
+    /** 全员倒地、回合结束前问要不要起身（#470）：原地起身 */
+    standAsk() {
+      return { stand: true };
     }
   };
 
@@ -331,6 +352,8 @@ const BattleSim = (function () {
       if ((winner = outcome())) break;
       enemyPhase(policy, stats);
       if ((winner = outcome())) break;
+      standCheck(policy);   // 全员倒地还能起身：回合结束前先问（#470）
+      if ((winner = outcome())) break;
       endEnemyTurn();
       resolveQueues(policy);
       winner = outcome();
@@ -348,5 +371,5 @@ const BattleSim = (function () {
     return out;
   }
 
-  return { setup, run, outcome, resolveQueues, BASIC_POLICY };
+  return { setup, run, outcome, resolveQueues, standCheck, BASIC_POLICY };
 })();
