@@ -1694,6 +1694,17 @@ function pvpFieldFactions() {
 /** 真的分了阵营对打：场上有两个以上玩家阵营的角色（PvP，#445）。按阵营判胜负、协助攻击分两轮问、敌人的借机攻击按阵营挑都看它；
  *  没配置阵营，或者配置了但场上的人都在同一个阵营（例：全部在「我方」）时是 false——这时和以前一模一样（友军 state.playerAllies 也照旧） */
 function pvpSplit() { return pvpFieldFactions().length >= 2; }
+/** PvP 单人队伍（#471，docs/pvp.md 第 1.3 节，作者 10/29）：场上有两个以上玩家阵营时，u 所在的玩家阵营里还在场上、没倒地的玩家角色只有它自己——
+ *  照单人模式的主角（isSoloHero）那一套，可以给自己协助格挡（eligibleBlockers）、接自己打出的失衡做协助攻击（playerAssisters），
+ *  花费、成功率、效果都和平时一样。武器人、护送对象不算人数，自己也不算单人；按当时场上的人算：倒地（濒死没起身）、死亡、移出的不算，
+ *  后来又加进来第二个人就不算单人，队友倒地 / 移出后只剩一个又算。只数自己阵营的人（单独设成友好的阵营的人不算进来）。
+ *  只有一个玩家阵营（没配置 / 全在「我方」/ 多一个没人的阵营）时永远是 false，一切照旧 */
+function pvpSoloHero(u) {
+  if (!u || !u.isPlayer || isWeaponUnit(u) || !pvpSplit()) return false;
+  const f = playerFactionOf(u);
+  return !(state.units || []).some(x => x && x.id !== u.id && x.isPlayer && !isWeaponUnit(x) && !x.hidden && !x._removed && !x.dead &&
+    !(x.dying && !x.upOnShp) && playerFactionOf(x) === f);
+}
 /** PvP（#445，docs/pvp.md 第 1.1 节）：场上有两个以上玩家阵营的角色时按阵营判胜负——某个阵营还有人站着、和它敌对的单位全部倒地或死亡
  *  （玩家角色：濒死 / 死亡；非玩家单位：死亡 / 移出），这个阵营获胜（互相友好的几个阵营可以一起赢）；所有玩家阵营都倒下 = 敌人赢。
  *  返回 null = 不按阵营判（没配置阵营，或者场上只有一个玩家阵营：胜负照旧）；否则 { winners: [阵营 id…], wiped, over } */
@@ -7166,7 +7177,7 @@ function playerAssisters(breaker, broken, pvp) {
     assistWeaponReady(u) &&
     !(typeof isCrushing === "function" && isCrushing(u)) &&
     !u.isPartner &&                                          // 支援的伙伴打完就退场，不接协助攻击
-    (!breaker || u.id !== breaker.id || isSoloHero(u)) &&   // 单人模式可以接自己打出的失衡
+    (!breaker || u.id !== breaker.id || isSoloHero(u) || pvpSoloHero(u)) &&   // 单人模式、PvP 只有一个人的阵营（#471）可以接自己打出的失衡
     (!pvp || (hostileTo(u, broken) && (!breaker || u.id === breaker.id || !hostileTo(u, breaker)))) &&
     (typeof bpCanAssistAttack !== "function" || bpCanAssistAttack(u)) &&
     !lineBlocked(u.zone, broken.zone)                       // #44：协助攻击无论远近都不能穿墙，被墙隔开的不能选
@@ -7545,7 +7556,7 @@ function eligibleBlockers(target, job) {
   // 倒下的不能格挡：死亡的（倒下的武器人、坚毅耗尽的角色）；濒死但起不来的（力竭、坚毅耗尽）也不给「起身并格挡」
   const canStand = (u) => !u.dead && !(u.dying && !u.upOnShp && standUpBlocked(u));
   return state.units.filter(u =>
-    u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u)) &&   // 单人模式可以给自己协助格挡
+    u.isPlayer && !u.hidden && !u.isPartner && canStand(u) && (u.id !== target.id || isSoloHero(u) || pvpSoloHero(u)) &&   // 单人模式、PvP 只有一个人的阵营（#471）可以给自己协助格挡
     sideOk(u) &&
     Number(u.zone) === Number(target.zone) &&
     !u.stunned && !sinkLocked(u) && crushOut(u) && ((u.bonus || 0) >= 1 || target.coverBy === u.id) &&
@@ -8867,7 +8878,7 @@ function dealToInner(attacker, target, opt) {
       target = guard;
     }
   }
-  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算——场上有两个以上玩家阵营时不算，#463；范围攻击每人各掷）；
+  // 载具（vehicle.js）：同区同阵营的单位挨打时，车每次各掷一次代挡（空车也算——场上有两个以上玩家阵营时玩家留下的空车不算，#463 / #468；范围攻击每人各掷）；
   // 成功就由车（驾驶员）承受这次攻击。玩家开的车按驾驶员的玩家阵营（vehicle.js · vehicleGuards / vehicleGuard）
   if (target && attacker && typeof vehicleGuard === "function") {
     const vg = vehicleGuard(attacker, target, opt);
