@@ -2,9 +2,12 @@
  *
  * 只拿 CounterCards.view(对局, 这一方)：看不到对方的手牌、暗出的牌、暗弃的牌；庄家偷看到的天气只有庄家自己知道。
  *   简单：随便出牌，不推理，下注也随机，偶尔会乱弃牌（下注时认输）；玩家方大多直接翻天气，偶尔随手暗弃一张跳过。
- *   普通：只用上一轮的结果推理（推出对方那一轮出了什么），下注看自己的牌好不好，偶尔诈唬。
+ *         筹码不够时随手借（输光了多半会借）。
+ *   普通：只看单轮结果——只用最近一轮的结算推理（推出对方那一轮出了什么），不跨轮记牌；下注看自己的牌好不好，偶尔诈唬。
+ *         每轮开始筹码不够时，落后或打平就借（借到补上缺口），领先就不借；下注时筹码不够、牌又好到想下注 / 加注才借。
  *   困难：记住整局的结果，排除已经推出来的牌；按胜率下注；按对手的下注习惯调整诈唬（对手常弃牌就多诈唬，对手常诈唬就多跟注），
  *         还会把对手这一轮的加注当成信号；庄家偷看后放回原位，困难的玩家方会认为堆顶多半对庄家有利。
+ *         借贷和普通一样，另外先估一下：借了以后剩下几轮全赢还追不追得上，追不上就不借，免得白欠。
  * 玩家方 AI 会决定什么时候翻天气、什么时候暗弃跳过（弃哪张）、要不要用常态清掉天气。
  * 所有阈值都在 AI_CONFIG。
  *
@@ -25,7 +28,9 @@
       peekChance: 0.8,       // 庄家：没有天气时偷看
       discardChance: 0.5,    // 庄家：有天气时弃掉
       revealChance: 0.8,     // 玩家：翻天气（其余随手暗弃一张跳过）
-      normalChance: 0.15     // 玩家：翻到天气后随手用常态
+      normalChance: 0.15,    // 玩家：翻到天气后随手用常态
+      loanChance: 0.5,       // 筹码不够时随手借（借最少的一份）
+      bustLoanChance: 0.9    // 输光了多半会借
     },
     normal: {
       betEdge: 0.3,          // 胜率差（赢 − 输）到这里就下注
@@ -41,7 +46,8 @@
       allInWeight: 1,        // 相位全押的分量（普通不特别看待）
       futureWeight: 0,       // 出牌时扣掉这张牌留到以后的价值
       normalKeep: 0.3,       // 留着常态的价值
-      elementKeep: 0.15, elementFv: 0.5   // 留着一张元素牌的价值：基础 + 它平时的期望 × 系数
+      elementKeep: 0.15, elementFv: 0.5,  // 留着一张元素牌的价值：基础 + 它平时的期望 × 系数
+      loanEdge: 0.4          // 下注时筹码不够：胜率差（赢 − 输）到这里、而且想下注 / 加注才借
     },
     hard: {
       betEdge: 0.2, bigEdge: 0.5, raiseEdge: 0.4, callEdge: -0.1, cheapCall: 0.3,
@@ -53,7 +59,9 @@
       allInWeight: 2,        // 相位全押的筹码大得多：输赢都按 2 倍看
       futureWeight: 0.35,
       normalKeep: 0.35, elementKeep: 0.15, elementFv: 0.6,
-      sizePot: 0.8           // 下注额 ≈ 最低额 + 底池 × 胜率差 × 这个系数
+      sizePot: 0.8,          // 下注额 ≈ 最低额 + 底池 × 胜率差 × 这个系数
+      loanEdge: 0.3,         // 同普通
+      loanGrowth: 2.5        // 借贷：一轮最多能把筹码翻几倍（全押赢差 2 = 2.5 倍），估算借了还追不追得上
     }
   };
   const LEVELS = ["easy", "normal", "hard"];
@@ -107,7 +115,7 @@
     })(0);
     return total ? normalize(counts) : uniform(U);
   }
-  /** 普通：只看上一轮的结果——推出来是哪张就排除，推出几张可能的就各减一点 */
+  /** 普通：只看单轮结果（最近一轮的结算），不跨轮记牌——推出来是哪张就排除，推出几张可能的就各减一点 */
   function beliefNormal(v) {
     const U = oppUniverse(v);
     const w = {}; U.forEach(c => { w[c] = 1; });
@@ -328,6 +336,8 @@
     const amount = (o, x) => ({ type: o.type, amount: clampN(Math.round(x), o.min, o.max) });
     if (ctx.level === "easy") {
       if (rng() < cfg.foldChance) return { type: "fold" };
+      const lo = has("borrow");
+      if (lo && rng() < cfg.loanChance) return { type: "borrow", amount: lo.min };
       if (toCall <= 0) {
         const b = has("bet");
         if (b && rng() < cfg.betChance) return amount(b, b.min + rng() * (Math.min(b.max, b.min * cfg.maxBetMult) - b.min));
@@ -342,6 +352,8 @@
     if (ctx.level === "hard") { st = oppStats(v); bel = readOpponent(ctx, bel, st); }
     const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
     const e = evaluate(ctx, v.me.card, Q, bel);
+    const lb = loanForBet(ctx, e);
+    if (lb) return lb;
     const pot = v.pot;
     const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
     const size = (o) => (ctx.level === "hard" ? o.min + pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
@@ -431,6 +443,42 @@
     return { type: "noNormal" };
   }
 
+  /* ---------- 借贷 ---------- */
+  /** 现在的身家：手上的 + 滚存底池里自己的一份 + 这一轮已经押下去的 − 欠主持方的 */
+  const worth = (s) => (s.chips || 0) + (s.pot || 0) + (s.bet || 0) - (s.owe || 0);
+  /** 每轮开始筹码不够：借不借、借多少 */
+  function loanAtStart(ctx) {
+    const v = ctx.v, cfg = ctx.cfg, o = ctx.opts.find(x => x.type === "borrow");
+    if (!o) return { type: "noLoan" };
+    const broke = v.me.chips <= 0 && v.me.pot <= 0;
+    if (ctx.level === "easy") return ctx.rng() < (broke ? cfg.bustLoanChance : cfg.loanChance) ? { type: "borrow", amount: o.min } : { type: "noLoan" };
+    // 普通 / 困难：领先就不借（少付利息；输光了又领先，不借就直接赢）；落后或打平才借，借到补上缺口
+    const theirs = v.opp.infinite ? v.me.start : worth(v.opp);
+    if (worth(v.me) > theirs) return { type: "noLoan" };
+    if (ctx.level === "hard" && !canCatchUp(ctx, o.max)) return { type: "noLoan" };
+    return { type: "borrow", amount: o.max };
+  }
+  /** 困难：借 amount 枚以后，剩下几轮全押都赢（每轮最多翻 loanGrowth 倍、最多赢光桌上的）扣还借款后能不能追平 */
+  function canCatchUp(ctx, amount) {
+    const v = ctx.v, left = v.rounds - v.round + 1;
+    const stack = v.me.chips + v.me.pot + v.me.bet + amount;
+    const owe = v.me.owe + CC().repayOf(amount);
+    const best = stack * Math.pow(ctx.cfg.loanGrowth, left);
+    if (v.opp.infinite) return best - owe >= v.me.start;
+    const table = stack + v.opp.chips + v.opp.pot + v.opp.bet;
+    const top = Math.min(best, table);
+    return top - owe >= table - top - v.opp.owe;
+  }
+  /** 下注时筹码不够（普通 / 困难）：牌好到想下注 / 加注，而且是自己的筹码在封顶（借了才押得上去）才借，借到补上缺口 */
+  function loanForBet(ctx, e) {
+    const v = ctx.v, cfg = ctx.cfg, o = ctx.opts.find(x => x.type === "borrow");
+    if (!o) return null;
+    const toCall = v.betting ? v.betting.toCall : 0;
+    const want = e.edge >= Math.max(cfg.loanEdge, toCall > 0 ? cfg.raiseEdge : cfg.betEdge);
+    const capped = v.opp.infinite || v.me.chips + v.me.bet < v.opp.chips + v.opp.bet;
+    return want && capped ? { type: "borrow", amount: o.max } : null;
+  }
+
   /* ---------- 入口 ---------- */
   function decide(view, level, rng) {
     if (!view || !view.legal || !view.legal.length) return null;
@@ -439,6 +487,7 @@
     const ctx = { v: view, level, rng, cfg: AI_CONFIG[level], opts: view.legal, belief: belief(view, level) };
     let a = null;
     switch (view.stage) {
+      case "loan": a = loanAtStart(ctx); break;
       case "dealerWeather": a = dealerWeather(ctx); break;
       case "dealerPeek": a = dealerPlace(ctx); break;
       case "play": a = playCard(ctx); break;
@@ -451,7 +500,7 @@
     if (!ok) {
       const o = pick(view.legal, rng);
       a = Object.assign({}, o);
-      if (o.type === "bet" || o.type === "raise") a.amount = o.min;
+      if (o.type === "bet" || o.type === "raise" || o.type === "borrow") a.amount = o.min;
     }
     return a;
   }

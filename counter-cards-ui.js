@@ -4,6 +4,8 @@
  * 牌桌：深色赌桌；元素牌 / 层牌用游戏里的图标和配色（icons.js、game.css 的 --fire / --flesh……）；筹码堆、发牌动画；
  *       天气堆放在桌边，翻开天气时有闪光和对应的天气特效（weather-fx.js，和战场同一套）。
  * 暗出的牌一律显示牌背（自己的那张在角上标一下是什么）；结算只显示胜负、分档和筹码变动，不亮牌。
+ * 筹码不够时（每轮开始 / 轮到自己下注）操作栏里有「借 3 枚（还 4）」这样的按钮；借了多少、要还多少写在两边的座位上；
+ * 总结算按最终筹码数（扣还借款之后）定胜负。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
@@ -68,11 +70,16 @@
       + `<i class="cc-corner">${esc(name)}</i><span class="cc-ico">${cardIcon(card)}</span><b class="cc-name">${esc(name)}</b>`
       + `${o.note ? `<small class="cc-note">${esc(o.note)}</small>` : ""}</${tag}>`;
   }
+  // 牌背的花纹：黄铜菱形套菱形、正中一颗铆钉。不写字——手牌叠在一起时每张只露出左边一截，字会被遮成别的字（以前的「AB」露出来像「AI」）
+  const BACK_EMBLEM = `<svg class="cc-emblem" viewBox="0 0 40 56" aria-hidden="true">`
+    + `<path class="o" d="M20 3 L37 28 L20 53 L3 28 Z M20 15 L28.5 28 L20 41 L11.5 28 Z"/>`
+    + `<path class="in" d="M20 15 L28.5 28 L20 41 L11.5 28 Z"/><path d="M20 3 L37 28 L20 53 L3 28 Z M20 15 L28.5 28 L20 41 L11.5 28 Z"/>`
+    + `<circle class="dot" cx="20" cy="28" r="3.2"/></svg>`;
   /** 牌背（暗出的牌、对方的手牌）。mine：自己暗出的那张，角上标一下是什么 */
   function backHtml(o) {
     o = o || {};
     const peek = o.mine ? `<span class="cc-peek" style="--c:${cardColor(o.mine)}" title="你暗出的：${esc(CC().cardName(o.mine))}">${cardIcon(o.mine)}<b>${esc(CC().cardName(o.mine))}</b></span>` : "";
-    return `<span class="cc-card cc-back${o.cls ? " " + o.cls : ""}"${o.delay != null ? ` style="--d:${o.delay}"` : ""} aria-label="${o.mine ? "你暗出的牌（牌背朝上）" : "牌背"}"><span class="cc-crest">AB</span>${peek}</span>`;
+    return `<span class="cc-card cc-back${o.cls ? " " + o.cls : ""}"${o.delay != null ? ` style="--d:${o.delay}"` : ""} aria-label="${o.mine ? "你暗出的牌（牌背朝上）" : "牌背"}"><span class="cc-crest">${BACK_EMBLEM}</span>${peek}</span>`;
   }
   /** 天气这张牌的修正（规则文字）：火 +1 / 冰 −1……，微光、酸雨、相位的附加说明 */
   function weatherMods(w) {
@@ -215,9 +222,9 @@
         ${opt("side", "dealer", "庄家", `${C.layers.length} 张层牌，管天气堆`)}
       </div>
       <div class="cc-pick"><span class="cc-pick-label">对手 AI</span>
-        ${opt("level", "easy", "简单", "随手出牌")}${opt("level", "normal", "普通", "看上一轮")}${opt("level", "hard", "困难", "记整局、会诈唬")}
+        ${opt("level", "easy", "简单", "随手出牌")}${opt("level", "normal", "普通", "只看单轮结果")}${opt("level", "hard", "困难", "记整局、会诈唬")}
       </div>
-      <p class="cc-hint">开局双方各 ${C.startChips} 枚筹码，另一方由 AI 操作。</p>
+      <p class="cc-hint">开局双方各 ${C.startChips} 枚筹码，另一方由 AI 操作。筹码不够时可以向主持方借（每借 ${C.loan.unit} 枚，结束时还 ${C.loan.repay} 枚）；最后按扣还后的筹码数定胜负。</p>
       ${rulesHtml()}
       <div class="cc-go"><button type="button" class="cc-btn" data-cc="title">回到标题</button><button type="button" class="cc-btn primary" data-cc="start">开局</button></div>
     </div>`;
@@ -227,10 +234,12 @@
     return `<details class="cc-rules"><summary>规则</summary><ul>
       <li><b>牌</b>：庄家 ${C.layers.length} 张层牌（${C.layers.map(CC().cardName).join("、")}），每轮必须打出一张；玩家 ${C.elements.length} 张元素牌（${C.elements.map(CC().cardName).join("、")}）+ 1 张常态（每局一次）；天气堆 ${C.weathers.length} 张（${C.weathers.map(CC().weatherName).join("、")}），开局洗混，抽完就没了，新翻的天气顶替旧天气。</li>
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
-      <li><b>每轮</b>：① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
+      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
       <li><b>分档赔付</b>：差 1 赢家拿走底池；差 2 输家再赔自己下注额的 0.5 倍；差 3 及以上再赔 1 倍。</li>
       <li><b>相位</b>：翻到相位，本轮双方全押，上限是筹码较少一方的全部筹码；打平各自退回。</li>
+      <li><b>借贷</b>：筹码不够时可以向主持方借——每轮开始时手上不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。${C.loan.unit} 枚一份，最少借 ${C.loan.unit} 枚，最多借到补上缺口；每借 ${C.loan.unit} 枚，对局结束时还 ${C.loan.repay} 枚（${C.loan.unit}→${C.loan.repay}、${C.loan.unit * 2}→${C.loan.repay * 2}），结算时从筹码里扣，还不上的记成负数。输光了不借，这一局就结束。</li>
+      <li><b>胜负</b>：${C.rounds} 轮打完（或有一方输光又不借）后，按最终筹码数（扣还借款之后）比，多的赢。</li>
     </ul></details>`;
   }
   function render() {
@@ -282,7 +291,7 @@
     const known = S.human === "dealer" && (v.deckTop || v.deckBottom)
       ? `<small class="cc-known">${v.deckTop ? `堆顶：${esc(CC().weatherName(v.deckTop))}` : ""}${v.deckTop && v.deckBottom ? " · " : ""}${v.deckBottom ? `堆底：${esc(CC().weatherName(v.deckBottom))}` : ""}</small>` : "";
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}</div>
+        <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
         ${chipsHtml(opp.chips, { title: oppName + "的筹码", label: opp.infinite ? "庄家筹码无限" : "", anim: anim.opp })}
       </div>
@@ -306,8 +315,21 @@
       <div class="cc-seat cc-me">
         ${chipsHtml(me.chips, { title: "你的筹码", anim: anim.me })}
         <div class="cc-hand">${myHand || `<span class="cc-empty">手牌打完了</span>`}</div>
-        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}</div>
+        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}${loanTag(me, "你")}</div>
       </div>`;
+  }
+  /** 向主持方借了多少、结束时要还多少（公开的） */
+  function loanTag(s, who) {
+    return s.loan ? `<small class="cc-loan" title="${esc(who)}向主持方借了 ${s.loan} 枚，对局结束时还 ${s.owe} 枚">借 ${s.loan} 枚 · 结束时还 ${s.owe} 枚</small>` : "";
+  }
+  /** 借贷按钮：一份一个（借 3 / 借 6 ……），写上结束时要还多少 */
+  function loanBtns(o, primary) {
+    let out = "";
+    for (let n = o.min; n <= o.max; n += o.step) {
+      const back = CC().repayOf(n);
+      out += btn("borrow", `借 ${n} 枚（还 ${back}）`, { data: { amount: n }, cls: "cc-loanbtn", primary: primary && n === o.min, title: `向主持方借 ${n} 枚，对局结束时还 ${back} 枚` });
+    }
+    return out;
   }
   /** 现在点哪些手牌有用：出牌 / 暗弃 / 常态要弃的元素牌 */
   function playableSet(v) {
@@ -343,6 +365,14 @@
     const has = (t) => v.legal.find(o => o.type === t);
     let p = "", b = "";
     switch (v.stage) {
+      case "loan": {
+        const o = has("borrow"), broke = v.me.chips <= 0 && v.me.pot <= 0;
+        p = `第 ${v.round} 轮开始前：你手上只有 ${v.me.chips} 枚筹码，不够这一轮的底注 ${v.ante} + 最低下注 ${v.minBet} 枚。`
+          + `可以向主持方借：${v.loan.unit} 枚一份，每借 ${v.loan.unit} 枚，对局结束时还 ${v.loan.repay} 枚。`
+          + (broke ? "你已经输光了，不借的话这一局就结束。" : "不借也能接着打。");
+        b = (o ? loanBtns(o, broke) : "") + btn("noLoan", broke ? "不借（结束对局）" : "不借", { primary: !broke });
+        break;
+      }
       case "dealerWeather":
         if (v.weather) {
           p = `庄家天气行动：场上是〔${esc(CC().weatherName(v.weather))}〕，弃掉还是保留？`;
@@ -415,6 +445,11 @@
       p += bet ? ` 下注至少 ${o.min} 枚。` : ` 加注至少 ${o.min} 枚。`;
     }
     b += btn("fold", "弃牌", { cls: "cc-danger", title: "立即判负：输掉自己已下的筹码（包括自己在滚存底池里的那一份）" });
+    const lo = has("borrow");
+    if (lo) {
+      p += ` 手上的筹码不够（这一步要 ${lo.need} 枚，你只有 ${v.me.chips} 枚），可以先向主持方借（每借 ${v.loan.unit} 枚，结束时还 ${v.loan.repay} 枚），借完还是你下注。`;
+      b += loanBtns(lo, false);
+    }
     return { p, b };
   }
   function sideHtml(v) {
@@ -460,14 +495,21 @@
       ${btn("dismiss", v.over ? "看总结算" : "继续", { primary: true })}
     </div>`;
   }
+  /** 总结算：按最终筹码数（扣还借款之后）定胜负，写清楚扣还了多少 */
   function finalHtml(v) {
-    const f = v.final || {};
-    const mine = f.net ? f.net[S.human] : 0;
-    const big = f.winner === S.human ? "这一局你赢了" : f.winner ? "这一局你输了" : "这一局打平";
-    return `<div class="cc-banner-card cc-final ${f.winner === S.human ? "win" : f.winner ? "lose" : "tie"}" role="dialog" aria-label="对局结束">
-      <small>对局结束 · 打了 ${f.rounds || v.round} 轮</small>
+    const f = v.final || {}, me = S.human, op = v.opponent;
+    const res = f.winner === me ? "win" : f.winner ? "lose" : "tie";
+    const big = { win: "这一局你赢了", lose: "这一局你输了", tie: "这一局打平" }[res];
+    const tone = { win: "up", lose: "down", tie: "" }[res];
+    const fin = f.chips || {}, loans = f.loans || {};
+    const theirs = fin[op] == null ? "∞" : fin[op];
+    const repaid = [me, op].filter(k => loans[k] && loans[k].owe).map(k => `${k === me ? "你" : sideName(k)}借 ${loans[k].loan} 枚、还 ${loans[k].owe} 枚`);
+    const rule = fin[op] == null ? `按你扣还借款后的筹码比买入的 ${v.me.start} 枚` : "按最终筹码数（扣还借款之后）比";
+    return `<div class="cc-banner-card cc-final ${res}" role="dialog" aria-label="对局结束">
+      <small>对局结束 · 打了 ${f.rounds} 轮</small>
       <h3>${big}</h3>
-      <p class="cc-deltas"><span class="${mine >= 0 ? "up" : "down"}">你 ${v.me.chips} 枚（${signed(mine)}）</span><span>${sideName(v.opponent)} ${v.opp.chips == null ? "∞" : v.opp.chips} 枚</span></p>
+      <p class="cc-deltas"><span class="${tone}">你 ${fin[me]} 枚</span><span>${sideName(op)} ${theirs} 枚</span></p>
+      <p class="cc-tier">${esc(rule)}${repaid.length ? `；已扣还借款：${esc(repaid.join("，"))}` : ""}。</p>
       <div class="cc-btns">${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${btn("title", "回到标题")}</div>
     </div>`;
   }
@@ -491,8 +533,9 @@
       case "weather": humanAct({ type: "weather", op: d.op }); break;
       case "place": humanAct({ type: "place", where: d.where }); break;
       case "play": humanAct({ type: "play", card: d.card }); break;
-      case "check": case "call": case "fold": case "reveal": case "noNormal": humanAct({ type: act }); break;
+      case "check": case "call": case "fold": case "reveal": case "noNormal": case "noLoan": humanAct({ type: act }); break;
       case "bet": case "raise": humanAct({ type: act, amount: S.amount }); break;
+      case "borrow": humanAct({ type: "borrow", amount: Number(d.amount) }); break;
       case "skip": case "normal": humanAct({ type: act, card: d.card }); break;
       case "mode": S.mode = d.mode || null; render(); break;
       case "amt": {

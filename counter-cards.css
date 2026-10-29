@@ -25,6 +25,7 @@
 .cc-btn.primary:hover:not(:disabled) { color: var(--sk-ink, #0b0806); filter: brightness(1.08); }
 .cc-btn.cc-hot { background: var(--sk-brass, #c99a46); color: var(--sk-ink, #0b0806); }
 .cc-btn.cc-danger { background: linear-gradient(170deg, #5a2320, #2b100e); }
+.cc-btn.cc-loanbtn:not(.primary) { background: linear-gradient(170deg, #4a3a22, #241a0f); color: #ffd9a8; }
 .cc-btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ---------- 设置页 ---------- */
@@ -81,6 +82,7 @@
 .cc-who { display: flex; flex-direction: column; gap: 2px; align-items: center; min-width: 88px; }
 .cc-who b { font-size: 16px; text-shadow: 1px 1px 0 #000; }
 .cc-who small { color: #b9c8b8; font-size: 12px; }
+.cc-who .cc-loan { color: #ffb38a; }
 .cc-hand { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .cc-hand-back .cc-card + .cc-card { margin-left: -34px; }
 .cc-empty { color: rgba(236, 224, 198, .5); font-size: 13px; font-style: italic; }
@@ -111,7 +113,13 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
   color: var(--sk-brass, #c99a46);
 }
 .cc-back::before { border-color: var(--sk-brass, #c99a46); opacity: .7; }
-.cc-crest { font: 400 22px var(--sk-stencil, Impact, sans-serif); letter-spacing: .04em; text-shadow: 2px 2px 0 #0b0806; }
+/* 牌背花纹（counter-cards-ui.js · BACK_EMBLEM）：不写字，叠在一起只露出一截时也不会被遮成别的字 */
+.cc-crest { display: block; line-height: 0; }
+.cc-emblem { display: block; width: 40px; height: 56px; overflow: visible; filter: drop-shadow(2px 2px 0 rgba(11, 8, 6, .8)); }
+.cc-emblem path { fill: none; stroke: var(--sk-brass, #c99a46); stroke-width: 2.6; stroke-linejoin: round; }
+.cc-emblem path.o { stroke: #0b0806; stroke-width: 6; }
+.cc-emblem path.in { fill: rgba(201, 154, 70, .22); stroke: none; }
+.cc-emblem .dot { fill: var(--sk-brass, #c99a46); stroke: #0b0806; stroke-width: 1.6; }
 .cc-peek {
   position: absolute; right: -10px; bottom: -10px; display: inline-flex; align-items: center; gap: 2px;
   padding: 2px 6px 2px 3px; border: 2px solid #0b0806; border-radius: 4px; background: #f3e9d2; color: #1b1712;
@@ -251,6 +259,6 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
   .cc-top { gap: 6px; padding: 4px 6px; font-size: 13px; }
   .cc-brand { font-size: 17px; }
   .cc-top .cc-btn { padding: 6px 8px; font-size: 12px; }
-  .cc-crest { font-size: 15px; }
+  .cc-emblem { width: 28px; height: 39px; }
   .cc-peek { font-size: 10px; right: -6px; bottom: -8px; }
 }

@@ -15,10 +15,11 @@ const ROOT = path.resolve(__dirname, "..");
 const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 const LEVELS = ["easy", "normal", "hard"];
 
-/** game.html 的 <body> 解析进小 DOM，加载克制卡牌要的脚本（计分要 engine.js） */
+/** game.html 的 <body> 解析进小 DOM，加载克制卡牌要的脚本（计分要 engine.js）。
+ *  页面开着「减少动态效果」：雷鸣的闪电、酸雨的涟漪是一直自己排下一次的定时器，桌上留着这两种天气测试进程就退不出去（天气层照样摆） */
 function page() {
   const html = read("game.html"), body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
-  const P = MD.create(body);
+  const P = MD.create(body, { media: (q) => /prefers-reduced-motion: reduce/.test(q) });
   const ctx = vm.createContext(P.window);
   ["engine.js", "icons.js", "weather-fx.js", "counter-cards.js", "counter-cards-ai.js", "counter-cards-ui.js"].forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
   const doc = P.document;
@@ -179,11 +180,13 @@ for (const side of ["player", "dealer"]) for (const level of LEVELS) {
     playThrough(p, p.CC.makeRng(side + level));
     const g = p.UI.state().game;
     assert.equal(g.over, true);
-    assert.equal(g.sides.dealer.chips + g.sides.player.chips, 100);
+    const d = g.sides.dealer, pl = g.sides.player;
+    assert.equal(d.chips + pl.chips, 100 + d.loan + pl.loan - d.owe - pl.owe);   // 借来的进了桌上，结束时扣还
     const fin = p.$("#cc-banner .cc-final");
     assert.ok(fin);
     assert.match(fin.textContent, /这一局你(赢|输)了|这一局打平/);
     assert.match(fin.textContent, new RegExp(`你 ${g.sides[side].chips} 枚`));
+    assert.match(fin.textContent, /按最终筹码数/);
     // 每一轮的结算都记在侧栏
     assert.equal(p.$$("#cc-side .cc-results .cc-res").length, g.results.length);
     // 再来一局 / 换边
@@ -259,6 +262,120 @@ test("下注栏：最低额 = 轮数、加减按钮不越界；常态不能点�
   assert.match(p.$("#cc-actions .cc-info").textContent, /本轮最低下注 1 枚/);
 });
 function CCturn(p) { const t = p.CC.toAct(p.UI.state().game); return t.length === 1 ? t[0] : t.join(","); }
+
+test("设置页：普通难度写「只看单轮结果」（以前是「看上一轮」）；开局说明和规则里写了借贷、按最终筹码数定胜负", () => {
+  const p = page();
+  click(p.$("#t-cc"));
+  const normal = p.$('[data-cc="set"][data-key="level"][data-val="normal"]');
+  assert.match(normal.textContent, /只看单轮结果/);
+  assert.ok(!p.$("#cc-setup").textContent.includes("看上一轮"));
+  const setup = p.$("#cc-setup").textContent;
+  assert.match(setup, /筹码不够时可以向主持方借（每借 3 枚，结束时还 4 枚）/);
+  assert.match(setup, /借贷：筹码不够时可以向主持方借/);
+  assert.match(setup, /3→4、6→8/);
+  assert.match(setup, /按最终筹码数（扣还借款之后）比/);
+});
+
+test("牌背只有花纹、不写字：庄家的手牌叠在一起、每张只露出左边一截时，也不会被遮成别的字（以前的「AB」露出来像「AI」）", () => {
+  const p = page();
+  const box = p.doc.createElement("div");
+  box.innerHTML = p.UI.backHtml();
+  assert.ok(box.querySelector(".cc-back svg.cc-emblem"), "牌背是花纹");
+  assert.equal(box.textContent.trim(), "", "牌背上没有字");
+  // 人当玩家：对面庄家的 5 张手牌叠着放，全是没有字的牌背
+  p.UI.start({ side: "player", level: "normal", seed: "牌背花纹", fast: true });
+  const backs = Array.from(p.$$("#cc-board .cc-opp .cc-hand-back .cc-card"));
+  assert.ok(backs.length >= 4);
+  backs.forEach(b => { assert.ok(b.querySelector("svg.cc-emblem")); assert.equal(b.textContent.trim(), ""); });
+  // 桌上庄家暗出的那张也一样；自己暗出的那张只有角上标的字
+  const slot = p.$("#cc-board .cc-slot .cc-back");
+  assert.ok(slot && slot.querySelector("svg.cc-emblem"));
+  assert.equal(slot.textContent.trim(), "");
+  const css = read("counter-cards.css");
+  assert.ok(!/\.cc-crest\s*\{[^}]*font:/.test(css), "牌背不再用字");
+});
+
+test("借贷（每轮开始）：人手上不够时操作栏问借不借，按钮写着借多少、还多少；借了以后两边座位上都写着；AI 接着走", () => {
+  const p = page();
+  p.UI.start({ side: "player", level: "normal", seed: "人借", fast: true, gameOpt: { playerChips: 1 } });
+  const g = p.UI.state().game;
+  assert.equal(g.stage, "loan");
+  const bar = p.$("#cc-actions");
+  assert.match(bar.textContent, /你手上只有 1 枚筹码，不够这一轮的底注 1 \+ 最低下注 1 枚/);
+  assert.match(bar.textContent, /每借 3 枚，对局结束时还 4 枚/);
+  const borrow = bar.querySelector('[data-cc="borrow"][data-amount="3"]');
+  assert.ok(borrow); assert.match(borrow.textContent, /借 3 枚（还 4）/);
+  assert.ok(!bar.querySelector('[data-cc="borrow"][data-amount="6"]'), "只缺 1 枚：最多借 3 枚");
+  assert.match(bar.querySelector('[data-cc="noLoan"]').textContent, /^不借$/);
+  click(borrow);
+  assert.equal(g.sides.player.loan, 3); assert.equal(g.sides.player.owe, 4);
+  assert.equal(g.stage, "play", "借完下底注，庄家（AI）走完天气行动、暗出");
+  assert.match(p.$("#cc-board .cc-me .cc-who").textContent, /借 3 枚 · 结束时还 4 枚/);
+  assert.match(p.$("#cc-board .cc-me .cc-chips").textContent, /3/);   // 1 + 3 − 底注 1
+  assert.ok(p.$("#cc-side .cc-log").textContent.includes("玩家向主持方借了 3 枚筹码（对局结束时还 4 枚）。"));
+  // 庄家那边看：座位上写着对方借了多少
+  const q = page();
+  q.UI.start({ side: "dealer", level: "normal", seed: "人借", fast: true, game: g });
+  assert.match(q.$("#cc-board .cc-opp .cc-who").textContent, /借 3 枚 · 结束时还 4 枚/);
+});
+
+test("借贷（每轮开始）：人输光了——按钮写「不借（结束对局）」，点了对局结束，总结算按最终筹码数", () => {
+  const p = page();
+  p.UI.start({ side: "player", level: "normal", seed: "人输光", fast: true, gameOpt: { dealerChips: 1, playerChips: 0 } });
+  const bar = p.$("#cc-actions");
+  assert.match(bar.textContent, /你已经输光了，不借的话这一局就结束/);
+  assert.ok(bar.querySelector('[data-cc="borrow"][data-amount="3"]').classList.contains("primary"));
+  const no = bar.querySelector('[data-cc="noLoan"]');
+  assert.match(no.textContent, /不借（结束对局）/);
+  click(no);
+  const fin = p.$("#cc-banner .cc-final");
+  assert.ok(fin);
+  assert.match(fin.textContent, /这一局你输了/);
+  assert.match(fin.textContent, /你 0 枚/); assert.match(fin.textContent, /庄家 1 枚/);
+  assert.match(fin.textContent, /按最终筹码数（扣还借款之后）比/);
+  assert.match(fin.textContent, /打了 0 轮/);
+});
+
+test("借贷（下注时）：轮到人下注、筹码不够时下注栏里有借的按钮，借完还是人下注，按钮就没了", () => {
+  const p = page();
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed: "下注栏借", deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"], playerChips: 8 });
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call");
+  A(g, "player", "reveal"); A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  A(g, "dealer", "weather", { op: "keep" });
+  A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "energy" });
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 2 });
+  p.UI.start({ side: "player", level: "normal", game: g, fast: true });
+  const bar = () => p.$("#cc-actions");
+  assert.match(bar().textContent, /手上的筹码不够（这一步要 4 枚，你只有 2 枚），可以先向主持方借/);
+  assert.ok(bar().querySelector('[data-cc="call"]'));
+  click(bar().querySelector('[data-cc="borrow"][data-amount="3"]'));
+  assert.equal(g.sides.player.chips, 5);
+  assert.equal(CC.toAct(g).join(), "player");
+  assert.ok(!bar().querySelector('[data-cc="borrow"]'), "够了就没有借的按钮");
+  assert.ok(bar().querySelector('[data-cc="raise"]'), "借完能加注了");
+});
+
+test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按扣还之后的筹码数", () => {
+  const p = page();
+  const CC = p.CC;
+  // 人当庄家：玩家（普通 AI）输光先借 3 枚；庄家（人）只差一点，也借 3 枚
+  p.UI.start({ side: "dealer", level: "normal", seed: "结算借", fast: true, gameOpt: { dealerChips: 1, playerChips: 0 } });
+  const g = p.UI.state().game;
+  assert.equal(g.sides.player.loan, 3, "AI 输光了会借");
+  click(p.$('#cc-actions [data-cc="borrow"][data-amount="3"]'));
+  assert.equal(g.sides.dealer.loan, 3);
+  playThrough(p, CC.makeRng("结算借"));
+  const f = g.final, fin = p.$("#cc-banner .cc-final").textContent;
+  assert.match(fin, new RegExp(`你 ${f.chips.dealer} 枚`));
+  assert.match(fin, new RegExp(`玩家 ${f.chips.player} 枚`));
+  assert.match(fin, new RegExp(`已扣还借款：你借 ${f.loans.dealer.loan} 枚、还 ${f.loans.dealer.owe} 枚，玩家借 ${f.loans.player.loan} 枚、还 ${f.loans.player.owe} 枚`));
+  const want = f.chips.dealer > f.chips.player ? /这一局你赢了/ : f.chips.dealer < f.chips.player ? /这一局你输了/ : /这一局打平/;
+  assert.match(fin, want);
+});
 
 /* ---------- 真浏览器（没装 Playwright 时跳过） ---------- */
 function findPlaywright() {

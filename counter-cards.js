@@ -3,6 +3,7 @@
  * 庄家拿 5 张层牌（每轮必须打出一张，5 轮正好打完）；玩家拿 7 张元素牌 + 1 张常态（每局只能用一次）；
  * 7 张天气牌开局洗混成一堆，抽完就没了，新翻出的天气顶替旧天气。
  * 每轮：
+ *   0. 借贷：手上的筹码不够这一轮「底注 + 最低下注额」的一方，先决定向不向主持方借（输光的一方先问，不借这一局就结束）；
  *   1. 双方各下 1 枚底注；
  *   2. 庄家天气行动：场上有天气 → 弃掉 / 保留；场上没有天气 → 偷看堆顶一张，放回原位或放到牌堆底（也可以不动）。玩家看得到庄家做了哪种操作；
  *   3. 双方暗出一张牌；
@@ -11,6 +12,9 @@
  *      之后场上有天气（不是相位）时，玩家还可以用常态清除它，代价是暗弃一张元素牌；
  *   6. 第二轮下注，庄家先；本轮翻到相位就不下注，双方直接全押（上限 = 筹码较少一方的全部筹码）；
  *   7. 不亮牌，系统直接判胜负、结算，双方都看不到对方出了什么，只公开胜负、分档和筹码变动。
+ * 借贷：轮到自己下注、手上的筹码不够「要跟的 + 最低下注额」时也可以借。3 枚一份，最少借 3 枚，最多借到补上缺口；
+ *   每借 3 枚，对局结束时还 4 枚（3→4、6→8），结算时从筹码里扣。借了多少、要还多少是公开的。
+ * 对局结束按最终筹码数（扣还借款之后）比胜负，不按相对开局的变化量。
  * 计分直接用游戏里的克制表和天气数值（engine.js · chartMod / weatherDamagePct / matchupKind，和克制表 matchup.js 同一套）：
  *   克制 +1 / 劣势 −1 / 其余 0（微光里能量以外的克制反转）；天气修正每 25% 记 ±1（酸雨里酸、冰以外的元素打装甲另 +25%，记 +1）。
  *   总分 > 0 玩家赢，< 0 庄家赢，= 0 平局。
@@ -20,6 +24,7 @@
  *   CounterCards.toAct(g)                    → 现在等谁操作：["dealer"] / ["player"] / ["dealer", "player"]（暗出牌时两边都要出）/ []（结束了）
  *   CounterCards.legal(g, "player")          → 这一方现在能做的操作
  *   CounterCards.act(g, "player", { type: "bet", amount: 2 })
+ *   CounterCards.act(g, "player", { type: "borrow", amount: 3 })   → 向主持方借 3 枚（筹码不够时才能借）
  *   CounterCards.view(g, "player")           → 这一方能看到的东西（对方的手牌、暗出的牌、暗弃的牌、庄家偷看到的天气都不在里面）
  */
 (function (root) {
@@ -35,6 +40,10 @@
     pctStep: 0.25,                     // 天气修正每 25% 记 ±1
     tierExtra: [0, 0, 0.5, 1],         // 分档赔付（下标 = 分差，3 及以上按 3）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5；差 3+ × 1
     extraRound: "floor",               // 额外赔付出现半枚时：floor 向下取整（ceil 向上取整）
+    // 借贷：筹码不够时可以向主持方借，unit 枚一份、最少借一份；每借 unit 枚，对局结束时还 repay 枚（3→4、6→8），结算时从筹码里扣。
+    // 「不够」= 每轮开始时不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。
+    // maxUnits：每次最多借几份；null = 借到补上缺口为止（规则里没写上限）
+    loan: { unit: 3, repay: 4, maxUnits: null },
     layers: ["flesh", "armor", "shield", "sand", "spirit"],
     elements: ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"],
     normal: "normal",                  // 常态：每局一次，代价是暗弃一张元素牌，清除当前天气；不能覆盖相位
@@ -140,7 +149,8 @@
     const chipsOf = (v) => Math.max(0, Math.floor(Number(v != null ? v : base) || 0));
     const deck = opt.deck ? opt.deck.slice() : shuffle(CC_CONFIG.weathers, makeRng(seed + "|weather"));
     deck.forEach(w => { if (CC_CONFIG.weathers.indexOf(w) < 0) throw new Error("没有这张天气牌：" + w); });
-    const side = (hand, chips, infinite) => ({ hand, card: null, chips, start: chips, infinite: !!infinite, bet: 0, pot: 0, st: 0, roundStart: chips, history: [], discards: [] });
+    // loan / owe：向主持方借了多少、对局结束时要还多少（公开）
+    const side = (hand, chips, infinite) => ({ hand, card: null, chips, start: chips, infinite: !!infinite, bet: 0, pot: 0, st: 0, roundStart: chips, loan: 0, owe: 0, history: [], discards: [] });
     const g = {
       v: 1, seed, rounds: CC_CONFIG.rounds, round: 0, stage: "start", over: false,
       weather: null,             // 场上的天气（null = 没有天气 / 常态）
@@ -151,6 +161,7 @@
         player: side(CC_CONFIG.elements.concat([CC_CONFIG.normal]), chipsOf(opt.playerChips), false)
       },
       betting: null, allIn: false, revealed: null, peek: null,
+      loanAsk: null,             // 每轮开始还没决定借不借的一方（依次问，输光的在前）
       know: { top: null, bottom: null },   // 庄家偷看过、知道位置的天气（只给庄家看）
       normalUsed: false,
       results: [], log: [], final: null
@@ -180,12 +191,54 @@
   /** 输光了：手上和滚存底池里都没有筹码（手上没了、底池里还有自己的一份，就押着那一份接着打） */
   const busted = (s) => !s.infinite && s.chips <= 0 && s.pot <= 0;
 
+  /* ---------- 借贷：筹码不够时向主持方借，对局结束时扣还 ---------- */
+  /** 借 n 枚，对局结束时要还多少：每借 3 枚还 4 枚 */
+  function repayOf(n) {
+    const L = CC_CONFIG.loan;
+    return Math.max(0, Math.ceil(Math.max(0, Number(n) || 0) / L.unit * L.repay - 1e-9));
+  }
+  /** 这一步「够用」要多少筹码：每轮开始 = 底注 + 本轮最低下注额；轮到自己下注 = 要跟的 + 本轮最低下注额；其余时候不借 */
+  function loanNeed(g, side) {
+    const mb = minBetOf(g.round);
+    if (g.stage === "loan") return CC_CONFIG.ante + mb;
+    if (g.stage === "bet1" || g.stage === "bet2") return Math.max(0, g.sides[other(side)].st - g.sides[side].st) + mb;
+    return 0;
+  }
+  /** 现在最多能借多少枚（0 = 不能借）：手上的筹码不够这一步用才能借，一份 3 枚，借到补上缺口为止（缺口向上取整到 3 的倍数） */
+  function loanMax(g, side) {
+    const s = g.sides[side], L = CC_CONFIG.loan;
+    if (s.infinite) return 0;
+    const gap = loanNeed(g, side) - s.chips;
+    if (gap <= 0) return 0;
+    const units = L.maxUnits != null ? L.maxUnits : Math.ceil(gap / L.unit);
+    return Math.max(0, Math.floor(units)) * L.unit;
+  }
+  /** 能借时的操作：借 min–max 枚（step 的倍数）；need = 这一步够用要多少 */
+  function loanOption(g, side) {
+    const max = loanMax(g, side), u = CC_CONFIG.loan.unit;
+    return max > 0 ? { type: "borrow", min: u, max, step: u, need: loanNeed(g, side) } : null;
+  }
+
   function startRound(g) {
-    const d = g.sides.dealer, p = g.sides.player;
-    if (g.round >= g.rounds || busted(d) || busted(p)) { finish(g); return; }
+    if (g.round >= g.rounds) { finish(g); return; }
     g.round += 1;
     SIDES.forEach(k => { const s = g.sides[k]; s.card = null; s.bet = 0; s.st = 0; s.roundStart = s.chips; });
     g.betting = null; g.allIn = false; g.revealed = null; g.peek = null;
+    // 借贷：手上的筹码不够这一轮「底注 + 最低下注额」的一方先决定借不借。
+    // 输光的先问——它不借这一局就结束了，免得另一方白借
+    g.stage = "loan";
+    g.loanAsk = SIDES.filter(k => loanMax(g, k) > 0).sort((a, b) => Number(busted(g.sides[b])) - Number(busted(g.sides[a])));
+    if (g.loanAsk.length) {
+      note(g, { t: "loanAsk", sides: g.loanAsk.slice(), text: `第 ${g.round} 轮开始前：${g.loanAsk.map(sideName).join("、")}手上的筹码不够这一轮的底注 + 最低下注额（${CC_CONFIG.ante + minBetOf(g.round)} 枚），可以向主持方借。` });
+      return;
+    }
+    beginRound(g);
+  }
+  /** 借贷问完了（或者不用问）：下底注，进庄家天气行动 */
+  function beginRound(g) {
+    const d = g.sides.dealer, p = g.sides.player;
+    g.loanAsk = null;
+    if (busted(d) || busted(p)) { finish(g); return; }
     // 有一方手上已经没有筹码（只剩滚存底池里的那一份）：双方都不下底注，这一轮只争底池
     const ante = Math.max(0, Math.min(CC_CONFIG.ante, behind(d), behind(p)));
     SIDES.forEach(k => pay(g.sides[k], ante));
@@ -199,6 +252,7 @@
   function toAct(g) {
     if (g.over) return [];
     switch (g.stage) {
+      case "loan": return g.loanAsk && g.loanAsk.length ? [g.loanAsk[0]] : [];
       case "dealerWeather": case "dealerPeek": return ["dealer"];
       case "play": return SIDES.filter(k => !g.sides[k].card);
       case "bet1": case "bet2": return [g.betting.toAct];
@@ -226,6 +280,10 @@
     if (toAct(g).indexOf(side) < 0) return [];
     const me = g.sides[side];
     switch (g.stage) {
+      case "loan": {
+        const lo = loanOption(g, side);
+        return (lo ? [lo] : []).concat([{ type: "noLoan" }]);
+      }
       case "dealerWeather":
         if (g.weather) return [{ type: "weather", op: "discard" }, { type: "weather", op: "keep" }];
         return g.deck.length ? [{ type: "weather", op: "peek" }, { type: "weather", op: "pass" }] : [];
@@ -245,6 +303,9 @@
           if (b.raises < CC_CONFIG.maxRaises && rm > toCall) out.push({ type: "raise", min: Math.min(mb, rm - toCall), max: rm - toCall });
         }
         out.push({ type: "fold" });
+        // 手上的筹码不够「要跟的 + 最低下注额」：可以先向主持方借（借完还是自己下注）
+        const lo = loanOption(g, side);
+        if (lo) out.push(lo);
         return out;
       }
       case "weather": {
@@ -295,6 +356,8 @@
         break;
       }
       case "noNormal": afterWeather(g); break;
+      case "borrow": borrow(g, side, a, ok); break;
+      case "noLoan": noLoan(g, side); break;
       default: fail("未知操作：" + a.type);
     }
     return g;
@@ -303,6 +366,28 @@
     const i = s.hand.indexOf(card);
     if (i < 0) fail("手里没有这张牌：" + cardName(card));
     s.hand.splice(i, 1);
+  }
+
+  /* 0. 借贷：向主持方借（每轮开始时 / 轮到自己下注时，筹码不够才能借），对局结束时扣还 */
+  function borrow(g, side, a, opt) {
+    const s = g.sides[side], u = CC_CONFIG.loan.unit;
+    const n = Math.floor(Number(a.amount));
+    if (!Number.isFinite(n) || n < opt.min || n > opt.max || n % u) fail(`借的筹码要是 ${u} 的倍数，在 ${opt.min}–${opt.max} 枚之间`);
+    const owe = repayOf(n);
+    s.chips += n; s.loan += n; s.owe += owe;
+    s.roundStart += n;                 // 借来的不算这一轮的输赢
+    note(g, { t: "loan", by: side, amount: n, owe, text: `${sideName(side)}向主持方借了 ${n} 枚筹码（对局结束时还 ${owe} 枚）。` });
+    if (g.stage === "loan") nextLoan(g);   // 下注时借完还是自己下注
+  }
+  function noLoan(g, side) {
+    const out = busted(g.sides[side]);
+    note(g, { t: "noLoan", by: side, text: out ? `${sideName(side)}输光了，没有向主持方借，对局结束。` : `${sideName(side)}没有向主持方借。` });
+    if (out) { finish(g); return; }
+    nextLoan(g);
+  }
+  function nextLoan(g) {
+    g.loanAsk.shift();
+    if (!g.loanAsk.length) beginRound(g);
   }
 
   /* 2. 庄家天气行动 */
@@ -516,15 +601,32 @@
     return `第 ${res.r} 轮：${sideName(res.winner)}赢（${tierText}${res.allIn ? "，相位全押" : ""}），拿走底池 ${res.pot} 枚${extra}${chips}。`;
   }
   function finish(g) {
-    g.over = true; g.stage = "over"; g.betting = null;
+    g.over = true; g.stage = "over"; g.betting = null; g.loanAsk = null;
     const d = g.sides.dealer, p = g.sides.player;
     // 还留在滚存底池里的（正常不会有：最后一轮打平已经退回），各自拿回
     SIDES.forEach(k => { const s = g.sides[k]; s.chips += s.pot; s.pot = 0; });
+    const out = SIDES.filter(k => busted(g.sides[k]));
+    // 借贷：对局结束时从筹码里扣还（每借 3 枚还 4 枚）；还不上的部分记成负数，就是欠主持方的
+    const held = {};
+    SIDES.forEach(k => { const s = g.sides[k]; held[k] = s.chips; s.chips -= s.owe; });
+    // 胜负按最终筹码数（扣还借款之后）比，不按相对开局的变化量；
+    // 赌场的庄家筹码无限，没有筹码数可比：玩家扣还借款后比买入多算玩家赢、少算庄家赢
+    const diff = d.infinite ? p.chips - p.start : p.chips - d.chips;
+    const winner = diff > 0 ? "player" : diff < 0 ? "dealer" : null;
     const net = { dealer: d.chips - d.start, player: p.chips - p.start };
-    const winner = net.player > net.dealer ? "player" : net.player < net.dealer ? "dealer" : null;
-    g.final = { rounds: g.round, winner, net, chips: { dealer: d.infinite ? null : d.chips, player: p.chips }, busted: SIDES.filter(k => busted(g.sides[k])) };
+    const nul = (k, v) => (g.sides[k].infinite ? null : v);
+    g.final = {
+      rounds: g.results.length, winner, net,
+      chips: { dealer: nul("dealer", d.chips), player: p.chips },        // 最终筹码（扣还借款之后，可能是负数）
+      held: { dealer: nul("dealer", held.dealer), player: held.player },  // 扣还借款之前手上的
+      loans: { dealer: { loan: d.loan, owe: d.owe }, player: { loan: p.loan, owe: p.owe } },
+      busted: out
+    };
     const tail = winner ? `${sideName(winner)}赢` : "平手";
-    note(g, { t: "over", text: `对局结束：玩家 ${p.chips} 枚（${net.player >= 0 ? "+" : ""}${net.player}）${d.infinite ? "" : `，庄家 ${d.chips} 枚`}——${tail}。` });
+    const repaid = (s) => (s.owe ? `（已扣还借款 ${s.owe} 枚）` : "");
+    note(g, { t: "over", text: d.infinite
+      ? `对局结束：玩家 ${p.chips} 枚${repaid(p)}，买入 ${p.start} 枚——${tail}。`
+      : `对局结束：玩家 ${p.chips} 枚${repaid(p)}，庄家 ${d.chips} 枚${repaid(d)}——按最终筹码数，${tail}。` });
   }
 
   /* 没有操作可选的步骤自己往下走 */
@@ -540,13 +642,15 @@
   function view(g, side) {
     if (SIDES.indexOf(side) < 0) fail("没有这一方：" + side);
     const me = g.sides[side], op = g.sides[other(side)];
-    const pub = (s) => ({ chips: s.infinite ? null : s.chips, infinite: s.infinite, start: s.infinite ? null : s.start, bet: s.bet, pot: s.pot, st: s.st });
+    // loan / owe：向主持方借了多少、要还多少，公开
+    const pub = (s) => ({ chips: s.infinite ? null : s.chips, infinite: s.infinite, start: s.infinite ? null : s.start, bet: s.bet, pot: s.pot, st: s.st, loan: s.loan, owe: s.owe });
     const b = g.betting;
     const v = {
       side, opponent: other(side), round: g.round, rounds: g.rounds, stage: g.stage, over: g.over,
       waiting: toAct(g), myTurn: toAct(g).indexOf(side) >= 0,
       weather: g.weather, revealed: g.revealed, deckCount: g.deck.length, gone: g.gone.slice(), allIn: g.allIn,
       minBet: minBetOf(g.round), ante: CC_CONFIG.ante, maxRaises: CC_CONFIG.maxRaises,
+      loan: { unit: CC_CONFIG.loan.unit, repay: CC_CONFIG.loan.repay }, loanAsk: g.loanAsk ? g.loanAsk.slice() : null,
       pot: g.sides.dealer.pot + g.sides.player.pot + g.sides.dealer.bet + g.sides.player.bet,
       normalUsed: g.normalUsed,
       me: Object.assign(pub(me), { hand: me.hand.slice(), card: me.card, history: clone(me.history), discards: clone(me.discards) }),
@@ -581,17 +685,18 @@
       g.casino = { table: t.id, name: t.name, buyIn: n, rate: t.rate, difficulty: t.difficulty };
       return g;
     },
-    /** 离桌：剩下的筹码、净输赢，按这张桌子的倍率折成奎支 */
+    /** 离桌：剩下的筹码（扣还向主持方借的；对局结束时已经扣过）、净输赢，按这张桌子的倍率折成奎支 */
     cashOut(g) {
       if (!g || !g.casino) fail("这一局不是赌场的对局");
-      const chips = g.sides.player.chips, net = chips - g.casino.buyIn;
-      return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate };
+      const s = g.sides.player;
+      const chips = s.chips - (g.over ? 0 : s.owe), net = chips - g.casino.buyIn;
+      return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: s.loan, owe: s.owe };
     }
   };
 
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
-    chartScore, weatherScore, score, scoreParts, tierOf, extraOf, minBetOf, settle,
+    chartScore, weatherScore, score, scoreParts, tierOf, extraOf, minBetOf, settle, repayOf,
     newGame, toAct, legal, act, view, spareElements, resultText, casino, makeRng, hashSeed
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
