@@ -3348,6 +3348,7 @@
     if (hotseat() && (!HotseatGame.isHost() || HotseatGame.hasAsk())) return false;
     if (!state.combatStarted || G.ended || G.depth > 0) return false;
     if (state.combatPhase !== "player") return false;
+    if (typeof pvpDuelOn === "function" && pvpDuelOn()) return false;   // 决斗（#472）打到分出胜负，不能撤退（主持人可以「回到探索环节」放弃）
     return !(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
   }
   async function askRetreat() {
@@ -3973,7 +3974,8 @@
     const rt = $("g-retreat");
     if (rt) {
       const bossNoRetreat = !!(G.rogue && G.rogue.spec && G.rogue.spec.retreat === false);
-      rt.hidden = bossNoRetreat;
+      const duelNoRetreat = typeof pvpDuelOn === "function" && pvpDuelOn();   // 决斗（#472）不能撤退：和不许撤退的首领战一样藏起来
+      rt.hidden = bossNoRetreat || duelNoRetreat;
       rt.disabled = !canRetreat();
     }
     paintUndo();

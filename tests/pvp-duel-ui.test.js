@@ -170,6 +170,8 @@ test("决斗（#472）：甲申请 → 主持人在「决斗」浮层同意 → 
   // 开战：抛硬币，公开记录写谁先手；甲的包里有决斗的选项
   await page.evaluate(() => GAME.startOrEnd());
   await page.waitForFunction(() => state.combatStarted && !!state.pvpDuel.first && GAME.depth === 0, null, { timeout: 15000 });
+  // 决斗不能撤退：「撤退」按钮藏起来、点不了（和不许撤退的首领战一样；指令层也拒绝，见 tests/pvp-duel.test.js）
+  assert.deepEqual(await page.evaluate(() => { const b = document.querySelector("#g-retreat"); return { hidden: !!b && b.hidden, disabled: !!b && b.disabled }; }), { hidden: true, disabled: true }, "决斗里没有「撤退」");
   await page.waitForFunction(() => { const p = __last("p-1"); return p && p.state && p.state.duel && p.state.duel.first; });
   await page.waitForFunction(() => __logs("p-1").some(t => /^抛硬币/.test(t)), null, { timeout: 10000 }).catch(() => {});
   const ps = await page.evaluate(() => { const p = __last("p-1"); return { duel: p.state.duel, logs: __logs("p-1") }; });
