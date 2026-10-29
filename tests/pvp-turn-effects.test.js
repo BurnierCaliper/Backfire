@@ -4,8 +4,9 @@
 //   B 乙放的「本回合」效果撑过对手（我方）的下一个回合，到乙下一个回合开始之前才失效；
 //   C 乙施加的即时效果同样撑到乙下一个回合开始之前（黄金时间照样再多一回合）；
 //   D 乙的护盾层在乙自己的回合开始时判「从上一个回合开始到现在没挨打」就回满。
-// 我方回合行动的人、非玩家单位照旧；普通 PvE（没有在敌人回合行动的玩家阵营）一切照旧。
-// 规则在 app.js · lateTurn / ownRound / markTurnFx / lateRoundEnd / lateRoundStart（startEnemyPhase 调），beginRound / turnEnd 跳过乙
+// 我方回合行动的人、非玩家单位的 A、B、D 照旧；普通 PvE（没有在敌人回合行动的玩家阵营）A、B、D 一切照旧。
+// C 普通 PvE 也改（作者 10/29 追加）：敌人（非玩家单位，在敌人回合行动）施加的即时效果撑过下一个我方回合，到下一个敌人回合开始之前才失效。
+// 规则在 app.js · lateTurn / instantLate / ownRound / markTurnFx / lateRoundEnd / lateRoundStart（startEnemyPhase 调），beginRound / turnEnd 跳过乙
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -25,6 +26,13 @@ const toEnemy = c => c.endPlayerTurn();
 const toPlayer = c => c.endEnemyTurn();
 /** 一下打在 t 身上的攻击（不排格挡队列） */
 const hit = (c, a, t, n) => c.dealTo(a, t, { atk: n || 4, mult: 1, element: "physical", baseBreak: 0, atkRange: "any", flags: { action: true, blockResolved: true, block: "none" } });
+/** 敌人 a 对 t 用自己的招式 id（我方不格挡，和 tests/riot-force.test.js 一样） */
+const enemyUse = (c, a, id, t) => {
+  const S = c.S.state;
+  a.ap = Math.max(1, a.ap || 0); S.attackerId = a.id; S.targetId = t ? t.id : null;
+  c.runSkill(id);
+  c.BattleSim.resolveQueues({ pickBlocker: () => null, pickAssister: l => l[0].id });
+};
 
 /** 布置战场：party 全在 1 区（三区直排），加一个血厚、架势高的狂徒（打不死也打不进失衡）。
  *  late：分到「乙」（在敌人回合行动）的角色（武器人跟着持有者）；null = 不配置阵营（普通 PvE）。
@@ -51,10 +59,11 @@ function asRole(c, u, role, lv) {
   c.resetBattleFlags(u);
 }
 
-test("普通 PvE 一切照旧：没有在敌人回合行动的阵营时 lateTurn 永远是 false、ownRound 就是回合数、什么都不记；同一种子整场自动对打（受影响的角色都在），不配置 / 全在「我方」/ 多一个没人的敌人回合阵营 / 两个阵营都在我方回合，结果和整场记录一模一样", () => {
+test("普通 PvE 的 A、B、D 一切照旧：没有在敌人回合行动的阵营时 lateTurn 永远是 false、ownRound 就是回合数、我方施加的什么都不记；同一种子整场自动对打（受影响的角色都在，这几场的敌人不施加即时效果），不配置 / 全在「我方」/ 多一个没人的敌人回合阵营 / 两个阵营都在我方回合，结果和整场记录一模一样", () => {
   const { c, S, k } = field({ party: ["tou", "nora", "xia", "chuan"], late: null });
   assert.equal(c.lateTurn(k("tou")), false);
   assert.equal(c.ownRound(k("tou")), S.turnNo);
+  assert.equal(c.instantLate(k("tou")), false, "我方（在我方回合行动）施加的即时效果不记");
   toEnemy(c);
   assert.equal(c.ownRound(k("tou")), S.turnNo, "敌人回合里也是回合数");
   assert.ok(S.units.every(u => !u.lateFx), "什么都不记");
@@ -336,6 +345,70 @@ test("C：黄金时间——乙施加的即时效果在「撑到乙下一个回�
   assert.equal(helu.instant.sting, true);
   toEnemy(f.c);
   assert.equal(helu.instant.sting, false, "再下一个乙的回合开始：失效");
+});
+
+test("C（PvE 也改）：敌人在敌人回合打在我方身上的熔融（镇压队警棍盾「火焰警棍」）撑过下一个我方回合，到下一个敌人回合开始之前才失效；我方施加的照旧在整轮开始失效", () => {
+  const f = field({ party: ["kolt", "helu"], late: null, enemies: [{ id: "riot_baton", lv: 5, zone: 1 }] });
+  const kolt = f.k("kolt"), b = f.foe;
+  assert.equal(b.kit, "riot_baton");
+  assert.equal(f.c.instantLate(b), true, "敌人在敌人回合行动");
+  toEnemy(f.c);
+  enemyUse(f.c, b, "en_riot_baton", kolt);
+  assert.equal(kolt.instant.melt, true, "打中施加熔融");
+  const end = logOf(f.c, () => toPlayer(f.c));
+  assert.equal(kolt.instant.melt, true, "整轮开始：敌人施加的还在（以前在这里就失效了，只经过了敌人回合）");
+  assert.ok(!end.includes(`${kolt.name} 熔融结束`), end);
+  const log = logOf(f.c, () => toEnemy(f.c));
+  assert.equal(kolt.instant.melt, false, "下一个敌人回合（施加者那一队的回合）开始之前失效");
+  assert.ok(log.includes(`${kolt.name} 熔融结束`), log);
+  assert.ok(!kolt.lateFx, "记号也清掉");
+  // 我方（在我方回合行动）施加的：照旧在整轮开始失效
+  const g = field({ party: ["kolt", "helu"], late: null, enemies: [{ id: "riot_baton", lv: 5, zone: 1 }] });
+  g.c.applyInstantEffect(g.foe, "melt", [], g.k("helu"));
+  assert.equal(g.foe.instant.melt, true);
+  assert.ok(!g.foe.lateFx, "我方施加的不记");
+  toEnemy(g.c);
+  assert.equal(g.foe.instant.melt, true, "敌人回合里还在");
+  toPlayer(g.c);
+  assert.equal(g.foe.instant.melt, false, "整轮开始失效（照旧）");
+});
+
+test("C（PvE）：敌人施加的刺骨 + 黄金时间——在「撑到下一个敌人回合开始」的基础上再多保留一回合", () => {
+  const f = field({ party: ["kolt", "helu"], late: null });
+  const kolt = f.k("kolt");
+  kolt.layers = [{ type: "flesh", current: 300, max: 300, inner: true }];
+  toEnemy(f.c);
+  f.c.applyInstantEffect(kolt, "sting", [], f.foe);
+  kolt.instant.goldHold = "sting";
+  toPlayer(f.c);
+  assert.equal(kolt.instant.sting, true, "整轮开始：还在");
+  assert.equal(kolt.instant.goldHold, "sting", "整轮开始不用掉黄金时间");
+  const log = logOf(f.c, () => toEnemy(f.c));
+  assert.equal(kolt.instant.sting, true, "下一个敌人回合开始：黄金时间再保留一回合");
+  assert.match(log, /黄金时间：刺骨再保留一回合/);
+  assert.ok(!kolt.instant.goldHold, "只延长一回合");
+  toPlayer(f.c);
+  assert.equal(kolt.instant.sting, true);
+  toEnemy(f.c);
+  assert.equal(kolt.instant.sting, false, "再下一个敌人回合开始：失效");
+});
+
+test("C（PvE）：熔融打坏的护盾——敌人施加的熔融，护盾到下一个敌人回合开始才以一半恢复（以前在整轮开始）；之后照旧按「没挨打」回满", () => {
+  const f = field({ party: ["kolt", "helu"], late: null });
+  const kolt = f.k("kolt");
+  kolt.layers = [{ type: "shield", current: 10, max: 10 }, { type: "flesh", current: 300, max: 300, inner: true }];
+  const sh = () => kolt.layers[0].current;
+  toEnemy(f.c);
+  f.c.applyInstantEffect(kolt, "melt", [], f.foe);
+  hit(f.c, f.foe, kolt, 12);   // 物理打护盾减半：6 点，过半但没打穿
+  assert.equal(sh(), 0, "护盾累计受伤过半：立刻失效");
+  toPlayer(f.c);
+  assert.equal(sh(), 0, "整轮开始：还没恢复（我方回合里护盾还是空的）");
+  const log = logOf(f.c, () => toEnemy(f.c));
+  assert.equal(sh(), 5, "下一个敌人回合开始：以一半恢复");
+  assert.match(log, /柯尔特 护盾以一半恢复/);
+  toPlayer(f.c);
+  assert.equal(sh(), 10, "整轮开始：上一轮没挨打 → 回满（照旧）");
 });
 
 test("C + D：过载——乙的川川给乙的队友过载：护盾翻倍撑过对手的回合，到乙下一个回合开始才清零（这一次不按「没挨打」回满）", () => {

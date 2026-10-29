@@ -1760,7 +1760,7 @@ function beginRound(notes) {
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 下面「每回合开始」的效果：在敌人回合行动的玩家阵营（lateTurn）的人跳过，到自己那一队的回合开始再结算（startEnemyPhase · lateRoundStart，#476）；
-  // 它们施加的即时效果、双重奏的 atk（u.lateFx 记了的）也一样
+  // 它们施加的即时效果、双重奏的 atk（u.lateFx 记了的）也一样。敌人（非玩家单位）施加的即时效果也记了，普通 PvE 也在敌人回合开始才失效
   {
     const xia = findKit("xia", state.units);
     if (xia && !lateTurn(xia)) xiaBackwaterFuel(xia, notes);
@@ -1785,7 +1785,7 @@ function beginRound(notes) {
     const own = !lateTurn(u);
     if (own) xiaAutoCrush(u, notes);
     if (own) noraRoundStart(u, notes);
-    // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合（在敌人回合行动的阵营施加的到它们的回合开始才算，#476）
+    // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合（在敌人回合行动的一方施加的到敌人回合开始才算，#476）
     const held = goldHeldInstants(u).filter(k => !lateFx(u, k));
     if (instantTurnStartA(u, notes, held, false)) u._noShieldRefill = true;
     if (own && u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
@@ -2007,7 +2007,8 @@ function refillShieldIfUnhit(u, blocked) {
   u.gotHitThisTurn = false;
 }
 /** 即时效果到点（回合开始）·前半：错位换回、过载结束清零护盾、熔融打坏的护盾以一半恢复。held：黄金时间这次保留的。
- *  late：只结算在敌人回合行动的阵营施加的（lateRoundStart，#476）；false 只结算别的（beginRound）。返回 true = 这一次不按「没挨打」回满护盾 */
+ *  late：只结算在敌人回合行动的一方（敌人、在敌人回合行动的玩家阵营）施加的（lateRoundStart，#476）；false 只结算别的（beginRound）。
+ *  返回 true = 这一次不按「没挨打」回满护盾 */
 function instantTurnStartA(u, notes, held, late) {
   const mine = k => lateFx(u, k) === !!late;
   let noRefill = false;
@@ -2017,7 +2018,7 @@ function instantTurnStartA(u, notes, held, late) {
   }
   // 黄金时间延长的过载这回合不结束；还在飞的高压巡逻艇一直过载（下面重新给它过载），旧的过载不在这里清零护盾（enemies.js · boatKeepsOverload）
   if (mine("overload") && held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && !(typeof boatKeepsOverload === "function" && boatKeepsOverload(u)) && overloadRoundStart(u, notes)) noRefill = true;
-  // 熔融打坏的护盾：跟着熔融是谁施加的（在敌人回合行动的阵营施加的到它们的回合开始才以一半恢复）
+  // 熔融打坏的护盾：跟着熔融是谁施加的（在敌人回合行动的一方施加的到敌人回合开始才以一半恢复）
   if (mine("melt") && typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) noRefill = true;
   return noRefill;
 }
@@ -2036,7 +2037,7 @@ function instantTurnStartB(u, notes, held, late) {
   if (held.length) notes.push(`${u.name} 黄金时间：${held.map(k => INSTANT_NAME[k] || k).join("、")}再保留一回合。`);
   // 只延长一回合：延长的那一种这一次到点了才用掉（还有另一边施加、还没到点的就留着）
   if (u.instant.goldHold && !goldHeldInstants(u).some(k => !mine(k))) u.instant.goldHold = false;
-  // 在敌人回合行动的阵营施加的：已经失效（这里清掉的，或者早就被用掉的）不再记
+  // 在敌人回合行动的一方施加的：已经失效（这里清掉的，或者早就被用掉的）不再记
   if (late) Object.keys(INSTANT_NAME).forEach(k => { if (!u.instant[k]) dropLateFx(u, k); });
 }
 
@@ -2045,7 +2046,8 @@ function offField(u) {
   return !u || !!(u.hidden || u.fused || u.dead || u._removed);
 }
 
-/** 回合开始时会结束的即时效果（玩家手册第四章「即时效果」：单回合生效） */
+/** 回合开始时会结束的即时效果（玩家手册第四章「即时效果」：单回合生效）。从施加起要经过一个我方回合和一个敌人回合：
+ *  持续到施加的人那一队下一个回合开始之前——我方施加的到整轮开始（beginRound），敌人施加的到敌人回合开始（lateRoundStart，#476） */
 const INSTANT_NAME = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
 /** 黄金时间延长的即时效果：instant.goldHold 为 true 时是身上现有的全部即时效果，写成效果名（如 "melt"）时只延长那一种 */
 function goldHeldInstants(u) {
@@ -2236,13 +2238,21 @@ function playerTurnEnd(phase) {
  *   B 「本回合内」、C 即时效果：它们放的（放在谁身上都一样）撑到施放者那一队下一个回合开始之前（下一个敌人回合开始：lateRoundEnd /
  *     lateRoundStart）才失效——放的时候在被施加的单位上记一笔（markTurnFx → u.lateFx），整轮结束 / 整轮开始跳过记了的；
  *   D 护盾层「这一回合没挨打就回满」：这些人在自己那一队的回合开始时判（从自己上一个回合开始到现在没挨打）。
- * 别人（在我方回合行动的玩家、非玩家单位）放的、别人每回合的效果照旧。普通 PvE（没有在敌人回合行动的玩家阵营）lateTurn 永远是 false，
- * u.lateFx 一笔都不记，一切和以前一模一样。持续伤害、场地、天气（沙暴风向）照旧整轮统一结算（作者 10/29） */
+ * 别人（在我方回合行动的玩家、非玩家单位）放的「本回合」效果、别人每回合的效果照旧。普通 PvE（没有在敌人回合行动的玩家阵营）lateTurn 永远是 false，
+ * A、B、D 和以前一模一样。持续伤害、场地、天气（沙暴风向）照旧整轮统一结算（作者 10/29）。
+ * C 即时效果 PvE 也改（作者 10/29 追加）：施加的人那一队在敌人回合行动就记——非玩家单位（敌人等）施加的也一样（instantLate），
+ * 例：敌人在敌人回合打在我方身上的熔融撑过下一个我方回合，到下一个敌人回合开始之前才失效；我方回合行动的人施加的照旧在整轮开始失效 */
 
 /** u 那一队在敌人回合行动：在敌人回合行动的玩家阵营里的玩家角色（武器人跟着持有者、替身跟着操控它的人，enemies.js · playerFactionOf） */
 function lateTurn(u) {
   if (!u || typeof pvpOn !== "function" || !pvpOn()) return false;
   return playerFactionOf(u) != null && unitTurnPhase(u) === "enemy";
+}
+/** 即时效果的施加者 by 那一队在敌人回合行动（C，作者 10/29 追加：PvE 也改）：非玩家单位（敌人、友军这些都在敌人回合行动），
+ *  和在敌人回合行动的玩家阵营里的角色（lateTurn）。它施加的即时效果撑到下一个敌人回合开始之前。施加者不知道（null）照旧 */
+function instantLate(by) {
+  if (!by) return false;
+  return typeof unitTurnPhase === "function" ? unitTurnPhase(by) === "enemy" : !by.isPlayer;
 }
 /** u 现在在自己的第几回合里（从 u 那一队上一个回合开始算）：在敌人回合行动的阵营是最近一个敌人回合开始时的回合数（state.lateRound，
  *  startEnemyPhase 记）——它们的「一回合」= 自己的敌人回合 + 对手接下来的我方回合；别人就是 state.turnNo */
@@ -2274,7 +2284,7 @@ const TURN_FX_ON = {
   shieldDown: u => !!u._shieldRestoreAtTurnEnd
 };
 Object.keys(INSTANT_NAME).forEach(k => { TURN_FX_ON[k] = u => !!(u.instant && u.instant[k]); });
-/** u 身上的 key 是在敌人回合行动的阵营放的（撑到下一个敌人回合开始） */
+/** u 身上的 key 是在敌人回合行动的阵营放的（撑到下一个敌人回合开始）；即时效果也包括非玩家单位施加的（instantLate） */
 function lateFx(u, key) { return !!(u && u.lateFx && u.lateFx[key]); }
 function dropLateFx(u, key) {
   if (!lateFx(u, key)) return;
@@ -2282,11 +2292,12 @@ function dropLateFx(u, key) {
   if (!Object.keys(u.lateFx).length) delete u.lateFx;
 }
 /** 施放者 by 给 u 挂「本回合」效果 / 即时效果 key（在挂上之前调）：by 那一队在敌人回合行动就在 u 身上记一笔，撑到下一个敌人回合开始；
- *  别人放的不记，照旧。by 不给（undefined）就看现在是谁在行动（actingPlayerId） */
+ *  别人放的不记，照旧。「本回合」效果只看在敌人回合行动的玩家阵营（lateTurn，普通 PvE 不记）；即时效果连非玩家单位施加的也记（instantLate）。
+ *  by 不给（undefined）就看现在是谁在行动（actingPlayerId） */
 function markTurnFx(u, key, by) {
   if (!u) return;
   if (by === undefined) { const id = actingPlayerId(); by = id != null ? unitById(id) : null; }
-  setLateFx(u, key, lateTurn(by));
+  setLateFx(u, key, INSTANT_NAME[key] ? instantLate(by) : lateTurn(by));
 }
 /** 给 u 的 key 记 / 不记「撑到下一个敌人回合开始」（late）。u 身上已经挂着同一种的：哪一份更晚失效按哪一份（重复施加不会变短）——
  *  在敌人回合行动的阵营的回合里（lateRoundNow）整轮结束在下一个敌人回合开始之前，记了的更晚；别的时候反过来，没记的更晚 */
@@ -2419,9 +2430,9 @@ function lateRoundEnd(notes) {
   expireWaveWalls(notes, true);
 }
 /** 在敌人回合行动的阵营自己的回合开始（startEnemyPhase，lateRoundEnd 之后、它们的 playerTurnStart 之前）：
- *  它们每回合开始的效果（A，整轮开始跳过了它们）、它们施加的即时效果到点（C）、它们的护盾层没挨打就回满（D）。普通 PvE 什么都不做 */
+ *  它们每回合开始的效果（A，整轮开始跳过了它们）、它们施加的即时效果到点（C）、它们的护盾层没挨打就回满（D）。
+ *  普通 PvE 只有 C：敌人（非玩家单位）施加的即时效果在这里到点（作者 10/29 追加），A、D 没有人 */
 function lateRoundStart(notes) {
-  if (typeof pvpOn !== "function" || !pvpOn()) return;
   const late = (state.units || []).filter(u => lateTurn(u));
   // A：和 beginRound 同一个先后
   const xia = late.find(u => u.kit === "xia");
@@ -2435,7 +2446,7 @@ function lateRoundStart(notes) {
   });
   late.forEach(u => { if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); } });
   if (typeof featHook === "function") late.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
-  // 每个单位和 beginRound 同一个先后：碾压、诺拉 → C：在敌人回合行动的阵营施加的即时效果（放在谁身上都一样）→ 霜结的免疫、引擎；
+  // 每个单位和 beginRound 同一个先后：碾压、诺拉 → C：在敌人回合行动的一方施加的即时效果（放在谁身上都一样）→ 霜结的免疫、引擎；
   // D 要等过载清零护盾之后再判
   const noRefill = new Set();
   (state.units || []).forEach(u => {
@@ -2465,7 +2476,8 @@ function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
   if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
   // 在敌人回合行动的玩家阵营（#476）：它们的上一回合到这里结束（放的「本回合」效果失效），然后开始自己的这一回合（每回合开始的效果、
-  // 它们施加的即时效果到点、护盾回满）——都在补行动点之前，和我方回合的整轮结束 → 整轮开始 → 补行动点一样
+  // 它们施加的即时效果到点、护盾回满）——都在补行动点之前，和我方回合的整轮结束 → 整轮开始 → 补行动点一样。
+  // 敌人（非玩家单位）施加的即时效果也在这里到点，普通 PvE 也是（作者 10/29 追加）
   lateRoundEnd(notes);
   state.lateRound = Number(state.turnNo) || 0;
   state.combatPhase = "enemy";
