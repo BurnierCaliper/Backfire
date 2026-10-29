@@ -1638,6 +1638,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  state.lateRound = 0;   // 在敌人回合行动的玩家阵营自己的回合数（#476，startEnemyPhase 记）：开战时还没轮到它们
   state.goneFoes = [];   // 新的一场：移出场的敌人名单从空开始
   // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
   state.apocalypse = false;
@@ -1774,105 +1775,46 @@ function beginRound(notes) {
   state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
   // 援军（chain.js）：到了时候的这一波进场
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
-  // 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油
+  // 下面「每回合开始」的效果：在敌人回合行动的玩家阵营（lateTurn）的人跳过，到自己那一队的回合开始再结算（startEnemyPhase · lateRoundStart，#476）；
+  // 它们施加的即时效果、双重奏的 atk（u.lateFx 记了的）也一样。敌人（非玩家单位）施加的即时效果也记了，普通 PvE 也在敌人回合开始才失效
   {
     const xia = findKit("xia", state.units);
-    if (xia && !xia.dead && xia.upOnShp && typeof passivePlus === "function" && passivePlus(xia, 2)) addFuel(1, "背水一战+", notes);
+    if (xia && !lateTurn(xia)) xiaBackwaterFuel(xia, notes);
   }
-  // 研磨机+：每两个回合获得 1 颗咖啡豆（第 2、4、6…回合开始）
   {
     const yu = findKit("yuito", state.units);
-    if (yu && !yu.dead && Number(state.turnNo) % 2 === 0 && typeof passivePlus === "function" && passivePlus(yu, 1)) {
-      yu.resources = yu.resources || {};
-      yu.resources.bean = (Number(yu.resources.bean) || 0) + 1;
-      notes.push(`研磨机+：结人获得 1 颗咖啡豆 → ${yu.resources.bean}。`);
-    }
+    if (yu && !lateTurn(yu)) yuitoGrinder(yu, notes);
   }
-  // 扭矩「转移注意」：下回合开始自动变回武器（失去的装甲记为废料，见 endTorqueGuard）
-  state.units.forEach(u => {
-    if (u.kit === "torque" && u.resources && u.resources.divertGuard && !u.hidden && !u.dead) {
-      notes.push("转移注意结束：扭矩变回武器。");
-      notes.push(...returnWeapon(u));
-    }
-  });
-  // Ecmo 探测模式：每回合开始自动对所在区做一次环境扫描
-  state.units.forEach(u => {
-    if (u.kit === "ecmo" && u.resources && u.resources.probe && !u.hidden && !u.dead) {
-      (u.resources.probeZones = u.resources.probeZones || []).push(Number(u.zone));
-      heluScanAct(u, { dest: Number(u.zone), act: "spawn" }, notes);
-    }
-  });
+  state.units.forEach(u => { if (!lateTurn(u)) torqueDivertEnd(u, notes); });
+  state.units.forEach(u => { if (!lateTurn(u)) ecmoProbeScan(u, notes); });
   // 双重奏的 atk、粉落汤气都只到这个回合开始
   state.units.forEach(u => {
-    if (u.duetAtk) { notes.push(`${u.name} 双重奏的 atk +${u.duetAtk} 消失。`); u.duetAtk = 0; }
-    if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); }
+    if (u.duetAtk && !lateFx(u, "duetAtk")) { notes.push(`${u.name} 双重奏的 atk +${u.duetAtk} 消失。`); u.duetAtk = 0; }
+    if (u.kit === "hiaki" && u.resources && u.resources.powder && !lateTurn(u)) { u.resources.powder = false; notes.push("粉落汤气结束。"); }
   });
   if (typeof mutinyTick === "function") mutinyTick(notes);
   if (typeof desertRoundStart === "function") desertRoundStart(notes);   // 尘虫摊平结束、管虫流沙
   // 专长（feats.js · hooks.roundStart）：每回合开始
-  if (typeof featHook === "function") state.units.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
+  if (typeof featHook === "function") state.units.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden && !lateTurn(u)) featHook(u, "roundStart", undefined, notes); });
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
-    // 夕夏濒死（倒地没起身）、晕眩或死了就不自动碾压（以前照碾）
-    if (u.kit === "xia" && isCrushing(u) && !u.dead && !u.dying && !u.stunned) {
-      const ct = crushingTarget(u);
-      u.zone = Number(ct.zone);
-      notes.push(...crushOnce(u, ct, true));
-    }
-    if (u.kit === "nora" && (typeof passiveOn !== "function" || passiveOn(u))) {
-      u.resources = u.resources || {};
-      if (u.resources.forceCruelNext) {
-        u.resources.forceCruelNext = false;
-        setMood(u, "cruel", notes, "压力升高");
-      } else if (!(typeof passivePlus === "function" && passivePlus(u, 2)) && Math.random() < 1 / 3) {   // 双相冲动+：不再随机翻面
-        flipMood(u, notes, "双相冲动");
-      }
-      const pinBefore = u.resources.piercedId;
-      if (pinBefore && !piercedTarget(u)) notes.push("刺入目标已超出距离 1，刺入结束。");
-    }
-    // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合
-    const held = goldHeldInstants(u);
-    if (u.instant && u.instant.shift && held.indexOf("shift") < 0) {
-      clearShift(u);
-      notes.push(`${u.name} 错位结束，血层顺序恢复。`);
-    }
-    // 黄金时间延长的过载这回合不结束；还在飞的高压巡逻艇一直过载（下面重新给它过载），旧的过载不在这里清零护盾（enemies.js · boatKeepsOverload）
-    if (held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && !(typeof boatKeepsOverload === "function" && boatKeepsOverload(u)) && overloadRoundStart(u, notes)) u._noShieldRefill = true;
-    if (typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) u._noShieldRefill = true;
-    if (u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
+    const own = !lateTurn(u);
+    if (own) xiaAutoCrush(u, notes);
+    if (own) noraRoundStart(u, notes);
+    // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合（在敌人回合行动的一方施加的到敌人回合开始才算，#476）
+    const held = goldHeldInstants(u).filter(k => !lateFx(u, k));
+    if (instantTurnStartA(u, notes, held, false)) u._noShieldRefill = true;
+    if (own && u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
     if (typeof selfImmunities === "function") selfImmunities(u, notes);
     if (typeof syncShockwave === "function") syncShockwave(u, notes);
     if (typeof syncFrenzyPosture === "function") syncFrenzyPosture(u, notes);   // 狂暴的架势上限（effects.js）也对一遍账
-    // 即时效果都是单回合的：没被用掉的也在回合开始时失效
-    if (u.instant) {
-      const gone = [];
-      // 过热熔融（沙灵聚合体开炮后）：留到开炮之后那个我方回合结束
-      const meltHold = u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo);
-      if (u.instant.melt && held.indexOf("melt") < 0 && !meltHold) { u.instant.melt = false; gone.push("熔融"); }
-      if (u.instant.sting && held.indexOf("sting") < 0) { u.instant.sting = false; gone.push("刺骨"); }
-      if (u.instant.spread && held.indexOf("spread") < 0) { u.instant.spread = false; gone.push("扩散"); }
-      if (u.instant.refract && held.indexOf("refract") < 0) { u.instant.refract = false; gone.push("折射"); }
-      if (gone.length) notes.push(`${u.name} ${gone.join("、")}结束。`);
-      if (held.length) notes.push(`${u.name} 黄金时间：${held.map(k => INSTANT_NAME[k] || k).join("、")}再保留一回合。`);
-      if (u.instant.goldHold) u.instant.goldHold = false;   // 只延长一回合
-    }
+    instantTurnStartB(u, notes, held, false);
     if (!u.stunned && (u.def || 0) > 0) u._imbalanceLock = false;
     if (u.kit === "livesand" && u.resources && u.resources.giant && !u.dead) {
       u.resources.giantTurns = (u.resources.giantTurns || 0) + 1;
     }
     if (u.resources) u.resources.blockUsedThisTurn = false;
-    if (u.kit === "xia" && u.resources) {
-      // 背水一战：起身（靠坚毅生命）继续战斗时总是启动引擎，一回合没攻击也不熄火
-      const backWater = u.upOnShp && !u.dead && (typeof passiveOn !== "function" || passiveOn(u));
-      if (u.resources.engine && !u.resources.attackedThisTurn && !u.resources.engineJustOn && !backWater) {
-        u.resources.engine = false;
-        notes.push("夕夏一回合未攻击，引擎关闭。");
-      } else if (u.resources.engineJustOn) {
-        notes.push("夕夏引擎刚启动：本回合即使未攻击也不关闭。");
-      }
-      u.resources.engineJustOn = false;
-      u.resources.attackedThisTurn = false;
-    }
+    if (own) xiaEngineCheck(u, notes);
   });
   state.units.forEach(u => {
     if (u.kit === "watchcrow" && !u.dead && !u.hidden) {
@@ -1949,29 +1891,11 @@ function beginRound(notes) {
     // 晕眩后自我效果结束（所有自我效果；蓄能累积的高能值不清零）
     if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
     if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes);
-    if (u.self === "burn") {
-      notes.push(...tickSelfBurn(u, true));
-    }
-    if (u.self === "frost") {
-      // 霜结每回合开始 1 冰击破：雪天只让冻伤和冻土的击破翻倍，这里不翻倍
-      dealBreak(u, 1, "ice", notes, "霜结");
-    }
-    if (u.self === "store") {
-      u.highEnergy = (u.highEnergy || 0) + (u.level || 1);
-      notes.push(`${u.name} 蓄能 +${u.level} → ${u.highEnergy}`);
-      checkHighBoom(u);
-    }
-    if (weather === "acid" && u.self === "splash") {
-      const regen = (u.level || 1) * envMult(u);
-      healUnit(u, regen);
-      notes.push(`${u.name} 酸雨溅射回复 ${regen}`);
-    }
+    const own = !lateTurn(u);   // 在敌人回合行动的阵营：自我效果、圣盾、护盾回满到自己那一队的回合开始（lateRoundStart，#476）
+    if (own) selfRoundStart(u, weather, notes);
     // 沙尘恢复：认第一层还能回血的沙尘（沙灵聚合体外层沙壳打穿后上限是 0，二阶段起回的是内层沙尘）
     const sand = (u.layers || []).find(l => l.type === "sand" && Number(l.max) > 0);
-    if (u.kit === "tou" && u.resources && (typeof passiveOn !== "function" || passiveOn(u))) {
-      u.resources.shield = Math.min(3, (u.resources.shield || 0) + 1);
-      notes.push(`${u.name} 圣盾 +1 → ${u.resources.shield}`);
-    }
+    if (own) touShieldTick(u, notes);
     if (weather === "sand") {
       notes.push(`${u.name} ${sandWindActionText(u)}`);
     }
@@ -1987,22 +1911,150 @@ function beginRound(notes) {
     } else if (sand && dustDown) {
       notes.push(`${u.name} 被击落：本回合沙尘不回复。`);
     }
-    if (!u.gotHitThisTurn && !u._noShieldRefill) {
-      // 只回满单位自带的那部分：临时护盾扣掉的不回来（max 已经跟着减掉了）
-      syncTempShield(u);
-      (u.layers || []).forEach(l => {
-        if (l.type === "shield") { l.current = l.max; l._lastCur = l.current; }
-      });
-    }
+    if (own) refillShieldIfUnhit(u, u._noShieldRefill);
     u._noShieldRefill = false;
-    u.gotHitThisTurn = false;
     u.damagedThisTurn = 0;
     u.sandLocked = false;
   });
   Object.keys(state.fields || {}).forEach(z => checkEnergyFieldBoom(z, notes));
   // 扭矩酸液炮蓄力：「下回合开始」爆发——和场地效果同一个时间段，在场地效果之后
-  releaseAcidCharges(notes);
+  releaseAcidCharges(notes, false);
   appendLog(notes.join("\n"));
+}
+
+/* ---------- 每回合开始的效果（beginRound；在敌人回合行动的玩家阵营在自己那一队的回合开始，lateRoundStart，#476） ---------- */
+/** 背水一战+：夏濒死并且起身时，每回合自动获得 1 点燃油 */
+function xiaBackwaterFuel(xia, notes) {
+  if (xia && !xia.dead && xia.upOnShp && typeof passivePlus === "function" && passivePlus(xia, 2)) addFuel(1, "背水一战+", notes);
+}
+/** 研磨机+：每两个回合获得 1 颗咖啡豆（第 2、4、6…回合开始） */
+function yuitoGrinder(yu, notes) {
+  if (yu && !yu.dead && Number(state.turnNo) % 2 === 0 && typeof passivePlus === "function" && passivePlus(yu, 1)) {
+    yu.resources = yu.resources || {};
+    yu.resources.bean = (Number(yu.resources.bean) || 0) + 1;
+    notes.push(`研磨机+：结人获得 1 颗咖啡豆 → ${yu.resources.bean}。`);
+  }
+}
+/** 扭矩「转移注意」：下回合开始自动变回武器（失去的装甲记为废料，见 endTorqueGuard） */
+function torqueDivertEnd(u, notes) {
+  if (u.kit === "torque" && u.resources && u.resources.divertGuard && !u.hidden && !u.dead) {
+    notes.push("转移注意结束：扭矩变回武器。");
+    notes.push(...returnWeapon(u));
+  }
+}
+/** Ecmo 探测模式：每回合开始自动对所在区做一次环境扫描 */
+function ecmoProbeScan(u, notes) {
+  if (u.kit === "ecmo" && u.resources && u.resources.probe && !u.hidden && !u.dead) {
+    (u.resources.probeZones = u.resources.probeZones || []).push(Number(u.zone));
+    heluScanAct(u, { dest: Number(u.zone), act: "spawn" }, notes);
+  }
+}
+/** 夏「狂怒碾压」：抓住目标时每回合开始自动碾压一次。夕夏濒死（倒地没起身）、晕眩或死了就不自动碾压（以前照碾） */
+function xiaAutoCrush(u, notes) {
+  if (u.kit === "xia" && isCrushing(u) && !u.dead && !u.dying && !u.stunned) {
+    const ct = crushingTarget(u);
+    u.zone = Number(ct.zone);
+    notes.push(...crushOnce(u, ct, true));
+  }
+}
+/** 诺拉：「压力升高」下回合开始必定残忍；「双相冲动」每回合开始 1/3 翻面（双相冲动+ 不再随机翻面）；刺入目标超出距离 1 就结束 */
+function noraRoundStart(u, notes) {
+  if (u.kit !== "nora" || !(typeof passiveOn !== "function" || passiveOn(u))) return;
+  u.resources = u.resources || {};
+  if (u.resources.forceCruelNext) {
+    u.resources.forceCruelNext = false;
+    setMood(u, "cruel", notes, "压力升高");
+  } else if (!(typeof passivePlus === "function" && passivePlus(u, 2)) && Math.random() < 1 / 3) {   // 双相冲动+：不再随机翻面
+    flipMood(u, notes, "双相冲动");
+  }
+  const pinBefore = u.resources.piercedId;
+  if (pinBefore && !piercedTarget(u)) notes.push("刺入目标已超出距离 1，刺入结束。");
+}
+/** 夕夏引擎：一回合（从自己上一个回合开始算起）没攻击就熄火 */
+function xiaEngineCheck(u, notes) {
+  if (u.kit !== "xia" || !u.resources) return;
+  // 背水一战：起身（靠坚毅生命）继续战斗时总是启动引擎，一回合没攻击也不熄火
+  const backWater = u.upOnShp && !u.dead && (typeof passiveOn !== "function" || passiveOn(u));
+  if (u.resources.engine && !u.resources.attackedThisTurn && !u.resources.engineJustOn && !backWater) {
+    u.resources.engine = false;
+    notes.push("夕夏一回合未攻击，引擎关闭。");
+  } else if (u.resources.engineJustOn) {
+    notes.push("夕夏引擎刚启动：本回合即使未攻击也不关闭。");
+  }
+  u.resources.engineJustOn = false;
+  u.resources.attackedThisTurn = false;
+}
+/** 自我效果每回合开始：焚身结算、霜结 1 冰击破、蓄能 +等级（川川「高能脉冲」）、溅射（酸雨回复） */
+function selfRoundStart(u, weather, notes) {
+  if (u.self === "burn") {
+    notes.push(...tickSelfBurn(u, true));
+  }
+  if (u.self === "frost") {
+    // 霜结每回合开始 1 冰击破：雪天只让冻伤和冻土的击破翻倍，这里不翻倍
+    dealBreak(u, 1, "ice", notes, "霜结");
+  }
+  if (u.self === "store") {
+    u.highEnergy = (u.highEnergy || 0) + (u.level || 1);
+    notes.push(`${u.name} 蓄能 +${u.level} → ${u.highEnergy}`);
+    checkHighBoom(u);
+  }
+  if (weather === "acid" && u.self === "splash") {
+    const regen = (u.level || 1) * envMult(u);
+    healUnit(u, regen);
+    notes.push(`${u.name} 酸雨溅射回复 ${regen}`);
+  }
+}
+/** 托乌「圣盾荣耀」：每回合开始圣盾 +1（最多 3） */
+function touShieldTick(u, notes) {
+  if (u.kit === "tou" && u.resources && (typeof passiveOn !== "function" || passiveOn(u))) {
+    u.resources.shield = Math.min(3, (u.resources.shield || 0) + 1);
+    notes.push(`${u.name} 圣盾 +1 → ${u.resources.shield}`);
+  }
+}
+/** 护盾层「这一回合没挨打就回满」（这一回合 = 从自己上一个回合开始算起）：只回满单位自带的那部分，临时护盾扣掉的不回来（max 已经跟着减掉了）。
+ *  blocked：这一次不回满（过载结束清零、熔融打坏的护盾以一半恢复）。挨打的记号在这里清掉，重新开始算 */
+function refillShieldIfUnhit(u, blocked) {
+  if (!u.gotHitThisTurn && !blocked) {
+    syncTempShield(u);
+    (u.layers || []).forEach(l => {
+      if (l.type === "shield") { l.current = l.max; l._lastCur = l.current; }
+    });
+  }
+  u.gotHitThisTurn = false;
+}
+/** 即时效果到点（回合开始）·前半：错位换回、过载结束清零护盾、熔融打坏的护盾以一半恢复。held：黄金时间这次保留的。
+ *  late：只结算在敌人回合行动的一方（敌人、在敌人回合行动的玩家阵营）施加的（lateRoundStart，#476）；false 只结算别的（beginRound）。
+ *  返回 true = 这一次不按「没挨打」回满护盾 */
+function instantTurnStartA(u, notes, held, late) {
+  const mine = k => lateFx(u, k) === !!late;
+  let noRefill = false;
+  if (u.instant && u.instant.shift && mine("shift") && held.indexOf("shift") < 0) {
+    clearShift(u);
+    notes.push(`${u.name} 错位结束，血层顺序恢复。`);
+  }
+  // 黄金时间延长的过载这回合不结束；还在飞的高压巡逻艇一直过载（下面重新给它过载），旧的过载不在这里清零护盾（enemies.js · boatKeepsOverload）
+  if (mine("overload") && held.indexOf("overload") < 0 && typeof overloadRoundStart === "function" && !(typeof boatKeepsOverload === "function" && boatKeepsOverload(u)) && overloadRoundStart(u, notes)) noRefill = true;
+  // 熔融打坏的护盾：跟着熔融是谁施加的（在敌人回合行动的一方施加的到敌人回合开始才以一半恢复）
+  if (mine("melt") && typeof meltShieldRoundStart === "function" && meltShieldRoundStart(u, notes)) noRefill = true;
+  return noRefill;
+}
+/** 即时效果到点（回合开始）·后半：即时效果都是单回合的，没被用掉的也在这时失效；黄金时间延长的多保留一回合（只延长一回合）。参数同上 */
+function instantTurnStartB(u, notes, held, late) {
+  if (!u.instant) return;
+  const mine = k => lateFx(u, k) === !!late;
+  const gone = [];
+  // 过热熔融（沙灵聚合体开炮后）：留到开炮之后那个我方回合结束
+  const meltHold = u.resources && Number(u.resources.meltHoldTurn) >= Number(state.turnNo);
+  if (u.instant.melt && mine("melt") && held.indexOf("melt") < 0 && !meltHold) { u.instant.melt = false; gone.push("熔融"); }
+  if (u.instant.sting && mine("sting") && held.indexOf("sting") < 0) { u.instant.sting = false; gone.push("刺骨"); }
+  if (u.instant.spread && mine("spread") && held.indexOf("spread") < 0) { u.instant.spread = false; gone.push("扩散"); }
+  if (u.instant.refract && mine("refract") && held.indexOf("refract") < 0) { u.instant.refract = false; gone.push("折射"); }
+  if (gone.length) notes.push(`${u.name} ${gone.join("、")}结束。`);
+  if (held.length) notes.push(`${u.name} 黄金时间：${held.map(k => INSTANT_NAME[k] || k).join("、")}再保留一回合。`);
+  // 只延长一回合：延长的那一种这一次到点了才用掉（还有另一边施加、还没到点的就留着）
+  if (u.instant.goldHold && !goldHeldInstants(u).some(k => !mine(k))) u.instant.goldHold = false;
+  // 在敌人回合行动的一方施加的：已经失效（这里清掉的，或者早就被用掉的）不再记
+  if (late) Object.keys(INSTANT_NAME).forEach(k => { if (!u.instant[k]) dropLateFx(u, k); });
 }
 
 /** 不在场上的单位：收回的武器人、合体中的、已经死掉 / 移除的。回合开始 / 结束的结算都跳过它们 */
@@ -2010,7 +2062,8 @@ function offField(u) {
   return !u || !!(u.hidden || u.fused || u.dead || u._removed);
 }
 
-/** 回合开始时会结束的即时效果（玩家手册第四章「即时效果」：单回合生效） */
+/** 回合开始时会结束的即时效果（玩家手册第四章「即时效果」：单回合生效）。从施加起要经过一个我方回合和一个敌人回合：
+ *  持续到施加的人那一队下一个回合开始之前——我方施加的到整轮开始（beginRound），敌人施加的到敌人回合开始（lateRoundStart，#476） */
 const INSTANT_NAME = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
 /** 黄金时间延长的即时效果：instant.goldHold 为 true 时是身上现有的全部即时效果，写成效果名（如 "melt"）时只延长那一种 */
 function goldHeldInstants(u) {
@@ -2020,9 +2073,11 @@ function goldHeldInstants(u) {
   return keys.filter(k => INSTANT_NAME[k] && u.instant[k]);
 }
 
-function releaseAcidCharges(notes) {
+/** 扭矩酸液炮蓄力「下回合开始」爆发。late：只放在敌人回合行动的阵营里的扭矩（它自己那一队的回合开始，lateRoundStart，#476）；
+ *  false 只放别的（beginRound） */
+function releaseAcidCharges(notes, late) {
   state.units.forEach(u => {
-    if (u.kit === "torque" && u.resources && u.resources.acidCharge != null && !u.hidden && !u.dead) {
+    if (u.kit === "torque" && lateTurn(u) === !!late && u.resources && u.resources.acidCharge != null && !u.hidden && !u.dead) {
       const z = Number(u.resources.acidCharge);
       u.resources.acidCharge = null;
       notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
@@ -2147,6 +2202,7 @@ function playerTurnStart(u, notes) {
   }
   if (u.resources && u.resources.gambitArmed) {
     u.resources.gambitArmed = false;
+    markTurnFx(u, "gambitStrike", u);   // 双倍攻击到这一回合结束；在敌人回合行动的阵营撑到自己的下一个回合开始（#476）
     u.resources.gambitStrike = true;
     u.resources.gambitWound = false;   // 受伤翻倍到这里（自己下一次行动前）为止
     notes.push(`${u.name} 破釜沉舟：本回合攻击双倍；受伤翻倍结束。`);
@@ -2182,12 +2238,266 @@ function playerTurnEnd(phase) {
       delete u.resources.whetDice;
     }
   });
+  // 瑞比「收发代理」无人机、明特机甲（#476）：在敌人回合行动的阵营里的瑞比在自己的回合结束时结算；别的瑞比照旧在整轮结束（turnEnd）
+  if (phase === "enemy") {
+    const notes = [];
+    state.units.forEach(u => { if (u.kit === "ruby" && lateTurn(u) && !offField(u)) rubyRoundEnd(u, notes); });
+    if (notes.length) appendLog(notes.join("\n"));
+  }
+}
+
+/* ---------- PvP：各队自己的回合（#476，作者 10/29，docs/pvp.md 第 2.1 节） ----------
+ * 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）自己的回合是敌人回合。#453 起补行动点 / 附赠、晕眩恢复、准备 / 磨刀、
+ * 破釜沉舟生效、拉斯缪尔 +20% 能量、汲取已经跟着各队自己的回合（playerTurnStart / playerTurnEnd），这里把剩下的也挪过去：
+ *   A 「每回合开始 / 下回合开始」：这些人的在自己那一队的回合开始结算（startEnemyPhase · lateRoundStart，在它们的 playerTurnStart 之前），
+ *     整轮开始（beginRound）跳过它们；
+ *   B 「本回合内」、C 即时效果：它们放的（放在谁身上都一样）撑到施放者那一队下一个回合开始之前（下一个敌人回合开始：lateRoundEnd /
+ *     lateRoundStart）才失效——放的时候在被施加的单位上记一笔（markTurnFx → u.lateFx），整轮结束 / 整轮开始跳过记了的；
+ *   D 护盾层「这一回合没挨打就回满」：这些人在自己那一队的回合开始时判（从自己上一个回合开始到现在没挨打）。
+ * 别人（在我方回合行动的玩家、非玩家单位）放的「本回合」效果、别人每回合的效果照旧。普通 PvE（没有在敌人回合行动的玩家阵营）lateTurn 永远是 false，
+ * A、B、D 和以前一模一样。持续伤害、场地、天气（沙暴风向）照旧整轮统一结算（作者 10/29）。
+ * C 即时效果 PvE 也改（作者 10/29 追加）：施加的人那一队在敌人回合行动就记——非玩家单位（敌人等）施加的也一样（instantLate），
+ * 例：敌人在敌人回合打在我方身上的熔融撑过下一个我方回合，到下一个敌人回合开始之前才失效；我方回合行动的人施加的照旧在整轮开始失效 */
+
+/** u 那一队在敌人回合行动：在敌人回合行动的玩家阵营里的玩家角色（武器人跟着持有者、替身跟着操控它的人，enemies.js · playerFactionOf） */
+function lateTurn(u) {
+  if (!u || typeof pvpOn !== "function" || !pvpOn()) return false;
+  return playerFactionOf(u) != null && unitTurnPhase(u) === "enemy";
+}
+/** 即时效果的施加者 by 那一队在敌人回合行动（C，作者 10/29 追加：PvE 也改）：非玩家单位（敌人、友军这些都在敌人回合行动），
+ *  和在敌人回合行动的玩家阵营里的角色（lateTurn）。它施加的即时效果撑到下一个敌人回合开始之前。施加者不知道（null）照旧 */
+function instantLate(by) {
+  if (!by) return false;
+  return typeof unitTurnPhase === "function" ? unitTurnPhase(by) === "enemy" : !by.isPlayer;
+}
+/** u 现在在自己的第几回合里（从 u 那一队上一个回合开始算）：在敌人回合行动的阵营是最近一个敌人回合开始时的回合数（state.lateRound，
+ *  startEnemyPhase 记）——它们的「一回合」= 自己的敌人回合 + 对手接下来的我方回合；别人就是 state.turnNo */
+function ownRound(u) {
+  return lateTurn(u) ? Number(state.lateRound) || 0 : Number(state.turnNo) || 0;
+}
+/** 现在是不是在敌人回合行动的阵营的回合里（这一回合的敌人回合开始以后、整轮结束之前）：这时整轮结束比下一个敌人回合开始早 */
+function lateRoundNow() {
+  return (Number(state.lateRound) || 0) === (Number(state.turnNo) || 0);
+}
+/** 「本回合」效果 / 即时效果现在挂着没有（键就是 u.lateFx 里记的名字；markTurnFx 判断重复施加用） */
+const TURN_FX_ON = {
+  sturdy: u => !!(u.statuses && u.statuses.sturdy),
+  weakFear: u => !!(u.statuses && u.statuses.weakFear),
+  inspire: u => !!(u.statuses && u.statuses.inspire),
+  noMove: u => !!u.noMove,
+  lockdownBy: u => u.lockdownBy != null,
+  coverBy: u => u.coverBy != null,
+  gritTurn: u => !!(u.resources && u.resources.gritTurn),
+  standTurn: u => !!(u.resources && u.resources.standTurn),
+  guardStrike: u => !!(u.resources && u.resources.guardStrike),
+  allReflect: u => !!(u.resources && u.resources.allReflect),
+  gambitStrike: u => !!(u.resources && u.resources.gambitStrike),
+  shelterTurn: u => !!u.shelterTurn,
+  harshEnv: u => !!u.harshEnv,
+  doubleStatus: u => !!(u.instant && u.instant.doubleStatus),
+  omenArmed: u => !!(u.instant && u.instant.omenArmed),
+  duetAtk: u => (Number(u.duetAtk) || 0) > 0,
+  shieldDown: u => !!u._shieldRestoreAtTurnEnd
+};
+Object.keys(INSTANT_NAME).forEach(k => { TURN_FX_ON[k] = u => !!(u.instant && u.instant[k]); });
+/** u 身上的 key 是在敌人回合行动的阵营放的（撑到下一个敌人回合开始）；即时效果也包括非玩家单位施加的（instantLate） */
+function lateFx(u, key) { return !!(u && u.lateFx && u.lateFx[key]); }
+function dropLateFx(u, key) {
+  if (!lateFx(u, key)) return;
+  delete u.lateFx[key];
+  if (!Object.keys(u.lateFx).length) delete u.lateFx;
+}
+/** 施放者 by 给 u 挂「本回合」效果 / 即时效果 key（在挂上之前调）：by 那一队在敌人回合行动就在 u 身上记一笔，撑到下一个敌人回合开始；
+ *  别人放的不记，照旧。「本回合」效果只看在敌人回合行动的玩家阵营（lateTurn，普通 PvE 不记）；即时效果连非玩家单位施加的也记（instantLate）。
+ *  by 不给（undefined）就看现在是谁在行动（actingPlayerId） */
+function markTurnFx(u, key, by) {
+  if (!u) return;
+  if (by === undefined) { const id = actingPlayerId(); by = id != null ? unitById(id) : null; }
+  setLateFx(u, key, INSTANT_NAME[key] ? instantLate(by) : lateTurn(by));
+}
+/** 给 u 的 key 记 / 不记「撑到下一个敌人回合开始」（late）。u 身上已经挂着同一种的：哪一份更晚失效按哪一份（重复施加不会变短）——
+ *  在敌人回合行动的阵营的回合里（lateRoundNow）整轮结束在下一个敌人回合开始之前，记了的更晚；别的时候反过来，没记的更晚 */
+function setLateFx(u, key, late) {
+  const was = lateFx(u, key);
+  if (!late && !was) return;   // 普通 PvE 总是走这里
+  const on = !!(TURN_FX_ON[key] && TURN_FX_ON[key](u));
+  const keep = !on ? late : lateRoundNow() ? (late || was) : (late && was);
+  if (keep) (u.lateFx = u.lateFx || {})[key] = true;
+  else dropLateFx(u, key);
+}
+/** 「本回合」效果 key 到点失效（turnEnd 清别人放的；lateRoundEnd 清在敌人回合行动的阵营放的，late = true）。日志照旧 */
+function expireTurnFx(u, key, notes, late) {
+  const st = u.statuses, r = u.resources;
+  if (key === "sturdy") {
+    if (st && st.sturdy) { st.sturdy = false; notes.push(`${u.name} 坚挺结束`); }
+  } else if (key === "weakFear") {
+    if (st && st.weakFear) {
+      st.weakFear = false;
+      if (st.weak) { st.weak = false; notes.push(`${u.name} 恐惧怒吼的虚弱结束`); }
+    }
+  } else if (key === "inspire") {
+    if (st && st.inspire && !st.inspireStay) { st.inspire = false; notes.push(`${u.name} 振奋结束`); }
+  } else if (key === "noMove") {
+    // 年糕咬住记了 noMoveUntil：持续到那个敌人回合结束（下一个敌人回合开始时还没到）；其余禁足到这一回合结束
+    const until = Number(u.noMoveUntil), now = Number(state.turnNo);
+    if (u.noMove && !(late ? until >= now : until > now)) {
+      u.noMove = false;
+      u.noMoveUntil = null;
+      notes.push(`${u.name} 解除禁足`);
+    }
+  } else if (key === "coverBy") {
+    if (u.coverBy) u.coverBy = null;
+  } else if (key === "gritTurn") {
+    if (r && r.gritTurn) { r.gritTurn = false; notes.push(`${u.name} 咬牙坚持结束。`); }
+  } else if (key === "standTurn") {
+    if (r && r.standTurn) { r.standTurn = false; notes.push(`${u.name} ${r.reviveGuard ? "还魂" : "屹立不倒"}结束。`); }
+    if (r && r.reviveGuard) r.reviveGuard = false;
+  } else if (key === "guardStrike") {
+    if (r && r.guardStrike) { r.guardStrike = false; r.guardStrikeUsed = false; }
+  } else if (key === "allReflect") {
+    if (r && r.allReflect) r.allReflect = false;
+  } else if (key === "gambitStrike") {
+    if (r && r.gambitStrike) r.gambitStrike = false;
+  } else if (key === "shelterTurn") {
+    if (u.shelterTurn) { u.shelterTurn = false; u.isolate = false; }
+  } else if (key === "harshEnv") {
+    if (u.harshEnv) u.harshEnv = false;
+  } else if (key === "doubleStatus") {
+    if (u.instant && u.instant.doubleStatus) {
+      u.instant.doubleStatus = false;
+      if (typeof syncShockwave === "function") syncShockwave(u, notes);   // 震荡扣的上限回到 2
+    }
+  } else if (key === "omenArmed") {
+    if (u.instant && u.instant.omenArmed) {
+      if (u.stunned || u.instant.omenHit) {
+        const caster = unitById(u.instant.omenFrom);
+        if (caster && caster.resources && caster.resources.roleOnce) caster.resources.roleOnce.omen = Math.max(0, (caster.resources.roleOnce.omen || 1) - 1);
+        notes.push(`${u.name} 已被击破，击破预告返还次数。`);
+      } else {
+        const caster = unitById(u.instant.omenFrom);
+        if (caster && !caster.noPosture) {
+          caster.def = 0;
+          caster.stunned = true;
+          notes.push(`击破预告失败：${caster.name} 架势被击破。`);
+          notes.push(imbalanceLine(caster));
+          if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(caster, notes);
+        }
+      }
+      u.instant.omenArmed = false;
+      u.instant.doubleBreak = false;
+    }
+  }
+  if (late) dropLateFx(u, key);
+}
+/** 整轮结束（turnEnd）里「本回合」效果失效的先后：前三种在瑞比的无人机之前，其余在后面（和以前的顺序一样） */
+const TURN_FX_HEAD = ["sturdy", "weakFear", "inspire"];
+const TURN_FX_TAIL = ["noMove", "coverBy", "gritTurn", "standTurn", "guardStrike", "allReflect", "gambitStrike", "shelterTurn", "harshEnv", "doubleStatus", "omenArmed"];
+/** 铁壁撑过回合：川川电能 +2（发电站+ +3），盾牌撤掉（turnEnd；在敌人回合行动的阵营的川川展开的到下一个敌人回合开始，#476） */
+function settleIronWall(p, notes) {
+  if (p.hp > 0 && !p._brokeWall) {
+    const gain = typeof passivePlusKit === "function" && passivePlusKit("chuan", 1) ? 3 : 2;   // 发电站+：铁壁积攒的电能 +1
+    addCharge(gain);
+    notes.push(`铁壁撑过回合，川川电能 +${gain}。`);
+  }
+  state.props = (state.props || []).filter(x => x.id !== p.id);
+}
+/** 中和感电打掉的护盾回满（turnEnd；在敌人回合行动的阵营施加的到下一个敌人回合开始，#476） */
+function restoreNeutralizedShield(u, notes) {
+  syncTempShield(u);
+  (u.layers || []).forEach(l => {
+    if (l.type === "shield") { l.current = l.max || l.current; l._lastCur = l.current; }
+  });
+  u._shieldRestoreAtTurnEnd = false;
+  dropLateFx(u, "shieldDown");
+  notes.push(`${u.name} 护盾在回合结束时回满（中和·感电）。`);
+}
+
+/** 在敌人回合行动的阵营的「一回合」结束：下一个敌人回合开始（startEnemyPhase 一开始，它们的回合开始之前）。
+ *  它们放的「本回合」效果到这里才失效（B），剑术+ 留附赠、思念+ 也按它们自己的一回合算。普通 PvE 什么都不做 */
+function lateRoundEnd(notes) {
+  if (typeof pvpOn !== "function" || !pvpOn()) return;
+  // 锁定（天气 / 场地）、禁足怒吼「只能攻击施放者」（turnEnd · releaseTurnLocks 跳过了这几个）
+  if (state.weatherLockTurn === "late") {
+    state.weatherLockTurn = false;
+    if (state.weatherLock) { state.weatherLock = null; notes.push("天气锁定结束。"); }
+  }
+  Object.keys(state.fields || {}).forEach(z => {
+    const f = state.fields[z];
+    if (f && f.fieldLockTurn === "late") {
+      f.fieldLockTurn = false;
+      if (f.fieldLock) { f.fieldLock = null; notes.push(`${z} 区场地锁定结束。`); }
+    }
+  });
+  (state.units || []).forEach(u => { if (u && lateFx(u, "lockdownBy")) { u.lockdownBy = null; dropLateFx(u, "lockdownBy"); } });
+  (state.units || []).forEach(u => {
+    if (!u || !lateTurn(u)) return;
+    // 剑术+：自己这一回合切换刀势得到、还没用掉的附赠动作，留到自己的下一回合（再下一回合就过期）
+    stanceCarryOver(u, notes);
+  });
+  // 思念+：被牵挂的队友在敌人回合行动——它自己这一回合（上一个敌人回合开始到现在）没受过伤
+  bondRoundEnd(notes, true);
+  (state.units || []).forEach(u => {
+    if (offField(u) || !u.lateFx) return;   // 收回的武器人 / 死掉的单位：和 turnEnd 一样不清，回到场上以后再算
+    TURN_FX_HEAD.concat(TURN_FX_TAIL).forEach(k => { if (lateFx(u, k)) expireTurnFx(u, k, notes, true); });
+    if (lateFx(u, "shieldDown")) { if (u._shieldRestoreAtTurnEnd) restoreNeutralizedShield(u, notes); else dropLateFx(u, "shieldDown"); }
+  });
+  // 铁壁：在敌人回合行动的阵营的川川展开的，撑过了对手的回合
+  (state.props || []).filter(p => p.kind === "ironwall" && lateFx(p, "ironwall")).forEach(p => settleIronWall(p, notes));
+  expireWaveWalls(notes, true);
+}
+/** 在敌人回合行动的阵营自己的回合开始（startEnemyPhase，lateRoundEnd 之后、它们的 playerTurnStart 之前）：
+ *  它们每回合开始的效果（A，整轮开始跳过了它们）、它们施加的即时效果到点（C）、它们的护盾层没挨打就回满（D）。
+ *  普通 PvE 只有 C：敌人（非玩家单位）施加的即时效果在这里到点（作者 10/29 追加），A、D 没有人 */
+function lateRoundStart(notes) {
+  const late = (state.units || []).filter(u => lateTurn(u));
+  // A：和 beginRound 同一个先后
+  const xia = late.find(u => u.kit === "xia");
+  if (xia) xiaBackwaterFuel(xia, notes);
+  const yu = late.find(u => u.kit === "yuito");
+  if (yu) yuitoGrinder(yu, notes);
+  late.forEach(u => torqueDivertEnd(u, notes));
+  late.forEach(u => ecmoProbeScan(u, notes));
+  (state.units || []).forEach(u => {
+    if (lateFx(u, "duetAtk")) { dropLateFx(u, "duetAtk"); if (u.duetAtk) { notes.push(`${u.name} 双重奏的 atk +${u.duetAtk} 消失。`); u.duetAtk = 0; } }
+  });
+  late.forEach(u => { if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); } });
+  if (typeof featHook === "function") late.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
+  // 每个单位和 beginRound 同一个先后：碾压、诺拉 → C：在敌人回合行动的一方施加的即时效果（放在谁身上都一样）→ 霜结的免疫、引擎；
+  // D 要等过载清零护盾之后再判
+  const noRefill = new Set();
+  (state.units || []).forEach(u => {
+    if (!u) return;
+    const own = late.indexOf(u) >= 0;
+    if (own) xiaAutoCrush(u, notes);
+    if (own) noraRoundStart(u, notes);
+    if (u.lateFx) {
+      const held = goldHeldInstants(u).filter(k => lateFx(u, k));
+      if (instantTurnStartA(u, notes, held, true)) noRefill.add(u);
+      instantTurnStartB(u, notes, held, true);
+    }
+    if (own && u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
+    if (own) xiaEngineCheck(u, notes);
+  });
+  late.forEach(u => {
+    if (offField(u)) return;   // 和整轮开始一样：不在场上的不吃自我效果、不回护盾
+    if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
+    selfRoundStart(u, currentWeatherFor(u), notes);
+    touShieldTick(u, notes);
+    refillShieldIfUnhit(u, noRefill.has(u));
+  });
+  releaseAcidCharges(notes, true);
 }
 
 function startEnemyPhase() {
   const notes = ["—— 敌人回合 ——"];
   if (typeof escortAct === "function") escortAct(notes);   // 护送的人物先躲 / 还击
+  // 在敌人回合行动的玩家阵营（#476）：它们的上一回合到这里结束（放的「本回合」效果失效），然后开始自己的这一回合（每回合开始的效果、
+  // 它们施加的即时效果到点、护盾回满）——都在补行动点之前，和我方回合的整轮结束 → 整轮开始 → 补行动点一样。
+  // 敌人（非玩家单位）施加的即时效果也在这里到点，普通 PvE 也是（作者 10/29 追加）
+  lateRoundEnd(notes);
+  state.lateRound = Number(state.turnNo) || 0;
   state.combatPhase = "enemy";
+  lateRoundStart(notes);
   // 在敌人回合行动的玩家阵营（#445）：这时补行动点 / 附赠（和我方回合开始一样结算），玩家角色比非玩家单位先动
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead || typeof unitTurnPhase !== "function" || unitTurnPhase(u) !== "enemy") return;
@@ -2259,24 +2569,10 @@ function turnEnd() {
   releaseTurnLocks(notes);
   if (typeof spiderRoundEnd === "function") spiderRoundEnd(notes);   // 陨体衍蛛：到点复活
   if (typeof desertRoundEnd === "function") desertRoundEnd(notes);   // 夜晚的尘虫迁徙 / 离开
-  // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）
-  state.units.forEach(u => {
-    const g = u.kit === "hiaki" && u.resources && u.resources.stanceGrant;
-    if (!g || g.turn !== Number(state.turnNo)) return;
-    const n = Math.min(Number(u.bonus) || 0, g.n);
-    u.resources.stanceGrant = null;
-    if (n > 0) { u.resources.stanceCarry = { turn: Number(state.turnNo) + 1, n }; notes.push(`剑术+：${u.name} 还有 ${n} 个切换刀势得到的附赠动作，留到下回合。`); }
-  });
-  // 思念+：被牵挂的队友这一回合没受过伤 → 恢复 1 架势且 atk +10（可叠加）
-  {
-    const yu = findKit("yuito", state.units);
-    const ally = yu && yu.resources && yu.resources.bondId ? unitById(yu.resources.bondId) : null;
-    if (ally && !ally.dead && !yu.dead && typeof passivePlus === "function" && passivePlus(yu, 2) && ally._hurtRound !== Number(state.turnNo)) {
-      ally.def = Math.min(Number(ally.defMax) || 0, (Number(ally.def) || 0) + 1);
-      ally.bondAtk = (Number(ally.bondAtk) || 0) + 10;
-      notes.push(`思念+：${ally.name} 这一回合没有受伤，恢复 1 架势，atk +10（累计 +${ally.bondAtk}）。`);
-    }
-  }
+  // 剑术+：这一回合切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期）。在敌人回合行动的阵营的绯秋按她自己的一回合算（lateRoundEnd，#476）
+  state.units.forEach(u => { if (!lateTurn(u)) stanceCarryOver(u, notes); });
+  // 思念+：被牵挂的队友这一回合没受过伤 → 恢复 1 架势且 atk +10（可叠加）。队友在敌人回合行动时按它那一队的回合算（lateRoundEnd，#476）
+  bondRoundEnd(notes, false);
   state.units.forEach(u => {
     if (offField(u)) return;   // 收回的武器人 / 死掉的单位：灼烧不叠层、不掉血
     const weather = currentWeatherFor(u);
@@ -2327,107 +2623,19 @@ function turnEnd() {
       dealBreak(u, br * sm, "ice", notes, sm > 1 ? "冻伤 ×2（加倍计量）" : "冻伤");
     }
     // 过载：护盾在下回合开始时清零（effects.js · overloadRoundStart）
-    if (u.statuses && u.statuses.sturdy) {
-      u.statuses.sturdy = false;
-      notes.push(`${u.name} 坚挺结束`);
-    }
-    if (u.statuses && u.statuses.weakFear) {
-      u.statuses.weakFear = false;
-      if (u.statuses.weak) { u.statuses.weak = false; notes.push(`${u.name} 恐惧怒吼的虚弱结束`); }
-    }
-    if (u.statuses && u.statuses.inspire && !u.statuses.inspireStay) {
-      u.statuses.inspire = false;
-      notes.push(`${u.name} 振奋结束`);
-    }
+    // 「本回合」效果到这一回合结束；在敌人回合行动的阵营放的（u.lateFx 记了的）撑到下一个敌人回合开始（lateRoundEnd，#476）
+    TURN_FX_HEAD.forEach(k => { if (!lateFx(u, k)) expireTurnFx(u, k, notes); });
     // 扬尘体的沙尘回复在回合开始（沙尘层的通用回复，被击落的那一回合不回），这里不再另回一次
     if (u.kit === "boomcar" && u.resources && u.resources.fuse != null) {
       u.resources.fuse -= 1;
     }
-    if (u.kit === "ruby" && u.resources && u.resources.drone && !u.dead && !u.hidden) {
-      // 收发代理：平时提取纳米；机甲里改为对高能敌人（没有就血量最少的）发射两次 0.2atk+1d12 能量激光，耗 10 纳米
-      if (!u.resources.mecha) {
-        addNano(10);
-        notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
-      } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
-        // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
-        // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
-        // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣。
-        // 瑞比开着友伤（enemies.js · friendlyFirePick，#432）：她以外的队友也在名单里，挑法照旧（高能的优先，再挑血量最少的）；
-        // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，她的阵营单独设成友好的敌人阵营不在
-        const foes = fieldUnits().filter(x => (typeof autoFoe === "function" ? autoFoe(u, x) : !x.isPlayer) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
-          zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
-          !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
-          !(typeof playerAllied === "function" && playerAllied(x, u)));   // 友军按瑞比的玩家阵营看（#445）
-        const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
-        const pool = high.length ? high : foes;
-        const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
-        if (tgt) {
-          const paid = spendNano(10, { ruby: u });
-          notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（${nanoSpentText(u, paid)}）。`);
-          const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
-          for (let i = 0; i < shots && !tgt.dead; i++) {
-            // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
-            hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
-          }
-        } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
-      } else notes.push(`银翼·收发代理：纳米${nanoReserveOf(u) ? "（含储备能源）" : ""}不足 10，无人机这回合没有发射。`);
-    }
-    if (u.kit === "ruby" && u.resources && u.resources.mecha) {
-      const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
-      // 纳米不够的差额从储备能源扣；两边都扣光才因为纳米耗尽退出机甲（#219）
-      const paid = spendNano(cost, { ruby: u, partial: true });
-      notes.push(`${u.name} 机甲维持：${paid.reserve ? nanoSpentText(u, paid) : `纳米 −${cost} → ${u.resources.nano}`}`);
-      if (nanoAvailable(u) <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
-    }
-    // 年糕咬住记了 noMoveUntil：持续到下一个敌人回合结束；其余禁足到这一回合结束
-    if (u.noMove && !(Number(u.noMoveUntil) > Number(state.turnNo))) {
-      u.noMove = false;
-      u.noMoveUntil = null;
-      notes.push(`${u.name} 解除禁足`);
-    }
-    if (u.coverBy) u.coverBy = null;
-    if (u.resources) {
-      if (u.resources.gritTurn) { u.resources.gritTurn = false; notes.push(`${u.name} 咬牙坚持结束。`); }
-      if (u.resources.standTurn) { u.resources.standTurn = false; notes.push(`${u.name} ${u.resources.reviveGuard ? "还魂" : "屹立不倒"}结束。`); }
-      if (u.resources.reviveGuard) u.resources.reviveGuard = false;
-      if (u.resources.guardStrike) { u.resources.guardStrike = false; u.resources.guardStrikeUsed = false; }
-      if (u.resources.allReflect) u.resources.allReflect = false;
-      if (u.resources.gambitStrike) u.resources.gambitStrike = false;
-    }
-    if (u.shelterTurn) { u.shelterTurn = false; u.isolate = false; }
-    if (u.harshEnv) u.harshEnv = false;
-    if (u.instant && u.instant.doubleStatus) {
-      u.instant.doubleStatus = false;
-      if (typeof syncShockwave === "function") syncShockwave(u, notes);   // 震荡扣的上限回到 2
-    }
-    if (u.instant && u.instant.omenArmed) {
-      if (u.stunned || u.instant.omenHit) {
-        const caster = unitById(u.instant.omenFrom);
-        if (caster && caster.resources && caster.resources.roleOnce) caster.resources.roleOnce.omen = Math.max(0, (caster.resources.roleOnce.omen || 1) - 1);
-        notes.push(`${u.name} 已被击破，击破预告返还次数。`);
-      } else {
-        const caster = unitById(u.instant.omenFrom);
-        if (caster && !caster.noPosture) {
-          caster.def = 0;
-          caster.stunned = true;
-          notes.push(`击破预告失败：${caster.name} 架势被击破。`);
-          notes.push(imbalanceLine(caster));
-          if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(caster, notes);
-        }
-      }
-      u.instant.omenArmed = false;
-      u.instant.doubleBreak = false;
-    }
+    // 瑞比在敌人回合行动的阵营里：无人机、机甲在她自己的回合结束时结算（playerTurnEnd，#476）
+    if (u.kit === "ruby" && !lateTurn(u)) rubyRoundEnd(u, notes);
+    TURN_FX_TAIL.forEach(k => { if (!lateFx(u, k)) expireTurnFx(u, k, notes); });
     // 黄金时间（instant.goldHold）在回合开始清除即时效果时认（beginRound · goldHeldInstants），这里不动
   });
-  (state.props || []).filter(p => p.kind === "ironwall").forEach(p => {
-    if (p.hp > 0 && !p._brokeWall) {
-      const gain = typeof passivePlusKit === "function" && passivePlusKit("chuan", 1) ? 3 : 2;   // 发电站+：铁壁积攒的电能 +1
-      addCharge(gain);
-      notes.push(`铁壁撑过回合，川川电能 +${gain}。`);
-    }
-    state.props = (state.props || []).filter(x => x.id !== p.id);
-  });
+  // 铁壁：在敌人回合行动的阵营的川川展开的撑到下一个敌人回合开始（lateRoundEnd，#476）
+  (state.props || []).filter(p => p.kind === "ironwall" && !lateFx(p, "ironwall")).forEach(p => settleIronWall(p, notes));
   (state.props || []).forEach(p => {
     if (p.kind === "acid" && p.hp < 3) {
       const pool = state.units.filter(u => !u.hidden && !u.dead && !u._removed &&Number(u.zone) === Number(p.zone));
@@ -2444,20 +2652,14 @@ function turnEnd() {
     if (p.kind === "turret") turretShot(p, p.faction === "enemy", notes);
   });
   state.units.forEach(u => {
-    if (u && u._shieldRestoreAtTurnEnd) {
-      syncTempShield(u);
-      (u.layers || []).forEach(l => {
-        if (l.type === "shield") { l.current = l.max || l.current; l._lastCur = l.current; }
-      });
-      u._shieldRestoreAtTurnEnd = false;
-      notes.push(`${u.name} 护盾在回合结束时回满（中和·感电）。`);
-    }
+    // 中和感电打掉的护盾：在敌人回合行动的阵营施加的到下一个敌人回合开始才回满（lateRoundEnd，#476）
+    if (u && u._shieldRestoreAtTurnEnd && !lateFx(u, "shieldDown")) restoreNeutralizedShield(u, notes);
   });
   if ((state.props || []).some(p => p.kind === "battery")) {
     notes.push(...refillBatteryFactionShields());
   }
   glowStoreTurnEnd(notes);   // 微光 · 蓄能：连续两个回合结束高能值都超过血量才自爆
-  expireWaveWalls(notes);    // 频域造物：这一整轮结束，驻波墙消失、原来的配置物恢复
+  expireWaveWalls(notes, false);   // 频域造物：这一整轮结束，驻波墙消失、原来的配置物恢复（在敌人回合行动的阵营放的到下一个敌人回合开始）
   releaseButtons(notes);
   notes.push(...advancePhaseWeather());
   settleBossStuns(notes);
@@ -2471,6 +2673,69 @@ function turnEnd() {
   if (typeof ratfolkSweep === "function" && !state._highDefer && !logSinkActive()) ratfolkSweep();
   presentAssistModal();
   presentBlockModal();
+}
+
+/** 剑术+：这一回合（自己的一回合，ownRound）切换刀势得到的附赠动作没用掉的，留到下回合（再下回合就过期） */
+function stanceCarryOver(u, notes) {
+  const g = u.kit === "hiaki" && u.resources && u.resources.stanceGrant;
+  const turn = ownRound(u);
+  if (!g || g.turn !== turn) return;
+  const n = Math.min(Number(u.bonus) || 0, g.n);
+  u.resources.stanceGrant = null;
+  if (n > 0) { u.resources.stanceCarry = { turn: turn + 1, n }; notes.push(`剑术+：${u.name} 还有 ${n} 个切换刀势得到的附赠动作，留到下回合。`); }
+}
+/** 思念+：被牵挂的队友这一回合（它自己的一回合，ownRound）没受过伤 → 恢复 1 架势且 atk +10（可叠加）。
+ *  late：只看在敌人回合行动的队友（lateRoundEnd）；false 只看别的（turnEnd） */
+function bondRoundEnd(notes, late) {
+  const yu = findKit("yuito", state.units);
+  const ally = yu && yu.resources && yu.resources.bondId ? unitById(yu.resources.bondId) : null;
+  if (!ally || lateTurn(ally) !== !!late) return;
+  if (late && !(Number(state.lateRound) > 0)) return;   // 第一个敌人回合开始：它自己还没有过一整回合（我方的整轮结束也是从第 1 回合结束才开始判）
+  if (!ally.dead && !yu.dead && typeof passivePlus === "function" && passivePlus(yu, 2) && ally._hurtRound !== ownRound(ally)) {
+    ally.def = Math.min(Number(ally.defMax) || 0, (Number(ally.def) || 0) + 1);
+    ally.bondAtk = (Number(ally.bondAtk) || 0) + 10;
+    notes.push(`思念+：${ally.name} 这一回合没有受伤，恢复 1 架势，atk +10（累计 +${ally.bondAtk}）。`);
+  }
+}
+/** 瑞比每回合结束：收发代理的无人机（平时提取纳米；机甲里改为对高能敌人发射激光）、明特机甲扣纳米。
+ *  整轮结束（turnEnd）；在敌人回合行动的阵营里的瑞比在她自己的回合结束（playerTurnEnd("enemy")，#476） */
+function rubyRoundEnd(u, notes) {
+  if (u.kit === "ruby" && u.resources && u.resources.drone && !u.dead && !u.hidden) {
+    // 收发代理：平时提取纳米；机甲里改为对高能敌人（没有就血量最少的）发射两次 0.2atk+1d12 能量激光，耗 10 纳米
+    if (!u.resources.mecha) {
+      addNano(10);
+      notes.push(`收发代理：无人机提取纳米 +10 → ${u.resources.nano}`);
+    } else if (nanoAvailable(u) >= 10) {   // 纳米不够的差额从储备能源扣（#219）
+      // 激光不能穿墙：隔着危墙 / 关着的门的敌人不算可选目标；一个都没有就什么都不干（不耗纳米）。
+      // 锁定前先判断够不够得着（和 dealTo 的判定一致：距离 ≤1、没躲藏、没下潜、不是友军 / 飞碟本体），
+      // 以前只看墙，锁到距离 2 / 躲藏 / 下潜的目标，激光打不出去纳米却照扣。
+      // 瑞比开着友伤（enemies.js · friendlyFirePick，#432）：她以外的队友也在名单里，挑法照旧（高能的优先，再挑血量最少的）；
+      // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，她的阵营单独设成友好的敌人阵营不在
+      const foes = fieldUnits().filter(x => (typeof autoFoe === "function" ? autoFoe(u, x) : !x.isPlayer) && !x.dead && !x.hidden && !x.fused && !lineBlocked(u.zone, x.zone) &&
+        zoneDist(Number(u.zone), Number(x.zone), Number(state.zoneMode)) <= 1 &&
+        !(x.statuses && x.statuses.hide) && !x.submerged && x.kit !== "ufo_body" &&
+        !(typeof playerAllied === "function" && playerAllied(x, u)));   // 友军按瑞比的玩家阵营看（#445）
+      const high = foes.filter(x => x.statuses && x.statuses.high);   // 蓄能单位不算高能目标
+      const pool = high.length ? high : foes;
+      const tgt = pool.slice().sort((x, y) => totalHp(x) - totalHp(y))[0];
+      if (tgt) {
+        const paid = spendNano(10, { ruby: u });
+        notes.push(`银翼·收发代理：无人机激光射向 ${tgt.name}（${nanoSpentText(u, paid)}）。`);
+        const shots = 2 + (u.resources.overdrive ? 1 : 0);   // 机体强化：无人机攻击次数 +1
+        for (let i = 0; i < shots && !tgt.dead; i++) {
+          // 每一发照普通命中的格式写进回合结束的日志（hitOne2 现在会写出伤害行）
+          hitOne2(u, tgt, { element: "energy", mult: 0.2, diceN: 1, diceS: 12, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true } }, notes);
+        }
+      } else notes.push("银翼·收发代理：没有打得到的敌人，无人机这回合什么都不干。");
+    } else notes.push(`银翼·收发代理：纳米${nanoReserveOf(u) ? "（含储备能源）" : ""}不足 10，无人机这回合没有发射。`);
+  }
+  if (u.kit === "ruby" && u.resources && u.resources.mecha) {
+    const cost = 20 + (u.resources.overdrive ? 20 : 0);   // 机体强化：每回合多耗 20
+    // 纳米不够的差额从储备能源扣；两边都扣光才因为纳米耗尽退出机甲（#219）
+    const paid = spendNano(cost, { ruby: u, partial: true });
+    notes.push(`${u.name} 机甲维持：${paid.reserve ? nanoSpentText(u, paid) : `纳米 −${cost} → ${u.resources.nano}`}`);
+    if (nanoAvailable(u) <= 0) notes.push(...exitMecha(u, "纳米耗尽，机甲结束"));
+  }
 }
 
 /** 防卫自律炮台开一炮：自动攻击 atk 最高的目标（hitPlayers：打我方还是打敌方）。
@@ -2608,6 +2873,8 @@ function pulseResonanceStatus(source, key) {
     if (key === "burn" && o.self === "burn") { appendLog(`共振：${source.name} 的灼烧分享给 ${o.name}，但自焚免疫灼烧。`); return; }
     o._resoBusy = true;
     o.statuses = o.statuses || {};
+    // 完整共享：「本回合」状态 / 即时效果什么时候失效也跟着来源（在敌人回合行动的阵营施加的撑到它们下一个回合开始，#476）
+    if (TURN_FX_ON[key]) setLateFx(o, key, lateFx(source, key));
     if (key === "burn") o.statuses.burn = (Number(o.statuses.burn) || 0) + 1;
     else if (key === "unstable" && source.statuses.unstable) { const n = []; applyUnstable(o, n); n.forEach(t => appendLog(t)); }
     else if (source.statuses[key] != null) o.statuses[key] = source.statuses[key];
@@ -2962,7 +3229,7 @@ function scoreSpend(u, ap, bonus) {
 function markPartyHurt(target, result) {
   if (!target || !target.isPlayer || !result) return;
   if ((Number(result.total) || 0) + (Number(result.shpDealt) || 0) <= 0) return;
-  target._hurtRound = Number(state.turnNo) || 0;   // 思念+：这一回合受过伤
+  target._hurtRound = ownRound(target);   // 思念+：这一回合受过伤（在敌人回合行动的阵营按它自己的一回合算，#476）
   if (result.flags && result.flags.friendlyFire) return;
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   state.battleScore.hurt = true;
@@ -4256,8 +4523,12 @@ function placeWaveWall(key, el, mode, by, notes) {
   }
   const before = gapStateText(g);
   Object.keys(g).forEach(k => delete g[k]);
+  // 放墙的人那一队在敌人回合行动（#476）：按它自己的回合数算，撑到它那一队下一个回合开始（下一个敌人回合开始，lateRoundEnd）才消失
+  const owner = by != null ? unitById(by) : null;
+  const late = lateTurn(owner);
+  const from = late ? ownRound(owner) : (Number(state.turnNo) || 1);
   Object.assign(g, { type: "wave", hp: 0, maxHp: 0, open: true, lastFrom: null,
-    wave: { el, mode, by: by != null ? by : null, until: (Number(state.turnNo) || 1) + Math.max(1, Number(WAVE_WALL.rounds) || 1) - 1, saved } });
+    wave: Object.assign({ el, mode, by: by != null ? by : null, until: from + Math.max(1, Number(WAVE_WALL.rounds) || 1) - 1, saved }, late ? { late: true } : {}) });
   if (notes) {
     notes.push(`频域造物：${key} 区之间${before === gapLabel("open") ? "" : `的${before}被暂时取代，`}出现${waveWallName(g.wave)}。`);
     notes.push(waveWallText(g.wave));
@@ -4265,13 +4536,16 @@ function placeWaveWall(key, el, mode, by, notes) {
   return null;
 }
 /** 回合结束：到期的驻波墙消失，原来的配置物原样恢复（危墙的耐久、门的开关、桥、空隙都还原）。
- *  单位总是站在区里，间隔上不会站人：恢复成危墙 / 关着的门 / 空隙时，谁在哪一区就还在哪一区（墙在期间走过去的人留在对面） */
-function expireWaveWalls(notes) {
+ *  单位总是站在区里，间隔上不会站人：恢复成危墙 / 关着的门 / 空隙时，谁在哪一区就还在哪一区（墙在期间走过去的人留在对面）。
+ *  late：只看在敌人回合行动的阵营放的墙（wave.late，下一个敌人回合开始时：until 是它们自己的回合数，过了才消失，#476）；
+ *  false 只看别的（整轮结束） */
+function expireWaveWalls(notes, late) {
   Object.keys(state.gaps || {}).forEach(k => {
     const g = state.gaps[k];
     if (!g || !g.wave) return;
     if (g.type !== "wave") { delete g.wave; return; }   // 主持人中途改过这条间隔：以主持人改的为准
-    if (Number(g.wave.until) > (Number(state.turnNo) || 1)) return;
+    if (!!g.wave.late !== !!late) return;
+    if (late ? Number(g.wave.until) >= (Number(state.turnNo) || 1) : Number(g.wave.until) > (Number(state.turnNo) || 1)) return;
     const name = waveWallName(g.wave);
     const saved = JSON.parse(JSON.stringify(g.wave.saved || emptyGap()));
     Object.keys(g).forEach(x => delete g[x]);
@@ -5507,7 +5781,8 @@ function applyCombat(target, result, attacker) {
   return notes;
 }
 
-function applyNeutralize(u) {
+/** 中和（即时效果）。by：施加的人（道具的使用者；不给就看现在是谁在行动）——中和感电打掉的护盾跟着它回满（#476） */
+function applyNeutralize(u, by) {
   const notes = [`【中和】结算 ${u ? u.name : "？"}`];
   if (!u) return notes;
   popStatus(u, "neutralize");
@@ -5561,6 +5836,7 @@ function applyNeutralize(u) {
     const shields = (u.layers || []).filter(l => l.type === "shield" && Number(l.current) > 0);
     if (shields.length) {
       shields.forEach(l => { l.current = 0; });
+      markTurnFx(u, "shieldDown", by);   // 回合结束回满：在敌人回合行动的阵营施加的到它们下一个回合开始（lateRoundEnd，#476）
       u._shieldRestoreAtTurnEnd = true;
       notes.push(`${u.name} 护盾因中和感电立刻失效，下回合结束回满。`);
     }
@@ -8182,20 +8458,21 @@ function tauntCap(u) {
   return lv >= 15 ? 4 : lv >= 5 ? 3 : 2;
 }
 /** 回合结束：职责「锁定」只锁这一回合，到点解开（主持人 / 全队集结的锁不动）；
- *  禁足怒吼「只能攻击坦克」也只到这一回合（不能移动的部分由 turnEnd 清 noMove） */
+ *  禁足怒吼「只能攻击坦克」也只到这一回合（不能移动的部分由 turnEnd 清 noMove）。
+ *  在敌人回合行动的阵营放的（锁记成 "late"、u.lateFx 记了 lockdownBy）撑到下一个敌人回合开始（lateRoundEnd，#476） */
 function releaseTurnLocks(notes) {
-  if (state.weatherLockTurn) {
+  if (state.weatherLockTurn && state.weatherLockTurn !== "late") {
     state.weatherLockTurn = false;
     if (state.weatherLock) { state.weatherLock = null; if (notes) notes.push("天气锁定结束。"); }
   }
   Object.keys(state.fields || {}).forEach(z => {
     const f = state.fields[z];
-    if (f && f.fieldLockTurn) {
+    if (f && f.fieldLockTurn && f.fieldLockTurn !== "late") {
       f.fieldLockTurn = false;
       if (f.fieldLock) { f.fieldLock = null; if (notes) notes.push(`${z} 区场地锁定结束。`); }
     }
   });
-  (state.units || []).forEach(u => { if (u.lockdownBy) u.lockdownBy = null; });
+  (state.units || []).forEach(u => { if (u.lockdownBy && !lateFx(u, "lockdownBy")) u.lockdownBy = null; });
 }
 
 /** 职责技能里「N 级起加强」看的等级：专长的涉猎版（feats.js · featNerfed）不吃这些加强 */
@@ -8658,7 +8935,7 @@ function runOnConnect(attacker, target, spec, res) {
     if (got) notes.push(`${target.name} 灼烧 +${got} → ${Number(target.statuses && target.statuses.burn) || 0} 层（${segs} 段各 ${Math.round(spec.burnEach * 100)}%）。`);
   }
   if (spec.instant && typeof applyInstantEffect === "function") {
-    applyInstantEffect(target, spec.instant, notes);
+    applyInstantEffect(target, spec.instant, notes, attacker || null);
     notes.push(`${target.name} 被施加${INSTANT_NAME[spec.instant] || spec.instant}。`);
   }
   if (spec.activate === "burn" && burnStackCount(target) > 0) {
@@ -9729,7 +10006,7 @@ function setHiakiStance(u, stance) {
   // 剑术+：切换刀势立刻获得 1 个附赠动作，每回合最多 1 个（作者定：以前每次切换都给，协助格挡切刀势能无限格挡）；
   // 没用掉的留到下回合，下回合结束时过期
   if (prev !== stance && typeof passivePlus === "function" && passivePlus(u, 2)) {
-    const turn = Number(state.turnNo) || 0;
+    const turn = ownRound(u);   // 每回合：在敌人回合行动的阵营里的绯秋按她自己的一回合算（#476）
     const g = u.resources.stanceGrant && u.resources.stanceGrant.turn === turn ? u.resources.stanceGrant : { turn, n: 0 };
     if (g.n >= HIAKI_STANCE_BONUS_PER_TURN) return;
     u.bonus = (Number(u.bonus) || 0) + 1;
@@ -11968,9 +12245,10 @@ function hitOne2(actor, target, opt, lines) {
 
 /** 错位：最外面两层「还有血」的血量层互换位置（打空的层不算）。
  *  两层各记一个标记（shiftSlot 1 = 原来在外的、2 = 原来在内的），层对象被复制、前面插进护盾、被抹掉也认得出来 */
-function applyShift(u) {
+function applyShift(u, by) {
   if (!u) return;
   u.instant = u.instant || {};
+  markTurnFx(u, "shift", by);   // 即时效果：在敌人回合行动的阵营施加的到它们下一个回合开始才换回（#476）
   u.instant.shift = true;
   if (u._shiftSwapped) return;
   const ls = u.layers || [];
@@ -13482,6 +13760,7 @@ function runSkillInner(id, optRun) {
       const tgt = (fl && fl.picks && fl.picks.target) ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先选助威目标。"); return paintSkillLog(lines.join("\n")); }
       tgt.statuses = tgt.statuses || {};
+      markTurnFx(tgt, "inspire", a);   // 本回合振奋：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
       tgt.statuses.inspire = true;
       const stay = (a.level || 1) >= 10 && fl && fl.picks && fl.picks.mode === "stay";
       tgt.statuses.inspireStay = !!stay;
@@ -13630,7 +13909,7 @@ function runSkillInner(id, optRun) {
       }
       if (Number(tgt.zone) !== Number(a.zone) || tgt.dead) lines.push(`${tgt.name} 不在 ${a.zone} 区，没能施加错位。`);
       else {
-        applyShift(tgt);
+        applyShift(tgt, a);
         popStatus(tgt, "shift");
         lines.push(`对 ${tgt.name} 施加错位（次外层与最外层互换至下回合开始）。`);
       }
@@ -13822,6 +14101,7 @@ function runSkillInner(id, optRun) {
       lines.push("电能 +1 → " + (findKit("chuan", state.units).resources.charge));
     } else if (id === "chuan_cover") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
+      markTurnFx(t, "coverBy", a);
       t.coverBy = a.id;
       lines.push(`掩护：此回合为 ${t.name} 免费自动协助格挡。`);
     } else if (id === "nora_aa") {
@@ -13871,7 +14151,7 @@ function runSkillInner(id, optRun) {
       pins.forEach(pin => {
         pin.instant = pin.instant || {};
         lines.push(`${pin.name} 获得刺骨。`);
-        applyInstantEffect(pin, "sting", lines);
+        applyInstantEffect(pin, "sting", lines, a);
         noraFrost(a, pin, lines);
       });
     } else if (id === "nora_pressure") {
@@ -14058,6 +14338,7 @@ function runSkillInner(id, optRun) {
         wall.movable = false;
         wall.faction = "player";
         wall.ownerId = a.id;   // 展开它的人：铁壁按他的玩家阵营护人、挡人（barrierOwner，#445）
+        if (lateTurn(a)) wall.lateFx = { ironwall: true };   // 在敌人回合行动的阵营：一回合内 = 撑到自己的下一个回合开始（lateRoundEnd，#476）
         if (extraShield) { wall.shield = wall.shieldMax = Math.floor(atk); }
         state.props.push(wall);
         lines.push(`铁壁展开：配置物装甲 ${hp}（${r.text}）${extraShield ? `，外层护盾 ${wall.shield}（多耗 1 电能）` : ""}，不可移动。同区敌方攻击行动只打铁壁一次。`);
@@ -14093,7 +14374,7 @@ function runSkillInner(id, optRun) {
       }
     } else if (id === "chuan_over") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      applyInstantEffect(t, "overload", lines);
+      applyInstantEffect(t, "overload", lines, a);
       if ((a.resources.charge || 0) >= 3) {
         const sh = Math.floor(atk / 2);
         addShieldLayer(t, sh);
@@ -14258,7 +14539,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "hiaki_pot") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (a.resources.blade !== "niu") { lines.push("热锅只能用丹生谷发动。"); }
-      else { applyInstantEffect(t, "melt", lines); lines.push(`${t.name} 被施加熔融。`); }
+      else { applyInstantEffect(t, "melt", lines, a); lines.push(`${t.name} 被施加熔融。`); }
     } else if (id === "niu_tsubame") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       hitOne(a, t, { element: "fire", mult: 1, baseBreak: 1, atk });
@@ -14294,7 +14575,7 @@ function runSkillInner(id, optRun) {
     } else if (id === "tou_ultra") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       // 即时效果的键是 refract（以前弹字写成 reflect，共振按 reflect 去分享，折射传不过去）
-      applyInstantEffect(t, "refract", lines);
+      applyInstantEffect(t, "refract", lines, a);
       lines.push(`${t.name} 陷入折射。`);
     } else if (id === "mochi_boom") {
       const boom = () => {
@@ -14318,8 +14599,8 @@ function runSkillInner(id, optRun) {
     } else if (id === "ruby_algo") {
       // 算法改变：任意距离的敌人施加扩散；这一回合内它每次受到伤害，瑞比 +5 纳米（engine.js · applyResultToUnit）
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      applyInstantEffect(t, "spread", lines);
-      t.algoTurn = state.turnNo;
+      applyInstantEffect(t, "spread", lines, a);
+      t.algoTurn = ownRound(a);   // 这一回合：瑞比在敌人回合行动时按她自己的一回合算（engine.js · applyResultToUnit，#476）
       lines.push(`算法改变：${t.name} 被施加扩散；这一回合它每次受到伤害，瑞比纳米 +5。`);
     } else if (id === "ruby_relay" || id === "wing_relay") {
       // 收发代理：放出小型无人机，不限时间。平时每回合 +10 纳米；瑞比在机甲里时改为每回合结束发射激光（turnEnd）
@@ -14371,6 +14652,7 @@ function runSkillInner(id, optRun) {
       const over = Math.max(0, r.total - (Number(got) || 0));
       lines.push(`双重奏：${tgt.name} 治疗 ${r.text}${r.maxed ? "（牵挂取最大值）" : ""}，恢复 ${got}。`);
       if (over > 0) {
+        markTurnFx(tgt, "duetAtk", a);   // 下回合开始失去：结人在敌人回合行动时到她那一队的回合开始（#476）
         tgt.duetAtk = (Number(tgt.duetAtk) || 0) + over;
         lines.push(`溢出的 ${over} 点治疗变成 atk +${over}（下回合开始失去）。`);
       }
@@ -14505,6 +14787,7 @@ function runSkillInner(id, optRun) {
       if (!roleSpend(a, "role_double_dot")) lines.push("加倍计量本场已用完。");
       else {
         t.instant = t.instant || {};
+        markTurnFx(t, "doubleStatus", a);   // 本回合：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
         t.instant.doubleStatus = true;
         lines.push(`${t.name} 本回合状态效果翻倍。`);
         if (typeof syncShockwave === "function") syncShockwave(t, lines);   // 震荡扣的架势上限也翻倍
@@ -14532,6 +14815,7 @@ function runSkillInner(id, optRun) {
       if (!roleSpend(a, "role_omen")) lines.push("击破预告本场已用完。");
       else {
         t.instant = t.instant || {};
+        markTurnFx(t, "omenArmed", a);   // 判定在这一回合结束；在敌人回合行动的阵营放的到它们下一个回合开始之前（lateRoundEnd，#476）
         t.instant.doubleBreak = true;
         t.instant.omenFrom = a.id;
         t.instant.omenArmed = true;
@@ -14541,7 +14825,10 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_lockdown") {
       // 只到这一回合结束：不能移动（turnEnd 清 noMove），攻击只能打施放者（lockdownBy，releaseTurnLocks 清）。
       // 以前借用嘲讽的 tauntTo：敌人这回合没出手就一直留到之后的回合；出手一次又提前没了
+      // 在敌人回合行动的阵营放的（#476）：两样都撑到它们下一个回合开始（lateRoundEnd）
       visibleEnemies(a.zone, a).filter(u => !u.dead && !u.fused).forEach(u => {
+        markTurnFx(u, "noMove", a);
+        markTurnFx(u, "lockdownBy", a);
         u.noMove = true;
         u.lockdownBy = a.id;
       });
@@ -14549,12 +14836,14 @@ function runSkillInner(id, optRun) {
     } else if (id === "role_grit") {
       if (!roleSpend(a, "role_grit")) lines.push("咬牙坚持本场次数用尽。");
       else {
+        markTurnFx(a, "gritTurn", a);   // 本回合：在敌人回合行动的阵营撑到自己的下一个回合开始（#476）
         a.resources.gritTurn = true;
         lines.push("咬牙坚持：本回合受伤减半。");
       }
     } else if (id === "role_stand") {
       if (!roleSpend(a, "role_stand")) lines.push("屹立不倒本场已用完。");
       else {
+        markTurnFx(a, "standTurn", a);
         a.resources.standTurn = true;
         lines.push("屹立不倒：本回合免疫伤害和击破。");
       }
@@ -14563,18 +14852,21 @@ function runSkillInner(id, optRun) {
       else {
         fieldFoes(a).filter(u => zoneDist(a.zone, u.zone, state.zoneMode) <= 1).forEach(u => {
           u.statuses = u.statuses || {};
-          // 只到这一回合结束（敌人回合打完的 turnEnd 里清掉），不是整场
+          // 只到这一回合结束（敌人回合打完的 turnEnd 里清掉），不是整场；在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
+          markTurnFx(u, "weakFear", a);
           if (!u.statuses.weak) u.statuses.weakFear = true;
           u.statuses.weak = true;
         });
         lines.push("恐惧怒吼：距离 1 内敌人本回合虚弱。");
       }
     } else if (id === "role_guard_strike") {
+      markTurnFx(a, "guardStrike", a);
       a.resources.guardStrike = true;
       lines.push("防守反击：本回合第一次成功协助格挡会追加一次协助攻击。");
     } else if (id === "role_all_reflect") {
       if (!roleSpend(a, "role_all_reflect")) lines.push("全反击本场已用完。");
       else {
+        markTurnFx(a, "allReflect", a);
         a.resources.allReflect = true;
         lines.push("全反击：本回合全队成功格挡将反伤伤害与击破。");
       }
@@ -14620,15 +14912,17 @@ function runSkillInner(id, optRun) {
         lines.push(`续命：${t.name} 恢复 ${heal}（最大生命 50%）。`);
       }
     } else if (id === "role_lock") {
-      // 每场一次（5 级两次，10 级三次）；只锁到这一回合结束（turnEnd 里解开）
+      // 每场一次（5 级两次，10 级三次）；只锁到这一回合结束（turnEnd 里解开）。
+      // 在敌人回合行动的阵营锁的记成 "late"：撑到它们下一个回合开始（lateRoundEnd 解开，#476）
       const cap = roleLockCap(a);
+      const lockTurn = lateTurn(a) ? "late" : true;
       if (!roleSpend(a, "role_lock")) lines.push(`锁定本场已用完（每场 ${cap} 次）。`);
       else if (state.weather && state.weather !== "none") {
-        if (!state.weatherLock) { state.weatherLock = a.name + "锁定"; state.weatherLockTurn = true; }
+        if (!state.weatherLock) { state.weatherLock = a.name + "锁定"; state.weatherLockTurn = lockTurn; }
         lines.push(`锁定天气：${weatherName(state.weather)} 本回合不会被修改。`);
       } else {
         const f = state.fields[a.zone];
-        if (f && !f.fieldLock) { f.fieldLock = a.name + "锁定"; f.fieldLockTurn = true; }
+        if (f && !f.fieldLock) { f.fieldLock = a.name + "锁定"; f.fieldLockTurn = lockTurn; }
         lines.push(`锁定 ${a.zone} 区场地本回合不会被修改。`);
       }
       if (a.kit === "helu") a.resources.lockLeft = Math.max(0, cap - ((a.resources.roleOnce || {}).lock || 0));
@@ -14640,6 +14934,7 @@ function runSkillInner(id, optRun) {
       if (!list.length) { lines.push("先选要保释的友方。"); return paintSkillLog(lines.join("\n")); }
       list.forEach(u => {
         if (!roleSpend(a, "role_shelter")) { lines.push(`保释本场次数已用完，${u.name} 没有保释。`); return; }
+        markTurnFx(u, "shelterTurn", a);   // 本回合：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
         u.isolate = true;
         u.shelterTurn = true;
         lines.push(`${u.name} 本回合豁免天气与场地。`);
@@ -14648,6 +14943,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       if (!roleSpend(a, "role_harsh")) lines.push("恶劣环境本场已用完。");
       else {
+        markTurnFx(t, "harshEnv", a);
         t.harshEnv = true;
         lines.push(`${t.name} 本回合场地与天气效果翻倍。`);
       }
@@ -14668,6 +14964,7 @@ function runSkillInner(id, optRun) {
       if (!roleSpend(a, "role_shake")) lines.push("撼动本场已用完。");
       else {
         visibleEnemies(a.zone, a).filter(u => !u.dead && !u.fused).forEach(u => {
+          markTurnFx(u, "noMove", a);   // 本回合无法移动：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
           u.noMove = true;
           if (!applyUnstable(u, lines)) return;
           convertUnstableInHv(u, lines);
@@ -14690,12 +14987,14 @@ function runSkillInner(id, optRun) {
       const fl = state.skillFlow;
       if (roleSkillLv(a) >= 15 && fl && fl.picks && fl.picks.mode === "all") {
         // 15 级：用行动点让全部友方此回合获得坚挺（skillCost 按这个分步改收行动点）。全部友方：施放者的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#456 / #460）
+        // 本回合：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
         const all = fieldUnits().filter(u => teammateOf(a, u) && !u.fused);
-        all.forEach(u => { u.statuses = u.statuses || {}; u.statuses.sturdy = true; });
+        all.forEach(u => { u.statuses = u.statuses || {}; markTurnFx(u, "sturdy", a); u.statuses.sturdy = true; });
         lines.push(`不倒战意：全部友方（${all.map(u => u.name).join("、")}）本回合获得坚挺。`);
       } else {
         if (!needT()) return paintSkillLog(lines.join("\n"));
         t.statuses = t.statuses || {};
+        markTurnFx(t, "sturdy", a);
         t.statuses.sturdy = true;
         lines.push(`${t.name} 本回合获得坚挺。`);
       }
@@ -14734,6 +15033,7 @@ function runSkillInner(id, optRun) {
       lines.push(`应急处理：${t.name} 恢复 ${heal}。`);
     } else if (id === "role_cover") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
+      markTurnFx(t, "coverBy", a);   // 此回合：在敌人回合行动的阵营掩护的撑到它们下一个回合开始（#476）
       t.coverBy = a.id;
       lines.push(`掩护：此回合为 ${t.name} 免费自动协助格挡。`);
     } else if (id === "role_pull") {
@@ -14847,7 +15147,7 @@ function runSkillInner(id, optRun) {
       const fl = state.skillFlow;
       const tgt = fl && fl.picks && fl.picks.target ? unitById(fl.picks.target) : t;
       if (!tgt) { lines.push("先在「技能目标」里选对象。"); return paintSkillLog(lines.join("\n")); }
-      applyInstantEffect(tgt, "overload", lines);
+      applyInstantEffect(tgt, "overload", lines, a);
       lines.push(`「非法」改装：${tgt.name} 过载。`);
       const k = findKit("kolt", state.units) || a;
       if (fl && fl.picks && fl.picks.mode === "ap" && teammateOf(a, tgt) && koltScrapFull(k)) {   // 我方单位：自己人（enemies.js · teammateOf，#460）
@@ -15248,7 +15548,7 @@ function runSkillInner(id, optRun) {
         const c = longgeTakeBullet(a, lines);
         if (c === "blue") {
           lines.push(`冷气穿刺（霰弹枪 · 蓝弹）：${t.name} 获得刺骨。`);
-          applyInstantEffect(t, "sting", lines);
+          applyInstantEffect(t, "sting", lines, a);
           // 那一区的友方：龙哥的自己人（同阵营或友好的阵营，enemies.js · teammateOf，#456 / #460）
           const allies = fieldUnits().filter(u => teammateOf(a, u) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(t.zone));
           if (!allies.length) lines.push(`${t.zone} 区没有友方可以治疗。`);
@@ -15259,7 +15559,7 @@ function runSkillInner(id, optRun) {
         }
       } else {
         lines.push(`冷气穿刺（手杖）：${t.name} 获得刺骨。`);
-        applyInstantEffect(t, "sting", lines);
+        applyInstantEffect(t, "sting", lines, a);
       }
     } else if (id === "longge_spit") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
@@ -15324,7 +15624,7 @@ function runSkillInner(id, optRun) {
         if (c === "red") {
           lines.push("热能轰击（霰弹枪 · 红弹）：子弹化作散射的火焰。");
           // 龙哥开着友伤（enemies.js · friendlyFireHit，#437）：同区龙哥以外的队友也熔融；红弹治疗照旧给同区全部友方
-          visibleEnemies(z, a).forEach(u => applyInstantEffect(u, "melt", lines));
+          visibleEnemies(z, a).forEach(u => applyInstantEffect(u, "melt", lines, a));
           allies.forEach(u => longgeBulletHeal("red", u, lines));
         } else {
           lines.push("热能轰击（霰弹枪 · 蓝弹）：子弹瞬间气化。");
@@ -15332,7 +15632,7 @@ function runSkillInner(id, optRun) {
         }
       } else {
         lines.push(`热能轰击（手杖）：${t.name} 熔融。`);
-        applyInstantEffect(t, "melt", lines);
+        applyInstantEffect(t, "melt", lines, a);
       }
     } else if (id === "longge_drink") {
       // 饮弹：枪口对准自己，消耗 1 发。蓝弹 → 霜结，并按蓝弹治疗自己；红弹 → 自己受 1×atk 火焰，返还行动点

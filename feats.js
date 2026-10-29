@@ -117,6 +117,7 @@ const FEATS = {
       run(a, ctx) {
         const t = ctx.t;
         if (!t || !featAllyOk(a, t)) { ctx.lines.push("先选要豁免的友方。"); return false; }
+        if (typeof markTurnFx === "function") markTurnFx(t, "shelterTurn", a);   // 本回合：在敌人回合行动的阵营放的撑到它们下一个回合开始（#476）
         t.isolate = true;
         t.shelterTurn = true;
         ctx.lines.push(`看天：${t.name} 本回合豁免天气与场地。`);
@@ -128,6 +129,7 @@ const FEATS = {
         const t = ctx.t;
         if (!t || !featAllyOk(a, t) || t.id === a.id) { ctx.lines.push("先选打气的友方。"); return false; }
         t.statuses = t.statuses || {};
+        if (typeof markTurnFx === "function") markTurnFx(t, "inspire", a);
         t.statuses.inspire = true;
         t.statuses.inspireStay = false;
         if (typeof popStatus === "function") popStatus(t, "inspire");
@@ -183,6 +185,7 @@ const FEATS = {
       run(a, ctx) {
         const t = ctx.t;
         if (!t || !featAllyOk(a, t) || t.id === a.id) { ctx.lines.push("先选要保护的队友。"); return false; }
+        if (typeof markTurnFx === "function") markTurnFx(t, "coverBy", a);
         t.coverBy = a.id;
         ctx.lines.push(`挺身：本回合 ${t.name} 每次被单体攻击时，${a.name} 都可以免费协助格挡。`);
       } } },
@@ -654,6 +657,7 @@ function featReviveCheck(u, notes) {
   if (!inner) return false;
   featUseOnce(u, "revive");
   inner.current = 1;
+  if (typeof markTurnFx === "function") markTurnFx(u, "standTurn", u);   // 直到自己下回合开始前：在敌人回合行动的阵营按自己那一队的回合（#476）
   u.resources.standTurn = true;
   u.resources.reviveGuard = true;
   if (notes) notes.push(`${u.name} 还魂：保留 1 点生命，直到自己下回合开始前不受任何伤害和击破。`);

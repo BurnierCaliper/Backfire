@@ -616,6 +616,8 @@ function itemApplyStatus(actor, u, key, notes) {
     }
   } else {
     if (key === "chase") u.chasers = (u.chasers || []).filter(id => id !== actor.id).concat(actor.id);
+    // 本回合的坚挺 / 振奋（镇定剂、兴奋剂、增幅的驻波墙）：在敌人回合行动的阵营给的撑到它们下一个回合开始（app.js · markTurnFx，#476）
+    if ((key === "sturdy" || key === "inspire") && typeof markTurnFx === "function") markTurnFx(u, key, actor || null);
     u.statuses[key] = true;
     if (typeof markStatusOwner === "function" && actor && actor.isPlayer) markStatusOwner(u, key, actor.id);   // 击杀归属：谁挂的状态
     if (key === "shockwave" && typeof syncShockwave === "function") syncShockwave(u, notes);
@@ -664,8 +666,8 @@ function useEffectItem(actor, it, target, zone, notes) {
   if (it.kind === "self") { if (typeof castSelfEffect === "function") castSelfEffect(actor, it.key, notes); notes.push(`${actor.name} 获得自我效果「${EFFECT_SELF_CN[it.key]}」。`); return; }
   if (it.kind === "stun") { itemStun(t, notes); return; }
   if (it.kind === "instant") {
-    if (it.key === "neutralize") { if (typeof applyNeutralize === "function") notes.push(...applyNeutralize(t)); return; }
-    if (it.key === "shift") { if (typeof applyShift === "function") applyShift(t); if (typeof popStatus === "function") popStatus(t, "shift"); notes.push(`${t.name} 错位：最外两层血量互换。`); return; }
+    if (it.key === "neutralize") { if (typeof applyNeutralize === "function") notes.push(...applyNeutralize(t, actor)); return; }
+    if (it.key === "shift") { if (typeof applyShift === "function") applyShift(t, actor); if (typeof popStatus === "function") popStatus(t, "shift"); notes.push(`${t.name} 错位：最外两层血量互换。`); return; }
     if (typeof applyInstantEffect === "function") applyInstantEffect(t, it.key, notes, actor);
     notes.push(`${t.name} 被施加${EFFECT_INSTANT_CN[it.key]}。`);
     return;
