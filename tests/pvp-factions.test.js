@@ -639,7 +639,7 @@ test("指令 battle.playerFaction：建阵营、分人、定回合、设敌友�
   assert.ok(kolt);
 });
 
-test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩家阵营不排进我方回合的行动顺序，敌人回合里由分到的玩家操控（#464 起；第一步时只有房主能操控）", () => {
+test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩家阵营在我方回合里轮不到（#478 起这一轮开始时一起排顺序），敌人回合里由分到的玩家操控（#464 起；第一步时只有房主能操控）", () => {
   const c = H.load();
   c.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "PVP445-HOTSEAT" });
   c.location = { search: "?hotseat=1" }; c.URLSearchParams = URLSearchParams;
@@ -662,15 +662,20 @@ test("热座 / 联机：只有房主能改阵营；在敌人回合行动的玩�
   c.HotseatGame.beginRound();
   const units = plain(c.HotseatGame.getView().units.map(u => u.id));
   assert.ok(units.includes(kolt.id), "我方的柯尔特排进行动顺序");
-  assert.ok(!units.includes(helu.id), "在敌人回合行动的赫鲁米卡不排进我方回合的行动顺序");
+  assert.ok(units.includes(helu.id), "在敌人回合行动的赫鲁米卡也排进这一轮的行动顺序（#478；以前我方回合不排它）");
+  assert.equal(send("p2", { type: "orderPick", actor: helu.id, index: 0 }).ok, true, "玩家 2 在这一轮开始时给它选格子");
+  assert.equal(send("p2", { type: "orderConfirm" }).ok, true);
+  assert.equal(send("p1", { type: "orderPick", actor: kolt.id, index: 1 }).ok, true);
+  assert.equal(send("p1", { type: "orderConfirm" }).ok, true);
+  assert.equal(c.HotseatGame.getView().currentUnitId, kolt.id, "我方回合轮不到排在前面的赫鲁米卡");
   // 敌人回合：赫鲁米卡分给了玩家 2，由他自己操控（#464，第二步；第一步时只有房主能操控）。回合推进走房主的规则流程（game.js · systemCommand），
-  // 敌人回合开始时会话给它们排一段行动顺序（game.js · endTurn → HotseatGame.beginRound("enemy")）
+  // 敌人回合开始时会话照这一轮排好的顺序轮到它（game.js · endTurn → HotseatGame.beginRound("enemy")，#478 起不再另外排）
+  assert.equal(send("p1", { type: "endTurn" }).ok, true);
   c.HotseatGame.system({ type: "battle.endPlayerTurn" });
   assert.equal(S.combatPhase, "enemy");
   assert.ok(helu.ap > 0, "敌人回合开始补了行动点");
   c.HotseatGame.beginRound("enemy");
-  assert.equal(send("p2", { type: "orderPick", actor: helu.id, index: 0 }).ok, true);
-  assert.equal(send("p2", { type: "orderConfirm" }).ok, true);
+  assert.equal(c.HotseatGame.getView().currentUnitId, helu.id, "不再选顺序，直接轮到赫鲁米卡");
   kolt.zone = 1; helu.zone = 2;
   const hit = { type: "skill", actor: helu.id, skill: "helu_aa", target: kolt.id, picks: {} };
   const p1 = send("p1", hit);

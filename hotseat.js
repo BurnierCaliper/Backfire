@@ -89,9 +89,12 @@
     const canStand = options.canStand || (u => typeof root.standUpBlocked === "function" ? !root.standUpBlocked(u) : Number(u.shp) > 0);
     let assignments = {}, phase = "setup", turnNo = 0, roster = [], slots = [], confirmed = new Set();
     let swaps = [], ask = null, closedAsk = null, sequence = 0;
-    // segment：现在排的是哪一段的行动顺序——"player" 我方回合；"enemy" 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）。
-    // roster 只有这一段行动的单位（排顺序用）；everyone 是场上所有能操作的单位（别的段的也在），问「归谁操控」（询问发给谁、掷骰……）看它
-    let segment = "player", everyone = [];
+    // segment：现在是这一轮的哪一段——"player" 我方回合；"enemy" 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）。
+    // 行动顺序在这一轮开始时（我方回合开始前）给所有玩家角色一起排（span = "round"，#478，作者 10/29：「所有玩家统一在这一轮开始时选顺序」）：
+    // roster / slots 里在我方回合、在敌人回合行动的都有（每一行的 turn），每一段只轮到在这一段行动的（current）；敌人回合开始时照排好的顺序接着动，不再另外排。
+    // 这一轮是从敌人回合开始的（突袭开局：我方回合的行动顺序没开始过）才在敌人回合开始时排，只排在敌人回合行动的（span = "enemy"）。
+    // everyone 是场上所有能操作的单位，问「归谁操控」（询问发给谁、掷骰……）看它
+    let segment = "player", span = "round", everyone = [];
     // 小队聊天：重新分配角色 / 有人进出房间会重建会话，聊天记录从上一个会话带过来
     let chat = (Array.isArray(options.chat) ? options.chat : []).filter(r => r && typeof r.text === "string").slice(-CHAT_KEEP);
     // 主持人发起的检定、玩家申请的属性点（跨战斗保留，和小队聊天一样）
@@ -114,7 +117,9 @@
       if (!hero || !isHero(hero)) return null;
       return { hero, operatorId: assignments[hero.id] || gmId, stableKey: u.weaponOf ? hero.id + ":weapon:" + u.kit : hero.id };
     }
-    /** 这一段排进行动顺序的单位（顺手把 everyone 换成场上所有能操作的单位） */
+    /** u 在哪一段行动："player" 我方回合 / "enemy" 敌人回合（玩家阵营定的，PvP #445 / #464；options.inRound(u, 段) 说在不在这一段，没给的都在我方回合） */
+    const turnOf = u => options.inRound && !options.inRound(u, "player") && options.inRound(u, "enemy") ? "enemy" : "player";
+    /** 这一轮排进行动顺序的单位（顺手把 everyone 换成场上所有能操作的单位） */
     function rows() {
       const all = maps(), result = [], anyone = [];
       for (const u of all.units) {
@@ -124,20 +129,22 @@
         if (!present(u) || !present(ident.hero) || (down(ident.hero) && !canStand(ident.hero))) continue;
         if (u.weaponOf ? down(u) : down(u) && !canStand(u)) continue;
         const row = { unitId: u.id, unitName: u.name || u.kit || u.id, operatorId: ident.operatorId,
-          operatorName: operatorMap.get(ident.operatorId).name, weaponOf: u.weaponOf || null, stableKey: ident.stableKey };
+          operatorName: operatorMap.get(ident.operatorId).name, weaponOf: u.weaponOf || null, stableKey: ident.stableKey, turn: turnOf(u) };
         anyone.push(row);
-        // 不在这一段行动的单位（玩家阵营定在别的回合行动，PvP #445 / #464）：不排进这一段的行动顺序，归谁操控照样记着
-        if (!options.inRound || options.inRound(u, segment)) result.push(row);
+        // 这一轮的行动顺序排所有人，在敌人回合行动的也排（#478）；这一轮从敌人回合开始（突袭开局）时只排在敌人回合行动的，归谁操控照样记着
+        if (span === "round" || row.turn === "enemy") result.push(row);
       }
       everyone = anyone;
       return result;
     }
     const rowFor = id => roster.find(r => r.unitId === id);
-    /** 归谁操控：这一段没排进顺序的单位（在别的回合行动的玩家阵营）也算 */
+    /** 归谁操控：没排进顺序的单位（突袭开局那一轮在我方回合行动的）也算 */
     const ownerRow = id => rowFor(id) || everyone.find(r => r.unitId === id);
     const slotFor = id => slots.findIndex(r => r && r.unitId === id);
-    const current = () => phase === "acting" ? (slots.find(r => r && !r.completed) || {}).unitId || null : null;
-    const lastLocked = () => slots.reduce((last, row, i) => row && (row.spent || row.completed) ? i : last, -1);
+    /** 现在轮到谁：在这一段行动的人里排在最前面、还没结束的（#478：这一轮的行动顺序里两个回合的人都在，别的回合的跳过） */
+    const current = () => phase === "acting" ? (slots.find(r => r && !r.completed && r.turn === segment) || {}).unitId || null : null;
+    // 已经固定的最后一格：只看在这一段行动的人（#478：这一轮的行动顺序里别的回合的人行动完了，不挡这一段的人调整顺序）
+    const lastLocked = () => slots.reduce((last, row, i) => row && row.turn === segment && (row.spent || row.completed) ? i : last, -1);
     function askSummary() {
       if (!ask) return null;
       return { id: ask.id, kind: ask.kind, jobId: ask.jobId, targetId: ask.targetId, deadline: ask.deadline,
@@ -147,8 +154,8 @@
           unitName: (ownerRow(h.unitId) || {}).unitName || h.unitId, extra: clone(h.extra || {}) })) };
     }
     function snapshot() {
-      // operable：场上所有能操作的单位归谁（#464：敌人回合那一段 roster 只有这一段的人，玩家画面认「自己的角色」看这一份）
-      return clone({ phase, turnNo, segment, mode, gmId, operators, assignments, roster, slots, operable: everyone,
+      // operable：场上所有能操作的单位归谁（#464：突袭开局那一轮 roster 只有在敌人回合行动的人，玩家画面认「自己的角色」看这一份）
+      return clone({ phase, turnNo, segment, span, mode, gmId, operators, assignments, roster, slots, operable: everyone,
         currentUnitId: current(), confirmed: [...confirmed], pendingSwaps: swaps, ask: askSummary(), closedAsk, chat, table });
     }
     function cleanTable(t) {
@@ -330,8 +337,8 @@
         while (slots.length > roster.length) { const i = slots.lastIndexOf(null); if (i < 0) break; slots.splice(i, 1); }
         while (slots.length < roster.length) slots.push(null);
         if (changed) confirmed.clear();
-        // 选顺序的时候这一段的人都没了（被移出、倒下起不来、分到别的回合行动的阵营……，#464）：和一开始就没人一样（beginRound），这一段直接算结束，
-        // 不然停在「选择行动顺序」等主持人点「按当前格子开始」
+        // 选顺序的时候要排的人都没了（被移出、倒下起不来；突袭开局那一轮分到了我方回合行动的阵营……，#464）：和一开始就没人一样（beginRound），
+        // 这一段直接算结束，不然停在「选择行动顺序」等主持人点「按当前格子开始」
         if (!roster.length) phase = "enemy";
       } else if (phase === "acting" || phase === "enemy") {
         for (const r of roster) if (!previousIds.has(r.unitId) && slotFor(r.unitId) < 0) {
@@ -412,8 +419,12 @@
       swaps = swaps.filter(s => ![s.actor, s.target].some(u => rowFor(u) && (rowFor(u).stableKey || "").split(":weapon:")[0] === heroId));
       return reconcile(true);
     }
-    /** 开始一段行动顺序。seg："player"（不给）= 我方回合；"enemy" = 敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）——
-     *  和我方回合一样选顺序、轮到谁谁动（分配给玩家的由他操控，没分配的由主持人操控），全部结束以后 phase 回到 "enemy"（再跑敌人的 AI）。
+    /** 开始这一轮的行动顺序，或者这一轮的敌人回合那一段。
+     *  seg 不给（"player"）：这一轮开始（我方回合开始前）——所有玩家角色一起选这一轮的行动顺序，在我方回合、在敌人回合行动的都排
+     *    （#478，作者 10/29：「所有玩家统一在这一轮开始时选顺序」）；我方回合里只轮到在我方回合行动的，轮完了 phase 是 "enemy"（接着进敌人回合）。
+     *  seg = "enemy"：敌人回合开始时、在敌人回合行动的玩家阵营先动的那一段（PvP #464）——照这一轮开始时排好的顺序接着动
+     *    （分配给玩家的由他操控，没分配的由主持人操控），不再另外排；全部结束以后 phase 回到 "enemy"（再跑敌人的 AI）。
+     *    这一轮是从敌人回合开始的（突袭开局：这一轮的行动顺序没排过）才在这里排，只排在敌人回合行动的。
      *  同一回合的同一段已经开始了就不重开（敌人回合那一段做完了也不重开） */
     function beginRound(number, seg) {
       const next = seg === "enemy" ? "enemy" : "player";
@@ -421,7 +432,18 @@
       if (phase === "ended") fail("ended", "战斗已经结束");
       if (turnNo === number && segment === next && (["selecting", "acting"].includes(phase) || (next === "enemy" && phase === "enemy"))) return snapshot();
       if (ask) fail("waiting", "正在等待协助回应");
-      turnNo = number; segment = next; spent.clear(); completed.clear(); swaps = []; confirmed.clear();
+      if (next === "enemy" && turnNo === number && segment === "player" && span === "round" && phase !== "setup") {
+        // 这一轮开始时已经一起排好了：敌人回合那一段照排好的顺序接着动。还没排进格子的（顺序没选完就进了敌人回合、后来加进来的……）接着排在后面
+        segment = "enemy"; swaps = []; confirmed.clear();
+        reconcile(false);
+        for (const r of roster) if (slotFor(r.unitId) < 0) {
+          const row = { ...r, spent: spent.has(r.stableKey), completed: completed.has(r.stableKey) }, free = slots.indexOf(null);
+          if (free >= 0) slots[free] = row; else slots.push(row);
+        }
+        phase = "acting"; if (!current()) phase = "enemy";
+        return emit("beginRound");
+      }
+      turnNo = number; segment = next; span = next === "enemy" ? "enemy" : "round"; spent.clear(); completed.clear(); swaps = []; confirmed.clear();
       phase = "selecting"; roster = rows(); slots = roster.map(() => null);
       if (!roster.length) phase = "enemy";
       return emit("beginRound");
@@ -501,9 +523,11 @@
       return { accepted: !!accept, snapshot: emit("swapAnswered") };
     }
     function assertAction(id, actorId) {
-      reconcile(false); requireOwned(id, actorId);
+      reconcile(false); const row = requireOwned(id, actorId);
       if (ask) fail("waiting", "正在等待协助回应");
       if (phase !== "acting") fail("not_acting", phase === "selecting" ? "请先确定行动顺序" : "现在不能操作玩家技能");
+      // 这一轮的行动顺序里也有在别的回合行动的人（#478）：这一段轮不到它
+      if (row.turn !== segment) fail("not_turn", row.turn === "enemy" ? "这个单位在敌人回合行动" : "这个单位在我方回合行动");
       if (current() !== actorId) fail("not_turn", "还没轮到这个单位");
       return true;
     }
@@ -517,7 +541,9 @@
       const all = maps();
       for (const e of entries || []) {
         if (!(Number(e.ap) > 0 || Number(e.bonus) > 0)) continue;
-        const ident = identity(all.byId.get(e.unitId), all);
+        const u = all.byId.get(e.unitId), ident = identity(u, all);
+        // 不在这一段行动的人花的（在敌人回合行动的人在我方回合里协助格挡……，#478：这一轮的行动顺序里也有它）不锁它的格子，轮到它那一段再说
+        if (u && turnOf(u) !== segment) continue;
         const key = ident ? ident.stableKey : stableById.get(e.unitId);
         if (key) spent.add(key);
       }
@@ -612,7 +638,7 @@
     function endBattle() { phase = "ended"; swaps = []; if (ask) closeAsk("ended", null, {}, null); return emit("ended"); }
     function reset() {
       if (ask) closeAsk("reset", null, {}, null);
-      phase = "setup"; turnNo = 0; segment = "player"; spent.clear(); completed.clear(); slots = []; swaps = []; confirmed.clear(); stableById.clear();
+      phase = "setup"; turnNo = 0; segment = "player"; span = "round"; spent.clear(); completed.clear(); slots = []; swaps = []; confirmed.clear(); stableById.clear();
       roster = rows(); return emit("reset");
     }
     // This checkpoint belongs to the host's online recovery sidecar, never to a
@@ -625,7 +651,10 @@
       const saved = clone(value);
       if (!saved || !["setup", "selecting", "acting", "enemy", "ended"].includes(saved.phase) ||
           !Number.isInteger(saved.turnNo) || saved.turnNo < 0 || !Array.isArray(saved.slots)) throw new Error("无效的房主顺序存档");
-      phase = "setup"; segment = saved.segment === "enemy" ? "enemy" : "player"; setAssignments(saved.assignments);
+      phase = "setup"; segment = saved.segment === "enemy" ? "enemy" : "player";
+      // 这一轮的行动顺序排了谁（#478）：没记的旧检查点，敌人回合那一段是单独排的（只有在敌人回合行动的）
+      span = saved.span === "round" || saved.span === "enemy" ? saved.span : segment === "enemy" ? "enemy" : "round";
+      setAssignments(saved.assignments);
       phase = saved.phase; turnNo = saved.turnNo; sequence = Number(saved.sequence) || 0;
       spent.clear(); completed.clear();
       for (const key of saved.spent || []) spent.add(key);
