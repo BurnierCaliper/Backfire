@@ -6,7 +6,8 @@
 //   D 乙的护盾层在乙自己的回合开始时判「从上一个回合开始到现在没挨打」就回满。
 // 我方回合行动的人、非玩家单位的 A、B、D 照旧；普通 PvE（没有在敌人回合行动的玩家阵营）A、B、D 一切照旧。
 // C 普通 PvE 也改（作者 10/29 追加）：敌人（非玩家单位，在敌人回合行动）施加的即时效果撑过下一个我方回合，到下一个敌人回合开始之前才失效。
-// 规则在 app.js · lateTurn / instantLate / ownRound / markTurnFx / lateRoundEnd / lateRoundStart（startEnemyPhase 调），beginRound / turnEnd 跳过乙
+// #482 起 C 看施加时是谁的回合、不看是谁施加的（这里的都是在自己的回合里施加的）；在对手的回合里施加的见 tests/opponent-turn-instant.test.js。
+// 规则在 app.js · lateTurn / instantLateNow / ownRound / markTurnFx / lateRoundEnd / lateRoundStart（startEnemyPhase 调），beginRound / turnEnd 跳过乙
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -63,8 +64,9 @@ test("普通 PvE 的 A、B、D 一切照旧：没有在敌人回合行动的阵�
   const { c, S, k } = field({ party: ["tou", "nora", "xia", "chuan"], late: null });
   assert.equal(c.lateTurn(k("tou")), false);
   assert.equal(c.ownRound(k("tou")), S.turnNo);
-  assert.equal(c.instantLate(k("tou")), false, "我方（在我方回合行动）施加的即时效果不记");
+  assert.equal(c.instantLateNow(), false, "我方回合里施加的即时效果不记");
   toEnemy(c);
+  assert.equal(c.instantLateNow(), true, "敌人回合里施加的即时效果记（#482：不看是谁施加的）");
   assert.equal(c.ownRound(k("tou")), S.turnNo, "敌人回合里也是回合数");
   assert.ok(S.units.every(u => !u.lateFx), "什么都不记");
   const parties = [["tou", "nora", "xia", "chuan"], ["ruby", "yuito", "hiaki", "kolt"], ["longge", "helu", "tou", "ras"]];
@@ -351,15 +353,15 @@ test("C（PvE 也改）：敌人在敌人回合打在我方身上的熔融（镇
   const f = field({ party: ["kolt", "helu"], late: null, enemies: [{ id: "riot_baton", lv: 5, zone: 1 }] });
   const kolt = f.k("kolt"), b = f.foe;
   assert.equal(b.kit, "riot_baton");
-  assert.equal(f.c.instantLate(b), true, "敌人在敌人回合行动");
   toEnemy(f.c);
+  assert.equal(f.c.instantLateNow(), true, "敌人回合");
   enemyUse(f.c, b, "en_riot_baton", kolt);
   assert.equal(kolt.instant.melt, true, "打中施加熔融");
   const end = logOf(f.c, () => toPlayer(f.c));
   assert.equal(kolt.instant.melt, true, "整轮开始：敌人施加的还在（以前在这里就失效了，只经过了敌人回合）");
   assert.ok(!end.includes(`${kolt.name} 熔融结束`), end);
   const log = logOf(f.c, () => toEnemy(f.c));
-  assert.equal(kolt.instant.melt, false, "下一个敌人回合（施加者那一队的回合）开始之前失效");
+  assert.equal(kolt.instant.melt, false, "下一个敌人回合（施加时的那一方的回合）开始之前失效");
   assert.ok(log.includes(`${kolt.name} 熔融结束`), log);
   assert.ok(!kolt.lateFx, "记号也清掉");
   // 我方（在我方回合行动）施加的：照旧在整轮开始失效
