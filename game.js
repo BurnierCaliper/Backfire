@@ -3529,6 +3529,15 @@
     // 单人：主角倒地后还能用坚毅生命起身就不算输；起不来才算真正死亡
     const downNotes = dispatch({ type: "battle.checkSolo" });
     if (downNotes && downNotes.length) addLogPhase(downNotes.join("\n"));
+    // 决斗（enemies.js · pvpDuelOutcome，#472）：一队全部倒地（含再起不能移出的）另一队获胜；两队同时全倒、回合上限两队一样是平局
+    const duel = typeof pvpDuelOutcome === "function" ? pvpDuelOutcome() : null;
+    if (duel) {
+      if (!duel.over) return false;
+      if (duel.why !== "rounds") addLogPhase(duel.text);   // 回合上限的那一句判的时候已经写进记录了（pvpDuelRoundLimit）
+      G.duelResult = duel;
+      G.pvpWinners = duel.winner ? [duel.winner] : null;
+      return finish(!!duel.winner, duel.winner ? "win" : "draw");
+    }
     const heroes = state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !isWeaponUnit(u));
     // 多人模式（含热座 / 联机）：全员倒地即失败，和 README 一致；只有单人主角能靠起身撑着不算输
     const standing = heroes.filter(u => typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying);
@@ -3567,9 +3576,10 @@
     refreshTop();
     const box = $("g-result");
     const retreated = G.lastOutcome === "retreat";
-    // 按阵营分出胜负（#445）：写哪个阵营获胜
+    // 按阵营分出胜负（#445）：写哪个阵营获胜；决斗（#472）两队一样是平局
     const pvpNames = win && !retreated && G.pvpWinners && G.pvpWinners.length ? G.pvpWinners.map(id => (playerFactionInfo(id) || { name: id }).name).join("、") : "";
-    box.querySelector("h2").textContent = retreated ? "撤退" : pvpNames ? `${pvpNames} 获胜` : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
+    const duelEnd = G.duelResult && G.duelResult.over ? G.duelResult : null;
+    box.querySelector("h2").textContent = retreated ? "撤退" : G.lastOutcome === "draw" ? "平局" : pvpNames ? `${pvpNames} 获胜` : win ? "胜利" : state.solo ? "阵亡" : "全员倒地";
     box.querySelector("h2").className = win ? "win" : "lose";
     // 战斗评分：胜利时先算速杀（1 / 2 / 3 回合内 ×2 / ×1.5 / ×1.2）和无伤（+100，倍率 +0.5，与速杀加算），再定评价
     const rewards = systemCommand({ type: "battle.finish", outcome: G.lastOutcome });
@@ -3606,23 +3616,28 @@
       const durNotes = systemCommand({ type: "battle.afterBattle" });
       if (typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
-        G.onBattleFinished({ outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null });
+        // 决斗（#472）：分数只是显示，不记进战场数据（不带 stats）
+        G.onBattleFinished(duelEnd ? { outcome: G.lastOutcome, turn: state.turnNo, xp: 0, kuizhi: 0, xpMult: 1, ups: [], durNotes, stats: [], grade: null, drops: null, duel: duelEnd.text }
+          : { outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null });
       }
       rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = trpgXpLine + (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
-    box.querySelector("p").textContent = retreated
+    box.querySelector("p").textContent = duelEnd
+      ? `第 ${state.turnNo} 回合结束。${duelEnd.text}决斗没有掉落、经验、奎支；血量、坚毅生命、武器耐久恢复成决斗前的样子（用掉的道具不恢复）。`
+      : retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
       : win
         ? `第 ${state.turnNo} 回合结束。${gradeLine ? gradeLine + "。" : ""}${loot}。${lvline}`
         : `队伍倒地。${loot}。${lvline}`;
-    // 结算面板上的大号评价字母
+    // 结算面板上的大号评价字母（决斗不评级：不显示）
     let badge = box.querySelector(".grade-badge");
     if (!badge) { badge = el("div", "grade-badge"); box.insertBefore(badge, box.querySelector("p")); }
     badge.className = "grade-badge g-" + (gr ? gr.grade : "C") + (win ? "" : " dim");
     badge.innerHTML = gr ? `<b>${gr.grade}</b><span>${gr.score} 分</span>` : "";
+    badge.hidden = !!(duelEnd && !gr);
     // 结算面板晚一点弹出，先让最后一击的大伤害数字和击倒演出放完
     const token = G.endToken = {};
     const showResult = () => {
@@ -3730,6 +3745,7 @@
     G.pvpTurn = false;   // 敌人回合里玩家阵营先动的那一段（#445）
     G.pvpDone = null;
     G.pvpWinners = null;
+    G.duelResult = null;   // 决斗分出的胜负（#472）
     $("g-result").classList.remove("show");
     $("g-reopen").classList.remove("show");
     cards.forEach(c => c.wrap.remove());

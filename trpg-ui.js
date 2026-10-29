@@ -1629,6 +1629,11 @@
 
   function recordBattle(r) {
       if (!TRPG.active || slot < 0) return;
+      // 决斗（#472）：只记胜负和「恢复成决斗前的样子」；没有经验、奎支、掉落，不记战场数据，也不算任务战斗
+      if (r.duel) {
+        log.push({ stamp: stampNow(), lines: [`决斗结束（第 ${r.turn} 回合）：${r.duel}`].concat(r.durNotes || []) });
+        return;
+      }
       const head = { win: "战斗胜利", lose: "战斗失败（全员倒地）", retreat: "撤出战斗" }[r.outcome] || "战斗结束";
       const lines = [`${head}（第 ${r.turn} 回合）：每人获得 ${r.xp} 经验${r.xpMult > 1 ? `（经验 ×${r.xpMult}）` : ""}，掉落 ${r.kuizhi} 奎支（现有 ${Number(state.kuizhi) || 0}）。`];
       if (r.grade) lines.push(`评价 ${r.grade.grade}：${r.grade.score} 分（基准 ${r.grade.par}）${r.outcome === "win" && r.grade.xpMult > 1 ? `，战斗经验 ×${r.grade.xpMult}（已含在上面的经验里）` : ""}。`);

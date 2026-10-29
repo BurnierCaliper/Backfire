@@ -48,6 +48,7 @@ const state = {
   friendlyFire: {},   // 友伤开关：{ 操控者: true / false }（enemies.js · FRIENDLY_FIRE，#428）
   ffHurt: {},         // 友伤打掉、还没补回来的血：{ 单位 id: 血量 }（ffHurtOf，#428）
   playerFactions: null,   // 玩家阵营（PvP 第一步，enemies.js · PVP_CFG，#445）：null = 全部在「我方」，一切照旧
+  pvpDuel: null,          // 决斗（PvP 第三步，enemies.js · PVP_DUEL_CFG，#472）：null = 不是决斗
   fields: {
     1: emptyField(),
     2: emptyField(),
@@ -1654,10 +1655,14 @@ function startCombat() {
     (state.units || []).forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "battleStart", undefined, featNotes); });
     if (featNotes.length) appendLog(featNotes.join("\n"));
   }
+  // 决斗（enemies.js · pvpDuelToss，#472）：抛硬币定先手——先手的队在我方回合行动、后手的在敌人回合行动，要在补行动点之前定
+  if (typeof pvpDuelToss === "function") pvpDuelToss();
   beginRound([]);
   startPlayerPhase();
   // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）：开战时还没轮到它们，行动点 / 附赠从 0 开始，到第一个敌人回合开始时才补
   (state.units || []).forEach(u => { if (u && u.isPlayer && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy") { u.ap = 0; u.bonus = 0; } });
+  // 决斗的后手补偿（enemies.js · pvpDuelLateBonus，#472）：后手每个角色先有 1 个附赠，先手的第一回合里就能用
+  if (typeof pvpDuelLateBonus === "function") pvpDuelLateBonus();
   if (typeof ratfolkBattleStart === "function") ratfolkBattleStart();   // 下水道狂鼠：记下开战时的血量（暴虐猎手斩杀看「降到」，enemies.js）
   appendLog("战斗开始。回合开始效果已结算。", "sep");
   if (state.ambush) appendLog("遭遇战：长休时被偷袭，我方来不及反应，跳过第一回合（没有行动点和附赠动作）。");
@@ -2124,7 +2129,7 @@ function playerTurnStart(u, notes) {
   // 晕眩标记（首领的规则；我方只有和载具合并的驾驶员用，vehicle.js）：没攒满就只恢复架势、照常行动；攒满了照常晕眩，标记清零
   if (u.stunned) bossShrugStun(u, notes);
   const wasStun = !!u.stunned;
-  refreshEconomy(u);
+  refreshEconomy(u, notes);
   if (wasStun) {
     recoverFromStun(u, notes);
     notes.push(`${u.name} 晕眩：本回合不获得行动点与附赠动作。`);
@@ -2447,6 +2452,8 @@ function turnEnd() {
   settleBossStuns(notes);
   if (typeof ratfolkRoundEnd === "function") ratfolkRoundEnd(notes);   // 狂暴的潜藏者回合结束进入躲藏（enemies.js）
   appendLog(notes.join("\n"));
+  // 决斗的回合上限（enemies.js · pvpDuelRoundLimit，#472）：打满限定的回合还没分出胜负，按剩余血量百分比判，不再开下一回合
+  if (typeof pvpDuelRoundLimit === "function" && pvpDuelRoundLimit()) return;
   beginRound([]);
   startPlayerPhase();
   // 下水道狂鼠（enemies.js · ratfolkSweep）：回合结束 / 开始的腐蚀、灼烧、场地伤害都结算完，再看一遍反应（斩杀等）
@@ -3097,6 +3104,7 @@ function resetBattleRecords() {
   state.ffHurt = {};              // 友伤打掉、还没补回来的血（ffHurtOf，#428）
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
   state.playerFactions = null;    // 玩家阵营（enemies.js · PVP_CFG，#445）：每场回到默认（全部在「我方」）
+  state.pvpDuel = null;           // 决斗（enemies.js · PVP_DUEL_CFG，#472）：每场开战前由指令 battle.duel 布置
 }
 /** 这场的基准分：把出现过的每个要打的敌人（含中途召唤的）「打空血、击杀」的分加起来，按第一次见到时的数值算。
  *  击破、失衡不算进来：那是玩家打出来的漂亮操作，不当成默认该拿的分。
@@ -3158,15 +3166,25 @@ function battleGrade() {
  *  重复调用不再加分、发经验或升级。
  *  标记保存在本场 battleScore 内，resetBattleRecords 开新战斗时一起清空。 */
 function settleBattleRewards(outcome) {
-  if (!["win", "lose", "retreat"].includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
+  // 决斗（#472）两队同时倒下 / 回合上限两队一样是平局（draw），只有决斗有
+  const duelOn = typeof pvpDuelOn === "function" && pvpDuelOn();
+  if (!["win", "lose", "retreat"].concat(duelOn ? ["draw"] : []).includes(outcome)) throw new Error("未知的战斗结局：" + outcome);
   state.battleScore = state.battleScore || { total: 0, parts: {} };
   const bs = state.battleScore;
   clearNanoReserve();   // 瑞比的储备能源战斗结束清零（#219）；连续战斗换区域不走这里，还是同一场
   if (bs.rewardSettlement) return {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
-    ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, trpgXp: bs.rewardSettlement.trpgXp || [], alreadySettled: true
+    ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, trpgXp: bs.rewardSettlement.trpgXp || [], alreadySettled: true,
+    ...(bs.rewardSettlement.duel ? { duel: bs.rewardSettlement.duel } : {})
   };
+  // 决斗（enemies.js · PVP_DUEL_CFG，#472）：没有掉落、经验、奎支，不评级、不升级，也不记进战场记录（最近 10 场）、图鉴。
+  // 只带上分出的胜负；两队各自的分数（每队单独计分）一起给结算面板看
+  if (duelOn) {
+    const duel = pvpDuelPublic();
+    bs.rewardSettlement = { outcome, grade: null, xpBonus: 0, ups: [], drops: null, trpgXp: [], duel };
+    return { outcome, grade: null, finishBonus: null, xpBonus: 0, totalXpBonus: 0, ups: [], drops: null, trpgXp: [], alreadySettled: false, duel };
+  }
   const finishBonus = outcome === "win" ? applyFinishBonus() : null;
   const grade = battleGrade();
   const gained = (state.battleGains && state.battleGains.xp) || 0;
@@ -3649,6 +3667,11 @@ function rasUnstableHit(target, res, notes) {
   (target.layers || []).forEach(l => { l.current = 0; });
   const wasUp = !!target.upOnShp;
   if (wasUp || (typeof exhaustTierOf === "function" && exhaustTierOf(target) >= 3)) {
+    // 决斗里伤害不会致死：坚毅生命保留 1，再起不能、移出战场（enemies.js · pvpDuelShpFloor，#472）
+    if (typeof pvpDuelShpFloor === "function" && pvpDuelOn() && pvpDuelTeamOf(target)) {
+      target.shp = Math.min(Number(target.shp) || 0, PVP_DUEL_CFG.outShp);
+      if (pvpDuelShpFloor(target, notes)) return;
+    }
     target.shp = 0;
     target.upOnShp = false;
     target.dying = false;
@@ -5791,8 +5814,10 @@ function applyBonusPenalties(u, bonus, notes) {
   if (u.loseBonusNext) { u.loseBonusNext = false; take("空手格挡"); }
   return bonus;
 }
-function refreshEconomy(u) {
+function refreshEconomy(u, notes) {
   if (!u || !u.isPlayer) return;
+  // 决斗的后手补偿（enemies.js · pvpDuelCarry，#472）：开战时给的附赠没用掉的，叠到后手自己的第一回合（只这一次；这一回合不能行动就作废）
+  const duelCarry = typeof pvpDuelCarry === "function" ? pvpDuelCarry(u) : 0;
   if (u.resources) delete u.resources.apGifts;   // 回合开始重新补行动点：上回合没用掉的赠送作废
   // 肉体操控（沙灵聚合体三阶段）：这一回合失去行动点（附赠动作照常）。标记只管一回合，不管这回合能不能行动都用掉
   const loseAp = !!u.loseApNext;
@@ -5829,6 +5854,11 @@ function refreshEconomy(u) {
   if (carry && carry.turn === Number(state.turnNo)) {
     bonus += carry.n;
     u.resources.stanceCarry = null;
+  }
+  // 决斗的后手补偿：也是加成，在扣之前加（例：这一回合 1 + 1 = 2 个附赠）
+  if (duelCarry > 0) {
+    bonus += duelCarry;
+    if (notes) notes.push(`后手补偿：${u.name} 开战时的附赠没用掉，叠到这一回合（+${duelCarry}）。`);
   }
   bonus = applyBonusPenalties(u, bonus);   // 所有加成算完再扣：不稳、空手格挡各 −1
   if (loseAp) ap = 0;
@@ -5959,6 +5989,8 @@ function exhaustTierFromHours(h) {
 }
 /** 不能起身的原因；可以起身返回 null */
 function standUpBlocked(u) {
+  // 决斗设成不允许起身（enemies.js · pvpDuelNoStand，#472）：倒地的人留在场上，只是不能自己起身（专长「拉一把」这类别人来救的照常）
+  if (typeof pvpDuelNoStand === "function" && pvpDuelNoStand(u)) return "决斗不允许起身";
   if (exhaustTierOf(u) >= 1) return "力竭：无法再用坚毅生命起身";
   if ((Number(u && u.shp) || 0) <= 0) return "坚毅生命已耗尽";
   return null;
@@ -7092,6 +7124,8 @@ function applyKnockdown(unit, notes, opt) {
       const loss = opt.lethal ? before : Math.max(0, Math.floor(Number(opt.shpLoss) || 0));
       if (loss <= 0) return "shp";
       unit.shp = Math.max(0, before - loss);
+      // 决斗（enemies.js · pvpDuelShpFloor，#472）：伤害不会致死，坚毅生命打到 1 保留 1，再起不能、移出战场
+      if (typeof pvpDuelShpFloor === "function" && pvpDuelShpFloor(unit, notes)) return "dead";
       if (unit.shp > 0) {
         notes.push(`${unit.name} 起身中，${opt.cause || "这次伤害"}改扣坚毅生命${shpHidden() ? "" : `（${before} → ${unit.shp}）`}。`);
         return "shp";
@@ -7105,6 +7139,8 @@ function applyKnockdown(unit, notes, opt) {
     }
     if (unit.dying) return "dying";
     if (exhaustTierOf(unit) >= 3) {
+      // 决斗里伤害不会致死：力竭 3 被击倒也只是再起不能（enemies.js · pvpDuelKnockOut，#472）
+      if (typeof pvpDuelKnockOut === "function" && pvpDuelKnockOut(unit, notes)) return "dead";
       unit.dead = true;
       unit.dying = false;
       notes.push(`${unit.name} 力竭 3：被击倒后立刻死亡。`);

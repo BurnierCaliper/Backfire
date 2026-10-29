@@ -1919,6 +1919,279 @@ function setPlayerFaction(cmd) {
   return JSON.parse(JSON.stringify(next));
 }
 
+/* ===== 决斗（PvP 第三步，#472，docs/pvp.md 第 1.2、2、3 节）=====
+ * 联机探索环节里玩家之间的决斗：只有 1 队、2 队，就是两个互相敌对的玩家阵营（state.playerFactions，第一步的规则层）——
+ * 敌我判断、协助格挡 / 协助攻击、谁在哪个回合行动全部照玩家阵营走，这里不另写一套。决斗自己的规则记在战斗状态里：
+ *   state.pvpDuel = {
+ *     teams:   { "1队": [单位 id…], "2队": [单位 id…] }   每队的角色（武器人跟着持有者，不单独记）
+ *     stand:   true / false     允许起身；不允许时倒地的人留在场上，只是不能自己起身（能被专长救起来）
+ *     rounds:  null / 回合数      回合上限（开了才有）：打完这一回合还没分出胜负，剩余血量百分比多的一队赢，一样算平局
+ *     first:   "1队" / "2队"     开战时抛硬币定的先手（startCombat → pvpDuelToss）：先手在我方回合行动，后手在敌人回合行动
+ *     carry:   { 单位 id: 1 }    后手补偿：开战时给后手每个角色的 1 个附赠，没用掉的叠到后手自己的第一回合（refreshEconomy → pvpDuelCarry）
+ *     out:     [单位 id…]        再起不能、移出战场的人
+ *     result:  null / { over, winner, draw, why, pct }   分出的胜负（pvpDuelOutcome / pvpDuelRoundLimit）
+ *     restore: { heroes, dur }   决斗前队伍档案（LEDGER）里的血量 / 坚毅 / 耐久，结束后盖回去（pvpDuelRestore）。只在房主本机，不发给玩家
+ *   }
+ * 指令 battle.duel（battle-commands.js → pvpDuelSetup）在布好战场之后、开战之前布置；开新的一场战斗清空（app.js · resetBattleRecords）。
+ * 伤害不会致死（pvpDuelShpFloor / pvpDuelKnockOut）；没有掉落、经验、奎支（app.js · settleBattleRewards）；结束后恢复（ledger.js · ledgerAfterBattle）。 */
+const PVP_DUEL_CFG = {
+  teams: [{ id: "1队", name: "1 队", zone: 1 }, { id: "2队", name: "2 队", zone: 3 }],   // 两队：玩家阵营 id / 名字、开局全队站哪一区
+  zoneMode: 3,         // 3 区制：两边开局隔开（一队 1 区、一队 3 区）
+  teamMax: 4,          // 每队最多几人（两队人数可以不一样，不另外补偿）
+  teamMin: 1,          // 每队至少几人才能开打
+  lateBonus: 1,        // 后手补偿：开战时后手每个角色手上先有几个附赠
+  standDefault: true,  // 默认允许起身
+  roundsDefault: 10,   // 打开「限定回合数」时默认几回合
+  roundsMax: 99,       // 回合上限最多几回合
+  outShp: 1            // 伤害不会致死：坚毅生命打到这里就保留这么多，再起不能、移出战场
+};
+/** 现在的决斗；不是决斗返回 null */
+function pvpDuelState() {
+  const d = typeof state !== "undefined" && state ? state.pvpDuel : null;
+  return d && typeof d === "object" && d.teams && typeof d.teams === "object" ? d : null;
+}
+/** 这一场是不是决斗 */
+function pvpDuelOn() { return !!pvpDuelState(); }
+/** 队伍的信息 { id, name, zone }（PVP_DUEL_CFG.teams） */
+function pvpDuelTeamInfo(id) { return PVP_DUEL_CFG.teams.find(t => t.id === id) || null; }
+/** u 在决斗的哪一队（武器人跟着持有者、替身跟着操控它的人）；不在决斗里返回 null */
+function pvpDuelTeamOf(u) {
+  const d = pvpDuelState();
+  if (!d || !u) return null;
+  if (u.creditTo != null && typeof unitById === "function") u = unitById(u.creditTo) || u;
+  const owner = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
+  const id = (owner || u).id;
+  const t = PVP_DUEL_CFG.teams.find(x => (d.teams[x.id] || []).includes(id));
+  return t ? t.id : null;
+}
+/** 这一队的角色（还在 state.units 里的；被主持人移走的不在） */
+function pvpDuelMembers(teamId) {
+  const d = pvpDuelState();
+  if (!d) return [];
+  return (d.teams[teamId] || []).map(id => (state.units || []).find(u => u && u.id === id)).filter(Boolean);
+}
+/** 布置决斗（指令 battle.duel，字段已在 battle-commands.js 校验过）：{ teams: { "1队": [角色单位 id…], "2队": [...] }, stand, rounds }。
+ *  在布好战场（battle.setup，把队伍摆上场）之后、开战之前：不参加的角色（连同武器人）、敌人、护送对象、配置物离场；3 区制，
+ *  1 队全部站 1 区、2 队全部站 3 区；两队分成两个互相敌对的玩家阵营（setPlayerFaction）；记下决斗前的血量 / 坚毅 / 耐久。返回 state.pvpDuel 的公开部分 */
+function pvpDuelSetup(cmd) {
+  const C = PVP_DUEL_CFG;
+  if (state.combatStarted) throw new Error("战斗已经开始，不能再布置决斗");
+  const heroes = (state.units || []).filter(u => u && u.isPlayer && !u.escort && !u._removed && !(typeof isWeaponUnit === "function" && isWeaponUnit(u)));
+  const teams = {}, seen = new Set();
+  C.teams.forEach(t => {
+    const ids = ((cmd.teams || {})[t.id] || []).map(String);
+    if (ids.length < C.teamMin) throw new Error(`${t.name}至少要 ${C.teamMin} 人`);
+    if (ids.length > C.teamMax) throw new Error(`${t.name}最多 ${C.teamMax} 人`);
+    ids.forEach(id => {
+      const u = heroes.find(h => h.id === id);
+      if (!u) throw new Error("没有这名角色：" + id);
+      if (seen.has(id)) throw new Error(`${u.name} 只能选一队`);
+      seen.add(id);
+    });
+    teams[t.id] = ids;
+  });
+  // 决斗前的样子：队伍档案里每个参加的人的血量 / 坚毅（LEDGER.heroes），和他的武器的耐久（LEDGER.dur）；没记过的记 null（结束后删掉，回到满的）
+  const restore = { heroes: {}, dur: {} };
+  if (typeof LEDGER !== "undefined" && LEDGER) {
+    heroes.filter(u => seen.has(u.id)).forEach(u => {
+      const rec = LEDGER.heroes && LEDGER.heroes[u.kit];
+      restore.heroes[u.kit] = rec ? JSON.parse(JSON.stringify(rec)) : null;
+      (u.linkedKits || []).forEach(k => { const v = LEDGER.dur && LEDGER.dur[k]; restore.dur[k] = v == null ? null : Number(v); });
+    });
+  }
+  heroes.filter(u => !seen.has(u.id)).forEach(u => { if (typeof removeHeroUnit === "function") removeHeroUnit(u); });
+  state.units = (state.units || []).filter(u => u && u.isPlayer && !u.escort);   // 决斗没有敌人、护送对象
+  state.props = [];
+  state.zoneMode = C.zoneMode;
+  state.board = null;
+  state.fields = { 1: emptyField(), 2: emptyField(), 3: emptyField() };
+  state.gaps = { "1-2": emptyGap(), "2-3": emptyGap() };
+  state.playerAllies = [];
+  state.battleDrops = null;   // 决斗没有掉落
+  state.ambush = false;
+  if (typeof Chain !== "undefined" && Chain.clear) Chain.clear();
+  // 两队 = 两个互相敌对的玩家阵营（不同的玩家阵营默认就敌对）；谁先手开战时抛硬币再定
+  setPlayerFaction({ reset: true });
+  C.teams.forEach(t => {
+    setPlayerFaction({ faction: t.id, name: t.name, phase: "player" });
+    teams[t.id].forEach(id => {
+      setPlayerFaction({ faction: t.id, unit: id });
+      const u = unitById(id);
+      (state.units || []).forEach(x => { if (x === u || (x.weaponOf && x.weaponOf === u.kit)) x.zone = t.zone; });
+    });
+  });
+  state.pvpDuel = { teams, stand: cmd.stand == null ? !!C.standDefault : !!cmd.stand,
+    rounds: cmd.rounds == null ? null : Math.max(1, Math.min(C.roundsMax, Math.floor(Number(cmd.rounds)))),
+    first: null, carry: {}, out: [], result: null, restore };
+  appendLog(`决斗：${C.teams.map(t => `${t.name}（${teams[t.id].map(id => unitById(id).name).join("、")}）`).join(" 对 ")}，` +
+    `${state.pvpDuel.stand ? "允许起身" : "不允许起身"}，${state.pvpDuel.rounds ? `限定 ${state.pvpDuel.rounds} 回合` : "不限回合"}。开战时抛硬币决定先手。`);
+  return pvpDuelPublic();
+}
+/** 决斗的公开部分（给画面、联机玩家看；不含决斗前的坚毅这些） */
+function pvpDuelPublic() {
+  const d = pvpDuelState();
+  if (!d) return null;
+  const r = d.result;
+  return JSON.parse(JSON.stringify({ teams: d.teams, stand: !!d.stand, rounds: d.rounds || null, first: d.first || null, out: d.out || [],
+    result: r ? { over: !!r.over, winner: r.winner || null, draw: !!r.draw, why: r.why || null, pct: r.pct || null } : null }));
+}
+/** 开战（app.js · startCombat，补行动点之前）：抛硬币定先手——先手的阵营在我方回合行动，后手的在敌人回合行动，结果写进战斗记录 */
+function pvpDuelToss() {
+  const d = pvpDuelState();
+  if (!d || d.first) return;
+  const [a, b] = PVP_DUEL_CFG.teams;
+  d.first = Math.random() < 0.5 ? a.id : b.id;
+  const first = pvpDuelTeamInfo(d.first), second = d.first === a.id ? b : a;
+  setPlayerFaction({ faction: first.id, phase: "player" });
+  setPlayerFaction({ faction: second.id, phase: "enemy" });
+  appendLog(`抛硬币：${first.name}先手（我方回合行动），${second.name}后手（敌人回合行动）。`);
+}
+/** 开战（app.js · startCombat，在敌人回合行动的阵营清零行动点之后）：后手补偿——后手每个在场的角色手上先有 1 个附赠，
+ *  先手的第一回合里就能用（主要拿来协助格挡）；没用掉的记在 carry 里，后手自己的第一回合开始时叠上去 */
+function pvpDuelLateBonus() {
+  const d = pvpDuelState();
+  if (!d || !d.first) return;
+  const n = Math.max(0, Math.floor(Number(PVP_DUEL_CFG.lateBonus) || 0));
+  const second = PVP_DUEL_CFG.teams.find(t => t.id !== d.first);
+  if (!n || !second) return;
+  const carry = {};
+  (state.units || []).forEach(u => {
+    if (!u || !u.isPlayer || u.hidden || u.dead || u._removed || u.escort || pvpDuelTeamOf(u) !== second.id) return;
+    u.bonus = n; u.bonusMax = Math.max(Number(u.bonusMax) || 0, n);
+    carry[u.id] = n;
+  });
+  d.carry = carry;
+  appendLog(`后手补偿：${second.name}每个角色先有 ${n} 个附赠动作，先手的第一回合里就能用（主要拿来协助格挡）；没用掉的留到自己的第一回合。`);
+}
+/** 后手自己的第一回合开始补行动点时（app.js · refreshEconomy）：开战时给的补偿还剩几个（最多给的那么多），叠到这一回合的附赠上。
+ *  只算一次：不管这一回合能不能行动（晕眩……）都用掉这个记号 */
+function pvpDuelCarry(u) {
+  const d = pvpDuelState();
+  if (!d || !u || !d.carry || !Object.prototype.hasOwnProperty.call(d.carry, u.id)) return 0;
+  const n = Math.max(0, Math.min(Number(d.carry[u.id]) || 0, Math.floor(Number(u.bonus) || 0)));
+  const next = Object.assign({}, d.carry);
+  delete next[u.id];
+  d.carry = next;
+  return n;
+}
+/** 决斗不允许起身时，决斗里的角色不能自己起身（app.js · standUpBlocked 认它）；专长「拉一把」这类别人来救的照常 */
+function pvpDuelNoStand(u) {
+  const d = pvpDuelState();
+  return !!d && !d.stand && !!pvpDuelTeamOf(u);
+}
+/** 伤害不会致死（决斗）：起身中受伤把坚毅生命打到 PVP_DUEL_CFG.outShp（1）或更低时，保留 1，再起不能、移出战场。
+ *  engine.js · applyResultToUnit（攻击 / 持续伤害）、app.js · applyKnockdown（坠落、窒息、高能自爆……）扣完坚毅后问这里；
+ *  返回 true = 已经按决斗处理（不再判死亡） */
+function pvpDuelShpFloor(u, notes) {
+  if (!pvpDuelOn() || !u || !u.isPlayer || u.pvpOut || (typeof isWeaponUnit === "function" && isWeaponUnit(u)) || !pvpDuelTeamOf(u)) return false;
+  if ((Number(u.shp) || 0) > PVP_DUEL_CFG.outShp) return false;
+  u.shp = PVP_DUEL_CFG.outShp;
+  return pvpDuelKnockOut(u, notes);
+}
+/** 再起不能（决斗）：这个角色移出战场——不算死亡（决斗结束后一切恢复），只是这场决斗里不再出现；武器人跟着离场，
+ *  指向它的嘲讽 / 掩护 / 禁足失效（和主持人移出玩家角色一样，app.js · removeHeroUnit）。画面上弹「再起不能」，联机玩家只收到这个状态（pvpOut），
+ *  不收坚毅数值。还在 state.units 里（算胜负、剩余血量百分比要用），dead / _removed 让它不再行动、不再被选中 */
+function pvpDuelKnockOut(u, notes) {
+  const d = pvpDuelState();
+  if (!d || !u || u.pvpOut || !pvpDuelTeamOf(u) || (typeof isWeaponUnit === "function" && isWeaponUnit(u))) return false;
+  if (typeof spawnPopup === "function" && !u.hidden) spawnPopup(u, { kind: "status", text: "再起不能", element: "physical" });
+  u.pvpOut = true;
+  u.dead = true; u.dying = false; u.upOnShp = false; u.stunned = false;
+  u._removed = true;
+  d.out = (d.out || []).filter(id => id !== u.id).concat([u.id]);
+  const gone = new Set([u.id]);
+  (state.units || []).forEach(x => { if (x !== u && x.weaponOf && x.weaponOf === u.kit && !x._removed) { x._removed = true; x.dead = true; gone.add(x.id); } });
+  (state.units || []).forEach(x => {
+    if (gone.has(x.tauntTo)) x.tauntTo = null;
+    if (gone.has(x.coverBy)) x.coverBy = null;
+    if (gone.has(x.lockdownBy)) x.lockdownBy = null;
+  });
+  ["selectedId", "attackerId", "targetId"].forEach(k => { if (gone.has(state[k])) state[k] = null; });
+  if (notes) notes.push(`${u.name} 再起不能（决斗中伤害不会致死），移出战场。`);
+  if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, notes || []);
+  return true;
+}
+/** 这一队还有没有人站着（没倒地、没再起不能、没被移走） */
+function pvpDuelTeamUp(teamId) {
+  return pvpDuelMembers(teamId).some(u => !u.dead && !u._removed && !u.pvpOut && !u.hidden &&
+    (typeof heroStillFighting === "function" ? heroStillFighting(u) : !u.dying));
+}
+/** 剩余血量百分比（回合上限判胜负用）：这一队所有角色现在的血量合计 ÷ 血量上限合计。只算各层血量，不算坚毅生命；
+ *  倒地的（濒死、再起不能）现在的血量按 0 算，上限照算。返回 { hp, max } */
+function pvpDuelHp(teamId) {
+  let hp = 0, max = 0;
+  pvpDuelMembers(teamId).forEach(u => {
+    max += typeof totalMaxHp === "function" ? totalMaxHp(u) : 0;
+    if (!u.dead && !u.dying && !u.pvpOut && !u._removed) hp += totalHp(u);
+  });
+  return { hp, max };
+}
+/** 百分比写成文字：保留一位小数 */
+function pvpDuelPctText(v) { return (Math.round((Number(v) || 0) * 1000) / 10) + "%"; }
+/** 决斗分出胜负没有：一队全部倒地（含再起不能移出的），另一队获胜；两队同时全倒算平局；开了回合上限、打完了看 pvpDuelRoundLimit 记下的结果。
+ *  返回 null = 不是决斗；{ over: false } = 还在打；{ over: true, winner: 队伍 id / null, draw, why: "wipe" / "rounds", pct, text } */
+function pvpDuelOutcome() {
+  const d = pvpDuelState();
+  if (!d || !state.combatStarted) return d ? { over: false } : null;
+  // 保险：没接到 pvpDuelShpFloor 的路径把决斗里的角色弄「死」了，也照再起不能算（结束后一切恢复）
+  const late = [];
+  PVP_DUEL_CFG.teams.forEach(t => pvpDuelMembers(t.id).forEach(u => { if (u.dead && !u.pvpOut && !u._removed) pvpDuelKnockOut(u, late); }));
+  if (late.length) appendLog(late.join("\n"));
+  if (!d.result) {
+    const [a, b] = PVP_DUEL_CFG.teams;
+    const upA = pvpDuelTeamUp(a.id), upB = pvpDuelTeamUp(b.id);
+    if (upA && upB) return { over: false };
+    const winner = upA ? a.id : upB ? b.id : null;
+    d.result = { over: true, winner, draw: !winner, why: "wipe", pct: null };
+  }
+  return Object.assign({}, d.result, { text: pvpDuelResultText(d.result) });
+}
+/** 胜负写成一句话（战斗记录、结算面板） */
+function pvpDuelResultText(r) {
+  if (!r || !r.over) return "";
+  const win = r.winner ? pvpDuelTeamInfo(r.winner) : null;
+  const lose = win ? PVP_DUEL_CFG.teams.find(t => t.id !== win.id) : null;
+  if (r.why === "rounds") {
+    const pct = PVP_DUEL_CFG.teams.map(t => `${t.name} ${pvpDuelPctText((r.pct || {})[t.id])}`).join("、");
+    return `回合上限：打满 ${r.rounds || ""} 回合还没分出胜负，按剩余血量百分比（${pct}）——${win ? win.name + "获胜" : "两队一样，平局"}。`;
+  }
+  return win ? `${win.name}获胜：${lose.name}全部倒地。` : "平局：两队同时全部倒地。";
+}
+/** 回合上限（app.js · turnEnd，一回合结束、下一回合开始之前）：开了「限定回合数」、打满了还没分出胜负，按剩余血量百分比判，
+ *  多的一队获胜，一样算平局；这时不再开下一回合（返回 true）。这一回合结束时的结算（持续伤害……）已经算完：有一队全倒了照全倒判 */
+function pvpDuelRoundLimit() {
+  const d = pvpDuelState();
+  if (!d || !d.rounds || !state.combatStarted || Number(state.turnNo) < d.rounds) return false;
+  const now = pvpDuelOutcome();
+  if (now && now.over) return true;
+  const [a, b] = PVP_DUEL_CFG.teams;
+  const ha = pvpDuelHp(a.id), hb = pvpDuelHp(b.id);
+  // 比 ha.hp / ha.max 和 hb.hp / hb.max：交叉相乘，不用小数比（一样就是一样）
+  const cmp = ha.hp * hb.max - hb.hp * ha.max;
+  const winner = cmp > 0 ? a.id : cmp < 0 ? b.id : null;
+  const ratio = h => h.max > 0 ? h.hp / h.max : 0;
+  d.result = { over: true, winner, draw: !winner, why: "rounds", rounds: d.rounds, pct: { [a.id]: ratio(ha), [b.id]: ratio(hb) } };
+  appendLog(pvpDuelResultText(d.result));
+  return true;
+}
+/** 决斗结束后（ledger.js · ledgerAfterBattle 在决斗时只走这里）：队伍档案里参加的人的血量、坚毅生命、武器耐久盖回决斗前的样子；
+ *  用掉的道具不恢复（背包照旧）。只做一次。返回 true = 是决斗、已经恢复 */
+function pvpDuelRestore(notes) {
+  const d = pvpDuelState();
+  if (!d) return false;
+  if (d.restored) return true;
+  const r = d.restore || { heroes: {}, dur: {} };
+  if (typeof LEDGER !== "undefined" && LEDGER) {
+    LEDGER.heroes = LEDGER.heroes || {};
+    Object.keys(r.heroes || {}).forEach(kit => { const v = r.heroes[kit]; if (v) LEDGER.heroes[kit] = JSON.parse(JSON.stringify(v)); else delete LEDGER.heroes[kit]; });
+    LEDGER.dur = LEDGER.dur || {};
+    Object.keys(r.dur || {}).forEach(k => { const v = r.dur[k]; if (v == null) delete LEDGER.dur[k]; else LEDGER.dur[k] = v; });
+  }
+  d.restored = true;
+  if (notes) notes.push("决斗结束：血量、坚毅生命、武器耐久恢复成决斗前的样子（用掉的道具不恢复）。");
+  return true;
+}
+
 /* ===== 第三采矿场 ===== */
 /** 身上有高能状态（#52：蓄能攒的高能值不算） */
 function hasHigh(u) { return !!(u && u.statuses && u.statuses.high); }

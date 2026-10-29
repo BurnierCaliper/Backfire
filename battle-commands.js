@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction", "battle.duel"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setScene", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -89,6 +89,24 @@
     if (rel && !(c.hostile === true || c.hostile === false || c.hostile === null)) throw new Error("player faction hostile must be true, false or null");
     if (!rel && has("hostile")) throw new Error("player faction hostile needs other or enemy");
   }
+  /** 决斗指令（PvP 第三步，enemies.js · pvpDuelSetup，#472）的字段：teams 只有「1队」「2队」两个键，各是不重复的单位 id 数组
+   *  （人数、是不是场上的角色由 pvpDuelSetup 再查）；stand 允许起身（布尔，可不给 = 默认允许）；rounds 回合上限（null / 不给 = 不限，
+   *  否则 1 到 PVP_DUEL_CFG.roundsMax 的整数） */
+  function duelCheck(c) {
+    const C = root.PVP_DUEL_CFG || (typeof PVP_DUEL_CFG !== "undefined" ? PVP_DUEL_CFG : { teams: [{ id: "1队" }, { id: "2队" }], roundsMax: 99 });
+    const known = ["type", "teams", "stand", "rounds"];
+    Object.keys(c).forEach(k => { if (!known.includes(k)) throw new Error("Unknown duel field: " + k); });
+    const ids = C.teams.map(t => t.id);
+    if (!c.teams || typeof c.teams !== "object" || Array.isArray(c.teams)) throw new Error("duel teams must be an object");
+    Object.keys(c.teams).forEach(k => { if (!ids.includes(k)) throw new Error("Unknown duel team: " + k); });
+    ids.forEach(k => {
+      const list = c.teams[k];
+      if (!Array.isArray(list) || list.some(id => typeof id !== "string" || !id)) throw new Error("duel team " + k + " must be a list of unit ids");
+      if (new Set(list).size !== list.length) throw new Error("duel team " + k + " has duplicates");
+    });
+    if (c.stand != null && typeof c.stand !== "boolean") throw new Error("duel stand must be a boolean");
+    if (c.rounds != null && !(Number.isInteger(c.rounds) && c.rounds >= 1 && c.rounds <= C.roundsMax)) throw new Error("duel rounds must be 1-" + C.roundsMax);
+  }
   function validate(cmd) {
     if (types.indexOf(cmd.type) < 0) throw new Error("Unknown battle command: " + cmd.type);
     if (["skill", "move", "standUp", "useItem", "openingChoice", "battle.enemyAction"].includes(cmd.type)) actor(cmd.actor);
@@ -114,6 +132,7 @@
       if (cmd.owner != null && (typeof cmd.owner !== "string" || !cmd.owner)) throw new Error("friendly fire owner must be a nonempty string");
     }
     if (cmd.type === "battle.playerFaction") playerFactionCheck(cmd);
+    if (cmd.type === "battle.duel") duelCheck(cmd);
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
       if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn", "ruinOn", "isolate"], "field kind");
@@ -412,6 +431,7 @@
         // 这场不许撤退（单局首领战 spec.retreat === false）：指令层也拒绝，不只靠界面把按钮变灰
         const g = env.game || root.GAME || {};
         if (g.rogue && g.rogue.spec && g.rogue.spec.retreat === false) throw new Error("这场战斗不能撤退");
+        if (typeof pvpDuelOn === "function" && pvpDuelOn()) throw new Error("决斗不能撤退");   // 决斗（#472）打到分出胜负，主持人可以直接回到探索环节放弃
         return performRetreat(cmd.rearguard || null);
       }
       case "endTurn": if (env.endUnit) return env.endUnit(cmd);
@@ -445,6 +465,8 @@
       }
       // 玩家阵营（PvP 第一步，enemies.js · setPlayerFaction，#445）：把玩家角色分到不同的阵营、定在哪个回合行动、和其他阵营是敌是友；改了立刻生效
       case "battle.playerFaction": return { factions: setPlayerFaction(cmd) };
+      // 决斗（PvP 第三步，enemies.js · pvpDuelSetup，#472）：布好战场之后、开战之前，把选好的两队摆成两个互相敌对的玩家阵营
+      case "battle.duel": return { duel: pvpDuelSetup(cmd) };
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };
