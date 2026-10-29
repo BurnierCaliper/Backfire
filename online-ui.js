@@ -1819,7 +1819,7 @@
       const next = copy(request), value = copy(chosen.value);
       if (choices.kind === "skill") { next.skill = value; next.picks = {}; delete next.target; delete next.dest; delete next.item; }
       else if (choices.key === "item") next.item = value;
-      else if (choices.key === "dest" && ["__move", "__item"].includes(next.skill)) next.dest = value;
+      else if (choices.key === "dest" && ["__move", "__item", "__stand"].includes(next.skill)) next.dest = value;   // 起身：0 = 原地起身，区号 = 起身并翻滚过去（#470）
       else if (choices.key === "target" && (next.skill === "__item" || !(next.skill && choices.optional != null))) {
         // Flow menus always carry optional (even false); a final target menu
         // has no optional field and becomes the command's primary target.

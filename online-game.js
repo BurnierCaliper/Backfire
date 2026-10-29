@@ -564,7 +564,7 @@
       for (const u of added) if (!existing.has(u.id)) saved.units.push({ id: u.id, eligibleEnemyRound: state.combatStarted ? Number(state.turnNo) + (state.combatPhase === "enemy" ? 1 : 0) : 0 });
       GMCommands.restore(saved, gmContext);
     }
-    if (!GAME.depth && !GAME.tape && [state.blockQueue, state.assistQueue, state.koltSwapQueue, state.heluScanQueue, state.longgeSafetyQueue].some(q => q?.length)) {
+    if (!GAME.depth && !GAME.tape && [state.blockQueue, state.assistQueue, state.koltSwapQueue, state.heluScanQueue, state.longgeSafetyQueue, state.standQueue].some(q => q?.length)) {
       queueMicrotask(() => { GAME.resolveOnlineEdits().then(() => publish()).catch(reportError); });
     }
   }
@@ -581,7 +581,9 @@
   function actionLabel(cmd) {
     // 移动写去了哪一区，用道具写用了什么、对谁，起身写清楚；都是玩家画面上本来就看得到的信息，不带任何坚毅生命数值
     if (cmd.type === "move") return Number.isFinite(Number(cmd.dest)) && cmd.dest !== null ? `移动 → ${Number(cmd.dest)} 区` : "移动";
-    if (cmd.type === "standUp") return "起身 · 重新站起";
+    // 起身并翻滚、全员倒地时回合结束前的回答（#470）：写翻到哪一区 / 没有起身
+    if (cmd.type === "standUp" || (cmd.type === "standAnswer" && cmd.stand)) return Number.isInteger(cmd.dest) && cmd.dest > 0 ? `起身 · 翻滚到 ${cmd.dest} 区` : "起身 · 重新站起";
+    if (cmd.type === "standAnswer") return "没有起身";
     if (cmd.type === "useItem") {
       const item = typeof ITEM_CATALOG !== "undefined" && cmd.item ? ITEM_CATALOG[cmd.item] : null;
       const target = cmd.target ? state.units.find(u => u.id === cmd.target) : null;
@@ -637,7 +639,7 @@
       if (cmd.type?.startsWith("gm.") || cmd.type === "battle.playerFaction") publicLogs.push({ kind: "gm", summary: { "gm.editUnit": "主持人更新了单位数据", "gm.setWeather": "主持人更新了天气", "gm.addProp": "主持人添加了配置物" }[cmd.type] || "主持人调整了战场",
         action: cmd.type === "gm.spawnEnemy" || cmd.type === "gm.addHero" ? "spawn" : cmd.type === "gm.removeUnit" ? cmd.mode : cmd.type === "gm.removeHero" ? "remove" : cmd.type === "gm.removeProp" ? (cmd.mode === "destroy" ? "propDestroy" : "propRemove") : cmd.type === "gm.setManual" ? (cmd.enabled ? "manualOn" : "manualOff") : "edit",
         unitName: cmd.type === "gm.spawnEnemy" ? enemyPresets().find(p => p.id === cmd.enemyId)?.name : hero ? hero.name : meta.unitName, propName: meta.propName, zone: cmd.zone, level: hero ? hero.level : cmd.level, at: Date.now() });
-      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (!["move", "standUp", "useItem"].includes(cmd.type) && meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
+      else if (actor) publicLogs.push({ kind: "action", actorName: actor.name, actionName: (!["move", "standUp", "standAnswer", "useItem"].includes(cmd.type) && meta.skillName && meta.skillName !== cmd.skill && meta.skillName !== cmd.type ? meta.skillName : actionLabel(cmd)), hits: hitSummary(tape), turn: state.turnNo, at: Date.now() });
       // 新一回合开始（敌人回合收尾 / 开战）：写回合数，回合开始的持续伤害、倒下也跟着这一行
       else if (cmd.type === "battle.endEnemyTurn" || cmd.type === "startCombat") publicLogs.push({ kind: "round", turn: state.turnNo, hits: hitSummary(tape), at: Date.now() });
       else publicLogs.push({ kind: "phase", phase: state.combatPhase, turn: state.turnNo, at: Date.now() });

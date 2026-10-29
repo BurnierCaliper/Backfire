@@ -487,8 +487,9 @@ test("胜负：某阵营的敌对单位全部倒地 / 死亡时它获胜；互�
     const out = () => plain(c.pvpBattleOutcome());
     assert.deepEqual(out(), { winners: [], wiped: false, over: false }, "都还站着：没分出来");
     assert.equal(c.BattleSim.outcome(), null);
-    // 乙全部倒地（濒死），狂徒还在：我方还有敌对单位站着，没赢
-    hiaki.dying = true; tou.dying = true;
+    // 乙全部倒地（濒死），狂徒还在：我方还有敌对单位站着，没赢。
+    // 这里让乙起不来（坚毅耗尽）：还能起身的要等回合结束前问过、都不起身才算倒下（#470，见 tests/wipe-stand-roll.test.js）
+    hiaki.dying = true; tou.dying = true; hiaki.shp = 0; tou.shp = 0;
     assert.deepEqual(out(), { winners: [], wiped: false, over: false }, "狂徒还在：我方还没赢");
     assert.equal(c.BattleSim.outcome(), null);
     // 狂徒死了：我方的敌对单位全部倒地 / 死亡 → 我方获胜
@@ -502,9 +503,9 @@ test("胜负：某阵营的敌对单位全部倒地 / 死亡时它获胜；互�
     hiaki.dying = false;
     assert.deepEqual(out(), { winners: [], wiped: false, over: false });
     assert.equal(c.BattleSim.outcome(), null, "乙还有人站着：继续打");
-    // 所有玩家阵营都倒下：敌人赢
+    // 所有玩家阵营都倒下（起不来）：敌人赢
     foe._removed = false;
-    [kolt, helu, hiaki, tou].forEach(h => { h.dying = true; });
+    [kolt, helu, hiaki, tou].forEach(h => { h.dying = true; h.shp = 0; });
     assert.equal(out().wiped, true);
     assert.equal(c.BattleSim.outcome(), "enemy");
   }
@@ -524,8 +525,8 @@ test("胜负：某阵营的敌对单位全部倒地 / 死亡时它获胜；互�
     foe.dead = true;
     assert.equal(c.BattleSim.outcome(), "player", "敌人全灭就赢（和以前一样）");
     foe.dead = false;
-    heroes.forEach(h => { h.dying = true; });
-    assert.equal(c.BattleSim.outcome(), "enemy", "全员倒地就输");
+    heroes.forEach(h => { h.dying = true; h.shp = 0; });
+    assert.equal(c.BattleSim.outcome(), "enemy", "全员倒地、没人能起身就输");
   }
 });
 
