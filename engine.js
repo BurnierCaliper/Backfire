@@ -1497,8 +1497,9 @@ function applyResultToUnit(target, result, attacker) {
   target.interfereZone = !target.interfere ? null
     : result.interfereZone !== undefined ? result.interfereZone : target.zone;
   target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
-  // 瑞比「算法改变」：被它标记的敌人这一回合每次受到伤害，瑞比 +5 纳米
-  if (result.total > 0 && target.algoTurn != null && typeof state !== "undefined" && target.algoTurn === state.turnNo && typeof addNano === "function") {
+  // 瑞比「算法改变」：被它标记的敌人这一回合每次受到伤害，瑞比 +5 纳米（这一回合按瑞比自己的一回合算：她在敌人回合行动时撑到她下一个回合开始，app.js · ownRound，#476）
+  const algoNow = () => typeof ownRound === "function" && typeof findKit === "function" ? ownRound(findKit("ruby", state.units)) : state.turnNo;
+  if (result.total > 0 && target.algoTurn != null && typeof state !== "undefined" && target.algoTurn === algoNow() && typeof addNano === "function") {
     addNano(5);
     if (typeof appendLog === "function") appendLog(`算法改变：${target.name} 受到伤害，瑞比纳米 +5。`);
   }

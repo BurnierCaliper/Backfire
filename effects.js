@@ -30,12 +30,14 @@ function enemiesOf(u) {
 }
 
 /* ---------- 即时效果：施加 ---------- */
-/** 施加即时效果（替代直接写 u.instant.xxx = true）。返回记录 */
+/** 施加即时效果（替代直接写 u.instant.xxx = true）。返回记录。
+ *  source：施加的人（不给就看现在是谁在行动）——在敌人回合行动的玩家阵营施加的，撑到它们下一个回合开始才失效（app.js · markTurnFx，#476） */
 function applyInstantEffect(u, key, notes, source) {
   notes = notes || [];
   if (!u) return notes;
   u.instant = u.instant || {};
   const already = !!u.instant[key];
+  if (typeof markTurnFx === "function") markTurnFx(u, key, source);
   u.instant[key] = true;
   if (typeof popStatus === "function") popStatus(u, key);
   if (key === "sting") {
