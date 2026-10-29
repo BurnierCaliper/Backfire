@@ -19,8 +19,8 @@ const toEnemy = c => c.endPlayerTurn();
 const toPlayer = c => c.endEnemyTurn();
 const noBlock = { pickBlocker: () => null, pickAssister: l => l[0].id };
 
-/** 布置战场（和 tests/pvp-turn-effects.test.js 一样）：party 全在 1 区（三区直排），敌人血厚、架势高（打不死也打不进失衡）。
- *  late：分到「乙」（在敌人回合行动）的角色；null = 不配置阵营（普通 PvE） */
+/** 布置战场（和 tests/pvp-turn-effects.test.js 差不多）：party 全在 1 区（三区直排），角色一层 300 的肉体（刺骨的那一下打不死），
+ *  敌人血厚、架势高（打不死也打不进失衡）。late：分到「乙」（在敌人回合行动）的角色；null = 不配置阵营（普通 PvE） */
 function field(opt) {
   const party = opt.party;
   const c = H.load();
@@ -73,7 +73,7 @@ test("PvE：敌人在我方回合里用反应（警棍盾的协助攻击）施�
 test("PvE：我方回合里施加的不管是谁施加的都到下一个整轮开始，敌人回合里施加的不管是谁都到下一个敌人回合开始；黄金时间照旧在这个基础上再多一回合", () => {
   const f = field({ party: ["kolt", "helu"], late: null });
   const kolt = f.k("kolt"), helu = f.k("helu"), thug = f.foes[0];
-  // 敌人回合里我方的反应施加的（例：协助攻击带出的即时效果）：到下一个敌人回合开始之前
+  // 敌人回合里我方的反应施加的：到下一个敌人回合开始之前（现在角色的反应都不带即时效果，这里在反应里直接施加）
   toEnemy(f.c);
   react(f, helu, () => f.c.applyInstantEffect(thug, "sting", [], helu));
   assert.equal(thug.instant.sting, true);
@@ -103,7 +103,7 @@ test("PvP：乙（在敌人回合行动）在我方回合里用反应施加的�
   const f = field({ party: ["nora", "helu", "kolt"], late: ["nora"] });
   const nora = f.k("nora"), helu = f.k("helu"), kolt = f.k("kolt");
   assert.equal(f.c.lateTurn(nora), true, "诺拉在敌人回合行动");
-  // 第 1 回合我方回合：乙的诺拉的反应（例：协助攻击）把刺骨施加在我方的赫鲁米卡身上
+  // 第 1 回合我方回合：乙的诺拉的反应（issue 的例子：协助攻击；现在角色的反应都不带即时效果，这里在反应里直接施加）把刺骨施加在我方的赫鲁米卡身上
   react(f, nora, () => f.c.applyInstantEffect(helu, "sting", [], nora));
   assert.equal(helu.instant.sting, true);
   toEnemy(f.c);

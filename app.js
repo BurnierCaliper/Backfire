@@ -2245,7 +2245,7 @@ function playerTurnEnd(phase) {
   }
 }
 
-/* ---------- PvP：各队自己的回合（#476，作者 10/29，docs/pvp.md 第 2.1 节） ----------
+/* ---------- PvP：各队自己的回合（#476 / #482，作者 10/29，docs/pvp.md 第 2.1 节） ----------
  * 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）自己的回合是敌人回合。#453 起补行动点 / 附赠、晕眩恢复、准备 / 磨刀、
  * 破釜沉舟生效、拉斯缪尔 +20% 能量、汲取已经跟着各队自己的回合（playerTurnStart / playerTurnEnd），这里把剩下的也挪过去：
  *   A 「每回合开始 / 下回合开始」：这些人的在自己那一队的回合开始结算（startEnemyPhase · lateRoundStart，在它们的 playerTurnStart 之前），
