@@ -23,3 +23,18 @@
 @media (max-width: 480px) {
   .cs-table { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name name" "meta meta" "buyin go"; }
 }
+
+/* 联机跑团的赌场浮层（casino-online-ui.js）：卡片、按钮沿用申请检定（.crq-*，按钮 44px） */
+.cso-card { max-width: 760px; }
+.cso-card h3 { margin: 12px 0 6px; font-size: 14px; }
+.cso-line { margin: 4px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.cso-hand { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.cso-c { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; border: 1px dashed currentColor; border-radius: 4px; opacity: .6; }
+.cso-amt { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.cso input[type="number"] { width: 64px; min-height: 36px; box-sizing: border-box; }
+.cso select { min-height: 36px; max-width: 100%; }
+.cso-ex label, .cso-pvp label, .cso-table label { white-space: nowrap; }
+.cso-results, .cso-log { margin: 6px 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
+.cso-private { color: var(--gold, #d8b25a); }
+.cso-final { font-size: 14px; }
+.cso-deal { border-top: 1px solid rgba(255, 255, 255, .12); padding-top: 6px; }

@@ -21,7 +21,7 @@ const TrpgCommands = (() => {
     shopBuyback: c => trpgShopBuyback(c.kit, c.token),
     adjustKuizhi: c => trpgAdjustKuizhi(c.amount, c.why),
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
-    // 赌场（#487）：本机跑团用这个存档自己的钱包（LEDGER.casino.party）；payer = 买筹码由谁付 / 卖筹码的钱进谁的钱包
+    // 赌场（#487）：本机跑团用这个存档自己的钱包（LEDGER.casino.wallets.party）；payer = 买筹码由谁付 / 卖筹码的钱进谁的钱包
     casinoOpen: () => trpgCasinoOpen(),
     casinoBuy: c => trpgCasinoBuy(c.n, c.payer),
     casinoSell: c => trpgCasinoSell(c.n, c.payer),

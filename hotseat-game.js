@@ -12,7 +12,7 @@
   const packetListeners = new Set();
   const listeners = new Set(), authorityContext = {}, actionTypes = new Set(["skill", "move", "standUp", "useItem"]);
   const automatic = new Set(["battle.supportInfo", "battle.checkSolo", "battle.rememberCampaign", "battle.loadCampaign"]);
-  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  const tableTypes = new Set(["checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback", "casino"]);
   const orderTypes = new Set(["orderPick", "orderConfirm", "orderStart", "orderMove", "orderSwapAccept", "answer", "chat", ...tableTypes]);
   const copy = value => JSON.parse(JSON.stringify(value));
   const active = () => !!(enabled && configured && session && authority && !state.solo);
@@ -143,6 +143,8 @@
       duel: duelView(s?.table?.duel),
       // 跑团地图：主持人在地图上标的队伍位置（玩家只能看，不能改）
       map: typeof LEDGER !== "undefined" && LEDGER ? { place: LEDGER.place || null, x: LEDGER.placePos ? LEDGER.placePos.x : null, y: LEDGER.placePos ? LEDGER.placePos.y : null } : null,
+      // 赌场（#487）：按收件人造——自己角色的钱包、自己那一方的牌局；主持人另有自己坐庄的那几桌（庄家那一方）
+      casino: casinoView(id),
       canConfigure: !network && canConfigure() && (!configured || id === gm()), canDisable: !network && canConfigure() && (!configured || id === gm()) };
   }
   const getView = () => getViewFor(playerId);
@@ -371,6 +373,58 @@
     if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
     return u;
   }
+  /* ---------- 赌场（#487）：联机跑团的探索环节里去赌场打 High Flux ----------
+   * 规则在 trpg.js · trpgCasino…（钱在 casino.js，牌局在 counter-cards.js）。每位玩家的筹码钱包按操控的角色记（LEDGER.casino.wallets[kit]），
+   * 买筹码 / 卖筹码、押奎支都走这名角色的私人钱包。三种桌子：AI 坐庄、主持人坐庄（赌场桌，收入场费）、玩家对赌（不收入场费）。
+   * 玩家只能动自己角色的钱包、自己坐着的那一局；主持人替主持人坐庄的那几桌出庄家那一方，也能让任何人离桌（卡住的桌子）。
+   * 每一步都写进存档（rememberCampaign）；不进小队聊天——谁赢谁输、钱包剩多少只给自己看。 */
+  /** 这个人能看到的赌场（trpg.js · trpgCasinoPacket；online-view.js · projectCasino 再按白名单拷）。不是联机跑团 → null */
+  function casinoView(id) {
+    if (typeof trpgCasinoPacket !== "function" || typeof TRPG === "undefined" || !TRPG.active || config.mode !== "trpg" || !session) return null;
+    const kits = heroes().filter(u => !u.dead && session.ownerOf(u.id) === id).map(u => u.kit);
+    try { return trpgCasinoPacket(kits, id === gm()); } catch (e) { return null; }
+  }
+  function casinoExploring() {
+    if (typeof trpgCasinoPacket !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有联机跑团有赌场");
+    if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能去赌场");
+    if (typeof Screens !== "undefined" && Screens && typeof Screens.is === "function" && Screens.is("battle")) fail("先回到探索环节再去赌场");
+  }
+  /** 牌局里的一步：只拷规则认的字段（counter-cards.js · act 再查合不合法） */
+  function casinoAction(a) {
+    const out = {};
+    if (!a || typeof a !== "object") return out;
+    for (const k of ["type", "op", "where", "card"]) if (typeof a[k] === "string") out[k] = a[k];
+    if (a.amount != null && Number.isFinite(Number(a.amount))) out.amount = Number(a.amount);
+    return out;
+  }
+  function casinoCommand(c) {
+    casinoExploring();
+    const kit = String(c.kit || ""), u = heroes().find(h => h.kit === kit && !h.dead);
+    if (!u) fail("没有这名角色");
+    const mine = session.ownerOf(u.id) === sender, isGM = sender === gm();
+    const own = () => { if (!mine) fail("只能用自己角色的钱包"); };
+    const op = String(c.op || "");
+    let notes;
+    try {
+      switch (op) {
+        case "open": own(); notes = trpgCasinoOpen(kit); break;
+        case "buy": own(); notes = trpgCasinoBuy(c.n, kit, kit); break;
+        case "sell": own(); notes = trpgCasinoSell(c.n, kit, kit); break;
+        case "sit": own(); notes = trpgCasinoSitAt(kit, String(c.table || ""), c.buyIn, { dealer: c.dealer === "gm" ? "gm" : "ai" }); break;
+        case "pvpOpen": own(); notes = trpgCasinoPvpOpen(kit, c.side === "dealer" ? "dealer" : "player", String(c.stakeKind || "")); break;
+        case "pvpJoin": own(); notes = trpgCasinoPvpJoin(kit, String(c.table || "")); break;
+        case "act":
+          if (c.asDealer) { if (!isGM) fail("只有主持人能替主持人坐庄的那一桌出牌"); }
+          else own();
+          notes = trpgCasinoAct(kit, casinoAction(c.action), { asDealer: !!c.asDealer });
+          break;
+        case "leave": if (!mine && !isGM) fail("只能让自己的角色离桌"); notes = trpgCasinoLeave(kit); break;
+        default: fail("没有这种赌场操作");
+      }
+    } catch (e) { fail(e.message); }
+    if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+    return { notes };
+  }
   /** 跑团工匠 / 工坊的消息：必须是跑团模式；玩家只能用自己操控的角色（主持人哪个都行），返回角色 kit */
   function trpgOwnKit(rawKit, deny) {
     if (typeof TRPG === "undefined" || !TRPG.active || typeof trpgSmithUpgrade !== "function") fail("只有跑团模式有工匠和工坊");
@@ -525,6 +579,8 @@
       teamChat(sender, "💰 " + notes[0]);
       return { notes };
     },
+    // 赌场（#487）：兑换、坐桌、对赌、出牌、离桌都是这一种指令（op），权限和探索环节在 casinoCommand 里查
+    casino: c => casinoCommand(c),
     answer: c => { if (choice) { const old = choice; choice = null; old.finish(c.extra.index); return { accepted: true }; } return session.answer(sender, c.askId, { unitId: c.helper || null, extra: c.extra || {} }); }
   };
   for (const [type, fn] of Object.entries(orderHandlers)) {

@@ -1,4 +1,4 @@
-// 赌场接入跑团（#487 第 5 步）：本机跑团用这个存档自己的筹码钱包（LEDGER.casino.party），赠送只送一次；
+// 赌场接入跑团（#487 第 5 步）：本机跑团用这个存档自己的筹码钱包（LEDGER.casino.wallets.party），赠送只送一次；
 // 买筹码由谁付（队伍公账 / 角色钱包）、卖筹码的钱进谁的钱包；钱包和打到一半的牌局跟着跑团存档（LEDGER.save / load）；
 // 「赌场」页（trpg-ui.js）第一次点开送赠送筹码、面板交给 casino-ui.js、牌局每走一步存档。规则在 trpg.js · trpgCasino*
 "use strict";
@@ -25,11 +25,11 @@ function field() {
 const send = (c, cmd) => c.Commands.dispatch(J(Object.assign({ type: "trpg" }, cmd)));
 const A = (CC, g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
 
-test("跑团：这个存档自己的钱包第一次来送 50 枚赠送筹码，只送一次；记在 LEDGER.casino.party", () => {
+test("跑团：这个存档自己的钱包第一次来送 50 枚赠送筹码，只送一次；记在 LEDGER.casino.wallets.party", () => {
   const c = field();
   assert.match(J(send(c, { action: "casinoOpen" })).join(""), /赌场：第一次来赌场：赠送 50 枚筹码/);
   assert.deepEqual(J(send(c, { action: "casinoOpen" })), [], "再来不送");
-  assert.equal(c.LEDGER.casino.party.gifted, true);
+  assert.equal(c.LEDGER.casino.wallets.party.gifted, true);
   assert.equal(c.trpgCasinoView().chips.gift, 50);
 });
 
@@ -63,7 +63,7 @@ test("跑团：坐桌（交入场费）→ 打完 → 离桌，赢来的进普�
   A(c.CounterCards, g, "dealer", "play", { card: "flesh" });
   // 存档 → 读档：打到一半的牌局还在（庄家暗出的牌也在）
   const saved = c.LEDGER.save();
-  assert.equal(saved.casino.party.seat.game.sides.dealer.card, "flesh");
+  assert.equal(saved.casino.wallets.party.seat.game.sides.dealer.card, "flesh");
   c.LEDGER.load({});
   assert.deepEqual(J(c.LEDGER.casino), {}, "旧存档没有赌场：空的");
   c.LEDGER.load(saved);
@@ -82,7 +82,7 @@ test("跑团：坐桌（交入场费）→ 打完 → 离桌，赢来的进普�
   }
   assert.match(J(send(c, { action: "casinoLeave" })).join(""), /离开大厅：桌上剩 84 枚/);
   assert.deepEqual([c.trpgCasinoView().chips.gift, c.trpgCasinoView().chips.normal], [49.5, 11]);
-  assert.equal(c.LEDGER.save().casino.party.seat, null);
+  assert.equal(c.LEDGER.save().casino.wallets.party.seat, null);
 });
 
 test("跑团的「赌场」页：第一次点开送赠送筹码、面板交给 casino-ui.js（奎支选单 = 由谁付 / 钱进谁的钱包）、牌局每走一步存档", () => {

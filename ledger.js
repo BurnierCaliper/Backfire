@@ -93,7 +93,7 @@ const LEDGER = {
   merchants: [],       // 跑团：主持人设置的商人（trpg-merchants.js）
   shopOpen: null,      // 跑团：现在开着的商人 id（联机玩家同步看到商人界面）
   lore: [],            // 跑团：角色资料（NPC 条目，lore.js；草稿只有主持人看得到）
-  casino: {},          // 跑团：赌场的筹码钱包（casino.js，#487）：party = 这个存档自己的，角色 kit = 联机玩家各自的（trpg.js · trpgCasino…）
+  casino: {},          // 跑团：赌场（casino.js，#487）：{ wallets: { party = 这个存档自己的筹码钱包，角色 kit = 联机玩家各自的 }, tables: 联机对赌桌, seq }（trpg.js · trpgCasino…）
 
   /** 存进队伍档案 */
   save() {

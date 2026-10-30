@@ -3374,7 +3374,8 @@ function advanceDays(run, n) {
     const w = casinoWallet(run);
     casinoInTown(run);
     run.casinoGames = (Number(run.casinoGames) || 0) + 1;
-    const game = Casino.sit(w, tableId, buyIn, { seed: `${run.seed}:casino:${run.casinoGames}`, deck: opt && opt.deck });
+    // 天气堆的种子带上开局的时刻：单局的种子写在记录里，只用它的话天气的顺序算得出来
+    const game = Casino.sit(w, tableId, buyIn, { seed: `${run.seed}:casino:${run.casinoGames}:${Date.now()}`, deck: opt && opt.deck });
     const t = Casino.tables().find(x => x.id === w.seat.table);
     return { notes: logAll(run, [`赌场：坐上${t.name}，买入 ${w.seat.buyIn} 枚，交入场费 ${w.seat.fee} 枚（不退）。`]), game };
   }
