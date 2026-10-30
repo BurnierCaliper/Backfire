@@ -30,3 +30,14 @@
 .mu-notes li { margin: 3px 0; }
 .g-app > .mu-overlay { position: fixed; }
 .mu-who { font-weight: 700; font-size: 17px; margin: 0 10px 0 4px; color: var(--sk-paper, #f3ead8); }
+/* High Flux 的得分表（#485，counter-cards.js · chart）：格子写 +1 / 0 / −1，别的和平时一样。
+ * 手机上格子只有一两个字，整张表在卡片里放得下，不用左右滑：格子不留最小宽度，天气改过的「原 → 现」改成上下两行 */
+.mu-unit { border-color: var(--sk-hazard, #f2c230); color: var(--sk-hazard, #f2c230); }
+@media (max-width: 760px) {
+  .mu-card.mu-score { padding: 12px 10px; }
+  .mu-score .mu-grid { border-spacing: 3px; font-size: 15px; }
+  .mu-score .mu-grid th { padding: 4px 3px; font-size: 13.5px; }
+  .mu-score .mu-grid td { min-width: 0; padding: 8px 2px; }
+  .mu-score .mu-grid td s { display: block; }
+  .mu-score .mu-arrow { display: none; }
+}

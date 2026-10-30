@@ -4,7 +4,10 @@
  *   表头：当前天气、相位阶段、恶劣环境 / 末日倍数（≠1 时）、冻土（跟随当前选中单位所在区域）
  *   行 = 属性（带属性图标），列 = 血量层；整行的天气增减伤写在 notes（数据没写的这里补上）
  *   格子按 adv 克制 / dis 被克制 / neu 普通 上色；天气改过的格子照常上色，只写「原（删除线）→ 现」，悬停 / 点开看原因
- *   下面列 notes */
+ *   下面列 notes
+ * High Flux 的得分表（#485，counter-cards.js · chart）：数据带 unit: "score"，格子写得分 +1 / 0 / −1（不写百分比）；
+ *   图例、左上角、表头多一个标签按数据给的 legend / corner / tag 写，样式、图标、配色、点开看原因都和平时一样。
+ *   open(chart, { mount }) 可以指定挂在哪（High Flux 挂在牌桌 #cc-game 下，天气写在那里） */
 (function (root) {
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -14,6 +17,13 @@
     const n = Math.round((Number(v) || 0) * 1000) / 10;
     return n > 0 ? `+${n}%` : n < 0 ? `−${Math.abs(n)}%` : "±0";
   }
+  /** 得分（High Flux 的得分表）：1 → +1；−1 → −1；0 → 0 */
+  function score(v) {
+    const n = Math.round(Number(v) || 0);
+    return n > 0 ? `+${n}` : n < 0 ? `−${Math.abs(n)}` : "0";
+  }
+  /** 这张表的数字怎么写：unit: "score" 写得分，其余写百分比 */
+  const numOf = c => (c && c.unit === "score" ? score : pct);
   /* 显示名统一：谐波（数据里要是出现旧名「谐振」，界面这里改过来） */
   const NAME_FIX = { "谐振": "谐波" };
   const disp = n => NAME_FIX[n] || n;
@@ -22,10 +32,10 @@
   function allNotes(c) {
     const notes = (c.notes || []).slice();
     const has = t => notes.some(n => n.indexOf(t) >= 0);
-    const groups = {};
+    const groups = {}, num = numOf(c);
     (c.rows || []).forEach(r => {
       if (!Number(r.pct)) return;
-      const k = pct(r.pct);
+      const k = num(r.pct);
       (groups[k] = groups[k] || []).push(disp(r.name));
     });
     const reasons = [...new Set((c.rows || []).filter(r => Number(r.pct) && r.pctReason).map(r => r.pctReason))];
@@ -97,23 +107,24 @@
   function html(c, view) {
     view = view || ui;
     if (!c) return `<div class="mu-card ovl-card" role="dialog" aria-label="克制表"><header class="ws-head"><span class="ws-tape">克制表</span><span class="ws-sub">暂时没有数据</span><button type="button" class="g-btn ws-close" data-mu-close>关闭</button></header></div>`;
-    const cols = c.cols || [], rows = c.rows || [];
+    const cols = c.cols || [], rows = c.rows || [], num = numOf(c), legend = c.legend || KIND_TEXT;
     const phase = c.weather === "phase" && c.phaseStep != null ? ` · ${PHASE[c.phaseStep] || c.phaseStep}` : "";
     const tags = [
+      c.tag ? `<span class="mu-tag mu-unit">${esc(c.tag)}</span>` : "",
       `<span class="mu-tag mu-weather">天气 ${esc(c.weatherName || c.weather)}${esc(phase)}</span>`,
       Number(c.envX) && Number(c.envX) !== 1 ? `<span class="mu-tag mu-env">天气效果 ×${esc(c.envX)}（恶劣环境 / 末日）</span>` : "",
       c.field && c.field.ice ? `<span class="mu-tag mu-ice">冻土${c.field.zone != null ? ` · ${esc(c.field.zone)}区` : c.zone != null ? ` · ${esc(c.zone)}区` : ""}</span>` : ""
     ].join("");
     const sel = view.cell;
-    const head = `<tr><th class="mu-corner">属性 \\ 血量</th>${cols.map(k => `<th class="mu-col mu-l-${esc(k.id)}">${esc(k.name)}</th>`).join("")}</tr>`;
+    const head = `<tr><th class="mu-corner">${esc(c.corner || "属性 \\ 血量")}</th>${cols.map(k => `<th class="mu-col mu-l-${esc(k.id)}">${esc(k.name)}</th>`).join("")}</tr>`;
     const body = rows.map((r, i) => {
       const cells = cols.map((k, j) => {
         const x = ((c.cells || [])[i] || [])[j] || {};
         const kind = x.kindId || "neu", on = sel && sel[0] === i && sel[1] === j;
         const e = eff(x, r);
-        const tip = `${disp(r.name)} → ${k.name}：${x.kind || KIND_TEXT[kind] || ""} ${pct(e.now)}${e.changed ? `（原 ${pct(e.before)}）` : ""}${e.reason ? " · " + e.reason : ""}`;
+        const tip = `${disp(r.name)} → ${k.name}：${x.kind || KIND_TEXT[kind] || ""} ${num(e.now)}${e.changed ? `（原 ${num(e.before)}）` : ""}${e.reason ? " · " + e.reason : ""}`;
         return `<td class="mu-cell mu-${esc(kind)}${e.changed ? " changed" : ""}${on ? " sel" : ""}" data-mu-cell="${i}:${j}" tabindex="0" title="${esc(tip)}">
-          ${e.changed ? `<s>${pct(e.before)}</s><span class="mu-arrow">→</span>` : ""}<b>${pct(e.now)}</b></td>`;
+          ${e.changed ? `<s>${num(e.before)}</s><span class="mu-arrow">→</span>` : ""}<b>${num(e.now)}</b></td>`;
       }).join("");
       return `<tr><th class="mu-row mu-e-${esc(r.id)}">${elIcon(r.id)}<span>${esc(disp(r.name))}</span></th>${cells}</tr>`;
     }).join("");
@@ -121,14 +132,14 @@
     if (sel) {
       const r = rows[sel[0]], k = cols[sel[1]], x = ((c.cells || [])[sel[0]] || [])[sel[1]];
       const e = r && x ? eff(x, r) : null;
-      if (r && k && x) detail = `<p class="mu-detail"><b>${esc(disp(r.name))} → ${esc(k.name)}</b>：${esc(x.kind || KIND_TEXT[x.kindId] || "")} ${pct(e.now)}${e.changed ? `（原来 ${esc(x.baseKind || "")} ${pct(e.before)}）` : ""}${e.reason ? ` · ${esc(e.reason)}` : ""}</p>`;
+      if (r && k && x) detail = `<p class="mu-detail"><b>${esc(disp(r.name))} → ${esc(k.name)}</b>：${esc(x.kind || KIND_TEXT[x.kindId] || "")} ${num(e.now)}${e.changed ? `（原来 ${esc(x.baseKind || "")} ${num(e.before)}）` : ""}${e.reason ? ` · ${esc(e.reason)}` : ""}</p>`;
     }
     const nl = allNotes(c);
     const notes = nl.length ? `<ul class="mu-notes">${nl.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
-    return `<div class="mu-card ovl-card" role="dialog" aria-label="克制表">
+    return `<div class="mu-card ovl-card${c.unit === "score" ? " mu-score" : ""}" role="dialog" aria-label="克制表">
       <header class="ws-head"><span class="ws-tape">克制表</span>${c.unitName ? `<span class="mu-who">${esc(disp(c.unitName))} 挨打时</span>` : ""}<span class="ws-sub">${tags}</span>
         <button type="button" class="g-btn ws-close" data-mu-close aria-label="关闭">关闭</button></header>
-      <p class="mu-legend"><span class="mu-adv">克制</span><span class="mu-dis">被克制</span><span class="mu-neu">普通</span></p>
+      <p class="mu-legend"><span class="mu-adv">${esc(legend.adv)}</span><span class="mu-dis">${esc(legend.dis)}</span><span class="mu-neu">${esc(legend.neu)}</span></p>
       <div class="mu-scroll"><table class="mu-grid">${head}${body}</table></div>
       ${detail}${notes}
     </div>`;
@@ -155,18 +166,18 @@
     });
     return box;
   }
-  /** 战斗里挂在 #g-app 下（天气写在 #g-app[data-weather]，卡片的天气 ::before 才套得上）；别处挂在 body */
-  function mount() {
+  /** 战斗里挂在 #g-app 下（天气写在 #g-app[data-weather]，卡片的天气 ::before 才套得上）；at：指定挂在哪（High Flux 挂在牌桌 #cc-game 下）；别处挂在 body */
+  function mount(at) {
     const app = document.getElementById("g-app");
-    const parent = app && !app.hidden && document.body.dataset.screen === "battle" ? app : document.body;
+    const parent = at || (app && !app.hidden && document.body.dataset.screen === "battle" ? app : document.body);
     if (ensureBox().parentNode !== parent) parent.appendChild(box);
   }
-  /** chart() 每次重画时取最新数据（天气、选中单位变了表跟着变） */
-  function open(chart) { getChart = chart || (() => localChart()); ui.cell = null; mount(); box.hidden = false; refresh(); }
+  /** chart() 每次重画时取最新数据（天气、选中单位变了表跟着变）；o.mount：挂在哪（见 mount） */
+  function open(chart, o) { getChart = chart || (() => localChart()); ui.cell = null; mount(o && o.mount); box.hidden = false; refresh(); }
   function close() { if (box) box.hidden = true; getChart = null; }
   function isOpen() { return !!(box && !box.hidden); }
   function refresh() { if (isOpen() && getChart) box.innerHTML = html(getChart()); }
-  function toggle(chart) { if (isOpen()) close(); else open(chart); }
+  function toggle(chart, o) { if (isOpen()) close(); else open(chart, o); }
 
   /* 入口在暂停页面里（pause-menu.js，#298；以前是战斗顶栏 #g-matchup / 单局顶栏 #r-matchup）：
    * 战斗画面按战场现状算，单局画面没有天气按常态。联机玩家的那一项在 online-ui.js（读房主发来的 view.matchup） */
@@ -178,5 +189,5 @@
   }
   if (root.PauseMenu) root.PauseMenu.register({ id: "matchup", visible: () => available() && !onlinePlayer() && ["battle", "run"].includes(screenNow()), run: openFromMenu });
 
-  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, eff, pct, state: ui, openFromMenu };
+  root.MatchupUI = { html, open, close, toggle, refresh, isOpen, available, localChart, chartWith, viewChart, allNotes, eff, pct, score, state: ui, openFromMenu };
 })(typeof window !== "undefined" ? window : globalThis);
