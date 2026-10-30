@@ -370,6 +370,18 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **警卫队队长（蜥蜴）：ATK 每级 +1、酸弹骰数每 5 级 +1、AI 优先后排**（engine.js · `enemyPresets` 的 `captain_lizard` / `sewerEliteOf`；enemies.js · `en_liz`；ai.js · `aim: "back"`；bestiary.js；docs/sewer-maintenance.md；测试 tests/captain-lizard-rules.test.js（新）、tests/sewer-elites.test.js）
+  - **以前**：
+    - ATK = 7 + ⌊等级/2⌋ + ⌊等级/5⌋（1 / 5 / 10 / 15 / 20 级：7、10、14、17、21）。
+    - 酸弹固定 1d6；图鉴写「atk + 1d6」，伤害骰栏没有「骰数每 5 级 +1」。
+    - AI `aim: "local"` + 保持距离 1：隔一区的人里挑**血量最高**的（前排坦克常被优先）。
+  - **现在**：
+    - ATK = 7 + (等级−1)，和杂兵每级 +1 的写法一样（1 / 5 / 10 / 15 / 20 级：7、11、16、21、26）。下水道维护两个触灵精英本来「照蜥蜴」的 ATK 公式一并改成 7 + (等级−1)。
+    - 酸弹（仅普通攻击 `en_liz`，协助不动）：(1 + ⌊等级/5⌋)d6（1–4 级 1d6、5 级 2d6、10 级 3d6、20 级 5d6），用已有的 `addedDiceByLevel`；单位 `dice` 与牛队长一样写成 `[1 + milestone(lv, 5), 6]`；图鉴能力注明「骰数每 5 级 +1」，`BESTIARY_DICE_SCALE` 加上蜥蜴。
+    - AI `aim: "back"`：仍保持距离 1；在打得到的人里优先 `range === "ranged"` 的后排角色，没有远程就挑离自己最远的，同档血量最低。图鉴移动写成「远距离，优先后排（远程角色；同档血量最低）」。
+  - **没改的**：蜥蜴的血量 / 架势、协助「2×atk 酸」、其它队长；酸弹以外的招式；触灵精英的血量 / 架势 / 招式（只跟着改 ATK 成长）。
+  - **测试**：tests/captain-lizard-rules.test.js（新）：若干等级的 ATK；酸弹骰数（真实 `runSkill`）；AI 在隔一区同时有高血近战坦克和低血远程时优先远程；日志不出现剩余坚毅生命数字（只允许「坚毅受创」）。tests/sewer-elites.test.js 的 ATK 表和「同蜥蜴」公式跟着改。
+
 - **巨型活沙吸收后出手按合并 atk 结算：`absorbSandsInto` 同步加上 `personalAtk`**（enemies.js · `absorbSandsInto`；测试 tests/giant-livesand-atk.test.js（新））
   - **以前**：活沙被杀死吸收沙灵 / 沙漠生物时，只把饲料的 `atk` 加进 `livesand.atk`。卡面和吸收日志写的是合并后的 ATK（常见 50+），但出手走 `runEnemyActionInner` → `effectiveAtk` → `baseEffectiveAtk`（party.js），敌人只读 `personalAtk + weaponAtk`，**不读 `unit.atk`**。`personalAtk` 仍停在生成时的底值 7，穿刺 / 流沙漩涡 / 全域沙暴每一击都按约 7 点算，变巨后每回合伤害只有个位数。
   - **现在**：吸收时 `atk` 与 `personalAtk` 加同一笔（有 `ivBase` 时一并改，和 `_raceAdd` 一致）。变巨后 `effectiveAtk` = 合并 atk，技能伤害跟卡面一致。
@@ -1669,7 +1681,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 - **下水道维护（二）：两个触灵精英「触灵维护员」「触灵清扫员」+ 下水道的「狂鼠 ↔ 下水道维护」三方混战**（作者 10/22 定稿的 docs/sewer-maintenance.md 第 2、3、4 节，issue #281；engine.js · `SEWER_STATS.elite`、`sewerEliteOf`、`enemyPresets`；run.js · `ENEMY_INFO`（两个精英；机甲触灵、飞碟触灵加 `race: "触灵"`）、`THREE_WAY.regions`；growth.js · `ENEMY_RANK`；enemies.js · `SEWER_CFG`（keeper / cleaner / cleanse / guard）、`SEWER_STATUS_NAME`、`sewerBadStatuses` / `sewerDotThreat` / `sewerCleansePick` / `sewerCleanse` / `sewerCleanseChoice`、`cleanerWaveZone` / `cleanerWave`、`cleanerOnField` / `sweeperGuardFor` / `sweeperGuardAfter`、`sewerAssistPool`、`enemySkillListBase`、`ENEMY_SKILL_RANGE`、`ENEMY_SKILL_COST`、`runEnemyActionInner`、`ENEMY_RACES`（新种族「触灵」）、`ENEMY_RACE_EXTRA`（飞碟触灵本体）、`spawnUfoBoss`；app.js · `dealTo`（代挡）；ai.js · `AI_SPEC`、`NO_TARGET`、`aiSpecial`、`aiPicks`、`aiPlanBase`（先清除状态、清扫员自己挑区）、`aiPickAssister`；items.js · `ENEMY_DROPS`、废料的说明；bestiary.js · `BESTIARY_TEXT`；测试：新增 tests/sewer-elites.test.js，tests/craft-materials.test.js 的敌人总数 55 → 57，tests/sewer-maintenance.test.js、tests/ratfolk-units.test.js 跟着改）
   - **以前**：下水道维护只有清扫机（抽到下水道维护，一场 4 枚代币就是 12 只清扫机）；下水道没有三方混战；「触灵」只是机甲触灵、飞碟触灵的阵营，不是种族。
   - **现在**：
-    - **数值**（`SEWER_STATS.elite`，两个精英相同；表是 2 人队，3 / 4 人队按 `scaleHp` 放大）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 12 + 5×(等级−1) + 5×⌊等级/2⌋、内层星灵 14 + 2×(等级−1)；架势 4；ATK 7 + ⌊等级/2⌋ + ⌊等级/5⌋。1 / 5 / 10 / 15 / 20 级：护盾 12、42、82、117、157，星灵 14、22、32、42、52，ATK 7、10、14、17、21（和文档的表一致）；架势表里写 4，10 级起照现有的精英规则 ×0.6（实际 4、4、2、2、2，和下水道狂鼠的精英一样）。远程；精英，2 枚代币；阵营照旧「下水道维护」，只出没在下水道；不是机械。
+    - **数值**（`SEWER_STATS.elite`，两个精英相同；表是 2 人队，3 / 4 人队按 `scaleHp` 放大）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 12 + 5×(等级−1) + 5×⌊等级/2⌋、内层星灵 14 + 2×(等级−1)；架势 4；ATK 7 + (等级−1)（照蜥蜴队长每级 +1）。1 / 5 / 10 / 15 / 20 级：护盾 12、42、82、117、157，星灵 14、22、32、42、52，ATK 7、11、16、21、26（和文档的表一致）；架势表里写 4，10 级起照现有的精英规则 ×0.6（实际 4、4、2、2、2，和下水道狂鼠的精英一样）。远程；精英，2 枚代币；阵营照旧「下水道维护」，只出没在下水道；不是机械。
     - **种族「触灵」**（`ENEMY_RACES["触灵"]`：没有六维修正、没有小分支；`RACE_PERKS` 里不写 = 暂时没有种族被动）：两个精英固定是它（不套六维，数值不变）。为了「分类和其他触灵放在一起」，机甲触灵（机枪 / 榴弹）、飞碟触灵（`ENEMY_INFO.ufo_boss`；战斗里挂在本体上，`ENEMY_RACE_EXTRA.ufo_body`，机械足是部件不挂）也改成固定「触灵」——阵营、数值都不变，只是种族栏、悬停说明、联机下发的种族多了「触灵」，主持人也能改它们的种族了。图鉴写「种族：触灵」。
     - **触灵维护员**（`sewer_keeper`）：普通攻击（`en_keeper_shot`）远程 1×atk + 1d4 电击、1 击破（`SEWER_CFG.keeper`；1d4 不随等级升档）；协助（`en_keeper_assist`）同普通攻击，打中再施加感电；特点：每清除一种状态，自己获得永续的振奋（振奋 + `inspireStay`，回合结束不消失；振奋只有一层，已经有了不再叠）。
     - **触灵清扫员**（`sewer_cleaner`）：普通攻击（`en_cleaner_wave`）选远程射程内（距离 1、不隔危墙 / 关着的门）看得见的敌人最多的一区（一样多挑那一区血量合计多的，再一样挑编号小的；狂鼠也算敌人），那一区所有和它敌对的单位各 0.5×atk 谐波、1 击破（范围攻击，不能协助格挡；`SEWER_CFG.cleaner`）；被嘲讽 / 决一死战牵制时只打牵制者所在的区（同区可以抵近，×0.6，和电弧扫射、喷洒一样）。协助（`en_cleaner_assist`）同普通攻击，打失衡的人所在的那一区；场上有别的单位能协助时它不主动协助（`sewerAssistPool`：协助名单里还有别人就把清扫员拿掉，只剩它才出手）。AI：远程、主动远离；要后撤 / 接近时先移动再打。
