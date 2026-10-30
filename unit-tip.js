@@ -46,7 +46,7 @@
   function effect(token) {
     const raw = String(token || "").trim();
     if (!raw) return null;
-    // 「灼烧×3」「高能 5」「自焚×2」「晕眩标记 1/2」「掩护（灯）」「聚焦护甲 火→[冰]」
+    // 「灼烧×3」「高能 5」「自焚×2」「晕眩标记 1/2」「掩护（灯）」「聚焦装甲 火→[冰]」
     let base = raw.replace(/[（(].*$/, "").replace(/\s*[×x]\s*\d+$/, "").replace(/\s+\d+(\/\d+)?$/, "").trim();
     if (/^聚焦/.test(base)) base = "聚焦";
     const e = codexEffects().find(x => x.name === base);
