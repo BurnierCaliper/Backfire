@@ -68,6 +68,7 @@
         <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
         <button class="t-btn" id="t-cc"><b>High Flux</b><small>赌桌小游戏：扮演庄家或玩家，和 AI 打 5 轮暗牌，按克制表和天气定输赢</small></button>
         <button class="t-btn" id="t-fd"><b>Flux Duel</b><small>两人对决：各拿 5 张层牌 + 7 张元素牌，不设庄家，每轮一张背面朝上的天气，各用元素打对方的层</small></button>
+        <button class="t-btn" id="t-fh"><b>Flux Hold'em</b><small>2–4 人公共牌桌：每人盖一张元素牌，对两张公共层牌计分、两张天气叠加，最高分拿走底池</small></button>
         <button class="t-btn" id="t-ccg"><b>High Flux · 猜大猜小</b><small>黑市玩法：庄家盖三张牌，分三轮押这一手的得分 −2 … +2，赔率按剩下的组合算</small></button>
       </div>
     </div>
@@ -105,6 +106,20 @@
       <aside class="cc-side" id="fd-side"></aside>
       <div class="cc-tip" id="fd-tip" role="tooltip" hidden></div>
       <div class="cc-banner" id="fd-banner" hidden></div>
+    </div>
+  </div>
+</section>
+<!-- Flux Hold'em（#488）：2–4 人公共牌桌。规则 flux-holdem.js、AI flux-holdem-ai.js，画面由 flux-holdem-ui.js（共用零件 flux-ui.js）填进下面这几块 -->
+<section class="scr-cc scr-fh" id="scr-fh" hidden>
+  <div class="cc-wrap">
+    <div class="cc-setup" id="fh-setup"></div>
+    <div class="cc-game" id="fh-game" hidden>
+      <header class="cc-top" id="fh-top"></header>
+      <div class="cc-table"><div class="cc-fx" id="fh-fx" aria-hidden="true"></div><div class="cc-board fh-board" id="fh-board"></div></div>
+      <div class="cc-actions" id="fh-actions" aria-live="polite"></div>
+      <aside class="cc-side" id="fh-side"></aside>
+      <div class="cc-tip" id="fh-tip" role="tooltip" hidden></div>
+      <div class="cc-banner" id="fh-banner" hidden></div>
     </div>
   </div>
 </section>
@@ -950,6 +965,8 @@ window.GAME_MODE = true;
 <script src="counter-cards-ai.js"></script>
 <script src="flux-duel.js"></script>
 <script src="flux-duel-ai.js"></script>
+<script src="flux-holdem.js"></script>
+<script src="flux-holdem-ai.js"></script>
 <script src="counter-cards-guess.js"></script>
 <script src="casino.js"></script>
 <script src="cyberware.js"></script>
@@ -1014,6 +1031,7 @@ window.GAME_MODE = true;
 <script src="counter-cards-ui.js"></script>
 <script src="flux-ui.js"></script>
 <script src="flux-duel-ui.js"></script>
+<script src="flux-holdem-ui.js"></script>
 <script src="counter-cards-guess-ui.js"></script>
 <script src="casino-ui.js"></script>
 <script src="cyberware-ui.js"></script>

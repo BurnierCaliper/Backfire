@@ -214,8 +214,9 @@
   }
 
   /* ---------- 克制表、悬停预览：按这一轮翻开的天气（还没翻开 = 没有天气）算实际总分 ---------- */
-  const chart = (v) => FD().chart(v.weather);
-  const chartKey = (v) => v.weather || "none";
+  // 结算横幅开着时按刚结算的那一轮的天气（下一轮的天气还背面朝上）
+  const chart = (v, banner) => FD().chart(banner ? banner.weather : v.weather);
+  const chartKey = (v, banner) => (banner ? "r" + banner.r + ":" : "") + ((banner ? banner.weather : v.weather) || "none");
   function tipHtml(T, card, v) {
     const c = CC().cardChart(card, v.weather), U = UI_CONFIG.tip;
     const head = `${U.head} · ${v.weather ? `天气 ${wn(v.weather)}` : v.facedown ? U.facedown : "没有天气"}`;

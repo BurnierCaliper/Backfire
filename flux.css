@@ -16,7 +16,36 @@
 .fd-wback { width: 92px; height: 120px; }
 .fd-shown { margin: 0; font-size: 13px; color: #ffe08a; }
 
+/* ---------- Flux Hold'em ---------- */
+/* 上面一排对手：名字、难度、庄 / 小盲 / 大盲、筹码、这一轮押了多少、手牌张数、盖了没有；轮到谁描一圈黄 */
+.fh-opps { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.fh-seat { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 128px; padding: 6px 10px; border: 2px solid rgba(236, 224, 198, .2); border-radius: 9px; background: rgba(0, 0, 0, .28); }
+.fh-seat.turn { border-color: var(--sk-hazard, #f2c230); box-shadow: 0 0 0 2px rgba(242, 194, 48, .35); }
+.fh-seat.folded, .fh-seat.out { opacity: .5; }
+.fh-name { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: center; }
+.fh-name small, .fh-bet { font-size: 11px; color: #b9c8b8; }
+.fh-badge, .fh-badges .fh-badge { display: inline-block; padding: 0 5px; border-radius: 3px; background: var(--sk-brass, #c99a46); color: #0b0806; font: 700 11px/1.5 var(--ui); font-style: normal; }
+.fh-badges { display: inline-flex; gap: 3px; }
+/* 对手的手牌、盖下的牌用小一号的牌背 */
+.cc-card.fh-small { width: 40px; height: 56px; padding: 2px; }
+.cc-card.fh-small .cc-emblem { width: 24px; height: 34px; }
+.fh-backs .cc-card + .cc-card { margin-left: -26px; }
+.fh-played { min-height: 58px; display: flex; align-items: center; }
+/* 中间：公共层牌、天气（叠加）、天气堆、弃掉的天气；没翻开的是牌背 */
+.fh-center { grid-template-columns: 1fr auto; }
+.fh-community { display: flex; gap: 16px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+.fh-group { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.fh-group > small { font-size: 11px; color: #b9c8b8; }
+.fh-cards { display: flex; gap: 6px; align-items: center; }
+.fh-peek .cc-card { transform: scale(.8); }
+/* 结算横幅：亮牌的那几张、最终筹码 */
+.fh-shown { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.fh-shown li.win { color: #ffe08a; font-weight: 700; }
+.fh-final { flex-direction: column; gap: 2px; }
+
 @media (max-width: 760px) {
   .fd-slot { width: 128px; gap: 4px; }
   .fd-rowlabel { display: none; }
+  .fh-seat { min-width: 96px; padding: 4px 6px; }
+  .fh-center { grid-template-columns: 1fr; }
 }

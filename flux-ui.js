@@ -44,7 +44,8 @@
    *   begin(opt) → { game, human, levels: { AI 坐的一方: 难度 } }（开一局，opt.game = 接着打）、
    *   setupHtml(T)、topHtml(T, v)、boardHtml(T, v)、sideHtml(T, v)、bannerHtml(T, 结果, v)、finalHtml(T, v)、
    *   stageControls(T, v) → { p, b }（下注以外的步骤：出牌……）、waitText(T, v)、streetText(T, v)、infoLine(T, v)、
-   *   weatherOf(v)（天气特效用哪张）、chart(v)（克制表数据）、chartKey(v)、tipHtml(T, 牌, v)、click(T, act, dataset)（自己的按钮，处理了返回 true） */
+   *   weatherOf(v)（天气特效用哪张）、chart(v, 结算横幅的那一轮)（克制表数据）、chartKey(v, 结算横幅的那一轮)、tipHtml(T, 牌, v)、
+ *   click(T, act, dataset)（自己的按钮，处理了返回 true） */
   function table(spec) {
     const K = spec.key, ATTR = "data-" + K, TIP = "data-" + K + "-tip", TIPKEY = K + "Tip";
     const el = (s) => $(K + "-" + s);
@@ -281,8 +282,8 @@
         banner.hidden = !h;
       }
       if (root.WeatherFx && el("fx")) root.WeatherFx.sync({ field: el("fx"), weather: spec.weatherOf(v) || "none" });
-      // 克制表开着：场上的天气变了才重画
-      if (chartOpen() && S.chartKey !== spec.chartKey(v)) { S.chartKey = spec.chartKey(v); MU().refresh(); }
+      // 克制表开着：场上的天气变了（或者结算横幅收起，换回这一轮的天气）才重画
+      if (chartOpen() && S.chartKey !== spec.chartKey(v, S.banner)) { S.chartKey = spec.chartKey(v, S.banner); MU().refresh(); }
       if (S.tip) showTip(S.tip.card, S.tip.via);
       S.anim = {};
     }
@@ -316,12 +317,13 @@
       const m = MU(), box = $("mu-overlay"), scr = $("scr-" + K);
       return !!(m && m.isOpen() && box && scr && scr.contains(box));
     }
+    /** 打开克制表：按场上的天气算；结算横幅开着时按刚结算的那一轮的天气（Hold'em 两张天气要到亮牌时才都翻开，横幅上看的就是叠加后的） */
     function openChart() {
       const m = MU();
       if (!m || !S) return false;
       stopTip();
-      S.chartKey = spec.chartKey(R().view(S.game, S.human));
-      m.open(() => spec.chart(R().view(S.game, S.human)), { mount: el("game") });
+      S.chartKey = spec.chartKey(R().view(S.game, S.human), S.banner);
+      m.open(() => spec.chart(R().view(S.game, S.human), S.banner), { mount: el("game") });
       const close = $("mu-overlay") && $("mu-overlay").querySelector("[data-mu-close]");
       if (close && typeof close.focus === "function") close.focus();
       return true;
@@ -344,7 +346,7 @@
       S.tip = { card, via };
       box.innerHTML = spec.tipHtml(api, card, v);
       box.dataset.card = card;
-      box.dataset.weather = (spec.chartKey(v) || "none");
+      box.dataset.weather = (spec.chartKey(v, null) || "none");
       box.hidden = false;
       const was = el("board").querySelector(`[aria-describedby="${K}-tip"]`);
       if (was && was !== a) was.removeAttribute("aria-describedby");
