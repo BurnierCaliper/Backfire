@@ -82,7 +82,7 @@
   function myScore(v, mine, opp, w) {
     return v.side === "player" ? CC().score(mine, opp, w) : -CC().score(opp, mine, w);
   }
-  /** 得分 → 筹码上的分量：差 1 = ±1，差 2 = ±1.5，差 3+ = ±2（和分档赔付同比例） */
+  /** 得分 → 筹码上的分量：差 1 = ±1，差 2 = ±1.5（和分档赔付同比例；分差超过 2 按差 2） */
   function util(s) {
     if (!s) return 0;
     return Math.sign(s) * (1 + (conf().tierExtra[CC().tierOf(s)] || 0));
