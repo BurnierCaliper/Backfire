@@ -11,7 +11,7 @@ const H = require("./headless");
 const ROOT = path.resolve(__dirname, "..");
 const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 const c = H.load();
-for (const f of ["counter-cards.js", "flux-holdem.js", "flux-holdem-ai.js"]) vm.runInContext(read(f), c, { filename: f });
+for (const f of ["counter-cards.js", "counter-cards-ai.js", "flux-holdem.js", "flux-holdem-ai.js"]) vm.runInContext(read(f), c, { filename: f });
 const CC = c.CounterCards;
 const X = c.FluxHoldem;
 const AI = c.FluxHoldemAI;
@@ -57,7 +57,7 @@ test("AI 只按自己能看到的东西做决定：别人盖的牌不一样、�
   }
 });
 
-test("胜率（期望份额）：在 0–1 之间，平均份额 = 1 ÷ 还在牌局里的人数；好牌比差牌高；普通、困难盖胜率最高的那张", () => {
+test("胜率（期望份额）：在 0–1 之间，平均份额 = 1 ÷ 还在牌局里的人数；好牌比差牌高；胜率差得多时普通、困难（几乎总）盖胜率最高的那张", () => {
   const g = X.newGame({ seed: "胜率", players: seatsOf(2), layers: LAYERS.slice(), weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"],
     hands: { p1: ["fire", "ice", "harmonic"], p2: ["physical", "energy", "acid"] }, elements: [] });
   A(g, "p1", "place", { where: "top" });
@@ -70,7 +70,10 @@ test("胜率（期望份额）：在 0–1 之间，平均份额 = 1 ÷ 还在�
   [fire, ice].forEach(q => assert.ok(q.e >= 0 && q.e <= 1));
   assert.ok(fire.e > ice.e + 0.2, `火 ${fire.e} 比冰 ${ice.e} 好得多`);
   AI.scenarios(v).forEach(sc => assert.equal(sc.weathers[0], "heat", "留在顶上的那张就是第 1 张天气"));
-  for (const level of ["normal", "hard"]) assert.deepEqual(J(AI.decide(v, level, CC.makeRng("p"))), { type: "play", card: "fire" });
+  for (const level of ["normal", "hard"]) {
+    assert.deepEqual(J(AI.decide(v, level, CC.makeRng("p"))), { type: "play", card: "fire" });
+    assert.ok(AI.cardOdds(v, level).fire > 0.99, level + "：胜率差得多（#521 起按胜率加权抽签）");
+  }
   // 不是庄家的看不到：第 1 张天气按还没上场的均匀
   const w = X.view(g, "p2");
   const firsts = new Set(AI.scenarios(w).map(sc => sc.weathers[0]));
@@ -191,4 +194,82 @@ test("统计工具 tools/flux-holdem-stats.js：AI 自对局里平分底池占�
   assert.equal(t.carriedPerAllIn, t.allIns ? Math.round(t.carried / t.allIns * 1000) / 10 : 0);
   // 同样的参数结果一样
   assert.deepEqual(J(S.run(3, 4, { ctx: c })), J(t));
+});
+
+/* ---------- 带随机性（#521，同 High Flux 的 AI：按温度加权抽签用 counter-cards-ai.js 的同一份） ---------- */
+
+const tallyOf = (list) => { const m = {}; list.forEach(k => { m[k] = (m[k] || 0) + 1; }); return m; };
+/** 第 1 张层牌肉体、庄家（甲）偷看酷暑留在顶上：乙手里是 hand，轮到乙盖牌（乙不知道第 1 张天气） */
+function closeView(hand) {
+  const g = X.newGame({ seed: "接近", players: seatsOf(2), layers: LAYERS.slice(), weathers: WEATHERS.slice(),
+    hands: { p1: ["fire", "ice", "harmonic"], p2: hand }, elements: [] });
+  A(g, "p1", "place", { where: "top" });
+  return X.view(g, "p2");
+}
+
+test("盖牌是混合策略（#521）：胜率接近的几张都会盖——同一个局面换随机数，盖出来的不总是同一张（以前每次都是胜率最高的那张），胜率最高的盖得最多；胜率差得多时几乎总盖最好的；困难的温度比普通低", () => {
+  const v = closeView(["fire", "acid", "electric"]);
+  const eq = {};
+  ["fire", "acid", "electric"].forEach(card => { eq[card] = AI.equity(v, card, "hard").e; });
+  assert.ok(Math.max(...Object.values(eq)) - Math.min(...Object.values(eq)) < 0.1, "三张的胜率接近：" + JSON.stringify(eq));
+  assert.ok(AI.AI_CONFIG.hard.playTemp > 0 && AI.AI_CONFIG.hard.playTemp < AI.AI_CONFIG.normal.playTemp, "困难温度较低，但不是 0");
+  for (const level of ["normal", "hard"]) {
+    const seen = tallyOf(Array.from({ length: 200 }, (_, i) => AI.decide(v, level, CC.makeRng("盖" + i)).card));
+    const top = Object.keys(seen).sort((a, b) => seen[b] - seen[a])[0];
+    assert.ok(Object.keys(seen).length >= (level === "normal" ? 3 : 2), level + "：" + JSON.stringify(seen));
+    assert.equal(top, "electric", level + "：胜率最高的盖得最多 " + JSON.stringify(seen));
+    const odds = AI.cardOdds(v, level);
+    Object.keys(odds).forEach(k => assert.ok(Math.abs((seen[k] || 0) / 200 - odds[k]) < 0.1, `${level} ${k}：抽中 ${seen[k]} 次，概率 ${odds[k]}`));
+  }
+  assert.ok(AI.cardOdds(v, "hard").electric > AI.cardOdds(v, "normal").electric, "困难更常盖胜率最高的");
+  // 胜率差得多（能量打肉体）：几乎总盖能量
+  for (const level of ["normal", "hard"]) assert.ok(AI.cardOdds(closeView(["energy", "physical", "ice"]), level).energy > 0.95, level);
+  // 简单照旧平均
+  Object.values(AI.cardOdds(v, "easy")).forEach(p => assert.ok(Math.abs(p - 1 / 3) < 1e-12));
+});
+
+test("AI 自对局（#521）：普通、困难两人局各打 200 局，第 1 轮盖的元素牌里最多的那张不超过 60%、至少 3 种（手牌本来就随机，改之前也满足；同一个局面每次都一样的问题看上一条）", () => {
+  for (const level of ["normal", "hard"]) {
+    const first = tallyOf(Array.from({ length: 200 }, (_, i) => {
+      const g = X.newGame({ seed: `混合-${level}-${i}`, players: seatsOf(2) });
+      AI.playOut(g, { p1: level, p2: level });
+      return g.sides.p1.history[0].card;
+    }));
+    assert.ok(Math.max(...Object.values(first)) <= 200 * 0.6 && Object.keys(first).length >= 3, level + "：" + JSON.stringify(first));
+  }
+});
+
+test("庄家偷看后放哪、下注额也带随机性（#521）：普通、困难自对局的局面里，同一个局面换随机数重新决定，有时不一样；差得多时照样每次选好的那边", () => {
+  for (const level of ["normal", "hard"]) {
+    const seen = { place: 0, size: 0 }, varied = { place: 0, size: 0 };
+    for (let n = 0; n < 16; n++) {
+      const g = X.newGame({ seed: `随机性-${level}-${n}`, players: seatsOf(2 + (n % 3)) });
+      const levels = {}, rngs = {};
+      g.order.forEach(id => { levels[id] = level; rngs[id] = CC.makeRng(id + n); });
+      for (let step = 0; !g.over; step++) {
+        assert.ok(step < 3000, "卡住了：" + g.stage);
+        const id = X.toAct(g)[0], v = X.view(g, id);
+        const kind = v.stage === "peek" ? "place" : v.stage === "bet1" || v.stage === "bet2" ? "size" : null;
+        if (kind) {
+          const acts = Array.from({ length: 12 }, (_, i) => AI.decide(v, level, CC.makeRng(`${n}-${step}-${i}`)));
+          const keys = kind === "size" ? acts.filter(a => a.type === "bet" || a.type === "raise").map(a => a.amount) : acts.map(a => a.where);
+          if (keys.length) { seen[kind]++; if (new Set(keys).size > 1) varied[kind]++; }
+        }
+        AI.step(g, id, level, rngs[id]);
+      }
+    }
+    for (const k of ["place", "size"]) assert.ok(varied[k] > 0, `${level} ${k}：${varied[k]} / ${seen[k]} 个局面换随机数决定不一样`);
+    assert.ok(varied.place < seen.place, level + "：差得多的局面照样每次选好的那边");
+  }
+});
+
+test("同一个种子打两次，结果完全一样（#521：随机数只用传进来的 rng）", () => {
+  const run = (seed, n, k) => {
+    const g = X.newGame({ seed, players: seatsOf(n) });
+    const levels = {};
+    g.order.forEach((id, i) => { levels[id] = LEVELS[(k + i) % 3]; });
+    AI.playOut(g, levels);
+    return JSON.stringify([g.log, g.results, g.final]);
+  };
+  for (const n of [2, 4]) for (let k = 0; k < 3; k++) assert.equal(run(`复现${n}-${k}`, n, k), run(`复现${n}-${k}`, n, k));
 });

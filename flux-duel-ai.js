@@ -6,14 +6,18 @@
  *           只用最近一轮的结算推理对方那一轮出了什么（不跨轮记牌）；
  *     困难：记整局——不亮牌时按每一轮的胜负、分档推出对方可能用掉了哪些牌（层牌、元素牌各自不重复），亮牌时直接排除；
  *           还给留到以后的牌算价值；下注时把对手这一轮的下注 / 加注当成信号。
+ *     普通 / 困难出牌是混合策略（#521，同 High Flux 的 AI）：不再只出期望最高的那一对，按期望加权抽签（温度 playTemp：普通高、困难低但不是 0，
+ *           按温度加权抽签用 counter-cards-ai.js 的同一份 softOdds / draw）；困难另外「别被摸透」（readBack）：假设对手看穿了自己出牌的概率、
+ *           拿克制的一对来打，掺进推理里重新算一遍，和没掺的取平均。随机数只用传进来的 rng，同一个种子打出同样的一局。
  *   借贷、下注、跟注后的追加窗口：和 High Flux 的 AI 用同一套决定（counter-cards-ai.js · decideBet，阈值在它的 AI_CONFIG），
- *     胜率按 Duel 的计分算（自己的分 − 对方的分，Duel 的三档分档）。
+ *     胜率按 Duel 的计分算（自己的分 − 对方的分，Duel 的三档分档）；下注额的随机性（#521）也跟着它。
  * 这里的阈值都在 AI_CONFIG。
  *
  *   FluxDuelAI.decide(view, "hard", rng)          → 一个操作（交给 FluxDuel.act）
  *   FluxDuelAI.step(对局, "a", "hard", rng)        → 让这一方做一步（不是它的回合返回 null）
  *   FluxDuelAI.playOut(对局, { a: "hard", b: "easy" })   → 两边都交给 AI 打到结束（测试 / 模拟用）
  *   FluxDuelAI.belief(view, "hard")               → 推理出的「对方这一轮出的是哪一对」的概率 { "层|元素": 概率 }
+ *   FluxDuelAI.pairOdds(view, "hard")             → 出牌那一步自己每一对会被抽中的概率 { "层|元素": 概率 }（decide 就按它抽，#521）
  */
 (function (root) {
   "use strict";
@@ -25,12 +29,15 @@
     easy: {},
     normal: {
       futureWeight: 0,       // 出牌时扣掉「这一对留到以后」的价值（普通不看以后）
-      allInWeight: 1         // 相位全押的分量（普通不特别看待）
+      allInWeight: 1,        // 相位全押的分量（普通不特别看待）
+      playTemp: 0.25         // 出牌按期望加权抽签的温度（#521，同 High Flux 的 AI）：越高越随机，0 = 只出期望最高的那一对
     },
     hard: {
       futureWeight: 0.3,
       allInWeight: 2,        // 相位全押的筹码大得多：输赢都按 2 倍看
-      readSoft: 0.4          // 对手这一轮只过牌 / 跟注：它手里是强牌的可能打几折（1 − 这个 × 强度）
+      readSoft: 0.4,         // 对手这一轮只过牌 / 跟注：它手里是强牌的可能打几折（1 − 这个 × 强度）
+      playTemp: 0.08,        // 出牌的温度（#521）：比普通低，但不是 0（Duel 一对牌的期望差得比 High Flux 的单张小，温度也低一点）
+      readBack: 0.5          // 别被摸透（#521，同 High Flux）：假设对手看穿了自己出牌的概率、拿克制的一对来打，掺进推理的分量（再和没掺的取平均）
     }
   };
   const LEVELS = ["easy", "normal", "hard"];
@@ -171,19 +178,47 @@
     return fe / L.length + fl / E.length;
   }
 
-  /* ---------- 出牌 ---------- */
+  /* ---------- 出牌（#521 改成混合策略，同 High Flux 的 AI，按温度加权抽签用 counter-cards-ai.js 的同一份） ---------- */
+  /** 简单随手出；普通 / 困难按 playOdds 的概率抽一对——期望越高越容易出，但不是 100% */
   function playPair(ctx) {
-    const v = ctx.v, opts = ctx.opts.filter(o => o.type === "play");
-    if (ctx.level === "easy") { const o = pick(opts, ctx.rng); return { type: "play", layer: o.layer, element: o.element }; }
-    const Q = weatherQ(v);
-    let best = opts[0], bestVal = -Infinity;
-    opts.forEach(o => {
-      let val = evaluate(v, o, ctx.belief, Q, ctx.cfg).ev;
-      val -= (ctx.cfg.futureWeight || 0) * futureValue(o.layer, o.element);
-      val += ctx.rng() * 1e-6;                       // 一样好时随便挑一对
-      if (val > bestVal) { bestVal = val; best = o; }
+    const opts = ctx.opts.filter(o => o.type === "play");
+    const o = ctx.level === "easy" ? pick(opts, ctx.rng) : HF().draw(opts, playOdds(ctx, opts), ctx.rng);
+    return { type: "play", layer: o.layer, element: o.element };
+  }
+  /** 出这一对的分：对方的一对按 bel、这一轮可能的天气的期望，再扣掉「这一对留到以后」的价值（futureWeight） */
+  function pairValue(ctx, o, bel) {
+    return evaluate(ctx.v, o, bel, weatherQ(ctx.v), ctx.cfg).ev - (ctx.cfg.futureWeight || 0) * futureValue(o.layer, o.element);
+  }
+  /** 出每一对的概率（#521）：按 pairValue 加权抽签（温度 playTemp）。困难再「别被摸透」（readBack）：
+   *  假设对手看穿了这个概率、拿克制的一对来打（counterBelief），掺进推理里重新算一遍，和没掺的取平均 */
+  function playOdds(ctx, opts) {
+    const cfg = ctx.cfg, vals = (bel) => opts.map(o => pairValue(ctx, o, bel));
+    const odds = HF().softOdds(vals(ctx.belief), cfg.playTemp);
+    if (!(cfg.readBack > 0)) return odds;
+    const read = HF().softOdds(vals(counterBelief(ctx, opts, odds)), cfg.playTemp);
+    return odds.map((x, i) => (x + read[i]) / 2);
+  }
+  /** 困难「别被摸透」：对手要是猜中了自己出每一对的概率（odds），它可能出的每一对（ctx.belief 里不为 0 的）打过来的期望（对手的角度），
+   *  按温度加权（再乘上它出得了这一对的可能）——这就是「被看穿以后对手会出什么」；和原来的推理按 readBack 掺在一起 */
+  function counterBelief(ctx, opts, odds) {
+    const v = ctx.v, bel = ctx.belief, Q = weatherQ(v), lam = ctx.cfg.readBack, phase = conf().allInWeather;
+    const keys = Object.keys(bel).filter(k => bel[k] > 0);
+    if (!keys.length) return bel;
+    const oppEv = keys.map(k => {
+      const [l, e] = k.split("|");
+      let s = 0;
+      opts.forEach((o, i) => {
+        if (!odds[i]) return;
+        Object.keys(Q).forEach(w => { s += odds[i] * Q[w] * util(sc(e, o.layer, wVal(w)) - sc(o.element, l, wVal(w))) * (w === phase ? ctx.cfg.allInWeight || 1 : 1); });
+      });
+      return s;
     });
-    return { type: "play", layer: best.layer, element: best.element };
+    const q = HF().softOdds(oppEv, ctx.cfg.playTemp).map((x, i) => x * bel[keys[i]]);
+    const qs = q.reduce((a, b) => a + b, 0);
+    const out = {};
+    Object.keys(bel).forEach(k => { out[k] = (1 - lam) * bel[k]; });
+    if (qs > 0) keys.forEach((k, i) => { out[k] += lam * q[i] / qs; });
+    return out;
   }
 
   /* ---------- 下注时的胜率（交给 High Flux 的下注决定） ---------- */
@@ -235,6 +270,17 @@
     // 借贷、下注、跟注后的追加窗口：和 High Flux 的 AI 同一套决定，胜率按 Duel 算
     return HF().decideBet(view, level, rng, edgeFor(ctx));
   }
+  /** 出牌那一步每一对会被抽中的概率 { "层|元素": 概率 }（#521，测试 / 调参用；decide 就按它抽）：简单是平均的；不是出牌的时候返回 null */
+  function pairOdds(view, level) {
+    if (!view || view.stage !== "play" || !view.legal || !view.legal.length) return null;
+    level = LEVELS.indexOf(level) >= 0 ? level : "normal";
+    const ctx = { v: view, level, rng: Math.random, cfg: AI_CONFIG[level], opts: view.legal, belief: belief(view, level) };
+    const opts = ctx.opts.filter(o => o.type === "play");
+    const p = level === "easy" ? opts.map(() => 1 / opts.length) : playOdds(ctx, opts);
+    const out = {};
+    opts.forEach((o, i) => { out[key(o.layer, o.element)] = p[i]; });
+    return out;
+  }
   /** 让 side 这一方（AI）走一步；不是它的回合返回 null */
   function step(g, side, level, rng) {
     if (D().toAct(g).indexOf(side) < 0) return null;
@@ -255,7 +301,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, decide, step, playOut, belief, candidates, evaluate };
+  const api = { AI_CONFIG, LEVELS, decide, step, playOut, belief, candidates, evaluate, pairOdds };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.FluxDuelAI = api;
 })(typeof window !== "undefined" ? window : globalThis);
