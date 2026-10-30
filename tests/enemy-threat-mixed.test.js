@@ -42,14 +42,14 @@ test("赶潮沙鱼：白天/夜晚/沙暴变体可跑；夜晚或沙暴伤害应
   }
 });
 
-test("自爆小车：护甲层基数不随等级；能自爆", () => {
+test("自爆小车：装甲层基数不随等级；能自爆", () => {
   const r15 = M.runMixedJob({ kit: "boomcar", level: 15, size: 2, index: 1, arm: "keep", variant: "natural" });
   const r20 = M.runMixedJob({ kit: "boomcar", level: 20, size: 2, index: 1, arm: "keep", variant: "natural" });
   assert.notEqual(r15.outcome, "error", r15.error);
   assert.notEqual(r20.outcome, "error", r20.error);
   const armor = layers => (layers || []).find(l => l.type === "armor");
   if (r15.boomLayers && r20.boomLayers) {
-    assert.equal(armor(r15.boomLayers).max, armor(r20.boomLayers).max, "护甲 max 不随等级变");
+    assert.equal(armor(r15.boomLayers).max, armor(r20.boomLayers).max, "装甲 max 不随等级变");
     const sh = layers => (layers || []).find(l => l.type === "shield");
     assert.ok(sh(r20.boomLayers).max > sh(r15.boomLayers).max, "护盾随等级涨");
   }

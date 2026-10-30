@@ -47,7 +47,7 @@ const TARGETS = [
   { kit: "mecha_gl", regions: ["天网设施", "巨人城"], mech: "mark",
     note: "标定榴弹；无团队协同，基线" },
   { kit: "boomcar", regions: ["外城区", "巨人城"], mech: "explode",
-    note: "贴脸自爆；护盾随等级、护甲层写死 3（疑似）" },
+    note: "贴脸自爆；护盾随等级、装甲层写死 3（疑似）" },
   { kit: "captain_lizard", regions: ["外城区", "巨人城"], mech: null,
     note: "无团队角色，基线" },
   { kit: "meteor_centipede", regions: ["第三采矿场"], mech: "centipede",
@@ -783,7 +783,7 @@ function markdownGiant(report) {
     "- 饲料：`LIVESAND_FEED_KITS` = 沙灵四足/人形、大沙灵、扬尘体；`LIVESAND_FEED_FACTIONS` = 沙漠生物（沙鱼）。**不吸收其他活沙**、尘虫/管虫。",
     "- 活沙本体预设（`engine.js`）：沙尘 `scaleHp(20+(lv-1), p)`，架势 4（再经 `unitOf`/`scaleDef`），ATK **固定 7**，骰子 `[0,0]`（技能不掷骰，纯 `mult×atk`）。",
     "- 变巨时对每只饲料：沙尘层 `current/max += totalHp(饲料)`；`atk += 饲料.atk`；`def`/`defMax` **各 +1**；饲料当场死亡。",
-    "- 复活：`resources.giant=true`，`giantTurns=0`，改名「巨型活沙」，`dead=false`。无护盾/护甲层（仍是单层 sand）。",
+    "- 复活：`resources.giant=true`，`giantTurns=0`，改名「巨型活沙」，`dead=false`。无护盾/装甲层（仍是单层 sand）。",
     "- 技能：近距穿刺（至多 2 目标，各 atk 物理 1 击破）；远距流沙漩涡（区内全员 atk 物理 2 击破+失去行动）；**存活满 3 个敌人回合**后解锁全域沙暴（全场 atk 物理）。", "",
     "### 变巨率 / 吸收数 / 存活（keep，人数合并）", "",
     "|变体|等级|变巨率|吸单位/次变巨|无饲料死亡/场|巨型存活敌人回合|撑到脉冲率|变巨后总伤|每敌人回合伤|占单角色满血%|",
@@ -870,9 +870,9 @@ function markdownMixed(report) {
     }
   }
   l.push("");
-  l.push("## 3. 自爆小车护甲层（代码核对）", "",
+  l.push("## 3. 自爆小车装甲层（代码核对）", "",
     "预设 `engine.js` · `boomcar`：`shield = scaleHp(5+(lv-1)*2, p)`，`armor = scaleHp(3, p)`。",
-    "护盾随等级涨，护甲基数写死 3（只随人数 `scaleHp`），**等级升到 20 护甲仍是 3**（2 人队）。",
+    "护盾随等级涨，装甲基数写死 3（只随人数 `scaleHp`），**等级升到 20 装甲仍是 3**（2 人队）。",
     "见手写分析是否判为疑似 bug。", "");
   // 采样一层
   if (report.boomcarLayers) {
