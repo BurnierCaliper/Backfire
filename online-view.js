@@ -595,6 +595,114 @@
     });
     return out;
   }
+  /* 赌场（#487）：hotseat-game.js · casinoView 按收件人造好（trpg.js · trpgCasinoPacket：自己角色的钱包、自己那一方的牌局；
+   * 主持人另有自己坐庄的那几桌——庄家那一方），这里只按白名单一项项拷。牌局照 counter-cards.js · view 的字段拷：
+   * 对方的手牌、暗出 / 暗弃的牌、庄家偷看到的天气本来就只在那一方的 view 里；记录只拷文字。没登记的字段一律丢掉 */
+  const CASINO_CAP = { tables: 8, open: 20, mine: 6, dealing: 12, seated: 24, hand: 12, history: 8, log: 60, results: 8, legal: 40, gone: 10 };
+  const CC_SIDES = ["dealer", "player"];
+  const sideOf = v => (CC_SIDES.includes(v) ? v : null);
+  const nullableNum = v => (v === null ? null : number(v));
+  function projectSidePair(o, fn) { if (!obj(o)) return null; const out = {}; CC_SIDES.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
+  function projectCasinoGame(g) {
+    if (!obj(g)) return null;
+    const out = copyFields(g, {}, ["stage"], ["round", "rounds", "deckCount", "minBet", "ante", "maxRaises", "pot"], ["over", "myTurn", "allIn", "normalUsed"]);
+    out.side = sideOf(get(g, "side")); out.opponent = sideOf(get(g, "opponent"));
+    if (!out.side) return null;
+    out.weather = id(get(g, "weather")); out.revealed = id(get(g, "revealed"));
+    out.waiting = arr(get(g, "waiting")).filter(s => CC_SIDES.includes(s));
+    out.gone = arr(get(g, "gone")).map(id).filter(Boolean).slice(0, CASINO_CAP.gone);
+    const loan = get(g, "loan"); out.loan = obj(loan) ? selected(loan, ["unit", "repay"]) : null;
+    const ask = get(g, "loanAsk"); out.loanAsk = Array.isArray(ask) ? ask.filter(s => CC_SIDES.includes(s)) : null;
+    const seat = (s, mine) => {
+      if (!obj(s)) return null;
+      const d = selected(s, ["infinite", "bet", "pot", "st", "loan", "owe"]);
+      d.chips = nullableNum(get(s, "chips")); if (d.chips === undefined) d.chips = null;
+      d.start = nullableNum(get(s, "start")); if (d.start === undefined) d.start = null;
+      if (mine) {
+        d.hand = arr(get(s, "hand")).map(id).filter(Boolean).slice(0, CASINO_CAP.hand);
+        d.card = id(get(s, "card"));
+        d.history = arr(get(s, "history")).slice(0, CASINO_CAP.history).flatMap(h => obj(h) && id(get(h, "card")) ? [{ r: number(get(h, "r")) || 0, card: get(h, "card") }] : []);
+        d.discards = arr(get(s, "discards")).slice(0, CASINO_CAP.history).flatMap(h => obj(h) && id(get(h, "card")) ? [{ r: number(get(h, "r")) || 0, card: get(h, "card"), why: id(get(h, "why")) }] : []);
+        const spare = number(get(s, "spare")); if (spare !== undefined) d.spare = spare;
+      } else Object.assign(d, selected(s, ["handCount", "discardCount", "played"]));
+      return d;
+    };
+    out.me = seat(get(g, "me"), true); out.opp = seat(get(g, "opp"), false);
+    const b = get(g, "betting");
+    out.betting = obj(b) ? Object.assign(selected(b, ["street", "raises", "toCall"]), { toAct: sideOf(get(b, "toAct")) }) : null;
+    out.results = arr(get(g, "results")).slice(-CASINO_CAP.results).flatMap(r => {
+      if (!obj(r)) return [];
+      const d = copyFields(r, {}, [], ["r", "tier", "extra", "pot"], ["allIn", "refund", "rollover"]);
+      d.weather = id(get(r, "weather"));
+      enumField(r, d, "outcome", ["dealer", "player", "tie", "fold"]);
+      d.winner = sideOf(get(r, "winner")); const folded = sideOf(get(r, "folded")); if (folded) d.folded = folded;
+      d.bets = projectSidePair(get(r, "bets"), number); d.delta = projectSidePair(get(r, "delta"), number); d.chips = projectSidePair(get(r, "chips"), nullableNum);
+      return [d];
+    });
+    out.log = arr(get(g, "log")).slice(-CASINO_CAP.log).flatMap(e => { const t = obj(e) && text(get(e, "text"), 160); return t ? [{ r: number(get(e, "r")) || 0, text: t, mine: !!get(e, "to") }] : []; });
+    out.legal = arr(get(g, "legal")).slice(0, CASINO_CAP.legal).flatMap(o => {
+      if (!obj(o) || !id(get(o, "type"))) return [];
+      const d = Object.assign({ type: get(o, "type") }, selected(o, ["min", "max", "step", "need", "amount"]));
+      for (const k of ["op", "where", "card"]) { const v = id(get(o, k)); if (v) d[k] = v; }
+      return [d];
+    });
+    const f = get(g, "final");
+    out.final = obj(f) ? { rounds: number(get(f, "rounds")) || 0, winner: sideOf(get(f, "winner")), chips: projectSidePair(get(f, "chips"), nullableNum), net: projectSidePair(get(f, "net"), number),
+      loans: projectSidePair(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined)), busted: arr(get(f, "busted")).filter(s => CC_SIDES.includes(s)) } : null;
+    // 庄家那一方才有：偷看到的堆顶、知道位置的堆顶 / 堆底（counter-cards.js · view 只给庄家）
+    if (out.side === "dealer") {
+      const p = get(g, "peek"); out.peek = obj(p) ? { card: id(get(p, "card")), where: id(get(p, "where")) } : null;
+      out.deckTop = id(get(g, "deckTop")); out.deckBottom = id(get(g, "deckBottom"));
+    }
+    return out;
+  }
+  /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局 */
+  function projectCasinoSeat(s, withGame) {
+    if (!obj(s)) return null;
+    const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round"], ["over"]), ["table", "level"]);
+    enumField(s, out, "kind", ["ai", "gm", "pvp"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]);
+    if (!out.kind) return null;
+    const side = sideOf(get(s, "side")); if (side) out.side = side;
+    if (withGame) out.game = projectCasinoGame(get(s, "game"));
+    return out;
+  }
+  function projectCasino(c) {
+    if (!obj(c)) return null;
+    const cfg = get(c, "config");
+    const out = { config: obj(cfg) ? selected(cfg, ["buy", "sell", "face", "gift"]) : {} };
+    out.tables = arr(get(c, "tables")).slice(0, CASINO_CAP.tables).flatMap(t => {
+      if (!obj(t) || !id(get(t, "id"))) return [];
+      const d = identifiers(t, copyFields(t, {}, ["name"], ["rate", "minBuyIn", "entryFee", "minBuyInChips", "entryFeeChips", "perChip"]), ["id"]);
+      enumField(t, d, "difficulty", ["easy", "normal", "hard"]);
+      return [d];
+    });
+    out.open = arr(get(c, "open")).slice(0, CASINO_CAP.open).flatMap(t => {
+      if (!obj(t) || !id(get(t, "id"))) return [];
+      const d = identifiers(t, copyFields(t, {}, [], ["start"]), ["id"]);
+      enumField(t, d, "stakeKind", ["chips", "kuizhi"]);
+      d.dealer = text(get(t, "dealer"), 40); d.player = text(get(t, "player"), 40);
+      return [d];
+    });
+    out.mine = arr(get(c, "mine")).slice(0, CASINO_CAP.mine).flatMap(m => {
+      if (!obj(m) || !id(get(m, "kit"))) return [];
+      const d = identifiers(m, copyFields(m, {}, ["name", "last"], ["purse", "sellable"]), ["kit"]);
+      const ch = get(m, "chips");
+      d.chips = obj(ch) ? selected(ch, ["gift", "normal", "total", "gifted"]) : {};
+      d.seat = projectCasinoSeat(get(m, "seat"), true);
+      return [d];
+    });
+    out.dealing = arr(get(c, "dealing")).slice(0, CASINO_CAP.dealing).flatMap(m => {
+      if (!obj(m) || !id(get(m, "kit"))) return [];
+      const seat = projectCasinoSeat(m, true);
+      return seat && seat.game ? [Object.assign(identifiers(m, copyFields(m, {}, ["name"]), ["kit"]), seat)] : [];
+    });
+    out.seated = arr(get(c, "seated")).slice(0, CASINO_CAP.seated).flatMap(m => {
+      if (!obj(m) || !id(get(m, "kit"))) return [];
+      const seat = projectCasinoSeat(m, false);
+      return seat ? [Object.assign(identifiers(m, copyFields(m, {}, ["name"]), ["kit"]), seat)] : [];
+    });
+    return out;
+  }
   /** 战斗掉落：奎支和物品名、数量 */
   function projectDrops(d) {
     if (!obj(d)) return null;
@@ -754,6 +862,15 @@
     });
     // 决斗的申请 / 准备画面（#472）：谁申请的、选项、每名角色选了哪一队
     const duel = projectDuel(get(view, "duel")); if (duel) out.duel = duel;
+    // 赌场（#487）：自己角色的钱包、自己那一方的牌局（hotseat-game.js 按收件人造）。再查一次是不是给这个人造的：
+    // 拿错了别人的 view 也漏不出别人的钱包和牌；主持人坐庄的那几桌、谁坐在哪桌只给主持人
+    if (get(view, "playerId") === context.recipientId) {
+      const casino = projectCasino(get(view, "casino"));
+      if (casino) {
+        if (get(view, "hostId") !== context.recipientId) { casino.dealing = []; casino.seated = []; }
+        out.casino = casino;
+      }
+    }
     out.messages = projectMessages(get(view, "messages"), context);
     const swap = get(view, "swap"); out.swap = obj(swap) ? identifiers(swap, {}, ["requestId", "from", "to", "recipient"]) : null;
     const ask = get(view, "ask"); out.ask = null;

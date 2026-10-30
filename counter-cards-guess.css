@@ -1,0 +1,72 @@
+/* High Flux 黑市玩法：猜大猜小（#489）· 牌桌。牌面、按钮、筹码堆、结算横幅、整体布局借用 counter-cards.css（.cc-*），
+ * 这里只有猜大猜小自己的：庄家盖着的三张牌、赔率表（5 格）、格子上摆的押注、操作栏里这一轮的押注行。
+ * 手机（390px）：赔率表 5 格挤在一行、牌缩小，侧栏照 counter-cards.css 排到牌桌下面。 */
+
+.ccg-board { justify-content: space-around; align-items: center; }
+.ccg-dealer { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+.ccg-slots { display: flex; gap: 14px; align-items: flex-end; justify-content: center; }
+.ccg-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ccg-slot > small { font-size: 11px; color: #b9c8b8; letter-spacing: .1em; }
+.ccg-slot .cc-card { width: 78px; height: 110px; }
+.ccg-slot .cc-wx { width: 92px; height: 120px; }
+.ccg-slot.up .cc-card { box-shadow: 0 3px 0 #0b0806, 0 0 0 3px rgba(242, 194, 48, .55), 0 8px 14px rgba(0, 0, 0, .5); }
+
+/* ---------- 赔率表：5 格（−2 … +2），赔率连本带利；不开盘的灰掉 ---------- */
+.ccg-oddswrap { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.ccg-oddshead { font-size: 12px; color: #ffe08a; letter-spacing: .05em; }
+.ccg-odds { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; width: min(640px, 100%); }
+.ccg-cell {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 108px; padding: 8px 4px 6px;
+  font: inherit; color: var(--sk-canvas, #ece0c6); text-align: center;
+  background: rgba(0, 0, 0, .35); border: 2px solid rgba(201, 154, 70, .55); border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .5);
+}
+button.ccg-cell { cursor: pointer; }
+button.ccg-cell:hover { border-color: var(--sk-hazard, #f2c230); }
+.ccg-cell.on { border-color: var(--sk-hazard, #f2c230); background: rgba(242, 194, 48, .16); box-shadow: 0 0 0 2px var(--sk-hazard, #f2c230); }
+.ccg-cell.closed { opacity: .45; border-style: dashed; border-color: rgba(236, 224, 198, .3); }
+.ccg-cell.hit { opacity: 1; border-color: #8fe39a; box-shadow: 0 0 0 3px rgba(143, 227, 154, .55); }
+.ccg-res { font: 800 26px var(--num, var(--ui)); text-shadow: 2px 2px 0 #000; }
+.ccg-x { font: 800 18px var(--num, var(--ui)); color: #ffe08a; }
+.ccg-cell.closed .ccg-x { color: #b9c8b8; font-weight: 400; font-size: 14px; }
+.ccg-k { font-size: 11px; color: #b9c8b8; }
+.ccg-slips { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.ccg-slip { padding: 1px 6px; font-size: 11.5px; font-weight: 700; color: #0b0806; background: var(--sk-tape, #dcd2ba); border: 1px solid #0b0806; border-radius: 3px; }
+.ccg-slip.win { background: #8fe39a; }
+.ccg-slip.lose { background: #6b6056; color: #d6cdbb; text-decoration: line-through; }
+
+/* ---------- 座位、操作栏 ---------- */
+.ccg-seat { gap: 12px; }
+.ccg-line { margin-right: 4px; }
+.ccg-line .ccg-res { font-size: 18px; }
+.ccg-line small { color: #ffe08a; font-size: 12px; }
+
+/* ---------- 赌命桌：押的是坚毅生命。牌桌换成暗红的毡面；押注条、结算只写固定代价和「坚毅受创」，没有数字 ---------- */
+[data-table="life"] .cc-table {
+  background-color: #2a1212;
+  background-image: var(--sk-noise), radial-gradient(ellipse at 50% 45%, #4a1d1a 0%, #2c1110 45%, #170807 100%);
+}
+.ccg-lifeseat .cc-who small:first-of-type { color: #ffb38a; }
+.ccg-stake { color: #ffb38a !important; }
+.ccg-grit { margin: 0; padding: 2px 12px; font: 800 16px var(--sk-tag, var(--ui)); color: #0b0806; background: #c9bfae; transform: rotate(-1deg); }
+.ccg-grit.hurt { color: var(--sk-canvas, #ece0c6); background: var(--sk-blood, #d8322a); }
+.ccg-dead { margin: 0; padding: 4px 14px; font: 800 18px var(--sk-tag, var(--ui)); color: var(--sk-canvas, #ece0c6); background: #0b0806; border: 2px solid var(--sk-blood, #d8322a); }
+
+/* ---------- 结算横幅：三张牌摆小一点 ---------- */
+.ccg-result .ccg-slots { gap: 8px; }
+.ccg-mini .cc-card { width: 56px; height: 80px; }
+.ccg-mini .cc-wx { width: 64px; height: 88px; }
+.ccg-mini .cc-mods { display: none; }
+
+/* ---------- 手机 ---------- */
+@media (max-width: 760px) {
+  .ccg-odds { gap: 4px; }
+  .ccg-cell { min-height: 84px; padding: 6px 2px 4px; }
+  .ccg-res { font-size: 20px; }
+  .ccg-x { font-size: 15px; }
+  .ccg-k { font-size: 10px; }
+  .ccg-slip { font-size: 10px; padding: 1px 3px; }
+  .ccg-slots { gap: 8px; }
+  .ccg-slot .cc-card { width: 56px; height: 80px; }
+  .ccg-slot .cc-wx { width: 74px; height: 96px; }
+}

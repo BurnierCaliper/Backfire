@@ -17,7 +17,7 @@
   const UNDO_MAX = 20;
 
   const TABS = [
-    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["clinic", "诊所"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
+    ["party", "队伍"], ["sheet", "角色"], ["rest", "时间与休息"], ["shop", "商店"], ["merchants", "商人"], ["casino", "赌场"], ["clinic", "诊所"], ["bag", "背包"], ["smith", "武器升级"], ["workshop", "工坊"], ["tasks", "任务"], ["checks", "检定"], ["battles", "战斗模板"], ["backstage", "后台"]
   ];
 
   function heroes() { return trpgHeroes(); }
@@ -109,6 +109,40 @@
         <button class="g-btn small" id="tr-pay-split" ${trpgPurse("party") ? "" : "disabled"}>把公账平分给大家</button></div>`;
   }
 
+  /* ---------- 赌场（#487）：本机跑团用这个存档自己的筹码钱包（trpg.js · trpgCasino…，LEDGER.casino.party）----------
+   * 面板在 casino-ui.js，牌桌在 counter-cards-ui.js（庄家是这张桌子难度的 AI）。第一次点开「赌场」页送赠送筹码（每个存档只送一次）；
+   * 牌局每走一步就存档（打到一半的牌局记在钱包里）。 */
+  let casinoPayer = "party";   // 买筹码由谁付、卖筹码的钱进谁的钱包
+  /** 赌场的一步：跑规则、记日志、存档；没做成 throw 给 casino-ui.js 显示 */
+  function casinoDo(action, data) {
+    pushUndo();
+    const notes = (Commands.dispatch(ruleCommand(action, data)) || []).filter(Boolean);
+    if (notes.length) { log.push({ stamp: stampNow(), lines: notes }); saveLog(); }
+    save();
+    return notes;
+  }
+  const casinoAdapter = {
+    view: () => trpgCasinoView(null, casinoPayer),
+    buy: n => casinoDo("casinoBuy", { n, payer: casinoPayer }),
+    sell: n => casinoDo("casinoSell", { n, payer: casinoPayer }),
+    sit: (table, buyIn) => casinoDo("casinoSit", { table, buyIn }),
+    leave: () => casinoDo("casinoLeave"),
+    saved: () => save(),
+    refresh: () => render(),
+    back: () => { tab = "casino"; Screens.show("trpg"); }
+  };
+  /** 第一次点开「赌场」页：要先送赠送筹码 */
+  const casinoFirstVisit = () => !!window.CasinoUI && typeof trpgCasinoView === "function" && typeof Casino !== "undefined" && !trpgCasinoView().chips.gifted;
+  function casinoHtml() {
+    if (!window.CasinoUI || typeof Casino === "undefined") return `<p class="r-hint">没有加载赌场。</p>`;
+    const opts = [["party", `队伍公账（${trpgPurse("party")}）`]].concat(heroes().filter(h => !h.dead).map(h => [h.kit, `${h.name}（${trpgPurse(h.kit)}）`]));
+    if (!opts.some(([k]) => k === casinoPayer)) casinoPayer = "party";
+    const payerSel = `<div class="tr-row tr-payer">奎支 <select data-casino-payer>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === casinoPayer ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+      <span class="r-hint">买筹码从这个钱包付，卖筹码的钱进这个钱包。</span></div>`;
+    return CasinoUI.html(trpgCasinoView(null, casinoPayer), { head: `<h2>赌场</h2><p class="r-hint">本机跑团：这个存档自己的筹码钱包（联机时每位玩家另有自己的）。庄家是 AI。</p>`,
+      payer: payerSel, kuizhiLabel: casinoPayer === "party" ? "队伍公账" : sellName(casinoPayer) });
+  }
+
   /* ---------- 存 / 读：每个操作、每场战斗结算都自动写回当前存档空位 ---------- */
   function writeSlotNow() {
     if (slot < 0 || !TRPG.active || !window.GAME) return;
@@ -193,6 +227,7 @@
 
   /* ---------- 各页 ---------- */
   const PANELS = {
+    casino: () => casinoHtml(),
     sheet() {
       const data = window.SkillText ? SkillText.sheetData() : [];
       if (!data.length) return `<p class="r-hint">还没有队员。到「队伍」页选人。</p>`;
@@ -863,8 +898,27 @@
         「开店」后联机玩家的画面会同步弹出这家店，玩家用自己角色的钱包买；同一时间只开一家，「关店」后玩家画面收起。</p>
       <div class="tr-row">新商人 <input type="text" id="mc-name" placeholder="名字" style="width:140px"><button class="g-btn small" data-mc="new:">新建</button></div>
       ${front}
-      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}`;
+      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}
+      ${blackMarketHtml()}`;
   };
+  /* ---------- 黑市赌命桌（#489，counter-cards-guess-ui.js）：主持人当庄，角色押坚毅；联机开着房间时不开 ---------- */
+  function blackMarketHtml() {
+    if (!window.CounterCardsGuessUI) return "";
+    return `<h3>黑市</h3>${CounterCardsGuessUI.blackMarketHtml(heroes().filter(h => !h.dead).map(h => ({ id: h.kit, name: h.name })),
+      { dealer: "主持人", death: "坚毅扣光即真正死亡（状态记成死亡）" })}`;
+  }
+  /** 上桌：每一手结算后把账交给规则（trpg 指令 blackMarket：扣坚毅、扣光真死、发奖，记录照常写进探索记录）；离桌回到探索画面 */
+  function openBlackMarket(kit) {
+    const u = heroes().find(h => h.kit === kit);
+    if (!u) return;
+    try {
+      CounterCardsGuessUI.startLife({
+        seat: { id: kit, name: u.name }, dealer: "主持人",
+        settle: (bill) => { act(ruleCommand("blackMarket", { kit, bill })); const now = heroes().find(h => h.kit === kit); return { dead: !!(now && now.dead) }; },
+        back: () => { Screens.show("trpg"); render(); }
+      });
+    } catch (e) { log.push({ stamp: stampNow(), lines: ["没做成：" + e.message] }); render(); }
+  }
   function merchantEditorHtml(m) {
     const groups = [];
     HANDBOOK_SHOP.forEach(r => { if (!groups.includes(r.group)) groups.push(r.group); });
@@ -898,6 +952,7 @@
     const open = trpgMerchantOpenNow();
     P.querySelectorAll("[data-mbuy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("merchantBuy", { id: open.id, key: b.dataset.mbuy, qty: Number((P.querySelector(`[data-mq="${b.dataset.mbuy}"]`) || {}).value) || 1 })); }; });
     P.querySelectorAll("[data-mredeem]").forEach(b => { b.onclick = () => act(ruleCommand("merchantRedeem", { id: open.id, item: b.dataset.mredeem })); });
+    P.querySelectorAll("[data-ccg-black]").forEach(b => { b.onclick = () => openBlackMarket(b.dataset.ccgBlack); });
     if (!merchantEdit) return;
     const m = merchantEdit;
     P.querySelectorAll("[data-me]").forEach(el => { el.oninput = () => { m[el.dataset.me] = el.type === "number" ? Number(el.value) || 0 : el.value; }; });
@@ -1312,7 +1367,15 @@
     bindClinic(P);
     bindAttrRequests(P);
     const on = (id, fn) => { const b = $(id); if (b) b.onclick = fn; };
-    $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => { tab = b.dataset.tab; render(); }; });
+    $("tr-tabs").querySelectorAll("[data-tab]").forEach(b => { b.onclick = () => {
+      tab = b.dataset.tab;
+      if (tab === "casino" && casinoFirstVisit()) { act(ruleCommand("casinoOpen")); return; }   // 第一次来赌场：送赠送筹码（写进记录、存档）
+      render();
+    }; });
+    // 赌场（#487）：面板里的按钮交给 casino-ui.js；「奎支」选单 = 买筹码由谁付、卖筹码的钱进谁的钱包
+    P.querySelectorAll("[data-casino-root]").forEach(h => { h.onclick = e => { if (window.CasinoUI) CasinoUI.handle(e, casinoAdapter); }; });
+    const cp = P.querySelector("[data-casino-payer]");
+    if (cp) cp.onchange = () => { casinoPayer = cp.value; render(); };
     // 队伍
     on("tr-apply-party", () => {
       const kits = [...P.querySelectorAll("[data-kit]")].filter(x => x.checked).map(x => x.dataset.kit);

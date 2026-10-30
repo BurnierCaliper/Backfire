@@ -301,6 +301,23 @@
     const per = Number(ROGUE_GACHA.dailyTaskFusion) || 0, all = Number(ROGUE_GACHA.dailyAllFusion) || 0;
     return `每个完成：随机武器材料${per > 0 ? ` + ${per} 个${esc(fusion)}` : ""} + 1000 奎支；三个全完成：额外${all > 0 ? ` ${all} 个${esc(fusion)} 和` : ""} 1000 奎支。`;
   }
+  /** 长线养成：黑市赌命桌（#489，counter-cards-guess-ui.js）。只写规则文字，不写谁还剩多少坚毅，按钮也不按坚毅变灰（押坚毅永远能下） */
+  function renderBlackMarket() {
+    if (!run.growth || online() || !window.CounterCardsGuessUI || !run.party.length) return "";
+    return `<h2>黑市</h2>${CounterCardsGuessUI.blackMarketHtml(run.party.map(h => ({ id: h.kit, name: Rogue.heroName(h.kit) })),
+      { death: "坚毅扣光即真正死亡：等级与武器等级清零、移出队伍，下次抽到从 1 级重新培养" })}`;
+  }
+  /** 上桌：每一手结算后把账交给规则（run 指令 blackMarket：扣坚毅、扣光真死、发奖）；离桌回到任务板，记录栏写这几手发生了什么（不带坚毅数值） */
+  function openBlackMarket(kit) {
+    const notes = [];
+    try {
+      CounterCardsGuessUI.startLife({
+        seat: { id: kit, name: Rogue.heroName(kit) },
+        settle: (bill) => { const r = dispatch({ type: "run", action: "blackMarket", kit, bill }, { run }); r.notes.forEach(t => notes.push(t)); return r; },
+        back: () => { Screens.show("run"); completeAction(notes); }
+      });
+    } catch (e) { completeAction(null, e); }
+  }
   /** 抽取：单机直接跑规则拿到结果再播动画（联机单局没有长线养成，抽取机只在单机出现） */
   function doDraw(n) {
     let res;
@@ -308,13 +325,44 @@
     completeAction(res.notes);
     if (window.GachaUI) GachaUI.play(res);
   }
+  /* ---------- 赌场（#487，长线养成）：任务板前去城里的赌场，和 AI 庄家打 High Flux ----------
+   * 面板和牌桌在 casino-ui.js / counter-cards-ui.js，钱的规则在 casino.js，存进长线存档在 rogue.js · casino*。 */
+  let casinoShown = false;   // 赌场面板展开着（坐在桌上时一直展开）
+  /** 赌场的一步：跑规则、记下这一步、存档；没做成 throw 给 casino-ui.js 显示 */
+  function casinoDo(command) {
+    const notes = dispatch(Object.assign({ type: "run" }, command), { run });
+    lastError = ""; lastNotes = Array.isArray(notes) ? notes : [];
+    save();
+    return notes;
+  }
+  const casinoAdapter = {
+    view: () => query("casinoView"),
+    buy: (n) => casinoDo({ action: "casinoBuy", n }),
+    sell: (n) => casinoDo({ action: "casinoSell", n }),
+    sit: (table, buyIn) => casinoDo({ action: "casinoSit", table, buyIn }),
+    leave: () => casinoDo({ action: "casinoLeave" }),
+    saved: () => save(),                                 // 牌局走了一步：打到一半的牌局记在 run.casino 里
+    refresh: () => render(),
+    back: () => { Screens.show("run"); render(); }
+  };
+  function renderCasino() {
+    if (!run.growth || !window.CasinoUI || typeof Casino === "undefined") return "";
+    const v = query("casinoView");
+    if (!casinoShown && !v.chips.seat) {
+      return `<h2>赌场</h2><p class="r-hint">城里的赌场：和 AI 庄家打 High Flux，${v.chips.gifted ? `钱包里有 ${v.chips.total} 枚筹码` : `第一次去送 ${Casino.CONFIG.gift} 枚筹码`}。</p>
+        <button class="g-btn" id="r-casino-open">去赌场</button>`;
+    }
+    return CasinoUI.html(v, { head: `<h2>赌场${v.chips.seat ? "" : ' <button class="g-btn small" id="r-casino-close">离开赌场</button>'}</h2>`, kuizhiLabel: "队伍奎支" });
+  }
   function renderBoard() {
     if (run.growth) {
       return `<h2>任务板</h2>
       <p class="r-hint">长线养成：独立存档，没有主线和期限。每天获得赫心融合体。角色永久死亡后清零等级移出队伍，下次抽到从 1 级重新培养。</p>
       ${emptyRestHtml(run, ITEM_CATALOG[ROGUE_GROWTH.fusionItem].name)}
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
+      ${renderCasino()}
       ${renderGrowth()}
+      ${renderBlackMarket()}
       ${renderSmiths()}`;
     }
     return `<h2>任务板</h2>
@@ -939,6 +987,10 @@
       };
     });
     body.querySelectorAll("[data-ss-host]").forEach(h => { h.onclick = e => { if (window.ShopSellUI) ShopSellUI.handle(e, sellAct, render); }; });
+    // 赌场（#487）：展开 / 收起面板，面板里的按钮交给 casino-ui.js
+    on("r-casino-open", () => { casinoShown = true; act({ action: "casinoOpen" }); });
+    on("r-casino-close", () => { casinoShown = false; if (window.CasinoUI) CasinoUI.setMessage(""); render(); });
+    body.querySelectorAll("[data-casino-root]").forEach(h => { h.onclick = e => { if (window.CasinoUI) CasinoUI.handle(e, casinoAdapter); }; });
     body.querySelectorAll("[data-buy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "buy", key: b.dataset.buy, qty: 1 }); }; });
     body.querySelectorAll("[data-redeem]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act({ action: "redeem", item: b.dataset.redeem }); }; });
     body.querySelectorAll("[data-upgrade]").forEach(b => { b.onclick = () => act({ action: "upgradeWeapon", kit: b.dataset.upgrade, smith: b.dataset.smith }); });
@@ -985,6 +1037,7 @@
     on("r-draw10", () => doDraw(10));
     body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
     body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });
+    body.querySelectorAll("[data-ccg-black]").forEach(b => { b.onclick = () => openBlackMarket(b.dataset.ccgBlack); });
     const pay = $("r-payer");
     if (pay) pay.onchange = () => { payerKit = pay.value; render(); };
     on("r-force-vote", () => { try { OnlineRogue.handle(myId(), { type: "rogue.force", what: "vote" }); } catch (e) { completeAction(null, e); } });

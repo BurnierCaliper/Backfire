@@ -464,6 +464,7 @@ const Rogue = (function () {
     if (!task) return "没有这个任务";
     if (task.key && run.main && run.main.done) return "主线已完成";
     if (!run.growth && task.days > daysLeft(run)) return `剩余天数不够（还剩 ${daysLeft(run)} 天）`;
+    if (run.casino && run.casino.seat) return "还坐在赌场的牌桌上：先离桌";
     return null;
   }
   /** 接下这个支线之后，主线还来不来得及。来不及返回提示 */
@@ -3256,6 +3257,40 @@ function advanceDays(run, n) {
     return logAll(run, notes);
   }
 
+  /* ---------- 长线养成：黑市赌命桌（#489 · counter-cards-guess.js 的赌命版，界面 counter-cards-guess-ui.js · startLife）----------
+   * 赌命桌每一手结算后，账（CounterCardsGuess.lifeBill：押输了几点、奖品）交到这里：
+   *   押输的点数从这名角色的坚毅里扣；扣光 = 坚毅耗尽，照长线养成的规则真正死亡（captureParty：等级与武器等级清零、移出队伍、
+   *   候补补上；下次抽到从 1 级重新培养）；赢的奎支、材料进这一局。
+   * 押坚毅永远能下：上桌、押注都不看这名角色还剩多少坚毅。返回 { dead, notes }——notes 不带任何坚毅数值（不写扣了多少、还剩多少） */
+  function blackMarketSettle(run, kit, bill) {
+    requireGrowth(run);
+    if (run.stage !== "board") throw new Error("回到任务板前才能上黑市");
+    if (!run.party.some(h => h.kit === kit)) throw new Error("队伍里没有这名角色");
+    bill = bill || {};
+    const lost = Math.max(0, Math.floor(Number(bill.lost) || 0));
+    const prize = bill.prize || {};
+    const name = heroName(kit), notes = [];
+    let dead = false;
+    if (lost > 0) {
+      const r = withParty(run, () => {
+        const u = findKit(kit, state.units);
+        if (!u) return;
+        u.shp = Math.max(0, (Number(u.shp) || 0) - lost);
+        if (u.shp <= 0) { u.dead = true; dead = true; }
+      });
+      notes.push(dead ? `${name} 在黑市赌命桌押输了：坚毅耗尽。` : `${name} 在黑市赌命桌押输了：坚毅受创。`);
+      r.notes.forEach(t => notes.push(t));
+    }
+    const kz = Math.max(0, Math.floor(Number(prize.kuizhi) || 0));
+    if (kz) state.kuizhi = (Number(state.kuizhi) || 0) + kz;
+    const got = (prize.items || []).filter(x => x && ITEM_CATALOG[x.id] && Math.floor(Number(x.n)) > 0);
+    got.forEach(x => bagAdd(x.id, Math.floor(Number(x.n))));
+    if (kz || got.length) notes.push(`${name} 在黑市赌命桌赢得 ${[kz ? kz + " 奎支" : ""].concat(got.map(x => `${ITEM_CATALOG[x.id].name} ×${Math.floor(Number(x.n))}`)).filter(Boolean).join("、")}。`);
+    logAll(run, notes);
+    save(run);
+    return { dead, notes };
+  }
+
   /** 路线图上每一列大约几点到（只算节点本身和路上的时间，不算休息）：[{ text, night, days } | null] */
   function routeEta(run) {
     const t = run && run.task;
@@ -3329,6 +3364,61 @@ function advanceDays(run, n) {
     return v == null ? weaponDurMaxFor(h, k, run) : Math.max(0, Number(v) || 0);
   }
 
+  /* ---------- 赌场（#487）：长线养成在任务板前（城里）可以去赌场，和 AI 庄家打 High Flux ----------
+   * 钱的规则在 casino.js（筹码钱包、200 奎支买 1 枚 / 1 枚卖 190、入场费、离桌结算），牌局在 counter-cards.js。
+   * 钱包记在 run.casino，跟着长线存档走（第一次来送的赠送筹码每个存档只送一次）；打到一半的牌局也在钱包里（seat.game），
+   * 界面每走一步就存档。买筹码花的、卖筹码得的都是队伍的奎支（state.kuizhi）。坐在桌上时不能接任务（先离桌）。 */
+  function casinoWallet(run) {
+    if (typeof Casino === "undefined") throw new Error("没有加载赌场（casino.js）");
+    if (!run.growth) throw new Error("只有长线养成能去赌场");
+    run.casino = Casino.wallet(run.casino);
+    return run.casino;
+  }
+  function casinoInTown(run) {
+    if (run.stage !== "board") throw new Error("只能在任务板前（城里）去赌场");
+  }
+  /** 进赌场：第一次来送赠送筹码（每个存档只送一次）。返回日志行 */
+  function casinoOpen(run) {
+    const w = casinoWallet(run);
+    casinoInTown(run);
+    return logAll(run, Casino.welcome(w).map(t => "赌场：" + t));
+  }
+  /** 界面用：钱包（按枚）、能卖几枚、队伍的奎支、桌子、兑换价、坐着的这一局 */
+  function casinoView(run) {
+    const w = casinoWallet(run);
+    return { chips: Casino.chips(w), sellable: Casino.sellable(w), kuizhi: Number(state.kuizhi) || 0, tables: Casino.tables(),
+      buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, game: w.seat ? w.seat.game : null };
+  }
+  function casinoBuy(run, n) {
+    const w = casinoWallet(run);
+    casinoInTown(run);
+    const r = Casino.buy(w, n, Number(state.kuizhi) || 0);
+    state.kuizhi = (Number(state.kuizhi) || 0) - r.cost;
+    return logAll(run, ["赌场：" + r.text]);
+  }
+  function casinoSell(run, n) {
+    const w = casinoWallet(run);
+    casinoInTown(run);
+    const r = Casino.sell(w, n);
+    state.kuizhi = (Number(state.kuizhi) || 0) + r.gain;
+    return logAll(run, ["赌场：" + r.text]);
+  }
+  /** 坐上一张赌场桌开一局（先收入场费），返回 { notes, game }；opt.deck 只给测试用 */
+  function casinoSit(run, tableId, buyIn, opt) {
+    const w = casinoWallet(run);
+    casinoInTown(run);
+    run.casinoGames = (Number(run.casinoGames) || 0) + 1;
+    // 天气堆的种子带上开局的时刻：单局的种子写在记录里，只用它的话天气的顺序算得出来
+    const game = Casino.sit(w, tableId, buyIn, { seed: `${run.seed}:casino:${run.casinoGames}:${Date.now()}`, deck: opt && opt.deck });
+    const t = Casino.tables().find(x => x.id === w.seat.table);
+    return { notes: logAll(run, [`赌场：坐上${t.name}，买入 ${w.seat.buyIn} 枚，交入场费 ${w.seat.fee} 枚（不退）。`]), game };
+  }
+  /** 离桌：桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退） */
+  function casinoLeave(run) {
+    const w = casinoWallet(run);
+    return logAll(run, ["赌场：" + Casino.leave(w).text]);
+  }
+
   return {
     CONFIG: C,
     newRun, heroPool, heroName, cardOf, region, daysLeft, enemyLevel, levelRange, totalActs,
@@ -3346,6 +3436,8 @@ function advanceDays(run, n) {
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
     drawInfo, drawHero, drawMany, drawRates, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
+    blackMarketSettle,   // 长线养成：黑市赌命桌一手的账（#489）
+    casinoOpen, casinoView, casinoBuy, casinoSell, casinoSit, casinoLeave,
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook

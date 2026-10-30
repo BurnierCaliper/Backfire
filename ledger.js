@@ -93,13 +93,14 @@ const LEDGER = {
   merchants: [],       // 跑团：主持人设置的商人（trpg-merchants.js）
   shopOpen: null,      // 跑团：现在开着的商人 id（联机玩家同步看到商人界面）
   lore: [],            // 跑团：角色资料（NPC 条目，lore.js；草稿只有主持人看得到）
+  casino: {},          // 跑团：赌场（casino.js，#487）：{ wallets: { party = 这个存档自己的筹码钱包，角色 kit = 联机玩家各自的 }, tables: 联机对赌桌, seq }（trpg.js · trpgCasino…）
 
   /** 存进队伍档案 */
   save() {
     return JSON.parse(JSON.stringify({
       day: this.day, hours: this.hours, clock: this.clock, dur: this.dur,
       heroes: this.heroes, weapons: this.weapons, shortUsed: this.shortUsed,
-      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, purse: this.purse || {}, merchants: this.merchants || [], shopOpen: this.shopOpen || null, lore: this.lore || [], water: ledgerWater()
+      restOnce: this.restOnce, shortOnce: this.shortOnce || {}, career: this.career, tasks: this.tasks || [], place: this.place || null, placePos: this.placePos || null, spit: this.spit || {}, ammoOrder: this.ammoOrder || {}, workshop: this.workshop || null, purse: this.purse || {}, merchants: this.merchants || [], shopOpen: this.shopOpen || null, lore: this.lore || [], casino: this.casino || {}, water: ledgerWater()
     }));
   },
   load(s) {
@@ -125,6 +126,8 @@ const LEDGER = {
     this.shopOpen = typeof s.shopOpen === "string" && this.merchants.some(m => m && m.id === s.shopOpen) ? s.shopOpen : null;
     // 角色资料：拷一份（lore.js · loreList 第一次读的时候整理：截长度、补 id）
     this.lore = Array.isArray(s.lore) ? JSON.parse(JSON.stringify(s.lore)) : [];
+    // 赌场的筹码钱包：拷一份（字段在 casino.js · Casino.wallet 用的时候补齐）
+    this.casino = s.casino && typeof s.casino === "object" && !Array.isArray(s.casino) ? JSON.parse(JSON.stringify(s.casino)) : {};
     this.purse = {};
     if (s.purse && typeof s.purse === "object") Object.keys(s.purse).forEach(k => { const v = Math.floor(Number(s.purse[k]) || 0); if (v > 0) this.purse[k] = v; });
     if (s.water != null) setLedgerWater(s.water);

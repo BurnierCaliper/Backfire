@@ -197,6 +197,17 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-amount { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; background: rgba(0, 0, 0, .35); border: 1px solid #4d4337; }
 .cc-amount .cc-btn { padding: 6px 9px; }
 .cc-amt { min-width: 2.2em; text-align: center; font: 800 18px var(--num, var(--ui)); color: #ffe08a; }
+/* 跟注后的追加窗口（#496，counter-cards-ui.js · windowClock / tickWindow）：数字每秒少一，进度条按剩下的时间缩短（--sec 窗口多长、--gone 已经过去多久） */
+.cc-window { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; }
+.cc-clock {
+  flex: none; display: inline-flex; align-items: baseline; gap: 3px; padding: 2px 10px 3px;
+  font-weight: 800; color: var(--sk-ink, #0b0806); background: var(--sk-hazard, #f2c230);
+  transform: rotate(-2deg); box-shadow: 2px 2px 0 rgba(0, 0, 0, .55);
+}
+.cc-count { min-width: .7em; text-align: center; font: 800 24px/1 var(--num, var(--ui)); }
+.cc-winbar { flex: 1; min-width: 0; height: 8px; background: rgba(0, 0, 0, .45); border: 1px solid #4d4337; overflow: hidden; }
+.cc-winbar i { display: block; height: 100%; background: var(--sk-hazard, #f2c230); transform-origin: left center; animation: ccWin var(--sec, 3000ms) linear var(--gone, 0ms) both; }
+@keyframes ccWin { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
 /* ---------- 侧栏 ---------- */
 .cc-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
@@ -271,8 +282,8 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-me .cc-chips.cc-collect { --from: -46px; }
 .cc-chips.cc-collect .cc-stack i { animation: ccCollect .45s cubic-bezier(.2, .8, .3, 1.1) both; animation-delay: calc(var(--i) * 30ms); }
 @keyframes ccCollect { from { opacity: 0; transform: translateY(var(--from, -46px)) scale(.85); } to { opacity: 1; transform: none; } }
-.cc-chips.cc-collect b { animation: ccWin .8s ease-out both; }
-@keyframes ccWin { from { transform: scale(1.4); color: #fff6c8; } to { transform: none; } }
+.cc-chips.cc-collect b { animation: ccGain .8s ease-out both; }   /* 不叫 ccWin：追加窗口的进度条（#496）已经用了这个名字，同名的 @keyframes 后写的会盖掉前面的 */
+@keyframes ccGain { from { transform: scale(1.4); color: #fff6c8; } to { transform: none; } }
 
 /* ---------- 结算横幅：只有胜负、分档和筹码变动 ---------- */
 .cc-banner { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .55); }
