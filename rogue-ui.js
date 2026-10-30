@@ -325,8 +325,8 @@
     completeAction(res.notes);
     if (window.GachaUI) GachaUI.play(res);
   }
-  /* ---------- 赌场（#487，长线养成）：任务板前去城里的赌场，和 AI 庄家打 High Flux ----------
-   * 面板和牌桌在 casino-ui.js / counter-cards-ui.js，钱的规则在 casino.js，存进长线存档在 rogue.js · casino*。 */
+  /* ---------- 赌场（#487，长线养成）：任务板前去城里的赌场，和 AI 打 High Flux（#488 起另有 Flux Duel、Flux Hold'em 的桌子） ----------
+   * 面板和牌桌在 casino-ui.js / counter-cards-ui.js（Flux 的牌桌 flux-duel-ui.js / flux-holdem-ui.js），钱的规则在 casino.js，存进长线存档在 rogue.js · casino*。 */
   let casinoShown = false;   // 赌场面板展开着（坐在桌上时一直展开）
   /** 赌场的一步：跑规则、记下这一步、存档；没做成 throw 给 casino-ui.js 显示 */
   function casinoDo(command) {
@@ -349,7 +349,8 @@
     if (!run.growth || !window.CasinoUI || typeof Casino === "undefined") return "";
     const v = query("casinoView");
     if (!casinoShown && !v.chips.seat) {
-      return `<h2>赌场</h2><p class="r-hint">城里的赌场：和 AI 庄家打 High Flux，${v.chips.gifted ? `钱包里有 ${v.chips.total} 枚筹码` : `第一次去送 ${Casino.CONFIG.gift} 枚筹码`}。</p>
+      // 能玩哪几种（High Flux、Flux Duel、Flux Hold'em，#488）：名字读各自的配置
+      return `<h2>赌场</h2><p class="r-hint">城里的赌场：和 AI 打 ${Casino.games().map(x => x.name).join("、")}，${v.chips.gifted ? `钱包里有 ${v.chips.total} 枚筹码` : `第一次去送 ${Casino.CONFIG.gift} 枚筹码`}。</p>
         <button class="g-btn" id="r-casino-open">去赌场</button>`;
     }
     return CasinoUI.html(v, { head: `<h2>赌场${v.chips.seat ? "" : ' <button class="g-btn small" id="r-casino-close">离开赌场</button>'}</h2>`, kuizhiLabel: "队伍奎支" });

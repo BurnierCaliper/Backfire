@@ -6,6 +6,9 @@
 .cs-wallet b { font-family: var(--num); font-size: 15px; }
 .cs-ex { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
 .cs-ex input, .cs-buyin input { width: 64px; min-height: 30px; box-sizing: border-box; }
+.cs-game { display: flex; flex-direction: column; gap: 6px; }
+.cs-game h3 { margin: 4px 0 0; font-size: 14px; }
+.cs-game > .r-hint { margin: 0; }
 .cs-tables { display: flex; flex-direction: column; gap: 6px; }
 .cs-table {
   display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name buyin go" "meta meta meta";

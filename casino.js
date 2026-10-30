@@ -1,6 +1,7 @@
 /* 赌场的钱（#487）：筹码钱包、牌桌上的输赢记进钱包
- * 规则层不碰网页。牌局本身是 High Flux（counter-cards.js；赌场桌走 CounterCards.casino.*），这里只管钱：
- * 筹码从哪来、押上桌、离桌时剩下的怎么回到钱包。
+ * 规则层不碰网页。牌局本身是 High Flux（counter-cards.js；赌场桌走 CounterCards.casino.*），
+ * 另有 Flux Duel（flux-duel.js）、Flux Hold'em（flux-holdem.js）的赌场桌（#488，见下面 GAMES）；这里只管钱：
+ * 筹码从哪来、押上桌、离桌时剩下的怎么回到钱包。三种玩法的钱一样算。
  *
  * 钱包：每个存档一份（联机时每位玩家各自一份），由各模式自己存（对象原样放进存档）：
  *   { v, gifted, gift, normal, seat }
@@ -19,9 +20,11 @@
  *   Casino.chips(w)                              → { gift, normal, total, seat } 都按枚（可能有零头）
  *   Casino.buy(w, 枚数, 现有奎支) / Casino.sell(w, 枚数)   → 兑换：200 奎支买 1 枚（奎支不够不能买），1 枚卖 190 奎支（只卖普通筹码的整枚）；
  *                                                  奎支由各模式自己扣 / 加（返回的 cost / gain）
- *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌开一局（庄家 = AI 或主持人，筹码无限）：先收入场费（每局一次、不退），
+ *   Casino.tables() / Casino.games()             → 能坐的赌场桌（三种玩法，High Flux 在前；每张带 game 是哪种玩法）/ 加载了的玩法
+ *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌开一局（赌场 = AI 或主持人坐庄）：先收入场费（每局一次、不退），
  *                                                  再押买入；返回这一局
  *   Casino.leave(w)                              → 离桌：桌上剩下的筹码按倍率回钱包（输了先扣赠送的），返回结算
+ *   Casino.runAi(这一局, 难度)                    → 赌场那几方（AI）走到轮到人
  */
 (function (root) {
   "use strict";
@@ -40,7 +43,58 @@
     return root.CounterCards;
   };
   const int = (x) => Math.trunc(Number(x) || 0);
+  const clone = (o) => JSON.parse(JSON.stringify(o));
   function fail(msg) { throw new Error(msg); }
+
+  /* ---------- 三种玩法都能坐赌场桌（#488）：High Flux、Flux Duel、Flux Hold'em ----------
+   * 桌子放在各自玩法的配置里：High Flux 是 CC_CONFIG.casino.tables（#486），Flux Duel 是 DUEL_CONFIG.casino.tables，
+   * Flux Hold'em 是 HOLDEM_CONFIG.casino.tables；桌子 id 全赌场不重复，长线养成 / 跑团的坐桌指令只认桌子 id。
+   * 没加载的玩法（例：只测 High Flux 的页面）就没有它的桌子。钱（买入、入场费、离桌结算、先扣赠送筹码）三种一样，
+   * 不一样的只有人坐哪一方、赌场坐哪几方（由 AI 走）：
+   *   High Flux：人坐玩家，庄家是赌场（筹码无限）；
+   *   Flux Duel：人坐 DUEL_CONFIG.casino.seat（a，第 1 轮先手），另一方是赌场（筹码无限，flux-duel.js · newGame 的 house）；
+   *   Flux Hold'em：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），没有主持人坐庄。
+   * 玩家对赌（pvp*）现在只有 High Flux。 */
+  const GAMES = {
+    highflux: {
+      has: () => !!root.CounterCards,
+      name: () => CC().CC_CONFIG.name,
+      tables: () => CC().casino.tables(),
+      gm: true,
+      start: (t, n, opt) => CC().casino.newGame(t.id, n, { seed: opt.seed, deck: opt.deck })
+    },
+    duel: {
+      has: () => !!(root.FluxDuel && root.FluxDuel.DUEL_CONFIG.casino),
+      name: () => root.FluxDuel.DUEL_CONFIG.name,
+      tables: () => clone(root.FluxDuel.DUEL_CONFIG.casino.tables),
+      gm: true,
+      start(t, n, opt) {
+        const D = root.FluxDuel, c = D.DUEL_CONFIG.casino;
+        return D.newGame({ seed: opt.seed, deck: opt.deck, first: c.seat, chipsBy: { [c.seat]: n }, house: D.other(c.seat), names: c.names });
+      },
+      side: () => root.FluxDuel.DUEL_CONFIG.casino.seat,
+      ai: (g) => [root.FluxDuel.other(g.casino.side)]
+    },
+    holdem: {
+      has: () => !!(root.FluxHoldem && root.FluxHoldem.HOLDEM_CONFIG.casino),
+      name: () => root.FluxHoldem.HOLDEM_CONFIG.name,
+      tables: () => clone(root.FluxHoldem.HOLDEM_CONFIG.casino.tables),
+      gm: false,
+      start(t, n, opt) {
+        const X = root.FluxHoldem, H = X.HOLDEM_CONFIG, names = H.casino.names;
+        const k = Math.max(H.minPlayers, Math.min(H.maxPlayers, Math.floor(Number(t.players) || H.maxPlayers)));
+        return X.newGame({ seed: opt.seed, players: Array.from({ length: k }, (_, i) => ({ id: "p" + (i + 1), name: names[i], chips: n })) });
+      },
+      side: () => "p1",
+      ai: (g) => g.order.filter(id => id !== g.casino.side)
+    }
+  };
+  /** 这一局是哪种玩法（High Flux 的对局没有 mode） */
+  const gameOf = (g) => (g && g.mode && GAMES[g.mode] ? g.mode : "highflux");
+  /** 这一局的规则、AI：High Flux 是 CounterCards / CounterCardsAI，Flux Duel 是 FluxDuel / FluxDuelAI，Flux Hold'em 是 FluxHoldem / FluxHoldemAI */
+  const RULES = { highflux: ["CounterCards", "CounterCardsAI"], duel: ["FluxDuel", "FluxDuelAI"], holdem: ["FluxHoldem", "FluxHoldemAI"] };
+  /** 加载了的玩法：[{ game, name }]，High Flux 在前（名字读各自的配置） */
+  function games() { return Object.keys(GAMES).filter(k => GAMES[k].has()).map(k => ({ game: k, name: GAMES[k].name() })); }
 
   /* ---------- 单位：面值（奎支）⇄ 枚 ---------- */
   /** 面值 → 枚（可能有零头） */
@@ -133,28 +187,50 @@
   /* ---------- 赌场桌：庄家是 AI 或主持人（筹码无限，代表赌场） ---------- */
   /** 入场费（桌上的枚数）：CC_CONFIG.casino.tables[i].entryFee，每开一局收一次、不退 */
   const feeOf = (t) => Math.max(0, Math.floor(Number(t.entryFee) || 0));
-  /** 能坐的桌子：#486 的配置（倍率 rate、最低买入 minBuyIn、庄家 AI 难度）+ 入场费 entryFee，另带折成钱包多少枚 */
+  /** 能坐的桌子：#486 的配置（倍率 rate、最低买入 minBuyIn、庄家 AI 难度）+ 入场费 entryFee，另带折成钱包多少枚。
+   *  三种玩法的都在里面（#488，High Flux 在前）：game 是哪种玩法、gameName 玩法名；name 是记录、提示里写的桌名
+   *  （Flux 的前面带玩法名，例「Flux Duel · 大厅」；High Flux 的照旧），short 是配置里的桌名（面板上按玩法分组时写） */
   function tables() {
-    return CC().casino.tables().map(t => Object.assign(t, { entryFee: feeOf(t), minBuyInChips: toChips(t.minBuyIn * t.rate), entryFeeChips: toChips(feeOf(t) * t.rate), perChip: toChips(t.rate) }));
+    const out = [];
+    games().forEach(({ game, name }) => {
+      GAMES[game].tables().forEach(t => {
+        out.push(Object.assign(t, { game, gameName: name, short: t.name, name: game === "highflux" ? t.name : `${name} · ${t.name}`,
+          entryFee: feeOf(t), minBuyInChips: toChips(t.minBuyIn * t.rate), entryFeeChips: toChips(feeOf(t) * t.rate), perChip: toChips(t.rate) }));
+      });
+    });
+    return out;
   }
   /** 坐上赌场桌开一局：先收入场费（这张桌子的 entryFee 枚，按倍率折成钱包里的筹码，先扣赠送的，不退），
    *  再买入 buyIn 枚这张桌子的筹码（不少于最低买入），按倍率从钱包里拿（先拿赠送的）押在桌上。
-   *  opt：seed / deck（测试用）/ dealer（"ai" 或 "gm"：谁当庄家，只记着，规则一样）。返回这一局（CounterCards 的对局） */
+   *  opt：seed / deck（测试用）/ dealer（"ai" 或 "gm"：谁当庄家，只记着，规则一样；Flux Hold'em 只有 AI）。
+   *  返回这一局（这张桌子那种玩法的对局；Flux 的对局另记 casino：桌子、买入、倍率、AI 难度、game 哪种玩法、side 人坐哪一方） */
   function sit(w, tableId, buyIn, opt) {
     opt = opt || {};
     wallet(w);
     if (w.seat) fail("已经坐在桌上了，先离桌");
-    const t = CC().casino.table(tableId);
+    const t = tables().find(x => x.id === tableId);
     if (!t) fail("没有这张桌子：" + tableId);
+    const G = GAMES[t.game];
+    if (opt.dealer === "gm" && !G.gm) fail(`${t.gameName} 的赌场桌只有 AI，没有主持人坐庄`);
     const n = Math.floor(Number(buyIn));
     if (!Number.isFinite(n) || n < t.minBuyIn) fail(`${t.name}最低买入 ${t.minBuyIn} 枚`);
-    const fee = feeOf(t), value = n * t.rate, feeValue = fee * t.rate;
+    const fee = t.entryFee, value = n * t.rate, feeValue = fee * t.rate;
     if (w.gift + w.normal < value + feeValue) fail(`筹码不够：买入 ${n} 枚${fee ? `加入场费 ${fee} 枚` : ""}要钱包里 ${fmt(value + feeValue)} 枚，现有 ${fmt(w.gift + w.normal)} 枚`);
-    const game = CC().casino.newGame(t.id, n, { seed: opt.seed, deck: opt.deck });
+    const game = G.start(t, n, opt);
+    if (t.game !== "highflux") game.casino = { table: t.id, name: t.name, buyIn: n, rate: t.rate, difficulty: t.difficulty, game: t.game, side: G.side() };
     take(w, feeValue);                   // 入场费：交给赌场，不退
     const stake = take(w, value);
     w.seat = { kind: opt.dealer === "gm" ? "gm" : "ai", table: t.id, name: t.name, rate: t.rate, buyIn: n, fee, stake, game };
     return game;
+  }
+  /** 人那一方桌上剩多少（三种玩法一样算，同 CounterCards.casino.cashOut）：剩下的筹码扣还向主持方借的（对局结束时已经扣过）；
+   *  打到一半离桌，已经押进底池的（这一轮下的、滚存的）不退 */
+  function cashOut(g) {
+    if (gameOf(g) === "highflux") return CC().casino.cashOut(g);
+    if (!g.casino) fail("这一局不是赌场的对局");
+    const s = g.sides[g.casino.side];
+    const chips = s.chips - (g.over ? 0 : s.owe), net = chips - g.casino.buyIn;
+    return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: s.loan, owe: s.owe };
   }
   /** 离桌：桌上剩下的筹码（扣还向主持方借的；打到一半离桌，已经押进底池的不退）按倍率回钱包。
    *  返回 { table, chips（桌上剩下的枚数）, buyIn, net（桌上净输赢，枚）, value（剩下的折多少面值）, netChips（钱包净变化，枚）, over, text } */
@@ -163,7 +239,7 @@
     const s = w.seat;
     if (!s) fail("没坐在桌上");
     if (s.kind === "pvp") fail("玩家对赌的桌子要用 pvpLeave 离桌");
-    const out = CC().casino.cashOut(s.game);
+    const out = cashOut(s.game);
     const back = out.chips * s.rate;
     const paid = payBack(w, s.stake, back);
     w.seat = null;
@@ -172,15 +248,28 @@
     return res;
   }
 
-  /** 赌场桌的庄家是 AI 时：轮到庄家就让 AI 走（counter-cards-ai.js · step，只看庄家那一方的 view），直到轮到人或者这一局结束。
+  /** 赌场桌的庄家是 AI 时：轮到赌场那几方就让 AI 走（各玩法 AI 的 step，只看那一方的 view），直到轮到人或者这一局结束。
+   *  High Flux 是庄家；Flux Duel 是人对面那一方；Flux Hold'em 是人以外的座位（人出局了就由 AI 打到结束）。
    *  随机数按种子和记录条数派生（联机时由房主跑，存档、刷新以后接着走结果一样）。返回走了几步 */
   function runAi(g, level) {
-    const AIm = root.CounterCardsAI;
-    if (!AIm) fail("要先加载 counter-cards-ai.js（High Flux 的 AI）");
+    const kind = gameOf(g), R = root[RULES[kind][0]], AIm = root[RULES[kind][1]];
+    if (!AIm) fail(`要先加载 ${GAMES[kind].name()} 的 AI`);
+    if (kind === "highflux") {
+      let n = 0;
+      while (!g.over && CC().toAct(g).indexOf("dealer") >= 0 && n < 500) {
+        if (!AIm.step(g, "dealer", level, CC().makeRng(g.seed + "|ai|" + g.log.length))) break;
+        n++;
+      }
+      return n;
+    }
+    const ai = GAMES[kind].ai(g);
     let n = 0;
-    while (!g.over && CC().toAct(g).indexOf("dealer") >= 0 && n < 500) {
-      if (!AIm.step(g, "dealer", level, CC().makeRng(g.seed + "|ai|" + g.log.length))) break;
-      n++;
+    for (let moved = true; moved && !g.over && n < 3000;) {
+      moved = false;
+      for (const k of R.toAct(g).filter(x => ai.indexOf(x) >= 0)) {
+        if (g.over || R.toAct(g).indexOf(k) < 0) continue;
+        if (AIm.step(g, k, level, CC().makeRng(g.seed + "|ai|" + k + "|" + g.log.length))) { n++; moved = true; }
+      }
     }
     return n;
   }
@@ -256,7 +345,7 @@
     return res;
   }
 
-  const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, tables, sit, leave, payBack, runAi,
+  const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, games, gameOf, tables, sit, cashOut, leave, payBack, runAi,
     STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Casino = api;

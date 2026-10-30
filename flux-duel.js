@@ -47,7 +47,19 @@
     // false：不亮，只公开胜负、分档和筹码变动；true：结算公开双方出的层牌、元素牌和各自的得分（可以记牌推理）
     reveal: false,
     seats: ["a", "b"],                 // 两方的代号（第 1 轮 a 先手，开局可以换）
-    seatNames: { a: "甲", b: "乙" }    // 记录里怎么称呼两方（开局可以按名字换）
+    seatNames: { a: "甲", b: "乙" },   // 记录里怎么称呼两方（开局可以按名字换）
+    // 赌场桌（#488 第 5 步；钱照 #487，在 casino.js）：人坐 seat（a = 第 1 轮先手），另一方是赌场（AI 或主持人坐庄，筹码无限）。
+    // 桌子的数值先照 High Flux 的三张赌场桌占位（CC_CONFIG.casino.tables：倍率 rate、最低买入 minBuyIn、AI 难度 difficulty、入场费 entryFee），
+    // 试玩再调；id 全赌场不重复（casino.js 按 id 认桌子）
+    casino: {
+      seat: "a",
+      names: { a: "你", b: "赌场" },
+      tables: [
+        { id: "duel-alley", name: "后巷小桌", rate: 10, minBuyIn: 20, difficulty: "easy", entryFee: 2 },
+        { id: "duel-hall", name: "大厅", rate: 50, minBuyIn: 30, difficulty: "normal", entryFee: 2 },
+        { id: "duel-vip", name: "贵宾室", rate: 200, minBuyIn: 50, difficulty: "hard", entryFee: 2 }
+      ]
+    }
   };
   const MODE = "duel";
   const SEATS = DUEL_CONFIG.seats;

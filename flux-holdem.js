@@ -52,7 +52,18 @@
     blinds: [1, 2],                    // 小盲 1 × 轮数、大盲 2 × 轮数
     maxRaises: 3,                      // 每个下注回合最多加注 3 次
     phaseMinBetMult: 2,                // 相位在场上时最低下注额（和加注的下限）× 2（正文「相位：本轮最低注翻倍」）
-    seatNames: ["玩家 1", "玩家 2", "玩家 3", "玩家 4"]
+    seatNames: ["玩家 1", "玩家 2", "玩家 3", "玩家 4"],
+    // 赌场桌（#488 第 5 步；钱照 #487，在 casino.js）：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），
+    // 没有主持人坐庄。players = 这张桌子几人（含你）；names = 座位上的称呼（你坐第一个）。
+    // 数值先照 High Flux 的三张赌场桌占位（倍率 rate、最低买入 minBuyIn、AI 难度 difficulty、入场费 entryFee），试玩再调；id 全赌场不重复
+    casino: {
+      names: ["你", "乙", "丙", "丁"],
+      tables: [
+        { id: "holdem-alley", name: "后巷小桌", rate: 10, minBuyIn: 20, difficulty: "easy", entryFee: 2, players: 4 },
+        { id: "holdem-hall", name: "大厅", rate: 50, minBuyIn: 30, difficulty: "normal", entryFee: 2, players: 4 },
+        { id: "holdem-vip", name: "贵宾室", rate: 200, minBuyIn: 50, difficulty: "hard", entryFee: 2, players: 4 }
+      ]
+    }
   };
   const MODE = "holdem";
   const CC = () => root.CounterCards;
