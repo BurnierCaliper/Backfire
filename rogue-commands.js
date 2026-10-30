@@ -63,7 +63,9 @@ const RogueCommands = (function () {
     finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
     drawHero: (_c, run) => Rogue.drawHero(run).notes,
     drawMany: (c, run) => { const r = Rogue.drawMany(run, c.n); return { notes: r.notes, results: r.results, kuizhi: r.kuizhi }; },
-    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null)
+    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null),
+    // 长线养成：黑市赌命桌一手的账（#489，counter-cards-guess.js · lifeBill）：扣坚毅、扣光真死、发奖；返回 { dead, notes }
+    blackMarket: (c, run) => Rogue.blackMarketSettle(run, c.kit, c.bill)
   };
   const queries = {
     heroView: (c, run) => Rogue.heroView(run, hero(run, c.kit)),

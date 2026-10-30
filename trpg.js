@@ -319,6 +319,38 @@ function trpgPayWith(payer, fn) {
     return out;
   } finally { state.kuizhi = pool; }
 }
+/* ---------- 黑市赌命桌（#489 · counter-cards-guess.js 的赌命版，界面 counter-cards-guess-ui.js · startLife）：主持人当庄 ----------
+ * 赌命桌每一手结算后，账（CounterCardsGuess.lifeBill：押输了几点、奖品）交到这里：押输的点数从这名角色的坚毅里扣；
+ * 扣光 = 坚毅耗尽，真正死亡（状态记成死亡，和后台改成「死亡」一样）。赢的奎支进这名角色的钱包（这一手死了就进队伍公账），材料进背包。
+ * 押坚毅永远能下：上桌、押注都不看还剩多少坚毅。返回记录的几行字，不带坚毅数值（不写扣了多少、还剩多少；主持人在角色卡上照样看得到坚毅）。
+ * 联机开着房间时不开（#489：联机对赌不开，入口在 counter-cards-guess-ui.js · blackMarketHtml 就收起来了）。 */
+function trpgBlackMarketSettle(kit, bill) {
+  const u = trpgHeroes().find(h => h.kit === kit);
+  if (!u) return ["没有这名角色。"];
+  if (u.dead) return [`${u.name} 已经死亡，不能上赌命桌。`];
+  bill = bill || {};
+  const lost = Math.max(0, Math.floor(Number(bill.lost) || 0));
+  const prize = bill.prize || {};
+  const notes = [];
+  if (lost > 0) {
+    u.shp = Math.max(0, (Number(u.shp) || 0) - lost);
+    if (u.shp <= 0) {
+      u.dead = true; u.dying = false; u.upOnShp = false;
+      notes.push(`${u.name} 在黑市赌命桌押输了：坚毅耗尽，永久死亡。`);
+    } else notes.push(`${u.name} 在黑市赌命桌押输了：坚毅受创。`);
+  }
+  const kz = Math.max(0, Math.floor(Number(prize.kuizhi) || 0));
+  const to = u.dead ? TRPG_PARTY_PURSE : kit;
+  if (kz) trpgPurseSet(to, trpgPurse(to) + kz);
+  const got = (prize.items || []).filter(x => x && ITEM_CATALOG[x.id] && Math.floor(Number(x.n)) > 0);
+  got.forEach(x => bagAdd(x.id, Math.floor(Number(x.n))));
+  if (kz || got.length) {
+    const what = [kz ? kz + " 奎支" : ""].concat(got.map(x => `${ITEM_CATALOG[x.id].name} ×${Math.floor(Number(x.n))}`)).filter(Boolean).join("、");
+    notes.push(`${u.name} 在黑市赌命桌赢得 ${what}${kz ? `（奎支进${to === TRPG_PARTY_PURSE ? "队伍公账" : ` ${trpgPurseName(to)} 的钱包`}）` : ""}。`);
+  }
+  if (typeof ledgerCapture === "function") ledgerCapture();
+  return notes.length ? notes : [`${u.name} 在黑市赌命桌这一手没押。`];
+}
 /* ---------- 诊所：义体改造（规则和单局一样：growth.js · cyberPlanError / cyberLayersFor，价格 ROGUE_CLINIC.cyberPerHp）----------
  * 方案记在角色身上（u.cyberPlan），跟着跑团存档走（game.js · packHero）；升级后按方案重建血量层。
  * 主持人在「诊所」页直接改（可以选由谁付）；联机玩家在诊所开放时提交申请，主持人同意后才改，钱从那名角色的钱包出。 */

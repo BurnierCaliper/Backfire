@@ -3256,6 +3256,40 @@ function advanceDays(run, n) {
     return logAll(run, notes);
   }
 
+  /* ---------- 长线养成：黑市赌命桌（#489 · counter-cards-guess.js 的赌命版，界面 counter-cards-guess-ui.js · startLife）----------
+   * 赌命桌每一手结算后，账（CounterCardsGuess.lifeBill：押输了几点、奖品）交到这里：
+   *   押输的点数从这名角色的坚毅里扣；扣光 = 坚毅耗尽，照长线养成的规则真正死亡（captureParty：等级与武器等级清零、移出队伍、
+   *   候补补上；下次抽到从 1 级重新培养）；赢的奎支、材料进这一局。
+   * 押坚毅永远能下：上桌、押注都不看这名角色还剩多少坚毅。返回 { dead, notes }——notes 不带任何坚毅数值（不写扣了多少、还剩多少） */
+  function blackMarketSettle(run, kit, bill) {
+    requireGrowth(run);
+    if (run.stage !== "board") throw new Error("回到任务板前才能上黑市");
+    if (!run.party.some(h => h.kit === kit)) throw new Error("队伍里没有这名角色");
+    bill = bill || {};
+    const lost = Math.max(0, Math.floor(Number(bill.lost) || 0));
+    const prize = bill.prize || {};
+    const name = heroName(kit), notes = [];
+    let dead = false;
+    if (lost > 0) {
+      const r = withParty(run, () => {
+        const u = findKit(kit, state.units);
+        if (!u) return;
+        u.shp = Math.max(0, (Number(u.shp) || 0) - lost);
+        if (u.shp <= 0) { u.dead = true; dead = true; }
+      });
+      notes.push(dead ? `${name} 在黑市赌命桌押输了：坚毅耗尽。` : `${name} 在黑市赌命桌押输了：坚毅受创。`);
+      r.notes.forEach(t => notes.push(t));
+    }
+    const kz = Math.max(0, Math.floor(Number(prize.kuizhi) || 0));
+    if (kz) state.kuizhi = (Number(state.kuizhi) || 0) + kz;
+    const got = (prize.items || []).filter(x => x && ITEM_CATALOG[x.id] && Math.floor(Number(x.n)) > 0);
+    got.forEach(x => bagAdd(x.id, Math.floor(Number(x.n))));
+    if (kz || got.length) notes.push(`${name} 在黑市赌命桌赢得 ${[kz ? kz + " 奎支" : ""].concat(got.map(x => `${ITEM_CATALOG[x.id].name} ×${Math.floor(Number(x.n))}`)).filter(Boolean).join("、")}。`);
+    logAll(run, notes);
+    save(run);
+    return { dead, notes };
+  }
+
   /** 路线图上每一列大约几点到（只算节点本身和路上的时间，不算休息）：[{ text, night, days } | null] */
   function routeEta(run) {
     const t = run && run.task;
@@ -3346,6 +3380,7 @@ function advanceDays(run, n) {
     pendingChoices, choiceOptions, choose, queueLevelRewards,
     dailyDate, dailySeed, dailyParty, dailyStats, featPickRates,
     drawInfo, drawHero, drawMany, drawRates, swapHero, partyLevel, growthXp: () => growthOn, routeEta, growthDaily: ensureGrowthDaily, growthDailyBump, setGrowthDailyClock,
+    blackMarketSettle,   // 长线养成：黑市赌命桌一手的账（#489）
     camp, nextAct, afterVictory, endRun,
     enterRunMode, leaveRunMode, syncWorld, save, inRunMode: () => !!stash,
     setLootHandler, grantLoot, rollItemDrops, setMapUseHook

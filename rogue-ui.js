@@ -301,6 +301,23 @@
     const per = Number(ROGUE_GACHA.dailyTaskFusion) || 0, all = Number(ROGUE_GACHA.dailyAllFusion) || 0;
     return `每个完成：随机武器材料${per > 0 ? ` + ${per} 个${esc(fusion)}` : ""} + 1000 奎支；三个全完成：额外${all > 0 ? ` ${all} 个${esc(fusion)} 和` : ""} 1000 奎支。`;
   }
+  /** 长线养成：黑市赌命桌（#489，counter-cards-guess-ui.js）。只写规则文字，不写谁还剩多少坚毅，按钮也不按坚毅变灰（押坚毅永远能下） */
+  function renderBlackMarket() {
+    if (!run.growth || online() || !window.CounterCardsGuessUI || !run.party.length) return "";
+    return `<h2>黑市</h2>${CounterCardsGuessUI.blackMarketHtml(run.party.map(h => ({ id: h.kit, name: Rogue.heroName(h.kit) })),
+      { death: "坚毅扣光即真正死亡：等级与武器等级清零、移出队伍，下次抽到从 1 级重新培养" })}`;
+  }
+  /** 上桌：每一手结算后把账交给规则（run 指令 blackMarket：扣坚毅、扣光真死、发奖）；离桌回到任务板，记录栏写这几手发生了什么（不带坚毅数值） */
+  function openBlackMarket(kit) {
+    const notes = [];
+    try {
+      CounterCardsGuessUI.startLife({
+        seat: { id: kit, name: Rogue.heroName(kit) },
+        settle: (bill) => { const r = dispatch({ type: "run", action: "blackMarket", kit, bill }, { run }); r.notes.forEach(t => notes.push(t)); return r; },
+        back: () => { Screens.show("run"); completeAction(notes); }
+      });
+    } catch (e) { completeAction(null, e); }
+  }
   /** 抽取：单机直接跑规则拿到结果再播动画（联机单局没有长线养成，抽取机只在单机出现） */
   function doDraw(n) {
     let res;
@@ -315,6 +332,7 @@
       ${emptyRestHtml(run, ITEM_CATALOG[ROGUE_GROWTH.fusionItem].name)}
       <div class="task-list">${(run.board || []).map((t, i) => taskCard(t, i)).join("")}</div>
       ${renderGrowth()}
+      ${renderBlackMarket()}
       ${renderSmiths()}`;
     }
     return `<h2>任务板</h2>
@@ -985,6 +1003,7 @@
     on("r-draw10", () => doDraw(10));
     body.querySelectorAll("[data-swap-in]").forEach(b => { b.onclick = () => act({ action: "swapHero", in: b.dataset.swapIn, out: b.dataset.swapOut || null }); });
     body.querySelectorAll("[data-swap-out-only]").forEach(b => { b.onclick = () => act({ action: "swapHero", out: b.dataset.swapOutOnly }); });
+    body.querySelectorAll("[data-ccg-black]").forEach(b => { b.onclick = () => openBlackMarket(b.dataset.ccgBlack); });
     const pay = $("r-payer");
     if (pay) pay.onchange = () => { payerKit = pay.value; render(); };
     on("r-force-vote", () => { try { OnlineRogue.handle(myId(), { type: "rogue.force", what: "vote" }); } catch (e) { completeAction(null, e); } });

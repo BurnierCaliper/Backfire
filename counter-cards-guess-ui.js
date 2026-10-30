@@ -40,8 +40,13 @@
   const signed = (n) => (n > 0 ? "+" + n : n < 0 ? "−" + Math.abs(n) : "0");
   const ME = "me";
   const startChips = () => (UI_CONFIG.startChips != null ? UI_CONFIG.startChips : CC().CC_CONFIG.startChips);
-  /** 现在开着联机房间（主持人或玩家）：赌命桌不开（#489：联机对赌不开） */
-  const onlineNow = () => { try { return !!(root.OnlineGame && root.OnlineGame.getView && root.OnlineGame.getView().active); } catch (e) { return false; } };
+  /** 现在开着联机房间（主持人或玩家）或者本机热座：赌命桌不开（#489：联机对赌不开） */
+  const onlineNow = () => {
+    try {
+      if (root.OnlineGame && root.OnlineGame.getView && root.OnlineGame.getView().active) return true;
+      return !!(root.HotseatGame && root.HotseatGame.isActive && root.HotseatGame.isActive());
+    } catch (e) { return false; }
+  };
 
   /* ---------- 牌面 ---------- */
   /** 天气这张牌：相位写猜大猜小自己的规则（克制分翻倍、不加天气修正），别的天气照 High Flux 的修正说明 */
@@ -106,7 +111,8 @@
   /** 坐上赌命桌（长线养成 / 跑团接进来）：
    *  opt.seat = { id, name }（押注的角色：只要 id 和名字，不带坚毅——界面根本拿不到）；
    *  opt.settle(bill) → { dead, notes }：每一手结算后由接入的那一边扣坚毅、发奖（bill = CounterCardsGuess.lifeBill，界面不看里面的数）；
-   *  opt.back()：离桌回到原来的画面（没给就回标题）；opt.seed、opt.deals（测试用）。联机开着房间时不开 */
+   *  opt.back()：离桌回到原来的画面（没给就回标题）；opt.dealer：谁当庄（跑团是主持人，默认黑市庄家）；opt.seed、opt.deals（测试用）。
+   *  联机开着房间 / 本机热座时不开 */
   function startLife(opt) {
     opt = opt || {};
     if (onlineNow()) throw new Error(UI_CONFIG.life.online);
@@ -114,7 +120,8 @@
     bind();
     S = { table: G().GUESS_CONFIG.life.id, chips: null, seed: seedOf(opt), n: 0, hand: null, draft: {}, msg: "", banner: false, last: {}, anim: {}, history: [],
       deals: (opt.deals || []).slice(),
-      life: { seat: { id: String(opt.seat.id), name: String(opt.seat.name || opt.seat.id) }, settle: opt.settle || null, back: opt.back || null, outcome: null, dead: false } };
+      life: { seat: { id: String(opt.seat.id), name: String(opt.seat.name || opt.seat.id) }, dealer: opt.dealer ? String(opt.dealer) : null,
+        settle: opt.settle || null, back: opt.back || null, outcome: null, dead: false } };
     enterScreen();
     show("game");
     deal();
@@ -270,7 +277,7 @@
     const status = v.over ? "这一手结束" : `第 ${v.round} / ${v.rounds} 轮下注`;
     if (S.life) {
       return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(v.table.name)}</b><span class="cc-round">${status}</span>`
-        + `<span class="cc-role"><b>${esc(S.life.seat.name)}</b>下注 · 第 ${S.n} 手 · 庄家：${esc(v.table.dealer)}</span>`
+        + `<span class="cc-role"><b>${esc(S.life.seat.name)}</b>下注 · 第 ${S.n} 手 · 庄家：${esc(S.life.dealer || v.table.dealer)}</span>`
         + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-ccg="leave">离桌</button>`;
     }
     return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(G().GUESS_CONFIG.name)}</b><span class="cc-round">${status}</span>`
@@ -286,7 +293,7 @@
       const face = val ? faceOf(k, val, cls) : CUI().backHtml({ cls: "cc-down" + (deal ? " cc-deal" : ""), delay: deal ? i : null });
       return `<div class="ccg-slot${val ? " up" : ""}" data-slot="${k}"><small>${esc(kinds[k])}</small>${face}</div>`;
     };
-    const dealer = S.life ? `<div class="cc-who"><b>${esc(v.table.dealer)}</b><small>黑市 NPC</small></div>` : `<div class="cc-who"><b>庄家</b><small>AI · 筹码无限</small></div>`;
+    const dealer = S.life ? `<div class="cc-who"><b>${esc(S.life.dealer || v.table.dealer)}</b><small>${S.life.dealer ? "坐庄" : "黑市 NPC"}</small></div>` : `<div class="cc-who"><b>庄家</b><small>AI · 筹码无限</small></div>`;
     let seat;
     if (S.life) {
       // 赌命桌：没有筹码堆，也不写押上的点数加起来是多少（每格的固定代价写在格子上）
@@ -412,6 +419,22 @@
     </div>`;
   }
 
+  /** 黑市入口（长线养成的任务板、跑团的「商人」页都用这一段）：规则说明 + 每名能上桌的角色一个「上桌」按钮（data-ccg-black = 角色 id）。
+   *  seats = [{ id, name }]——只要名字：不写谁还剩多少坚毅，按钮也不会按坚毅变灰（押坚毅永远能下）。
+   *  opt.dealer：谁当庄（默认黑市庄家）；opt.death：坚毅扣光以后怎么样（各模式自己的死亡规则，规则文字）。
+   *  联机开着房间 / 本机热座时只写「联机不开赌命桌」，没有按钮 */
+  function blackMarketHtml(seats, opt) {
+    opt = opt || {};
+    const L = G().GUESS_CONFIG.life;
+    const head = `<p class="ccg-bm-title"><b>${esc(L.name)}</b></p>`;
+    if (onlineNow()) return `<div class="ccg-bm">${head}<p class="r-hint">${esc(UI_CONFIG.life.online)}。</p></div>`;
+    const list = (seats || []).filter(s => s && s.id != null);
+    const rules = `${esc(opt.dealer || L.dealer)}坐庄猜大猜小（${esc(CC().CC_CONFIG.name)}），押的是坚毅生命：每格押上 ${L.stake.join(" / ")} 点（第一 / 二 / 三轮），押坚毅永远能下。`
+      + `押输了坚毅受创，${esc(opt.death || "坚毅扣光即真正死亡")}。押中按赔率赢奎支，赔率高另给稀有材料。`;
+    const btns = list.map(s => `<button type="button" class="g-btn small" data-ccg-black="${esc(s.id)}">${esc(s.name)} 上桌</button>`).join("");
+    return `<div class="ccg-bm">${head}<p class="r-hint">${rules}</p><div class="r-choices">${btns || `<span class="r-hint">没有能上桌的角色。</span>`}</div></div>`;
+  }
+
   /* ---------- 点击 ---------- */
   function onClick(e) {
     const b = e.target && e.target.closest ? e.target.closest("[data-ccg]") : null;
@@ -453,7 +476,7 @@
   }
 
   root.CounterCardsGuessUI = {
-    UI_CONFIG, open, start, startLife, render, weatherFace,
+    UI_CONFIG, open, start, startLife, blackMarketHtml, online: onlineNow, render, weatherFace,
     state: () => S, view: () => (S && S.hand ? G().view(S.hand, meId()) : null), act: humanAct
   };
 })(typeof window !== "undefined" ? window : globalThis);
