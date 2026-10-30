@@ -10638,13 +10638,17 @@ function resolveLonggeSafety(front) {
   } else appendLog(`${a.name} 让${LONGGE_AMMO[c].name}留在最后。`);
   if (typeof renderAll === "function") renderAll();
 }
-/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区 */
+/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区。
+ *  扫了就算扫描过当前战场（resources.scanned，和主动「环境扫描」一样）：频域造物、驻波推进相位、大气干扰调转风向、
+ *  规则干涉的附赠动作都认（#397，以前只有主动扫描才算）；放弃的不算 */
 function resolveHeluScan(picks) {
   const job = (state.heluScanQueue || []).shift();
   if (!job) return;
   const a = unitById(job.actorId);
   if (!a || !picks) { if (a) appendLog(`${a.name} 放弃了这次环境扫描。`); return; }
   const lines = [];
+  a.resources = a.resources || {};
+  a.resources.scanned = true;
   heluScanAct(a, Object.assign({}, picks, { dest: job.zone }), lines);
   appendLog(lines.join("\n"));
   if (typeof renderAll === "function") renderAll();
@@ -15394,7 +15398,7 @@ function runSkillInner(id, optRun) {
         const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
         applyFocus(t, layer, lines, { by: a });
       }
-      // 再对这个敌人所在的区做一次环境扫描（不耗行动，也不算本场那次主动扫描）
+      // 再对这个敌人所在的区做一次环境扫描（不耗行动；扫了也算扫描过当前战场，见 resolveHeluScan）
       queueHeluScan(a, t.zone, lines);
     } else if (id === "ecmo_bite") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
