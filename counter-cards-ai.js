@@ -14,6 +14,7 @@
  *   CounterCardsAI.decide(view, "hard", rng)          → 一个操作（交给 CounterCards.act）
  *   CounterCardsAI.step(对局, "dealer", "hard", rng)    → 让这一方做一步（不是它的回合返回 null）
  *   CounterCardsAI.belief(view, "hard")                → 推理出的「对方这一轮出的是哪张」的概率
+ *   CounterCardsAI.dealerKnownTop(view)                → 从公开记录推出庄家知道堆顶往下几张（偷看按顺序往下看，#502）
  */
 (function (root) {
   "use strict";
@@ -25,7 +26,7 @@
       betChance: 0.35,       // 没人下注时随手下注
       raiseChance: 0.15,     // 面对下注时随手加注
       maxBetMult: 3,         // 随手下注最多几倍最低额
-      peekChance: 0.8,       // 庄家：没有天气时偷看
+      peekChance: 0.8,       // 庄家：偷看下一张（没有天气时，或者保留天气以后）
       discardChance: 0.5,    // 庄家：有天气时弃掉
       revealChance: 0.8,     // 玩家：翻天气（其余随手暗弃一张跳过）
       normalChance: 0.15,    // 玩家：翻到天气后随手用常态
@@ -178,15 +179,20 @@
     v.gone.concat(v.weather ? [v.weather] : []).forEach(w => { const i = all.indexOf(w); if (i >= 0) all.splice(i, 1); });
     return all;
   }
-  /** 庄家最近一次偷看是「放回原位」，而且之后还没人翻过天气：堆顶就是庄家看过、留着的那张 */
-  function dealerKeptTop(v) {
-    for (let i = (v.log || []).length - 1; i >= 0; i--) {
-      const e = v.log[i];
-      if (e.t === "pw" && e.op === "reveal") return false;
-      if (e.t === "dw" && e.op === "peek" && e.where) return e.where === "top";
-    }
-    return false;
+  /** 庄家看过的天气（只有庄家的 view 里有，#502）：top = 堆顶往下连续看过的几张，bottom = 压到牌堆底的几张；玩家方两串都是空的 */
+  const seenOf = (v) => v.deckSeen || { top: v.deckTop ? [v.deckTop] : [], bottom: v.deckBottom ? [v.deckBottom] : [] };
+  /** 从公开记录推出庄家知道堆顶往下几张（偷看按顺序往下看，#502）：偷看后放回原位 +1，压到牌堆底不变，玩家翻开一张 −1。
+   *  庄家每次偷看、放哪儿、玩家每次翻开都是公开的，谁都推得出来 */
+  function dealerKnownTop(v) {
+    let n = 0;
+    (v.log || []).forEach(e => {
+      if (e.t === "dw" && e.op === "peek" && e.where === "top") n++;
+      else if (e.t === "pw" && e.op === "reveal" && n > 0) n--;
+    });
+    return n;
   }
+  /** 堆顶是庄家偷看过、放回原位的那张（之后还没被翻开）——后来往下偷看的压到了牌堆底也一样 */
+  function dealerKeptTop(v) { return dealerKnownTop(v) > 0; }
   /** 这个天气对庄家有多有利（从玩家的角度猜：对方可能的层牌 × 自己手里的元素牌，平均下来比没有天气少得几分） */
   function dealerFavor(ctx, w) {
     const v = ctx.v;
@@ -208,7 +214,9 @@
     if (!v.deckCount) return null;
     if (v.side === "dealer" && v.deckTop) return { [v.deckTop]: 1 };
     const comp = deckComposition(v);
-    if (v.side === "dealer" && v.deckBottom && comp.length > 1) comp.splice(comp.indexOf(v.deckBottom), 1);
+    // 庄家：压到牌堆底、看过的那几张不在堆顶（堆里还有没看过的牌时，堆顶是没看过的那些里的一张）
+    const under = v.side === "dealer" ? seenOf(v).bottom : [];
+    if (under.length && comp.length > under.length) under.forEach(w => { const i = comp.indexOf(w); if (i >= 0) comp.splice(i, 1); });
     const d = {};
     comp.forEach(w => { d[w] = (d[w] || 0) + 1; });
     if (ctx.level === "hard" && v.side === "player" && dealerKept(ctx)) {
@@ -273,17 +281,19 @@
   }
 
   /* ---------- 各步的决定 ---------- */
+  /** 庄家天气行动（#502：场上有天气时保留以后也能接着偷看，偷看按顺序往下看）。
+   *  简单：随手选——有天气时一半弃掉；不弃（或者没有天气）多半偷看下一张。
+   *  普通 / 困难：清掉天气比留着好才弃掉；留着（或者没有天气）时堆里还有没看过的牌就偷看——看的是没看过的下一张，
+   *  看过的都记着：放回原位还是压到牌堆底（dealerPlace）、猜下一张天气（topDist：出牌、下注）都用上 */
   function dealerWeather(ctx) {
-    const v = ctx.v, ops = ctx.opts.map(o => o.op);
+    const v = ctx.v, has = (op) => ctx.opts.some(o => o.op === op), go = (op) => ({ type: "weather", op });
     if (ctx.level === "easy") {
-      if (ops.indexOf("discard") >= 0) return { type: "weather", op: ctx.rng() < ctx.cfg.discardChance ? "discard" : "keep" };
-      return { type: "weather", op: ctx.rng() < ctx.cfg.peekChance ? "peek" : "pass" };
+      if (has("discard") && ctx.rng() < ctx.cfg.discardChance) return go("discard");
+      if (has("peek") && ctx.rng() < ctx.cfg.peekChance) return go("peek");
+      return go(has("keep") ? "keep" : "pass");
     }
-    if (ops.indexOf("discard") >= 0) {
-      const keep = weatherValue(ctx, v.weather), clear = weatherValue(ctx, null);
-      return { type: "weather", op: clear > keep + ctx.cfg.weatherMargin ? "discard" : "keep" };
-    }
-    return { type: "weather", op: ops.indexOf("peek") >= 0 ? "peek" : "pass" };
+    if (has("discard") && weatherValue(ctx, null) > weatherValue(ctx, v.weather) + ctx.cfg.weatherMargin) return go("discard");
+    return go(has("peek") ? "peek" : has("keep") ? "keep" : "pass");
   }
   /** 庄家：这个天气下自己手里最好的那张牌的期望 */
   function weatherValue(ctx, w) {
@@ -294,14 +304,22 @@
     if (w === conf().allInWeather) best *= ctx.cfg.allInWeight || 1;
     return best;
   }
+  /** 偷看后放回原位还是压到牌堆底。简单随手放；普通 / 困难用上看过的情报（#502）：
+   *  这张对自己的牌不比「压下去以后换到这个位置上的那张」差太多就放回原位，不然压到牌堆底。
+   *  换上来的：堆里还有没看过的牌 → 没看过的那些里的一张（看过的都知道在哪儿，不会换上来，不算进平均）；
+   *  都看过了 → 压到底的第一张；下面没有牌了 → 放哪儿都一样。
+   *  困难还看位置：这张在堆顶往下第几张、剩下几轮最多还能翻几张（这一轮也算）——翻不到它就不用挪 */
   function dealerPlace(ctx) {
     const v = ctx.v;
     if (ctx.level === "easy") return { type: "place", where: ctx.rng() < 0.5 ? "top" : "bottom" };
-    const card = v.peek && v.peek.card;
+    const top = { type: "place", where: "top" };
+    const card = v.peek && v.peek.card, at = (v.peek && v.peek.at) || 0, seen = seenOf(v);
     const rest = deckComposition(v);
-    rest.splice(rest.indexOf(card), 1);
-    if (!rest.length) return { type: "place", where: "top" };
-    const avg = rest.reduce((s, w) => s + weatherValue(ctx, w), 0) / rest.length;
+    [card].concat(seen.top, seen.bottom).forEach(w => { const i = rest.indexOf(w); if (i >= 0) rest.splice(i, 1); });
+    const next = rest.length ? rest : seen.bottom.slice(0, 1);
+    if (!next.length) return top;
+    if (ctx.level === "hard" && at >= v.rounds - v.round + 1) return top;
+    const avg = next.reduce((s, w) => s + weatherValue(ctx, w), 0) / next.length;
     return { type: "place", where: weatherValue(ctx, card) >= avg - ctx.cfg.weatherMargin ? "top" : "bottom" };
   }
   function playCard(ctx) {
@@ -523,7 +541,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, step, playOut, belief, candidates };
+  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, step, playOut, belief, candidates, dealerKnownTop };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCardsAI = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -267,3 +267,110 @@ test("困难比简单强：同样的种子，困难的一方平均赢筹码", ()
   assert.ok(dealerHard > 0, "困难庄家 vs 简单玩家：庄家平均 " + dealerHard.toFixed(2));
   assert.ok(playerHard > 0, "困难玩家 vs 简单庄家：玩家平均 " + playerHard.toFixed(2));
 });
+
+/* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
+
+test("庄家 AI 会用新选项（#502）：场上有天气时保留以后接着偷看——三档难度都用过；普通 / 困难留着天气、堆里还有没看过的牌时一定接着偷看，简单随手选（保留不看、保留偷看都有）；整局里往下看过第 2 张以后的", () => {
+  const n = {};
+  LEVELS.forEach(l => { n[l] = { keepPeek: 0, keepOnly: 0, deep: 0 }; });
+  for (const level of LEVELS) for (let i = 0; i < 30; i++) {
+    const g = CC.newGame({ seed: `天气行动-${level}-${i}` });
+    const rngs = { dealer: CC.makeRng("d" + i), player: CC.makeRng("p" + i) };
+    for (let guard = 0; !g.over; guard++) {
+      assert.ok(guard < 400, "卡住了：" + g.stage);
+      const side = CC.toAct(g)[0], v = CC.view(g, side);
+      const a = AI.decide(v, side === "dealer" ? level : "normal", rngs[side]);
+      if (side === "dealer" && v.stage === "dealerWeather" && v.weather && v.legal.some(o => o.op === "peek")) {
+        if (a.op === "peek") n[level].keepPeek++; else if (a.op === "keep") n[level].keepOnly++;
+      }
+      CC.act(g, side, a);
+      if (side === "dealer" && a.type === "weather" && a.op === "peek" && g.peek.at > 0) n[level].deep++;
+    }
+  }
+  for (const level of LEVELS) assert.ok(n[level].keepPeek > 0, `${level}：保留以后接着偷看过 ${JSON.stringify(n[level])}`);
+  for (const level of ["normal", "hard"]) assert.equal(n[level].keepOnly, 0, `${level}：留着天气时还有没看过的牌就偷看`);
+  assert.ok(n.easy.keepOnly > 0, "简单随手选：也有保留了不看的");
+  assert.ok(LEVELS.every(l => n[l].deep > 0), "按顺序往下看：看过第 2 张以后的 " + JSON.stringify(n));
+});
+
+test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还是压到牌堆底，按「没看过的牌」比——同样的公开局面、第 2 轮偷看到同一张酷暑，第 1 轮压到牌堆底的是微光就把酷暑也压下去，是相位就放回原位（看过的知道在哪儿，不会换上来）；简单随手放", () => {
+  const mk = (buried, other) => {
+    const g = CC.newGame({ seed: "放哪儿", deck: [buried, "heat", "snow", "acid", other, "thunder", "sand"] });
+    // 第 1 轮：偷看堆顶、压到牌堆底；玩家暗弃常态跳过（没翻天气，公开的局面两局一样）
+    A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "bottom" });
+    A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+    A(g, "player", "check"); A(g, "dealer", "check");
+    A(g, "player", "skip", { card: "normal" });
+    A(g, "dealer", "check"); A(g, "player", "check");
+    A(g, "dealer", "weather", { op: "peek" });   // 第 2 轮：偷看到酷暑
+    return g;
+  };
+  const g1 = mk("glow", "phase"), g2 = mk("phase", "glow");
+  assert.equal(JSON.stringify(CC.view(g1, "player")), JSON.stringify(CC.view(g2, "player")), "玩家看到的一模一样");
+  const v1 = CC.view(g1, "dealer"), v2 = CC.view(g2, "dealer");
+  assert.deepEqual([v1.peek.card, v2.peek.card], ["heat", "heat"]);
+  assert.deepEqual([J(v1.deckSeen.bottom), J(v2.deckSeen.bottom)], [["glow"], ["phase"]]);
+  for (const level of ["normal", "hard"]) {
+    const a1 = AI.decide(v1, level, CC.makeRng("x")), a2 = AI.decide(v2, level, CC.makeRng("x"));
+    assert.deepEqual([a1.where, a2.where], ["bottom", "top"], level);
+  }
+  const easy = new Set(Array.from({ length: 12 }, (_, i) => AI.decide(v1, "easy", CC.makeRng("e" + i)).where));
+  assert.equal(easy.size, 2, "简单随手放");
+});
+
+test("困难庄家用上看过的情报（#502）：三张压到了牌堆底、堆里只剩一张没看过——推得出堆顶就是那张（微光），出牌和亲眼看过堆顶时一样", () => {
+  const deck = ["heat", "snow", "acid", "sand", "phase", "thunder", "glow"];
+  const mk = (look) => {
+    const g = CC.newGame({ seed: "推出堆顶", deck });
+    // 前三轮：庄家偷看堆顶压到牌堆底（酷暑、酸雨、相位），玩家翻开下一张（雪天、沙暴、雷鸣）
+    [["flesh", "ice"], ["sand", "physical"], ["spirit", "harmonic"]].forEach(([dc, pc]) => {
+      A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "bottom" });
+      A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+      A(g, "player", "check"); A(g, "dealer", "check");
+      A(g, "player", "reveal"); A(g, "player", "noNormal");
+      A(g, "dealer", "check"); A(g, "player", "check");
+    });
+    // 第 4 轮：保留雷鸣不看（堆顶靠推）/ 保留以后偷看堆顶、放回原位（亲眼看过）
+    if (look) { A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" }); }
+    else A(g, "dealer", "weather", { op: "keep" });
+    return g;
+  };
+  const inferred = CC.view(mk(false), "dealer"), looked = CC.view(mk(true), "dealer");
+  assert.deepEqual(J(inferred.deckSeen), { top: [], bottom: ["heat", "acid", "phase"], unseen: 1 });
+  assert.equal(inferred.deckTop, null, "堆顶没亲眼看过");
+  assert.equal(looked.deckTop, "glow");
+  const a = AI.decide(inferred, "hard", CC.makeRng("x")), b = AI.decide(looked, "hard", CC.makeRng("x"));
+  assert.equal(a.type, "play");
+  assert.equal(a.card, b.card, "推出来的堆顶和亲眼看过的一样用");
+  assert.equal(a.card, "shield");
+});
+
+test("玩家方从公开记录推出庄家知道堆顶往下几张（#502）：偷看后放回原位 +1、压到牌堆底不变、翻开一张 −1——庄家第 3 轮往下看了第 2 张、压到牌堆底，堆顶还是庄家看过、留着的那张（困难的玩家方照样认为它多半对庄家有利）", () => {
+  const g = CC.newGame({ seed: "推堆顶", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
+  const known = () => {
+    const n = AI.dealerKnownTop(J(CC.view(g, "player")));
+    assert.equal(n, CC.view(g, "dealer").deckSeen.top.length, "和庄家自己记的一样");
+    return n;
+  };
+  const rest = (dc, pc, skip) => {
+    A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+    A(g, "player", "check"); A(g, "dealer", "check");
+    if (skip) A(g, "player", "skip", { card: skip }); else A(g, "player", "reveal");
+    if (g.stage === "normal") A(g, "player", "noNormal");
+    A(g, "dealer", "check"); A(g, "player", "check");
+  };
+  assert.equal(known(), 0);
+  A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" });
+  assert.equal(known(), 1, "第 1 轮：堆顶看过、放回原位");
+  rest("flesh", "ice", "fire");
+  A(g, "dealer", "weather", { op: "pass" });
+  rest("sand", "physical", "acid");
+  assert.equal(known(), 1, "第 2 轮庄家没动、玩家跳过：还是 1 张");
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.equal(g.peek.at, 1);
+  A(g, "dealer", "place", { where: "bottom" });
+  assert.equal(known(), 1, "第 3 轮往下看的第 2 张压到了牌堆底：堆顶还是庄家看过、留着的");
+  rest("spirit", "harmonic");
+  assert.equal(g.weather, "glow", "玩家翻开的就是那张");
+  assert.equal(known(), 0, "翻开了：庄家不再知道堆顶");
+});
