@@ -63,7 +63,13 @@ const RogueCommands = (function () {
     finishBattle: (c, run) => Rogue.finishBattle(run, c.outcome),
     drawHero: (_c, run) => Rogue.drawHero(run).notes,
     drawMany: (c, run) => { const r = Rogue.drawMany(run, c.n); return { notes: r.notes, results: r.results, kuizhi: r.kuizhi }; },
-    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null)
+    swapHero: (c, run) => Rogue.swapHero(run, c.out || null, c.in || null),
+    // 赌场（#487，长线养成）：进赌场送赠送筹码、兑换、坐桌开一局、离桌结算；牌局里的每一步由牌桌界面直接改 run.casino.seat.game
+    casinoOpen: (_c, run) => Rogue.casinoOpen(run),
+    casinoBuy: (c, run) => Rogue.casinoBuy(run, c.n),
+    casinoSell: (c, run) => Rogue.casinoSell(run, c.n),
+    casinoSit: (c, run) => Rogue.casinoSit(run, c.table, c.buyIn).notes,
+    casinoLeave: (_c, run) => Rogue.casinoLeave(run)
   };
   const queries = {
     heroView: (c, run) => Rogue.heroView(run, hero(run, c.kit)),
@@ -101,7 +107,8 @@ const RogueCommands = (function () {
     canShortRestAtNode: (_c, run) => Rogue.canShortRestAtNode(run),
     watchOptions: (_c, run) => Rogue.watchOptions(run),
     drawInfo: (_c, run) => Rogue.drawInfo(run),
-    drawRates: (_c, run) => Rogue.drawRates(run)
+    drawRates: (_c, run) => Rogue.drawRates(run),
+    casinoView: (_c, run) => Rogue.casinoView(run)
   };
   const sessions = {
     readSaved() { return SaveStore.loadRun(); },

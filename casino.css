@@ -1,0 +1,25 @@
+/* 赌场（#487）：钱包、兑换、选桌（casino-ui.js）。长线养成的任务板、跑团的「赌场」页都用这一份 */
+.casino { display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; min-width: 0; }
+.casino h2 { margin: 0; }
+.cs-msg { margin: 0; padding: 6px 10px; border-left: 3px solid var(--gold); background: rgba(0, 0, 0, .18); font-size: 13px; line-height: 1.5; }
+.cs-wallet { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 10px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+.cs-wallet b { font-family: var(--num); font-size: 15px; }
+.cs-ex { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; }
+.cs-ex input, .cs-buyin input { width: 64px; min-height: 30px; box-sizing: border-box; }
+.cs-tables { display: flex; flex-direction: column; gap: 6px; }
+.cs-table {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "name buyin go" "meta meta meta";
+  align-items: center; gap: 4px 10px; padding: 8px 10px; background: var(--plate); border: 1px solid var(--line); border-radius: 4px; font-size: 13px;
+}
+.cs-tname { grid-area: name; min-width: 0; }
+.cs-tname small { display: block; font-size: 11px; color: var(--muted); }
+.cs-tmeta { grid-area: meta; font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.cs-buyin { grid-area: buyin; white-space: nowrap; }
+.cs-table > .g-btn { grid-area: go; }
+.cs-seat { padding: 8px 10px; background: var(--plate); border: 1px solid var(--gold); border-radius: 4px; font-size: 13px; }
+.cs-seat p { margin: 0 0 6px; }
+.cs-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-rule { margin: 0; }
+@media (max-width: 480px) {
+  .cs-table { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name name" "meta meta" "buyin go"; }
+}
