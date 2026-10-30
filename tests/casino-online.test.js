@@ -205,13 +205,21 @@ test("玩家对赌押奎支：1 枚 = 200 奎支（开局各押 50 × 200），�
   assert.match(mine("p2", "ruby").last, /输 200 奎支/);
 });
 
-test("主持人能让人离桌（卡住的桌子）；玩家不能让别人离桌；战斗中不能去赌场", () => {
-  const { c, send, mine } = room();
+test("主持人能让人离桌（卡住的桌子、坐着的角色死了）；玩家不能让别人离桌；战斗中不能去赌场", () => {
+  const { c, hero, send, mine } = room();
   ok(send("p2", { op: "open", kit: "ruby" }));
   ok(send("p2", { op: "sit", kit: "ruby", table: "alley", buyIn: 20, dealer: "gm" }));
   no(send("p3", { op: "leave", kit: "ruby" }), /只能让自己的角色离桌/);
   ok(send("host", { op: "leave", kit: "ruby" }));
   assert.equal(mine("p2", "ruby").seat, null);
+  // 坐着的角色死了：主持人照样能让他离桌（那一桌不会一直卡着），别人不行
+  ok(send("p2", { op: "sit", kit: "ruby", table: "alley", buyIn: 20, dealer: "gm" }));
+  hero("ruby").dead = true;
+  no(send("p2", { op: "leave", kit: "ruby" }), /没有这名角色/);
+  no(send("host", { op: "buy", kit: "ruby", n: 1 }), /没有这名角色/);
+  ok(send("host", { op: "leave", kit: "ruby" }));
+  assert.equal(c.LEDGER.casino.wallets.ruby.seat, null);
+  hero("ruby").dead = false;
   c.S.state.combatStarted = true;
   no(send("p2", { op: "buy", kit: "ruby", n: 1 }), /战斗中不能去赌场/);
 });

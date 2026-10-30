@@ -399,9 +399,10 @@
   }
   function casinoCommand(c) {
     casinoExploring();
-    const kit = String(c.kit || ""), u = heroes().find(h => h.kit === kit && !h.dead);
-    if (!u) fail("没有这名角色");
-    const mine = session.ownerOf(u.id) === sender, isGM = sender === gm();
+    const kit = String(c.kit || ""), u = heroes().find(h => h.kit === kit && !h.dead), isGM = sender === gm();
+    // 坐着的角色死了 / 离队了：主持人照样能让他离桌（不然那一桌一直卡着）
+    if (!u && !(isGM && c.op === "leave")) fail("没有这名角色");
+    const mine = !!u && session.ownerOf(u.id) === sender;
     const own = () => { if (!mine) fail("只能用自己角色的钱包"); };
     const op = String(c.op || "");
     let notes;
