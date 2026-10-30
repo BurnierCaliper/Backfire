@@ -3,9 +3,10 @@
 // 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）；
 // 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）；
 // 下注不封顶时跟不起的下注栏、跟注后追加窗口的倒计时（#496）；
-// 结算前的过渡（最后一步 → 判定中 → 结算横幅，点一下桌面跳过；追加窗口关上之后才开始）、侧栏的记录按时间顺序（#499）。
+// 结算前的过渡（最后一步 → 判定中 → 结算横幅，点一下桌面跳过；追加窗口关上之后才开始）、侧栏的记录按时间顺序（#499）；
+// 庄家偷看出来的天气牌：「只有你看得到」不被图标挡住、效果文字都排在牌里（#499 第 4 项）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
-// 克制表、悬停预览、追加窗口、结算前的过渡的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
+// 克制表、悬停预览、追加窗口、结算前的过渡、偷看出来的天气牌的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -584,6 +585,51 @@ test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 /
   assert.match(p.$('#cc-board .cc-seen [data-at="bottom"]').textContent, /堆底往上\s*微光/, "庄家记得压到牌堆底的是哪张（天气堆旁边）");
   const pv = p.CC.view(p.UI.state().game, "player");
   assert.doesNotMatch(JSON.stringify(pv), /glow|微光/);
+});
+
+/* ---------- 偷看出来的天气牌：标签不被图标挡住、效果文字排在牌里（主人 10/30，#499 第 4 项） ---------- */
+/** 七种天气牌上写的：名字、元素修正、附加说明（规则文字，同 weatherMods）；酸雨排第一（修正最多，以前溢出得最厉害） */
+const PEEK_CARDS = {
+  acid: { name: "酸雨", els: ["火 -1", "酸 +1", "电 +1", "冰 -1", "物理 -1", "谐波 -1"], notes: ["酸、冰以外打装甲 +1"] },
+  glow: { name: "微光", els: ["能量 +1"], notes: ["能量以外克制反转"] },
+  phase: { name: "相位", els: [], notes: ["翻到时双方全押"] },
+  snow: { name: "雪天", els: ["火 -1", "酸 -1", "冰 +1", "物理 +1"], notes: [] },
+  heat: { name: "酷暑", els: ["火 +1", "酸 +1", "冰 -1"], notes: [] },
+  thunder: { name: "雷鸣", els: ["电 +1", "能量 +1"], notes: [] },
+  sand: { name: "沙暴", els: ["酸 -1", "电 -1"], notes: [] }
+};
+const peekTitle = (w) => `${PEEK_CARDS[w].name}：${PEEK_CARDS[w].els.concat(PEEK_CARDS[w].notes).join("，")}`;
+/** 天气堆顶是 w（其余六张跟在后面） */
+const peekDeck = (w) => [w].concat(Object.keys(PEEK_CARDS).filter(x => x !== w));
+
+test("偷看出来的天气牌（主人 10/30，#499 第 4 项）：「只有你看得到」的样式只管标签（以前 .cc-peekcard small 连牌里的效果文字也染成黄色、放大）；牌上图标和名字并排在顶上，元素修正排两列（先排满左边一列）、附加说明单独一行，七种天气的每一条修正都写在牌上，完整说明在牌的悬停提示（title）里；场上那张天气牌照旧", () => {
+  const css = read("counter-cards.css").replace(/\/\*[\s\S]*?\*\//g, "");   // 注释里提到旧写法不算
+  assert.ok(!/\.cc-peekcard\s+small/.test(css), "标签的样式不能写成「.cc-peekcard 里所有的 small」：牌里的效果文字也是 <small class=\"cc-mods\">");
+  for (const w of Object.keys(PEEK_CARDS)) {
+    const p = page(), e = PEEK_CARDS[w];
+    p.UI.start({ side: "dealer", level: "normal", seed: "偷看出来的牌-" + w, fast: true, gameOpt: { deck: peekDeck(w) } });
+    click(p.$('#cc-actions [data-cc="weather"][data-op="peek"]'));
+    const box = p.$("#cc-board .cc-peekcard");
+    assert.ok(box, w + "：偷看出来的牌");
+    const label = box.querySelector(":scope > .cc-peeklabel");
+    assert.ok(label && label.textContent === "只有你看得到", w + "：标签单独一个样式名");
+    const card = box.querySelector(":scope > .cc-wx.cc-wx-fit");
+    assert.ok(card, w + "：排得下的天气牌");
+    assert.equal(card.dataset.weather, w);
+    assert.equal(card.getAttribute("title"), peekTitle(w), w + "：完整说明在牌的悬停提示里");
+    assert.ok(card.querySelector(".cc-wx-head .cc-ico svg"), w + "：图标在顶上");
+    assert.equal(card.querySelector(".cc-wx-head .cc-name").textContent, e.name, w + "：名字和图标并排");
+    assert.ok(!card.querySelector(".cc-corner"), w + "：名字写在顶上了，左上角不再写一遍");
+    assert.deepEqual(Array.from(card.querySelectorAll(".cc-mods-el > i")).map(c => c.textContent), e.els, w + "：元素修正一格一条");
+    if (e.els.length) assert.equal(card.querySelector(".cc-mods-el").style.getPropertyValue("--rows"), String(Math.ceil(e.els.length / 2)), w + "：排两列，先排满左边一列");
+    else assert.ok(!card.querySelector(".cc-mods-el"), w + "：没有元素修正就不画这一块");
+    assert.deepEqual(Array.from(card.querySelectorAll(".cc-mods-note")).map(c => c.textContent), e.notes, w + "：附加说明单独一行");
+  }
+  // 场上那张天气牌照旧：左上角写名字，图标 / 名字 / 修正一条一行
+  const p = page(), now = p.UI.weatherCardHtml("acid");
+  assert.doesNotMatch(now, /cc-wx-fit|cc-wx-head|cc-mods-el|cc-mods-note/);
+  assert.match(now, /<i class="cc-corner">酸雨<\/i>/);
+  assert.match(now, /火 -1<br>酸 \+1<br>电 \+1<br>冰 -1<br>物理 -1<br>谐波 -1<br>酸、冰以外打装甲 \+1<\/small>/);
 });
 
 /* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
@@ -1473,6 +1519,96 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     assert.ok(m.width > 0 && m.left >= 0 && m.right <= m.vw, `「你看过的」在屏幕里：${JSON.stringify(m)}`);
     assert.ok(m.left >= m.deckRight - 1 || m.top >= m.deckBottom - 1, `摆在天气堆旁边（右边或下面），不盖住天气堆：${JSON.stringify(m)}`);
     assert.ok(m.overflow <= 1, "牌桌没有横向溢出：" + m.overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 偷看出来的天气牌（#499 第 4 项，真浏览器）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
+/** 量排版用的中文字体：GitHub 上跑测试的 Linux 没装中文字体，汉字画成方框，只有 0.75 个字宽（平时的黑体一个字一格），量出来排得下也不算数。
+ *  把正文字体（skin.css 的 --sk-body，第一个是 Noto Sans SC）的汉字换成游戏自带的指芒星（fonts/，平均 0.9 个字宽），size-adjust 放大到一个字一格；
+ *  用 data: URL（file:// 打开的页面不让跨域读字体文件）；只换汉字、中文标点，数字和字母照旧。装了中文字体的机器上也换，量出来都一样 */
+function cjkFontCss() {
+  return (read("fonts/fonts.css").match(/@font-face \{ font-family: 'Zhi Mang Xing';[^}]*\}/g) || []).map(rule => rule
+    .replace("'Zhi Mang Xing'", "'Noto Sans SC'").replace("U+0020-007E, ", "").replace(/;\s*\}$/, "; size-adjust: 111%; }")
+    .replace(/url\(([^)]+)\)/, (m, f) => `url(data:font/woff2;base64,${fs.readFileSync(path.join(ROOT, "fonts", f)).toString("base64")})`)).join("\n");
+}
+/** 在页面里跑：装上 cjkFontCss 的字体、等它载入；返回一个汉字几个字宽（装上了 1 左右，没装上 0.75） */
+async function useCjkFont(css) {
+  const s = document.createElement("style");
+  s.textContent = css;
+  document.head.appendChild(s);
+  const T = "只有你看得到酸雨微光相位物理谐波";
+  await document.fonts.load("100px 'Noto Sans SC'", T);
+  const e = document.createElement("span");
+  e.style.cssText = "position: absolute; left: 0; top: 0; white-space: nowrap; font: 400 100px 'Noto Sans SC', sans-serif";
+  e.textContent = T;
+  document.body.appendChild(e);
+  const em = e.getBoundingClientRect().width / T.length / 100;
+  e.remove();
+  return em;
+}
+/** 在页面里跑：人当庄家、天气堆顶是 o.deck[0]，点「偷看下一张」，量偷看出来的那张牌——
+ *  标签被挡住没有（标签上取三个点，看最上面的是不是标签自己）、在不在虚线框里、在不在牌上面；牌里看得见的东西（图标、每一段字按行量）出没出牌边那圈彩色框；
+ *  有没有字被裁掉（省略号、两行截断、看不见的溢出）；效果文字的字号、颜色和场上那张天气牌（同一种天气，临时放一张来比）一样不一样；悬停提示 */
+function peekMeasure(o) {
+  const g = CounterCards.newGame({ seed: "偷看出来的牌-" + o.deck[0], deck: o.deck });
+  CounterCardsUI.start({ side: "dealer", level: "normal", game: g, fast: true });
+  document.querySelector('#cc-actions [data-cc="weather"][data-op="peek"]').click();
+  const box = document.querySelector("#cc-board .cc-peekcard"), card = box.querySelector(".cc-wx"), label = box.firstElementChild;
+  label.scrollIntoView({ block: "center" });
+  const lr = label.getBoundingClientRect(), cr = card.getBoundingClientRect(), br = box.getBoundingClientRect();
+  const k = parseFloat(getComputedStyle(card).borderTopWidth) + 3;   // 牌边那圈彩色框（::before，往里 3px）的外沿
+  const inside = (r) => r.left >= cr.left + k - 0.5 && r.right <= cr.right - k + 0.5 && r.top >= cr.top + k - 0.5 && r.bottom <= cr.bottom - k + 0.5;
+  const out = [];
+  const walk = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (!n.textContent.trim() || !n.parentElement.getClientRects().length) continue;   // 不画的（display: none）不量
+    const range = document.createRange();
+    range.selectNodeContents(n);
+    for (const r of range.getClientRects()) if (r.width && !inside(r)) { out.push(n.textContent.trim()); break; }
+  }
+  const icon = card.querySelector(".cc-ico svg");
+  if (icon && !inside(icon.getBoundingClientRect())) out.push("图标");
+  const cut = [card, ...card.querySelectorAll("*")].filter(el => el instanceof HTMLElement && getComputedStyle(el).overflow !== "visible" && (el.scrollWidth > el.clientWidth + 0.5 || el.scrollHeight > el.clientHeight + 0.5))
+    .map(el => el.getAttribute("class") + "：" + el.textContent);
+  const y = lr.top + lr.height / 2;
+  const covered = [0.15, 0.5, 0.85].map(f => document.elementFromPoint(lr.left + lr.width * f, y)).filter(el => !(el && (el === label || label.contains(el))))
+    .map(el => (el ? el.closest("[class]").getAttribute("class") : "（屏幕外）"));
+  const ref = document.createElement("div");
+  ref.className = "cc-wnow";
+  ref.innerHTML = CounterCardsUI.weatherCardHtml(o.deck[0]);
+  document.querySelector("#cc-board .cc-wzone").appendChild(ref);
+  const mods = getComputedStyle(card.querySelector(".cc-mods")), now = getComputedStyle(ref.querySelector(".cc-mods"));
+  const res = { label: label.textContent, covered, labelIn: lr.width > 0 && lr.left >= br.left - 0.5 && lr.right <= br.right + 0.5 && lr.top >= br.top - 0.5 && lr.bottom <= cr.top + 0.5,
+    out, cut, title: card.getAttribute("title"), font: [mods.fontSize, mods.color], nowFont: [now.fontSize, now.color], overflow: document.getElementById("scr-cc").scrollWidth - innerWidth };
+  ref.remove();
+  return res;
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：庄家偷看出来的天气牌（#499 第 4 项）——「只有你看得到」不被天气图标挡住；七种天气（酸雨 7 条修正也是）的效果文字都完整排在牌里，不出牌边、没被裁掉，字号、颜色和场上那张天气牌一样；完整说明在牌的悬停提示里`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [];
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(GAME_URL);
+    const em = await page.evaluate(useCjkFont, cjkFontCss());
+    assert.ok(em > 0.97 && em < 1.06, "量排版用的中文字体换上了，一个汉字一个字宽：" + em);
+    for (const w of Object.keys(PEEK_CARDS)) {
+      const m = await page.evaluate(peekMeasure, { deck: peekDeck(w) }), at = `${vp.tag} · ${PEEK_CARDS[w].name}`;
+      assert.equal(m.label, "只有你看得到");
+      assert.deepEqual(m.covered, [], `${at}：「只有你看得到」上面盖着别的东西（以前酸雨的图标顶出牌顶、盖住标签）`);
+      assert.ok(m.labelIn, `${at}：标签在虚线框里、在牌的上面：${JSON.stringify(m)}`);
+      assert.deepEqual(m.out, [], `${at}：牌里的东西都在牌边那圈彩色框里（以前酸雨的修正掉出牌底）`);
+      assert.deepEqual(m.cut, [], `${at}：牌里的字都显示全了，没有省略、截断`);
+      assert.deepEqual(m.font, m.nowFont, `${at}：效果文字的字号、颜色和场上那张天气牌一样（以前被标签的样式染成黄色、放大到 11px）`);
+      assert.equal(m.title, peekTitle(w), `${at}：完整说明在牌的悬停提示里`);
+      assert.ok(m.overflow <= 1, `${at}：牌桌没有横向溢出：${m.overflow}px`);
+    }
     assert.deepEqual(errors, []);
   });
 }
