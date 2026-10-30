@@ -882,6 +882,20 @@ test("追加窗口里：点「加注」关窗、照常轮到 AI 应对（算进�
   assert.ok(g4.betting.window, "对局停在窗口里，不会自己往下走");
 });
 
+test("手机竖屏（max-width: 600px）：High Flux 牌桌的操作栏固定在屏幕底部（position: sticky; bottom: 0），排在侧栏后面、底色不透明、让开 iPhone 底部的横条；电脑上照旧（#499 第 3 项；位置在真浏览器那条量）", () => {
+  const css = read("counter-cards.css");
+  const phone = css.match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/);
+  assert.ok(phone, "有手机竖屏（max-width: 600px）那一段");
+  const rule = phone[1].match(/#scr-cc \.cc-actions\s*\{([^}]*)\}/);
+  assert.ok(rule, "只管 High Flux 的牌桌（#scr-cc）");
+  assert.match(rule[1], /position:\s*sticky/);
+  assert.match(rule[1], /bottom:\s*0/);
+  assert.match(rule[1], /order:\s*1/, "排在侧栏后面：翻到哪都在最底下，滑到底时侧栏露得出来");
+  assert.match(rule[1], /background:\s*#[0-9a-f]{3,6}\b/i, "底色不透明：盖在牌桌上面时看不到底下的牌");
+  assert.match(rule[1], /env\(safe-area-inset-bottom/, "让开 iPhone 底部的横条");
+  assert.doesNotMatch(css.replace(phone[0], "").replace(/\/\*[\s\S]*?\*\//g, ""), /sticky/, "别的宽度不贴底");
+});
+
 test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按扣还之后的筹码数", () => {
   const p = page();
   const CC = p.CC;
@@ -1622,6 +1636,74 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
       await press('#cc-actions [data-cc="raise"]');
       await page.waitForFunction(() => CounterCardsUI.state().game.log.some(e => e.t === "bet" && e.op === "raise" && e.by === "player" && e.window), null, T);
     }
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 手机竖屏：操作栏固定在屏幕底部（主人 10/30 试玩反馈，#499 第 3 项；真浏览器，同上没装 Playwright 时用机器自带的 Chrome，都没有才跳过） */
+/** 量一下（在页面里跑）：操作栏怎么定位、贴没贴在屏幕底部，里面每个按钮 / 倒计时的位置，牌桌、侧栏的位置，滚到哪了 */
+function measureDock() {
+  const scr = document.getElementById("scr-cc"), bar = document.getElementById("cc-actions");
+  const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width }; };
+  const items = [...bar.querySelectorAll("button[data-cc], .cc-clock")].map(el => Object.assign({ what: el.dataset.cc || "倒计时" }, box(el)));
+  return { vw: innerWidth, vh: innerHeight, scroll: scr.scrollTop, maxScroll: scr.scrollHeight - scr.clientHeight, pos: getComputedStyle(bar).position,
+    bar: box(bar), table: box(document.querySelector("#scr-cc .cc-table")), side: box(document.getElementById("cc-side")), items, overflow: scr.scrollWidth - innerWidth };
+}
+/** 操作栏里不在屏幕里的按钮 / 倒计时 */
+const offScreen = (m) => m.items.filter(x => !(x.width > 0 && x.top >= -1 && x.bottom <= m.vh + 1 && x.left >= -1 && x.right <= m.vw + 1)).map(x => x.what);
+const scrollCc = (page, to) => page.evaluate((y) => { const s = document.getElementById("scr-cc"); s.scrollTop = y === "end" ? s.scrollHeight : y; }, to);
+
+for (const vp of [{ width: 390, height: 844, tag: "手机 390×844", mobile: true }, { width: 1400, height: 900, tag: "桌面" }]) {
+  test(`真浏览器（${vp.tag}）：${vp.mobile ? "手机竖屏操作栏固定在屏幕底部（#499 第 3 项）——下注时（两行按钮）、追加窗口里（倒计时、加注、弃牌、不加注）所有按钮都在第一屏，不用滚动；往下滑也一直在底部；滑到最底下牌桌、侧栏都露得出来，不被操作栏挡住" : "电脑上操作栏照旧排在牌桌下面，不贴底"}`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext(Object.assign({ viewport: { width: vp.width, height: vp.height } }, vp.mobile ? { isMobile: true, hasTouch: true } : {}));
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });   // 不放发牌动画：量位置时牌已经在桌上
+    await page.goto(GAME_URL);
+    await page.evaluate(windowSetup);   // 下注：庄家下注 1 枚，轮到人跟注 / 加注 / 弃牌（两行按钮）
+    await page.waitForSelector('#cc-actions [data-cc="fold"]', T);
+    const bet = await page.evaluate(measureDock);
+    if (!vp.mobile) {
+      assert.equal(bet.pos, "static", "电脑上不贴底");
+      assert.ok(bet.bar.top >= bet.table.bottom, "照旧排在牌桌下面：" + JSON.stringify(bet));
+      assert.deepEqual(errors, []);
+      return;
+    }
+    assert.equal(bet.scroll, 0, "第一屏");
+    assert.deepEqual(bet.items.map(x => x.what).filter(w => w !== "amt"), ["call", "raise", "fold"]);
+    assert.deepEqual(offScreen(bet), [], "下注时所有按钮都在第一屏：" + JSON.stringify(bet));
+    assert.ok(Math.abs(bet.bar.bottom - bet.vh) <= 1, "操作栏贴在屏幕底部：" + JSON.stringify(bet.bar));
+    // 追加窗口：倒计时和按钮都在第一屏
+    await page.evaluate(() => document.querySelector('#cc-actions [data-cc="call"]').click());
+    await page.waitForSelector("#cc-actions .cc-count", T);
+    const win = await page.evaluate(measureDock);
+    assert.equal(win.scroll, 0, "第一屏");
+    assert.deepEqual(win.items.map(x => x.what).filter(w => w !== "amt"), ["倒计时", "raise", "fold", "pass"]);
+    assert.deepEqual(offScreen(win), [], "追加窗口：倒计时和所有按钮都在第一屏：" + JSON.stringify(win));
+    assert.ok(Math.abs(win.bar.bottom - win.vh) <= 1, "操作栏贴在屏幕底部：" + JSON.stringify(win.bar));
+    assert.ok(win.maxScroll > 0, "牌桌加侧栏比一屏高，要滚动（不然量不出贴底）");
+    // 往下滑一半（看侧栏）：操作栏还在底部，按钮照样点得到
+    await scrollCc(page, Math.round(win.maxScroll / 2));
+    const mid = await page.evaluate(measureDock);
+    assert.ok(mid.scroll > 0 && Math.abs(mid.bar.bottom - mid.vh) <= 1, "往下滑了操作栏还在底部：" + JSON.stringify(mid));
+    assert.deepEqual(offScreen(mid), []);
+    // 滑到最底下：侧栏、牌桌都在操作栏上面露出来（操作栏在排版里有自己的位置，不会一直挡着最后那一截）
+    await scrollCc(page, "end");
+    const end = await page.evaluate(measureDock);
+    assert.ok(end.scroll >= end.maxScroll - 1, "滑到底了");
+    assert.ok(end.side.bottom <= end.bar.top + 1 && end.table.bottom <= end.bar.top + 1, "最底下：侧栏、牌桌都在操作栏上面：" + JSON.stringify(end));
+    assert.ok(Math.abs(end.bar.bottom - end.vh) <= 1);
+    for (const m of [bet, win, mid, end]) assert.ok(m.overflow <= 1, "没有横向溢出：" + m.overflow + "px");
+    // 窗口里点「不加注」照常（点得到：在屏幕里的那个位置真的是这个按钮）
+    await scrollCc(page, 0);
+    const hit = await page.evaluate(() => { const el = document.querySelector('#cc-actions [data-cc="pass"]'), r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); });
+    assert.ok(hit, "「不加注」没被别的东西盖住");
+    await page.tap('#cc-actions [data-cc="pass"]', T);
+    await page.waitForFunction(() => CounterCardsUI.state().game.stage === "weather", null, T);
     assert.deepEqual(errors, []);
   });
 }

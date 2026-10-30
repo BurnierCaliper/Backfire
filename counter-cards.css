@@ -1,6 +1,6 @@
 /* High Flux（#485）· 牌桌：深色赌桌 + 回火的街头废土皮肤（铁皮、喷漆、胶带、黄铜包边）。
  * 牌面颜色读 game.css 的 --fire / --flesh……（counter-cards-ui.js 写进 --c）；天气特效是 weather-fx.css 的 .wfx-*，放在 #cc-fx 里垫在牌下面。
- * 手机（390px）：牌缩小，侧栏排到牌桌下面。 */
+ * 手机（390px）：牌缩小，侧栏排到牌桌下面；竖屏（≤ 600px）操作栏贴在屏幕底部（#499 第 3 项）。 */
 
 .scr-cc {
   position: fixed; inset: 0; z-index: 38; overflow-y: auto;
@@ -336,4 +336,17 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
   .cc-top .cc-btn { padding: 6px 8px; font-size: 12px; }
   .cc-emblem { width: 28px; height: 39px; }
   .cc-peek { font-size: 10px; right: -6px; bottom: -8px; }
+}
+
+/* ---------- 手机竖屏：操作栏固定在屏幕底部（主人 10/30 试玩反馈，#499 第 3 项） ----------
+ * 以前操作栏排在牌桌下面：390×844 下，下注时第二行的「弃牌」、追加窗口（#496）里的「加注」「弃牌」「不加注」要往下滑才看得到，3 秒来不及。
+ * 现在贴在屏幕底部（sticky）：排到侧栏后面（order），滑到哪都在最底下；它在排版里有自己的位置，滑到最底下时牌桌、侧栏都在它上面露出来，不会一直被挡着。
+ * 底色不透明（盖在牌桌上时看不到底下的牌），底下让开 iPhone 的横条。只管 High Flux 的牌桌；猜大猜小（#scr-ccg）借这套布局，这次不动。 */
+@media (max-width: 600px) {
+  #scr-cc .cc-game { padding-bottom: 0; }   /* 滑到最底下时操作栏也贴着屏幕底边，不往上跳那 6px */
+  #scr-cc .cc-actions {
+    position: sticky; bottom: 0; z-index: 5; order: 1;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+    background: #13100d; box-shadow: 0 -6px 14px rgba(0, 0, 0, .6);
+  }
 }
