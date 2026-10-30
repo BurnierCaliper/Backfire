@@ -571,7 +571,7 @@ for (const side of ["player", "dealer"]) for (const level of LEVELS) {
   });
 }
 
-test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 / 牌堆底；玩家（AI）看不到", () => {
+test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 / 压到牌堆底；玩家（AI）看不到", () => {
   const p = page();
   p.UI.start({ side: "dealer", level: "normal", seed: "偷看", fast: true, gameOpt: { deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] } });
   click(p.$('#cc-actions [data-cc="weather"][data-op="peek"]'));
@@ -581,9 +581,132 @@ test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 /
   assert.match(peek.textContent, /只有你看得到/);
   click(p.$('#cc-actions [data-cc="place"][data-where="bottom"]'));
   assert.ok(!p.$("#cc-board .cc-peekcard"));
-  assert.match(p.$("#cc-board .cc-deck").textContent, /堆底：微光/, "庄家记得放到牌堆底的是哪张");
+  assert.match(p.$('#cc-board .cc-seen [data-at="bottom"]').textContent, /堆底往上\s*微光/, "庄家记得压到牌堆底的是哪张（天气堆旁边）");
   const pv = p.CC.view(p.UI.state().game, "player");
   assert.doesNotMatch(JSON.stringify(pv), /glow|微光/);
+});
+
+/* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
+/** 人当庄家：第 1 轮庄家不动、玩家翻出雷鸣；第 2 轮庄家保留雷鸣以后偷看堆顶的微光、放回原位，玩家暗弃跳过
+ *  → 第 3 轮轮到人做庄家天气行动，场上还是雷鸣，天气堆从上往下是微光（看过）、酷暑、雪天…… */
+function keptGame(p, seed) {
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed, deck: ["thunder", "glow", "heat", "snow", "acid", "sand", "phase"] });
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "check"); A(g, "dealer", "check");
+  A(g, "player", "reveal"); A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" });
+  A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+  A(g, "player", "check"); A(g, "dealer", "check");
+  A(g, "player", "skip", { card: "fire" });
+  if (g.stage === "normal") A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  p.UI.start({ side: "dealer", level: "normal", game: g, seed, fast: true });
+  return g;
+}
+const btnTexts = (p) => Array.from(p.$$("#cc-actions .cc-btns button")).map(b => b.textContent);
+
+test("庄家天气行动（#502）：人当庄家、场上有天气——「弃掉天气」「保留天气」；点「保留天气」以后出现「偷看下一张」「不看」（这时还没定），偷看的是没看过的下一张，压到牌堆底；天气堆旁边列出看过的几张，玩家看不到", () => {
+  const p = page();
+  const g = keptGame(p, "保留以后偷看");
+  assert.equal(g.round, 3); assert.equal(g.stage, "dealerWeather"); assert.equal(g.weather, "thunder");
+  const bar = () => p.$("#cc-actions");
+  assert.match(bar().textContent, /场上是〔雷鸣〕，弃掉还是保留？保留以后还可以接着偷看下一张。/);
+  assert.deepEqual(btnTexts(p), ["弃掉天气", "保留天气"]);
+  assert.ok(bar().querySelector('[data-cc="mode"][data-mode="keep"]').classList.contains("primary"));
+  // 天气堆旁边：第 2 轮看过、放回原位的微光
+  const seen = () => p.$("#cc-board .cc-seen");
+  assert.ok(seen(), "天气堆旁边列出庄家看过的");
+  assert.match(seen().textContent, /只有你看得到/);
+  assert.match(seen().querySelector('[data-at="top"]').textContent, /^堆顶往下\s*微光$/);
+  assert.ok(!seen().querySelector('[data-at="bottom"]'));
+  assert.match(seen().textContent, /还有 5 张没看过/);
+  // 点「保留天气」：接着问偷不偷看；对局还没动
+  const before = JSON.stringify(g);
+  click(bar().querySelector('[data-cc="mode"][data-mode="keep"]'));
+  assert.equal(JSON.stringify(g), before, "点了保留还没定，对局不动");
+  assert.deepEqual(btnTexts(p), ["偷看下一张", "不看"]);
+  assert.match(bar().textContent, /保留场上的〔雷鸣〕。要不要接着偷看天气堆里下一张没看过的（从上往下第 2 张，上面 1 张你看过了）？/);
+  assert.ok(bar().querySelector('[data-cc="weather"][data-op="peek"]').classList.contains("primary"));
+  // 偷看下一张：看到的是微光下面的酷暑
+  click(bar().querySelector('[data-cc="weather"][data-op="peek"]'));
+  assert.equal(g.stage, "dealerPeek"); assert.equal(g.weather, "thunder", "天气保留在场上");
+  const card = p.$("#cc-board .cc-peekcard");
+  assert.ok(card && /酷暑/.test(card.textContent) && /只有你看得到/.test(card.textContent));
+  assert.match(bar().textContent, /天气堆从上往下第 2 张是〔酷暑〕。放回原位，还是压到牌堆底？/);
+  assert.deepEqual(btnTexts(p), ["放回原位", "压到牌堆底"]);
+  // 压到牌堆底：只挪酷暑，微光还在堆顶
+  click(bar().querySelector('[data-cc="place"][data-where="bottom"]'));
+  assert.deepEqual(J(g.deck), ["glow", "snow", "acid", "sand", "phase", "heat"]);
+  assert.ok(!p.$("#cc-board .cc-peekcard"));
+  assert.match(seen().querySelector('[data-at="top"]').textContent, /^堆顶往下\s*微光$/);
+  assert.match(seen().querySelector('[data-at="bottom"]').textContent, /^堆底往上\s*酷暑$/);
+  assert.match(seen().textContent, /还有 4 张没看过/);
+  const log = p.$("#cc-side .cc-log").textContent;
+  assert.ok(log.includes("你偷看到天气堆从上往下第 2 张是〔酷暑〕（上面 1 张你已经看过）。"), "私人记录写看到的是第几张、是什么");
+  assert.ok(log.includes("庄家保留了场上的天气〔雷鸣〕。") && log.includes("庄家偷看了天气堆从上往下第 2 张，压到了牌堆底。"));
+  // 玩家看不到庄家看过的牌
+  assert.doesNotMatch(JSON.stringify(p.CC.view(g, "player")), /glow|微光|heat|酷暑/);
+});
+
+test("庄家天气行动（#502）：点「保留天气」再点「不看」= 保留、不看，直接暗出；人当玩家时桌上没有庄家看过的牌", () => {
+  const p = page();
+  const g = keptGame(p, "保留不看");
+  click(p.$('#cc-actions [data-cc="mode"][data-mode="keep"]'));
+  click(p.$('#cc-actions [data-cc="weather"][data-op="keep"]'));
+  assert.equal(g.weather, "thunder");
+  assert.equal(g.stage, "play", "直接暗出（AI 玩家也出了，等人出牌）");
+  assert.equal(g.peek, null, "没有偷看");
+  assert.deepEqual(J(p.CC.view(g, "dealer").deckSeen.top), ["glow"]);
+  assert.ok(p.$("#cc-board button.cc-can"), "轮到人出层牌");
+  assert.match(p.$("#cc-side .cc-log").textContent, /庄家保留了场上的天气〔雷鸣〕。/);
+  // 人当玩家：庄家（测试替它走）偷看过堆顶，桌上看不出来
+  const q = page();
+  const h = q.CC.newGame({ seed: "玩家看不到", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
+  q.CC.act(h, "dealer", { type: "weather", op: "peek" }); q.CC.act(h, "dealer", { type: "place", where: "top" });
+  q.CC.act(h, "dealer", { type: "play", card: "flesh" });
+  q.UI.start({ side: "player", level: "normal", game: h, fast: true });
+  assert.ok(!q.$("#cc-board .cc-seen"), "玩家这边没有「庄家看过的」");
+  assert.doesNotMatch(q.$("#cc-board").textContent, /微光/);
+  assert.match(q.$("#cc-side .cc-log").textContent, /庄家偷看了天气堆顶的一张，放回原位。/);
+});
+
+test("庄家天气行动（#502）：天气堆里剩下的都看过了——「保留天气」直接保留（不再问偷不偷看），提示写剩下的都看过了", () => {
+  const p = page();
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed: "全看过", deck: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"] });
+  [["flesh", "ice"], ["sand", "physical"], ["spirit", "harmonic"], ["shield", "energy"]].forEach(([dc, pc]) => {
+    A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "bottom" });
+    A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+    A(g, "player", "check"); A(g, "dealer", "check");
+    A(g, "player", "reveal"); A(g, "player", "noNormal");
+    A(g, "dealer", "check"); A(g, "player", "check");
+  });
+  p.UI.start({ side: "dealer", level: "normal", game: g, fast: true });
+  assert.equal(g.round, 5); assert.equal(g.weather, "heat");
+  const bar = p.$("#cc-actions");
+  assert.match(bar.textContent, /场上是〔酷暑〕，弃掉还是保留？天气堆里剩下的你都看过了，保留以后不能再偷看。/);
+  assert.deepEqual(btnTexts(p), ["弃掉天气", "保留天气"]);
+  assert.ok(!bar.querySelector('[data-op="peek"]') && !bar.querySelector('[data-cc="mode"]'));
+  assert.match(p.$('#cc-board .cc-seen [data-at="bottom"]').textContent, /^堆底往上\s*相位\s*微光\s*酸雨$/, "第一张在最底下");
+  assert.match(p.$("#cc-board .cc-seen").textContent, /剩下的都看过了/);
+  click(bar.querySelector('[data-cc="weather"][data-op="keep"]'));
+  assert.equal(g.stage, "play");
+  assert.equal(g.weather, "heat");
+});
+
+test("规则说明的庄家天气行动照 #502 写：保留以后还能接着偷看、按顺序往下看、压到牌堆底；设置页和对局中的侧栏都是", () => {
+  const p = page();
+  click(p.$("#t-cc"));
+  const roundLine = (where) => Array.from(p.$$(where + " .cc-rules li")).map(li => li.textContent).find(t => t.startsWith("每轮"));
+  const want = "② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③";
+  assert.ok(roundLine("#cc-setup").includes(want), "设置页");
+  click(p.$('[data-cc="start"]'));
+  p.UI.stop();   // 人当玩家：庄家（AI）在等发牌动画，这里不用它走
+  assert.ok(roundLine("#cc-side").includes(want), "对局中的侧栏");
+  assert.ok(!p.$("#scr-cc").textContent.includes("放到牌堆底") && !p.$("#scr-cc").textContent.includes("偷看堆顶一张"), "旧说法不再出现");
 });
 
 test("翻开天气：桌上换成那张天气牌、闪一下，放对应的天气特效（weather-fx.js）；没有天气时特效收掉", () => {
@@ -1306,6 +1429,53 @@ test("手机长按：轻点照常出牌、不弹预览；按住时手指挪开�
   await wait(ms + 80);
   assert.ok(!visible(tip), "轻点不弹预览");
 });
+
+/* 庄家天气行动（#502，真浏览器）：没装 Playwright 时用机器自带的 Chrome（同下面克制表那几条），都没有才跳过 */
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：人当庄家——保留天气以后点「偷看下一张」、压到牌堆底，天气堆旁边列出看过的几张（#502）：在屏幕里，牌桌没有横向溢出`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(GAME_URL);
+    // 同上面 keptGame：第 3 轮轮到人做庄家天气行动，场上是雷鸣，堆顶的微光第 2 轮看过
+    await page.evaluate(() => {
+      const A = (g, side, type, extra) => CounterCards.act(g, side, Object.assign({ type }, extra || {}));
+      const g = CounterCards.newGame({ seed: "真浏览器偷看", deck: ["thunder", "glow", "heat", "snow", "acid", "sand", "phase"] });
+      A(g, "dealer", "weather", { op: "pass" });
+      A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+      A(g, "player", "check"); A(g, "dealer", "check");
+      A(g, "player", "reveal"); A(g, "player", "noNormal");
+      A(g, "dealer", "check"); A(g, "player", "check");
+      A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" });
+      A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+      A(g, "player", "check"); A(g, "dealer", "check");
+      A(g, "player", "skip", { card: "fire" });
+      if (g.stage === "normal") A(g, "player", "noNormal");
+      A(g, "dealer", "check"); A(g, "player", "check");
+      CounterCardsUI.start({ side: "dealer", level: "normal", game: g, fast: true });
+    });
+    await page.click('#cc-actions [data-cc="mode"][data-mode="keep"]', T);
+    await page.click('#cc-actions [data-cc="weather"][data-op="peek"]', T);
+    await page.waitForSelector("#cc-board .cc-peekcard", T);
+    await page.click('#cc-actions [data-cc="place"][data-where="bottom"]', T);
+    await page.waitForSelector('#cc-board .cc-seen [data-at="bottom"]', T);
+    const m = await page.evaluate(() => {
+      const box = document.querySelector("#cc-board .cc-seen"), r = box.getBoundingClientRect(), deck = document.querySelector("#cc-board .cc-deck").getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, vw: innerWidth, deckRight: deck.right, deckTop: deck.top, deckBottom: deck.bottom, top: r.top, bottom: r.bottom,
+        rows: [...box.querySelectorAll(".cc-seen-row")].map(x => x.textContent.replace(/\s+/g, "")), overflow: document.getElementById("scr-cc").scrollWidth - innerWidth };
+    });
+    assert.deepEqual(m.rows, ["堆顶往下微光", "堆底往上酷暑"]);
+    assert.ok(m.width > 0 && m.left >= 0 && m.right <= m.vw, `「你看过的」在屏幕里：${JSON.stringify(m)}`);
+    assert.ok(m.left >= m.deckRight - 1 || m.top >= m.deckBottom - 1, `摆在天气堆旁边（右边或下面），不盖住天气堆：${JSON.stringify(m)}`);
+    assert.ok(m.overflow <= 1, "牌桌没有横向溢出：" + m.overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
 
 /* ---------- 真浏览器（没装 Playwright 时跳过） ---------- */
 function findPlaywright() {
