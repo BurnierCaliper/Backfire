@@ -17,6 +17,8 @@
  *   const w = Casino.wallet(存档里的钱包或 null)   → 补齐字段
  *   Casino.welcome(w)                            → 第一次玩：送赠送筹码（只送一次），返回说明
  *   Casino.chips(w)                              → { gift, normal, total, seat } 都按枚（可能有零头）
+ *   Casino.buy(w, 枚数, 现有奎支) / Casino.sell(w, 枚数)   → 兑换：200 奎支买 1 枚（奎支不够不能买），1 枚卖 190 奎支（只卖普通筹码的整枚）；
+ *                                                  奎支由各模式自己扣 / 加（返回的 cost / gain）
  *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌（庄家 = AI 或主持人，筹码无限），返回这一局
  *   Casino.leave(w)                              → 离桌：桌上剩下的筹码按倍率回钱包（输了先扣赠送的），返回结算
  */
@@ -26,7 +28,9 @@
   /* ---------- 配置：所有数值都在这里 ---------- */
   const CASINO_CONFIG = {
     gift: 50,          // 第一次玩赠送的筹码（每个钱包只送一次）
-    face: 200          // 1 枚筹码的面值（奎支）：赌场桌按桌子倍率换算都按这个
+    face: 200,         // 1 枚筹码的面值（奎支）：赌场桌按桌子倍率换算都按这个
+    buy: 200,          // 兑换：买 1 枚筹码付多少奎支
+    sell: 190          // 兑换：卖 1 枚筹码得多少奎支（和买价的差价是庄家抽成）；只有普通筹码能卖，赠送的不能
   };
 
   const CC = () => {
@@ -73,6 +77,36 @@
       seat: s ? { kind: s.kind, table: s.table, name: s.name, buyIn: s.buyIn, rate: s.rate, stake: toChips(s.stake.gift + s.stake.normal), over: !!(s.game && s.game.over) } : null
     };
   }
+  /* ---------- 兑换：奎支 ⇄ 筹码（只按整枚） ---------- */
+  function count(n) {
+    const k = Number(n);
+    if (!Number.isInteger(k) || k <= 0) fail("要换的筹码数是正整数");
+    return k;
+  }
+  /** 买筹码：n 枚，每枚 CASINO_CONFIG.buy 奎支，进普通筹码。kuizhi = 付钱的那一方现在有多少奎支，不够就不能买。
+   *  奎支由调用的模式自己扣（返回的 cost）。返回 { chips, cost, text } */
+  function buy(w, n, kuizhi) {
+    wallet(w);
+    const k = count(n), cost = k * CASINO_CONFIG.buy, have = Math.floor(Number(kuizhi) || 0);
+    if (have < cost) fail(`奎支不够：买 ${k} 枚筹码要 ${cost} 奎支，现有 ${have}`);
+    w.normal += k * CASINO_CONFIG.face;
+    return { chips: k, cost, text: `买了 ${k} 枚筹码，花掉 ${cost} 奎支。` };
+  }
+  /** 现在能卖几枚：普通筹码的整枚数（赠送的不能卖，零头不能卖，桌上押着的不算） */
+  function sellable(w) {
+    wallet(w);
+    return Math.max(0, Math.floor(w.normal / CASINO_CONFIG.face));
+  }
+  /** 卖筹码：n 枚普通筹码，每枚得 CASINO_CONFIG.sell 奎支（奎支由调用的模式自己加：返回的 gain）。返回 { chips, gain, text } */
+  function sell(w, n) {
+    wallet(w);
+    const k = count(n), can = sellable(w);
+    if (k > can) fail(can ? `只能卖 ${can} 枚：赠送的筹码不能换成奎支` : "没有能卖的筹码：赠送的筹码不能换成奎支");
+    const gain = k * CASINO_CONFIG.sell;
+    w.normal -= k * CASINO_CONFIG.face;
+    return { chips: k, gain, text: `卖了 ${k} 枚筹码，得 ${gain} 奎支。` };
+  }
+
   /** 从钱包里拿出 value 面值押上桌：先拿赠送的，再拿普通的。返回各拿了多少 */
   function take(w, value) {
     const g = Math.min(w.gift, value);
@@ -130,7 +164,7 @@
     return res;
   }
 
-  const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, tables, sit, leave, payBack };
+  const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, tables, sit, leave, payBack };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Casino = api;
 })(typeof window !== "undefined" ? window : globalThis);

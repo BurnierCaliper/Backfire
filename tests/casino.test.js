@@ -169,3 +169,63 @@ test("打到一半的牌局跟着钱包存档：存了再读，接着打完、�
   assert.equal(K.chips(w2).gift, 50);
   assert.equal(K.chips(w2).normal, (vip.minBuyIn + 4) * vip.rate / FACE);
 });
+
+/* ---------- 兑换：200 奎支买 1 枚，1 枚卖 190 奎支 ---------- */
+
+test("兑换：200 奎支买 1 枚筹码（进普通筹码）；奎支不够不能买，钱包不动", () => {
+  assert.equal(K.CONFIG.buy, 200);
+  const w = K.wallet(null);
+  const r = K.buy(w, 3, 600);
+  assert.deepEqual([r.chips, r.cost], [3, 600]);
+  assert.match(r.text, /买了 3 枚筹码，花掉 600 奎支/);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, 3]);
+  assert.throws(() => K.buy(w, 1, 199), /奎支不够/);
+  assert.throws(() => K.buy(w, 2, 399), /奎支不够/);
+  assert.equal(K.chips(w).normal, 3, "没买成不动钱包");
+  assert.throws(() => K.buy(w, 0, 1000), /正整数/);
+  assert.throws(() => K.buy(w, 1.5, 1000), /正整数/);
+  assert.throws(() => K.buy(w, -1, 1000), /正整数/);
+});
+
+test("兑换：1 枚普通筹码卖 190 奎支；赠送的不能卖、零头不能卖", () => {
+  assert.equal(K.CONFIG.sell, 190);
+  const w = K.wallet(null);
+  K.welcome(w);                                        // 赠送 50 枚
+  assert.equal(K.sellable(w), 0);
+  assert.throws(() => K.sell(w, 1), /赠送的筹码不能换成奎支/);
+  K.buy(w, 2, 400);
+  assert.equal(K.sellable(w), 2);
+  assert.throws(() => K.sell(w, 3), /只能卖 2 枚/);
+  const r = K.sell(w, 2);
+  assert.deepEqual([r.chips, r.gain], [2, 380]);
+  assert.match(r.text, /卖了 2 枚筹码，得 380 奎支/);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [50, 0]);
+  // 零头（后巷小桌赢来的 0.15 枚）不能卖
+  const w2 = K.wallet({ gifted: true, gift: 0, normal: Math.round(1.15 * FACE) });
+  assert.equal(K.sellable(w2), 1);
+  K.sell(w2, 1);
+  assert.equal(K.chips(w2).normal, 0.15);
+  assert.equal(K.fmt(w2.normal), "0.15");
+  assert.throws(() => K.sell(w2, 1), /没有能卖的筹码/);
+  // 欠着赌场的（普通筹码是负数）：买来的先补上欠的
+  const w3 = K.wallet({ gifted: true, gift: 0, normal: -FACE });
+  K.buy(w3, 2, 400);
+  assert.equal(K.chips(w3).normal, 1);
+});
+
+test("用赠送筹码赢了一局以后：赢到的部分能卖成奎支，赠送的部分不能卖", () => {
+  const vip = table("vip");
+  const w = K.wallet(null);
+  K.welcome(w);                                        // 只有赠送的 50 枚
+  const g = K.sit(w, "vip", vip.minBuyIn, { deck: PHASE_FIRST });
+  phaseAllIn(g, "flesh", "fire");
+  dealerFoldsRest(g);
+  K.leave(w);
+  const won = (vip.minBuyIn + 4) * vip.rate / FACE;    // 赢来的（普通筹码）
+  assert.equal(K.sellable(w), won);
+  const r = K.sell(w, won);
+  assert.equal(r.gain, won * 190);
+  assert.equal(K.chips(w).gift, 50);
+  assert.throws(() => K.sell(w, 1), /赠送的筹码不能换成奎支/, "赠送的 50 枚一枚也卖不了");
+  assert.equal(K.chips(w).gift, 50);
+});
