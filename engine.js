@@ -607,7 +607,7 @@ function weatherDamagePct(weather, element) {
       return 0;
     case "acid":
       if (element === "acid" || element === "electric") return 0.25;
-      if (element !== "acid" && element !== "electric" && element !== "energy") return -0.25;
+      if (element !== "acid" && element !== "electric" && element !== "energy" && element !== "harmonic") return -0.25;
       return 0;
     case "thunder":
       if (element === "electric" || element === "energy") return 0.25;

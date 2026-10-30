@@ -370,6 +370,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **酸雨也豁免谐波的 −25%**（主人 10/30：谐波是后来加的属性，酸雨的豁免当时漏了它；engine.js · `weatherDamagePct`；codex.js 酸雨词条；测试 tests/counter-cards.test.js）
+  - **以前**：酸雨里除酸液、闪电、能量外所有伤害 −25%，谐波也吃这 −25%。
+  - **现在**：除酸液、闪电、能量、谐波外所有伤害 −25%。谐波在酸雨里和能量一样不增不减（打装甲照旧另 +25%）。克制表、High Flux 计分直接调 `weatherDamagePct`，一起变。
 - **High Flux 分档赔付只留两档：删掉「差 ±3 及以上」**（主人 10/30 在 PR #486 的评论；counter-cards.js · `CC_CONFIG.tierExtra` / `tierOf` / `extraOf` / `settle` / `resultText`；counter-cards-ui.js · `rulesHtml` / `outcomeOf` / `bannerHtml`；测试：tests/counter-cards.test.js、tests/counter-cards-ui.test.js）
   - **以前**：三档：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额的 0.5 倍；差 3 及以上再赔 1 倍。但单轮分差最多 ±2，第 3 档永远打不出来。
   - **现在**：只有差 1、差 2 两档（`tierExtra` 改成 `[0, 0, 0.5]`）。万一分差超过 2，按差 2 算。界面上的规则说明、结算文字不再写「差 3」。细节见下面 High Flux 那一条的「分档赔付只留两档」。
