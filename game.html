@@ -24,6 +24,7 @@
   <link rel="stylesheet" href="weather-fx.css" />
   <link rel="stylesheet" href="pause-menu.css" />
   <link rel="stylesheet" href="counter-cards.css" />
+  <link rel="stylesheet" href="counter-cards-guess.css" />
   <!-- 新画面（HD-2D 战场，#261）：战场顶栏的开关开着才用到。样式的类名都是 hd2d- / pl- 开头，关着时一条都套不上；
        场景和 three.js 打成了一个普通脚本 hd2d/hd2d-scene.bundle.js（tools/build-hd2d.js），开了以后 hd2d/hd2d-field.js 才加载，直接双击打开也能用 -->
   <link rel="stylesheet" href="hd2d/hd2d.css" />
@@ -64,6 +65,7 @@
         <button class="t-btn" id="t-growth"><b>长线养成</b><small id="t-growth-sub">独立存档 · 不影响普通单局</small></button>
         <button class="t-btn" id="t-training"><b>训练场</b><small>单人对训练假人手动打 8 回合，记每回合伤害，和自动搜出来的输出循环对照</small></button>
         <button class="t-btn" id="t-cc"><b>High Flux</b><small>赌桌小游戏：扮演庄家或玩家，和 AI 打 5 轮暗牌，按克制表和天气定输赢</small></button>
+        <button class="t-btn" id="t-ccg"><b>High Flux · 猜大猜小</b><small>黑市玩法：庄家盖三张牌，分三轮押这一手的得分 −2 … +2，赔率按剩下的组合算</small></button>
       </div>
     </div>
     <div class="t-panel" id="t-panel-online" data-view="online" hidden>
@@ -86,6 +88,19 @@
       <aside class="cc-side" id="cc-side"></aside>
       <div class="cc-tip" id="cc-tip" role="tooltip" hidden></div>
       <div class="cc-banner" id="cc-banner" hidden></div>
+    </div>
+  </div>
+</section>
+<!-- High Flux 黑市玩法：猜大猜小（#489）。规则 counter-cards-guess.js，画面由 counter-cards-guess-ui.js 填进下面这几块（牌面、按钮、布局借用 counter-cards.css） -->
+<section class="scr-cc scr-ccg" id="scr-ccg" hidden>
+  <div class="cc-wrap">
+    <div class="cc-setup" id="ccg-setup"></div>
+    <div class="cc-game" id="ccg-game" hidden>
+      <header class="cc-top" id="ccg-top"></header>
+      <div class="cc-table"><div class="cc-fx" id="ccg-fx" aria-hidden="true"></div><div class="cc-board ccg-board" id="ccg-board"></div></div>
+      <div class="cc-actions" id="ccg-actions" aria-live="polite"></div>
+      <aside class="cc-side" id="ccg-side"></aside>
+      <div class="cc-banner" id="ccg-banner" hidden></div>
     </div>
   </div>
 </section>
@@ -916,6 +931,7 @@ window.GAME_MODE = true;
 <script src="matchup.js"></script>
 <script src="counter-cards.js"></script>
 <script src="counter-cards-ai.js"></script>
+<script src="counter-cards-guess.js"></script>
 <script src="cyberware.js"></script>
 <script src="daylight.js"></script>
 <script src="ledger.js"></script>
@@ -976,6 +992,7 @@ window.GAME_MODE = true;
 <script src="backpack-ui.js"></script>
 <script src="matchup-ui.js"></script>
 <script src="counter-cards-ui.js"></script>
+<script src="counter-cards-guess-ui.js"></script>
 <script src="cyberware-ui.js"></script>
 <script src="shop-sell-ui.js"></script>
 <script src="gacha-ui.js"></script>

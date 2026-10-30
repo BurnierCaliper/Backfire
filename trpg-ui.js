@@ -863,8 +863,27 @@
         「开店」后联机玩家的画面会同步弹出这家店，玩家用自己角色的钱包买；同一时间只开一家，「关店」后玩家画面收起。</p>
       <div class="tr-row">新商人 <input type="text" id="mc-name" placeholder="名字" style="width:140px"><button class="g-btn small" data-mc="new:">新建</button></div>
       ${front}
-      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}`;
+      <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}
+      ${blackMarketHtml()}`;
   };
+  /* ---------- 黑市赌命桌（#489，counter-cards-guess-ui.js）：主持人当庄，角色押坚毅；联机开着房间时不开 ---------- */
+  function blackMarketHtml() {
+    if (!window.CounterCardsGuessUI) return "";
+    return `<h3>黑市</h3>${CounterCardsGuessUI.blackMarketHtml(heroes().filter(h => !h.dead).map(h => ({ id: h.kit, name: h.name })),
+      { dealer: "主持人", death: "坚毅扣光即真正死亡（状态记成死亡）" })}`;
+  }
+  /** 上桌：每一手结算后把账交给规则（trpg 指令 blackMarket：扣坚毅、扣光真死、发奖，记录照常写进探索记录）；离桌回到探索画面 */
+  function openBlackMarket(kit) {
+    const u = heroes().find(h => h.kit === kit);
+    if (!u) return;
+    try {
+      CounterCardsGuessUI.startLife({
+        seat: { id: kit, name: u.name }, dealer: "主持人",
+        settle: (bill) => { act(ruleCommand("blackMarket", { kit, bill })); const now = heroes().find(h => h.kit === kit); return { dead: !!(now && now.dead) }; },
+        back: () => { Screens.show("trpg"); render(); }
+      });
+    } catch (e) { log.push({ stamp: stampNow(), lines: ["没做成：" + e.message] }); render(); }
+  }
   function merchantEditorHtml(m) {
     const groups = [];
     HANDBOOK_SHOP.forEach(r => { if (!groups.includes(r.group)) groups.push(r.group); });
@@ -898,6 +917,7 @@
     const open = trpgMerchantOpenNow();
     P.querySelectorAll("[data-mbuy]").forEach(b => { b.onclick = () => { if (window.Sfx) Sfx.ui("coin"); act(ruleCommand("merchantBuy", { id: open.id, key: b.dataset.mbuy, qty: Number((P.querySelector(`[data-mq="${b.dataset.mbuy}"]`) || {}).value) || 1 })); }; });
     P.querySelectorAll("[data-mredeem]").forEach(b => { b.onclick = () => act(ruleCommand("merchantRedeem", { id: open.id, item: b.dataset.mredeem })); });
+    P.querySelectorAll("[data-ccg-black]").forEach(b => { b.onclick = () => openBlackMarket(b.dataset.ccgBlack); });
     if (!merchantEdit) return;
     const m = merchantEdit;
     P.querySelectorAll("[data-me]").forEach(el => { el.oninput = () => { m[el.dataset.me] = el.type === "number" ? Number(el.value) || 0 : el.value; }; });
