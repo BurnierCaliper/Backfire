@@ -433,7 +433,7 @@
   }
 
   const ROLE_NAME = { primary: "主职责", secondary: "副职责" };
-  const layerName = (t) => (typeof LAYER_NAMES !== "undefined" && LAYER_NAMES[t]) || ({ flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" })[t] || t;
+  const layerName = (t) => (typeof LAYER !== "undefined" && LAYER[t]) || t;   // 层名只读 engine.js · LAYER（#510：全项目只留一份）
   function layersOf(u) {
     return (u.layers || []).map(l => ({
       type: l.type, name: layerName(l.type),

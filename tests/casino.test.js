@@ -106,7 +106,7 @@ test("离桌结算：赢来的进普通筹码，押上去的赠送筹码原样�
   const w = K.wallet(null);
   K.welcome(w);                                        // 赠送 50 枚
   const g = K.sit(w, "hall", 40, { deck: PHASE_FIRST });   // 买入 40 枚 = 钱包 10 枚，入场费另扣
-  phaseAllIn(g, "flesh", "fire");                      // 相位全押：火打血肉 +1，玩家翻倍
+  phaseAllIn(g, "flesh", "fire");                      // 相位全押：火打肉体 +1，玩家翻倍
   dealerFoldsRest(g);                                  // 后面四轮庄家都弃牌：玩家每轮多赢 1 枚底注
   assert.equal(g.over, true);
   assert.equal(g.final.chips.player, 40 * 2 + 4);

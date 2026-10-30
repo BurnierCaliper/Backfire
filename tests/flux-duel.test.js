@@ -156,7 +156,7 @@ test("层牌每轮必出一张、元素牌每张整局只能用一次：用过�
   const L = D.legal(g, "a");
   assert.ok(L.length && L.every(o => o.type === "play"));
   assert.ok(!L.some(o => o.element === "fire"), "火用过了");
-  assert.ok(!L.some(o => o.layer === "flesh"), "血肉用过了");
+  assert.ok(!L.some(o => o.layer === "flesh"), "肉体用过了");
   assert.equal(L.length, 4 * 6, "4 张层牌 × 6 张元素牌");
   assert.throws(() => A(g, "a", "play", { layer: "armor", element: "fire" }), /不能这样做/);
   assert.throws(() => A(g, "a", "play", { layer: "flesh", element: "acid" }), /不能这样做/);
@@ -175,12 +175,12 @@ test("层牌每轮必出一张、元素牌每张整局只能用一次：用过�
 /* ---------- 计分、分档赔付 ---------- */
 
 test("结算：各自用自己的元素牌打对方的层牌（CounterCards.score，这一轮的天气），分高的赢；分差定分档：差 1 拿底池、差 2 输家再赔 0.5 倍、差 3 再赔 1 倍、差 4 按差 3", () => {
-  // 第 1 轮天气酷暑；甲出〔血肉〕〔火〕（第 4 个例子出〔灵体〕〔火〕），甲第一轮下注 4 枚、乙跟注，双方这一轮都押了 5 枚
+  // 第 1 轮天气酷暑；甲出〔肉体〕〔火〕（第 4 个例子出〔星灵〕〔火〕），甲第一轮下注 4 枚、乙跟注，双方这一轮都押了 5 枚
   const cases = [
-    { a: ["flesh", "fire"], b: ["sand", "physical"], sa: 1, sb: 0, tier: 1, extra: 0 },     // 火打沙 0 + 酷暑火 +1；物理打血肉 0
-    { a: ["flesh", "fire"], b: ["flesh", "physical"], sa: 2, sb: 0, tier: 2, extra: 2 },    // 火打血肉 克制 +1 + 酷暑 +1；5 × 0.5 向下取整
-    { a: ["flesh", "fire"], b: ["flesh", "ice"], sa: 2, sb: -1, tier: 3, extra: 5 },        // 冰打血肉 0 + 酷暑冰 −1
-    { a: ["spirit", "fire"], b: ["flesh", "ice"], sa: 2, sb: -2, tier: 3, extra: 5 }        // 冰打灵体 被克制 −1 + 酷暑 −1：分差 4 按差 3
+    { a: ["flesh", "fire"], b: ["sand", "physical"], sa: 1, sb: 0, tier: 1, extra: 0 },     // 火打沙尘 0 + 酷暑火 +1；物理打肉体 0
+    { a: ["flesh", "fire"], b: ["flesh", "physical"], sa: 2, sb: 0, tier: 2, extra: 2 },    // 火打肉体 克制 +1 + 酷暑 +1；5 × 0.5 向下取整
+    { a: ["flesh", "fire"], b: ["flesh", "ice"], sa: 2, sb: -1, tier: 3, extra: 5 },        // 冰打肉体 0 + 酷暑冰 −1
+    { a: ["spirit", "fire"], b: ["flesh", "ice"], sa: 2, sb: -2, tier: 3, extra: 5 }        // 冰打星灵 被克制 −1 + 酷暑 −1：分差 4 按差 3
   ];
   for (const x of cases) {
     const g = D.newGame({ seed: "tier", deck: DECK });
@@ -268,7 +268,7 @@ test("相位：第一轮下注后翻到相位，双方全押（上限 = 筹码�
   assert.equal(r.weather, "phase");
   assert.deepEqual(J(r.bets), { a: 30, b: 30 }, "按乙的 30 枚封顶");
   assert.equal(r.winner, "a");
-  assert.equal(r.tier, 1, "火打血肉 克制 +1，相位不加不减");
+  assert.equal(r.tier, 1, "火打肉体 克制 +1，相位不加不减");
   assert.equal(r.pot, 60);
   assert.equal(g.sides.a.chips, 80);
   assert.equal(g.sides.b.chips, 0);
@@ -401,7 +401,7 @@ test("亮牌开关：默认不亮——结算只公开胜负、分档和筹码�
   const r = g.results[0];
   assert.equal(r.shown, undefined);
   const text = g.log.find(e => e.t === "result").text;
-  assert.ok(!/亮牌|冰|火|血肉/.test(text), text);
+  assert.ok(!/亮牌|冰|火|肉体/.test(text), text);
   assert.equal(D.view(g, "a").reveal, false);
   assert.equal(D.view(g, "b").results[0].shown, undefined);
   const was = C.duel.reveal;
@@ -410,7 +410,7 @@ test("亮牌开关：默认不亮——结算只公开胜负、分档和筹码�
     const h = D.newGame({ seed: "rv", deck: DECK });
     betFourRound(h, ["flesh", "fire"], ["flesh", "ice"]);
     assert.deepEqual(J(h.results[0].shown), { a: { layer: "flesh", element: "fire", score: 2 }, b: { layer: "flesh", element: "ice", score: -1 } });
-    assert.match(h.log.find(e => e.t === "result").text, /亮牌：甲〔血肉〕〔火〕得 \+2，乙〔血肉〕〔冰〕得 −1/);
+    assert.match(h.log.find(e => e.t === "result").text, /亮牌：甲〔肉体〕〔火〕得 \+2，乙〔肉体〕〔冰〕得 −1/);
     assert.equal(D.view(h, "b").reveal, true);
     assert.deepEqual(J(D.view(h, "b").results[0].shown.a), { layer: "flesh", element: "fire", score: 2 });
   } finally { C.duel.reveal = was; }

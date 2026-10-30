@@ -142,7 +142,7 @@ test("结算：押输了几点只交给接入层（lifeBill），画面里只有
 });
 
 test("押中高赔率的格子另给稀有材料：能量第二轮押 −2（32 倍 → 赌命桌 35 倍）给赫心结晶", () => {
-  // 能量打血肉、天气相位：找一张让结果是 −2 的组合
+  // 能量打肉体、天气相位：找一张让结果是 −2 的组合
   let deal = null;
   for (const w of C.weathers) for (const ly of C.layers) if (!deal && G.outcome("energy", ly, w) === -2) deal = { element: "energy", weather: w, layer: ly };
   assert.ok(deal, "能量有一种组合是 −2");

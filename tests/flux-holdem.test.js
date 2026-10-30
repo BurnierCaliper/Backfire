@@ -83,7 +83,7 @@ test("计分：只有一张天气时就是 CounterCards.score；两张天气的�
   }
   // 电打护盾：克制 +1 + 酸雨里电 +1 + 雷鸣里电 +1 = +3（不设上限）
   assert.equal(X.scoreStack("electric", "shield", ["acid", "thunder"]), 3);
-  // 火打血肉：克制 +1 + 酷暑 +1 + 酸雨里火 −1 = +1
+  // 火打肉体：克制 +1 + 酷暑 +1 + 酸雨里火 −1 = +1
   assert.equal(X.scoreStack("fire", "flesh", ["heat", "acid"]), 1);
   // 没有微光：两张天气各自的修正相加，克制那一项不变
   for (const el of C.elements) for (const ly of C.layers) {
@@ -92,14 +92,14 @@ test("计分：只有一张天气时就是 CounterCards.score；两张天气的�
 });
 
 test("计分：微光反转克制表（能量的克制不反转），也反转另一张天气给所有元素的修正（含给能量的、酸雨打装甲那一项），微光自己给能量的 +1 保留", () => {
-  // 火打血肉，酷暑 + 微光：克制 +1 反转成 −1；酷暑给火的 +1 反转成 −1；微光不给火修正 → −2
+  // 火打肉体，酷暑 + 微光：克制 +1 反转成 −1；酷暑给火的 +1 反转成 −1；微光不给火修正 → −2
   assert.equal(X.scoreStack("fire", "flesh", ["heat", "glow"]), -2);
-  // 能量打灵体，雷鸣 + 微光：能量的克制不反转 +1；雷鸣给能量的 +1 反转成 −1；微光自己给能量的 +1 保留 → +1
+  // 能量打星灵，雷鸣 + 微光：能量的克制不反转 +1；雷鸣给能量的 +1 反转成 −1；微光自己给能量的 +1 保留 → +1
   assert.equal(X.scoreStack("energy", "spirit", ["thunder", "glow"]), 1);
   // 火打装甲，酸雨 + 微光：克制 −1 反转成 +1；酸雨里火 −1、打装甲另 +1（合计 0）反转还是 0 → +1
   assert.equal(CC.score("fire", "armor", "acid"), -1);
   assert.equal(X.scoreStack("fire", "armor", ["acid", "glow"]), 1);
-  // 物理打沙，酸雨 + 微光：克制 0；酸雨里物理 −1 反转成 +1 → +1
+  // 物理打沙尘，酸雨 + 微光：克制 0；酸雨里物理 −1 反转成 +1 → +1
   assert.equal(X.scoreStack("physical", "sand", ["acid", "glow"]), 1);
   // 冰打装甲，酸雨 + 微光：酸雨打装甲那一项冰没有；酸雨里冰 −1 反转成 +1 → +1
   assert.equal(X.scoreStack("ice", "armor", ["acid", "glow"]), 1);
@@ -198,7 +198,7 @@ test("每轮：庄家偷看天气堆顶（只有庄家看得到，放哪公开�
   assert.equal(r.outcome, "showdown");
   assert.deepEqual(J(r.layers), ["flesh", "armor"]);
   assert.deepEqual(J(r.weathers), ["heat", "snow"]);
-  // 物理：血肉 0 + 雪天 +1；装甲 −1 + 雪天 +1 → +1。火：+1 +1 −1 = +1，−1 +1 −1 = −1 → 0。冰：0 −1 +1，0 −1 +1 → 0
+  // 物理：肉体 0 + 雪天 +1；装甲 −1 + 雪天 +1 → +1。火：+1 +1 −1 = +1，−1 +1 −1 = −1 → 0。冰：0 −1 +1，0 −1 +1 → 0
   assert.deepEqual(J(r.shown), { p1: { card: "fire", score: 0 }, p2: { card: "physical", score: 1 }, p3: { card: "ice", score: 0 } });
   assert.deepEqual(J(r.winners), ["p2"]);
   assert.equal(r.pot, 6);

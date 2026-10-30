@@ -816,7 +816,7 @@
   const craftForm = { kit: "", item: "", diff: "", helper: "" };
   /* ---------- 诊所：义体改造（trpg.js · trpgModifyHero；联机玩家的申请在上面，主持人同意才改）---------- */
   const cyberForm = {};   // kit → 正在填的方案（重画时保留）
-  const CY_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
+  const CY_LAYERS = ["armor", "shield", "sand"].map(k => [k, LAYER[k]]);   // [层 id, 层名]，层名读 engine.js · LAYER（#510：全项目只留一份）
   PANELS.clinic = function () {
     const reqs = (TRPG.cyberRequests || []).filter(r => r.status === "pending");
     const reqHtml = reqs.length ? `<h3>玩家的改造申请</h3>${reqs.map(r => {

@@ -137,7 +137,7 @@ test("点手牌盖下（盖下的那张在角上标一下）；第一轮下注�
   assert.deepEqual(J(game.weathers), ["heat"]);
   assert.equal(p.$("#fh-board .fh-community [data-weather]").dataset.weather, "heat", "第 1 张天气翻开");
   assert.match(p.$("#fh-actions").textContent, /乙正在想/, "第二轮从庄家左边（乙）开始");
-  // 第二轮都过牌：亮牌（层牌血肉、装甲，天气酷暑 + 微光）
+  // 第二轮都过牌：亮牌（层牌肉体、装甲，天气酷暑 + 微光）
   p.X.act(game, "p2", { type: "check" });
   p.UI.render();
   assert.match(p.$("#fh-actions").textContent, /第二轮下注（天气〔酷暑〕）（从庄家左边起）：还没人下注/);
@@ -148,7 +148,7 @@ test("点手牌盖下（盖下的那张在角上标一下）；第一轮下注�
   const fire = p.X.handScore("fire", ["flesh", "armor"], ["heat", "glow"]), phys = p.X.handScore("physical", ["flesh", "armor"], ["heat", "glow"]);
   assert.match(banner.textContent, new RegExp(`你〔火〕得 ${fmt(fire).replace("+", "\\+")}`));
   assert.match(banner.textContent, new RegExp(`乙〔物理〕得 ${fmt(phys).replace("+", "\\+")}`));
-  assert.match(banner.textContent, /层牌 〔血肉〕〔装甲〕 · 天气 酷暑 \+ 微光/);
+  assert.match(banner.textContent, /层牌 〔肉体〕〔装甲〕 · 天气 酷暑 \+ 微光/);
   assert.match(banner.textContent, fire > phys ? /主池 \d+ 枚归你/ : fire < phys ? /主池 \d+ 枚归乙/ : /由你、乙平分|由乙、你平分/);
   // 横幅上的克制表：按刚结算的那一轮的两张天气叠加
   click(banner.querySelector('[data-fh="chart"]'));
@@ -222,8 +222,8 @@ test("悬停预览：鼠标停在手里的元素牌上，写这张牌按场上�
   assert.ok(visible(tip));
   assert.match(tip.textContent, /天气还没翻开，按没有天气算/);
   assert.deepEqual(tipScores(p), J(p.X.cardChart("fire", []).cells.map(x => fmt(x.value))));
-  assert.match(tip.textContent, /对已翻开的公共层牌〔血肉〕合计 \+1/);
-  // 盖牌、第一轮下注打完，翻开酷暑：火打血肉 +2
+  assert.match(tip.textContent, /对已翻开的公共层牌〔肉体〕合计 \+1/);
+  // 盖牌、第一轮下注打完，翻开酷暑：火打肉体 +2
   p.X.act(game, "p2", { type: "play", card: "physical" });
   p.UI.render();
   click(mine(p, "fire"));
@@ -237,7 +237,7 @@ test("悬停预览：鼠标停在手里的元素牌上，写这张牌按场上�
   assert.ok(visible(tip));
   assert.match(tip.textContent, /天气 酷暑/);
   assert.deepEqual(tipScores(p), J(p.X.cardChart("ice", ["heat"]).cells.map(x => fmt(x.value))));
-  assert.match(tip.textContent, /对已翻开的公共层牌〔血肉〕合计 −1/);
+  assert.match(tip.textContent, /对已翻开的公共层牌〔肉体〕合计 −1/);
   // 侧栏的克制表按场上的天气
   click(p.$('#fh-side [data-fh="chart"]'));
   assert.match(p.$("#mu-overlay").textContent, /天气 酷暑/);

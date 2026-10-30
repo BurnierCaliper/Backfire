@@ -122,7 +122,7 @@ test("牌桌：自己的手牌两排正面朝上（5 张层牌、7 张元素牌�
   assert.equal(p.$$("#fd-board .fd-slots .fd-slot")[0].querySelectorAll(".cc-back").length, 2);
   playPair(p, "flesh", "physical");
   assert.equal(p.$$("#fd-board .fd-slots .fd-slot")[1].querySelectorAll(".cc-back").length, 2, "自己暗出的两张也是牌背");
-  assert.match(p.$$("#fd-board .fd-slots .fd-slot")[1].textContent, /血肉[\s\S]*物理/, "自己那两张在角上标一下");
+  assert.match(p.$$("#fd-board .fd-slots .fd-slot")[1].textContent, /肉体[\s\S]*物理/, "自己那两张在角上标一下");
   assert.equal(game.stage, "bet1");
   assert.ok(!p.$("#fd-board [data-weather]"));
   betThrough(p, game, "bet1");
@@ -151,7 +151,7 @@ test("出牌：层牌、元素牌各点一张选中（再点一下取消），�
   assert.equal(game.sides.a.layer, "sand");
   assert.equal(game.sides.a.element, "fire");
   assert.ok(!p.$("#fd-board .cc-me button.cc-can"), "出过了，手牌不能再点");
-  // 打完这一轮：火、沙不在手里了
+  // 打完这一轮：火、沙尘不在手里了
   for (let i = 0; i < 30 && game.round === 1; i++) {
     if (p.UI.state().banner) { click(p.$('#fd-banner [data-fd="dismiss"]')); continue; }
     click(p.$('#fd-actions [data-fd="check"]') || p.$('#fd-actions [data-fd="call"]') || p.$('#fd-actions [data-fd="pass"]') || p.$('#fd-actions [data-fd="noLoan"]'));
@@ -207,7 +207,7 @@ test("亮牌开关打开时（DUEL_CONFIG.reveal = true）：结算横幅写双�
     if (game.results.length) { p.UI.state().banner = game.results[0]; p.UI.render(); }
   }
   const text = p.$("#fd-banner").textContent;
-  assert.match(text, /你出〔血肉〕〔火〕得 \+2 · 对手出〔血肉〕〔冰〕得 −1/);
+  assert.match(text, /你出〔肉体〕〔火〕得 \+2 · 对手出〔肉体〕〔冰〕得 −1/);
   assert.ok(!/不亮牌/.test(text));
   assert.match(p.$("#fd-banner").textContent, /差 3 及以上：输家再赔出自己下注额的 1 倍/);
   p.UI.stop();
@@ -255,10 +255,10 @@ test("克制表（侧栏、横幅上的按钮）：格子是这一轮翻开的�
   assert.match(box.textContent, /Flux Duel 得分/);
   assert.match(box.textContent, /加分（正分）/);
   assert.match(box.textContent, /两边的分相减就是分差/);
-  // 第一格：火打血肉，还没翻开天气 +1
+  // 第一格：火打肉体，还没翻开天气 +1
   const fireFlesh = () => p.$('#mu-overlay [data-mu-cell="0:0"]').textContent.replace(/\s+/g, "");
   assert.match(fireFlesh(), /\+1$/);
-  // 翻开酷暑：开着的表跟着重画，火打血肉 +1 → +2
+  // 翻开酷暑：开着的表跟着重画，火打肉体 +1 → +2
   playPair(p, "flesh", "physical");
   betThrough(p, game, "bet1");
   assert.equal(game.weather, "heat");
@@ -266,7 +266,7 @@ test("克制表（侧栏、横幅上的按钮）：格子是这一轮翻开的�
   assert.match(box.textContent, /天气 酷暑/);
   assert.match(fireFlesh(), /\+2$/);
   const c = p.D.chart("heat");
-  assert.equal(c.cells[0][0].value, 2, "火打血肉，酷暑里 +2");
+  assert.equal(c.cells[0][0].value, 2, "火打肉体，酷暑里 +2");
   assert.equal(c.tag, "Flux Duel 得分");
   assert.deepEqual(J(c.legend), { adv: "加分（正分）", dis: "扣分（负分）", neu: "0 分" });
   p.UI.closeChart();

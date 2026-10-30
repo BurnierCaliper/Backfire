@@ -87,7 +87,7 @@ test("计分直接取游戏里的克制表和天气数值：7 元素 × 5 层 ×
   }
 });
 
-test("没有天气：克制 +1、劣势 −1、其余 0；物理打血肉是 0（垫牌）", () => {
+test("没有天气：克制 +1、劣势 −1、其余 0；物理打肉体是 0（垫牌）", () => {
   assert.equal(CC.score("fire", "flesh"), 1);
   assert.equal(CC.score("acid", "armor"), 1);
   assert.equal(CC.score("electric", "shield"), 1);
@@ -188,7 +188,7 @@ test("克制表（得分）：格式同 matchup.js · matchupChart（行 = 7 张
   assert.equal(CC.chart("没有这种天气").weather, "none");
 });
 
-test("克制表（得分）：格子的原因写这一分怎么来的——酷暑火打血肉 +1 → +2、微光反转、酸雨打装甲另 +1；表下面写这个天气的修正，相位写全押", () => {
+test("克制表（得分）：格子的原因写这一分怎么来的——酷暑火打肉体 +1 → +2、微光反转、酸雨打装甲另 +1；表下面写这个天气的修正，相位写全押", () => {
   const cellOf = (ch, el, ly) => ch.cells[C.elements.indexOf(el)][C.layers.indexOf(ly)];
   const none = CC.chart(null);
   assert.equal(cellOf(none, "fire", "flesh").reason, "克制 +1");
@@ -212,7 +212,7 @@ test("克制表（得分）：格子的原因写这一分怎么来的——酷�
   assert.ok(CC.chart("phase").notes.some(n => /^相位：不改得分；翻到相位的那一轮双方全押/.test(n)));
 });
 
-test("悬停预览（作者 10/29 在 PR #486 的评论）：cardChart(元素牌, 天气) 就是克制表 chart(天气) 里这张牌的那一行——打血肉、装甲、护盾、沙、灵体的得分和计分 score()、克制表完全一致（微光反转、酸雨打装甲也是）；常态、层牌没有", () => {
+test("悬停预览（作者 10/29 在 PR #486 的评论）：cardChart(元素牌, 天气) 就是克制表 chart(天气) 里这张牌的那一行——打肉体、装甲、护盾、沙尘、星灵的得分和计分 score()、克制表完全一致（微光反转、酸雨打装甲也是）；常态、层牌没有", () => {
   for (const w of ALL_WEATHER) {
     const ch = CC.chart(w);
     C.elements.forEach((el, i) => {
@@ -227,7 +227,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：cardChart(元素牌
     });
   }
   const row = (el, w) => J(CC.cardChart(el, w).cells.map(x => x.value));
-  assert.deepEqual(row("fire", null), [1, -1, 0, 0, -1], "没有天气：火克血肉、被装甲和灵体克");
+  assert.deepEqual(row("fire", null), [1, -1, 0, 0, -1], "没有天气：火克肉体、被装甲和星灵克");
   assert.deepEqual(row("fire", "heat"), [2, 0, 1, 1, 0], "酷暑：火 +1");
   assert.deepEqual(row("fire", "glow"), [-1, 1, 0, 0, 1], "微光：克制关系反转");
   assert.deepEqual(row("energy", "glow"), [1, 0, 1, 1, 2], "微光：能量不反转，另 +1");
@@ -260,7 +260,7 @@ test("开局：双方各 50 枚筹码；庄家 5 张层牌，玩家 7 张元素�
 
 /* ---------- 庄家天气行动 ---------- */
 
-test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到），放回原位或放到牌堆底，玩家看得到选了哪种", () => {
+test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到），放回原位或压到牌堆底，玩家看得到选了哪种", () => {
   const g = CC.newGame({ seed: "偷看", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
   assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["peek", "pass"]);
   A(g, "dealer", "weather", { op: "peek" });
@@ -275,7 +275,7 @@ test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到）�
   A(g, "dealer", "place", { where: "bottom" });
   assert.deepEqual(J(g.deck), ["heat", "snow", "acid", "thunder", "sand", "phase", "glow"]);
   const pv2 = CC.view(g, "player");
-  assert.ok(pv2.log.some(e => /偷看了天气堆顶的一张，放到了牌堆底/.test(e.text)));
+  assert.ok(pv2.log.some(e => /偷看了天气堆顶的一张，压到了牌堆底/.test(e.text)));
   assert.doesNotMatch(JSON.stringify(pv2), /glow|微光/);
   const dv2 = CC.view(g, "dealer");
   assert.equal(dv2.deckTop, null); assert.equal(dv2.deckBottom, "glow");
@@ -288,15 +288,177 @@ test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到）�
   assert.equal(CC.view(g2, "dealer").deckTop, "glow");
 });
 
-test("庄家天气行动：场上有天气时弃掉或保留；弃掉的天气离场", () => {
+test("庄家天气行动：场上有天气时弃掉或保留（保留以后还可以接着偷看：peek）；弃掉的天气离场", () => {
   const g = CC.newGame({ seed: "弃天气", deck: DECK });
-  quietRound(g, "flesh", "ice");                     // 第 1 轮翻出雷鸣（冰打血肉 0，平局滚存）
+  quietRound(g, "flesh", "ice");                     // 第 1 轮翻出雷鸣（冰打肉体 0，平局滚存）
   assert.equal(g.weather, "thunder");
-  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep"]);
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep", "peek"]);
   A(g, "dealer", "weather", { op: "discard" });
   assert.equal(g.weather, null);
   assert.deepEqual(J(g.gone), ["thunder"]);
   assert.ok(CC.view(g, "player").log.some(e => /庄家弃掉了场上的天气〔雷鸣〕/.test(e.text)));
+});
+
+/* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
+
+test("庄家天气行动（#502）：场上有天气时保留以后还能接着偷看下一张（peek = 保留 + 偷看），看完放回原位或压到牌堆底；不看就是 keep", () => {
+  const g = CC.newGame({ seed: "保留偷看", deck: DECK });
+  quietRound(g, "flesh", "ice");                     // 第 1 轮翻出雷鸣；堆里剩沙暴、微光、酷暑、雪天、酸雨、相位
+  assert.equal(g.weather, "thunder");
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.equal(g.weather, "thunder", "保留以后偷看：天气留在场上");
+  assert.deepEqual(J(g.gone), []);
+  assert.equal(g.stage, "dealerPeek");
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.where)), ["top", "bottom"]);
+  const dv = CC.view(g, "dealer");
+  assert.deepEqual(J(dv.peek), { card: "sand", where: null, at: 0 });
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.to === "dealer" && e.card === "sand" && e.text === "你偷看到天气堆顶是〔沙暴〕。"));
+  A(g, "dealer", "place", { where: "bottom" });
+  assert.deepEqual(J(g.deck), ["glow", "heat", "snow", "acid", "phase", "sand"]);
+  assert.equal(g.stage, "play");
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["sand"], unseen: 5 });
+  assert.equal(CC.view(g, "dealer").deckBottom, "sand");
+  // 放回原位
+  const g2 = CC.newGame({ seed: "保留偷看2", deck: DECK });
+  quietRound(g2, "flesh", "ice");
+  A(g2, "dealer", "weather", { op: "peek" }); A(g2, "dealer", "place", { where: "top" });
+  assert.equal(g2.weather, "thunder");
+  assert.deepEqual(J(g2.deck), ["sand", "glow", "heat", "snow", "acid", "phase"]);
+  assert.deepEqual(J(CC.view(g2, "dealer").deckSeen), { top: ["sand"], bottom: [], unseen: 5 });
+  assert.equal(CC.view(g2, "dealer").deckTop, "sand");
+  // 保留、不看（keep）：和以前一样，直接暗出
+  const g3 = CC.newGame({ seed: "保留不看", deck: DECK });
+  quietRound(g3, "flesh", "ice");
+  A(g3, "dealer", "weather", { op: "keep" });
+  assert.equal(g3.stage, "play");
+  assert.equal(g3.weather, "thunder");
+  assert.equal(g3.peek, null);
+  assert.deepEqual(J(CC.view(g3, "dealer").deckSeen), { top: [], bottom: [], unseen: 6 });
+});
+
+test("庄家天气行动（#502）：玩家只看得到庄家做了哪种操作（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌；view 里没有庄家看过的牌", () => {
+  const g = CC.newGame({ seed: "只看操作", deck: DECK });
+  quietRound(g, "flesh", "ice");                     // 雷鸣
+  A(g, "dealer", "weather", { op: "peek" });
+  let pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "keep" && e.text === "庄家保留了场上的天气〔雷鸣〕。"), "看得到庄家保留了");
+  assert.doesNotMatch(JSON.stringify(pv), /sand|沙暴/);
+  A(g, "dealer", "place", { where: "bottom" });
+  pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "peek" && e.where === "bottom" && e.text === "庄家偷看了天气堆顶的一张，压到了牌堆底。"));
+  assert.doesNotMatch(JSON.stringify(pv), /sand|沙暴/, "看不到压到牌堆底的是哪张");
+  for (const k of ["peek", "deckSeen", "deckTop", "deckBottom"]) assert.ok(!(k in pv), "玩家的 view 里没有 " + k);
+  assert.ok(pv.log.every(e => e.t !== "peekCard"), "偷看到的牌只记在庄家的私人记录里");
+  // 庄家自己看得到
+  const dv = CC.view(g, "dealer");
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.card === "sand"));
+  assert.deepEqual(J(dv.deckSeen.bottom), ["sand"]);
+});
+
+test("偷看按顺序往下看（#502）：每次看的是庄家自己还没看过的下一张——第 1 轮看了堆顶 A 放回原位，第 2 轮玩家暗弃跳过、A 还在堆顶，第 3 轮再偷看看到的是 A 下面的 B；B 压到堆底以后堆顶还是 A，玩家翻开的是真正的堆顶 A", () => {
+  const g = CC.newGame({ seed: "往下看", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
+  // 第 1 轮：没有天气，偷看堆顶的 A（微光），放回原位；玩家暗弃跳过
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.deepEqual(J(CC.view(g, "dealer").peek), { card: "glow", where: null, at: 0 });
+  A(g, "dealer", "place", { where: "top" });
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: ["glow"], bottom: [], unseen: 6 });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  checks(g); A(g, "player", "skip", { card: "fire" }); checks(g);
+  // 第 2 轮：庄家不动，玩家又暗弃跳过：A 还在堆顶
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+  checks(g); A(g, "player", "skip", { card: "acid" }); checks(g);
+  assert.equal(g.round, 3);
+  assert.equal(g.deck[0], "glow");
+  assert.equal(CC.view(g, "dealer").deckTop, "glow", "庄家还记得堆顶是 A");
+  // 第 3 轮：再偷看，看到的是 A 下面的 B（酷暑），不会又看一遍 A
+  A(g, "dealer", "weather", { op: "peek" });
+  const dv = CC.view(g, "dealer");
+  assert.deepEqual(J(dv.peek), { card: "heat", where: null, at: 1 });
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.card === "heat" && e.at === 1 && e.text === "你偷看到天气堆从上往下第 2 张是〔酷暑〕（上面 1 张你已经看过）。"));
+  // 压到堆底：压的是 B 这一张，A 还留在堆顶；庄家记得堆底那张是 B
+  A(g, "dealer", "place", { where: "bottom" });
+  assert.deepEqual(J(g.deck), ["glow", "snow", "acid", "thunder", "sand", "phase", "heat"]);
+  const dv2 = CC.view(g, "dealer");
+  assert.deepEqual(J(dv2.deckSeen), { top: ["glow"], bottom: ["heat"], unseen: 5 });
+  assert.equal(dv2.deckTop, "glow"); assert.equal(dv2.deckBottom, "heat");
+  const pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "peek" && e.at === 1 && e.text === "庄家偷看了天气堆从上往下第 2 张，压到了牌堆底。"));
+  assert.doesNotMatch(JSON.stringify(pv), /glow|微光|heat|酷暑/);
+  // 玩家翻开的总是真正的堆顶：A
+  A(g, "dealer", "play", { card: "spirit" }); A(g, "player", "play", { card: "harmonic" });
+  checks(g); A(g, "player", "reveal");
+  assert.equal(g.weather, "glow");
+  assert.deepEqual(J(g.deck), ["snow", "acid", "thunder", "sand", "phase", "heat"]);
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["heat"], unseen: 5 }, "翻开的 A 从看过的记录里拿掉，堆底的 B 还记着");
+  if (g.stage === "normal") A(g, "player", "noNormal");
+  checks(g);
+  // 第 4 轮：保留微光以后偷看，看的又是现在的堆顶（没看过）
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.deepEqual(J(CC.view(g, "dealer").peek), { card: "snow", where: null, at: 0 });
+});
+
+test("偷看按顺序往下看（#502）：天气堆里剩下的牌庄家都看过了就不能再偷看——场上有天气只能弃掉 / 保留，没有天气这一轮就没有天气行动", () => {
+  // 每轮都偷看、压到牌堆底，玩家翻开下一张：第 4 轮压完，堆里剩下的 4 张庄家全看过；玩家再翻开一张，剩 3 张也全看过
+  const deck = ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
+  const fourRounds = (g, last) => {
+    [["flesh", "ice"], ["sand", "physical"], ["spirit", "harmonic"], ["shield", "energy"]].forEach(([dc, pc], i) => {
+      A(g, "dealer", "weather", { op: "peek" });
+      assert.equal(g.peek.at, 0, `第 ${i + 1} 轮：前面看过的都压到了堆底，看的是堆顶`);
+      A(g, "dealer", "place", { where: "bottom" });
+      A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+      checks(g); A(g, "player", "reveal");
+      if (g.stage === "normal") { if (i === 3 && last) last(g); else A(g, "player", "noNormal"); }
+      checks(g);
+    });
+  };
+  const g = CC.newGame({ seed: "看完", deck });
+  fourRounds(g);
+  assert.equal(g.round, 5);
+  assert.equal(g.weather, "heat", "玩家翻开的是真正的堆顶（压到底的酷暑转了一圈回到堆顶）");
+  assert.deepEqual(J(g.deck), ["acid", "glow", "phase"]);
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["acid", "glow", "phase"], unseen: 0 });
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep"], "全看过了：保留以后不能再偷看");
+  assert.throws(() => A(g, "dealer", "weather", { op: "peek" }), /不能这样做/);
+  // 没有天气（第 4 轮用常态清掉了）：全看过了，庄家这一轮没有天气行动
+  const h = CC.newGame({ seed: "看完2", deck });
+  fourRounds(h, (x) => A(x, "player", "normal", { card: "fire" }));
+  assert.equal(h.round, 5);
+  assert.equal(h.weather, null);
+  assert.equal(h.stage, "play", "没有可选的天气行动：直接暗出");
+  assert.ok(CC.view(h, "player").log.some(e => e.t === "dw" && e.op === "none" && e.r === 5 && e.text === "场上没有天气、天气堆里剩下的 3 张庄家都看过了，庄家这一轮没有天气行动。"));
+});
+
+test("偷看按顺序往下看（#502）：随便合法地乱打 200 局，庄家看过的记录一直和天气堆对得上（top 是堆顶往下那几张，bottom 是最底下那几张）；每次偷看的都是第一张没看过的，看过的不会再看；保留以后偷看天气留在场上", () => {
+  const rng = CC.makeRng("往下看乱打");
+  const n = { peek: 0, deep: 0, kept: 0, bottom: 0 };
+  for (let i = 0; i < 200; i++) {
+    const g = CC.newGame({ seed: "P" + i });
+    for (let steps = 0; !g.over; steps++) {
+      assert.ok(steps < 400, "卡住了：" + g.stage);
+      const who = CC.toAct(g), side = who[Math.floor(rng() * who.length)];
+      const opts = CC.legal(g, side), o = opts[Math.floor(rng() * opts.length)];
+      const a = Object.assign({}, o);
+      if (o.min != null) a.amount = o.min;
+      const before = J(CC.view(g, "dealer").deckSeen), w = g.weather;
+      CC.act(g, side, a);
+      const s = CC.view(g, "dealer").deckSeen, d = g.deck;
+      assert.deepEqual(J(s.top), J(d.slice(0, s.top.length)), "top 是堆顶往下那几张");
+      assert.deepEqual(J(s.bottom), J(d.slice(d.length - s.bottom.length)), "bottom 是最底下那几张");
+      assert.equal(s.unseen, d.length - s.top.length - s.bottom.length);
+      assert.ok(s.unseen >= 0);
+      if (a.type === "weather" && a.op === "peek") {
+        n.peek++;
+        assert.ok(before.unseen > 0, "还有没看过的才能偷看");
+        assert.equal(g.peek.at, before.top.length, "看的是堆顶往下看过的几张后面那一张");
+        assert.ok(!before.top.includes(g.peek.card) && !before.bottom.includes(g.peek.card), "看过的不会再看");
+        if (g.peek.at > 0) n.deep++;
+        if (w) { n.kept++; assert.equal(g.weather, w, "保留以后偷看：天气还在场上"); }
+      }
+      if (a.type === "place" && a.where === "bottom") n.bottom++;
+    }
+  }
+  assert.ok(n.peek > 0 && n.deep > 0 && n.kept > 0 && n.bottom > 0, JSON.stringify(n));
 });
 
 /* ---------- 暗出 ---------- */
@@ -313,7 +475,7 @@ test("暗出：玩家只能出元素牌（常态不能当出牌），庄家出�
   const dv = CC.view(g, "dealer"), pv = CC.view(g, "player");
   assert.equal(dv.opp.played, true); assert.equal(dv.opp.card, undefined); assert.equal(dv.opp.hand, undefined);
   assert.doesNotMatch(JSON.stringify(dv), /harmonic|谐波|"normal"|"fire"/);
-  assert.doesNotMatch(JSON.stringify(pv), /spirit|灵体|"flesh"|"armor"/);
+  assert.doesNotMatch(JSON.stringify(pv), /spirit|星灵|"flesh"|"armor"/);
   assert.equal(pv.opp.handCount, 4);
   assert.equal(g.stage, "bet1");
   assert.equal(g.betting.toAct, "player");
@@ -329,8 +491,8 @@ test("下注：每轮最低下注额 = 轮数，低于最低额不行；第一�
   assert.equal(g.stage, "normal");                    // 翻出雷鸣：问要不要用常态
   A(g, "player", "noNormal");
   assert.equal(g.stage, "bet2"); assert.equal(g.betting.toAct, "dealer");
-  checks(g);                                          // 第 1 轮：冰打血肉、雷鸣，平局
-  quietRound(g, "sand", "physical");                  // 第 2 轮：沙暴，物理打沙 0，平局
+  checks(g);                                          // 第 1 轮：冰打肉体、雷鸣，平局
+  quietRound(g, "sand", "physical");                  // 第 2 轮：沙暴，物理打沙尘 0，平局
   toBet1(g, "spirit", "harmonic");                    // 第 3 轮
   assert.equal(g.round, 3);
   const bet = CC.legal(g, "player").find(o => o.type === "bet");
@@ -537,11 +699,11 @@ test("弃牌：立即判负，输掉自己已下的筹码，包括自己在滚�
 
 test("平局底池滚存到下一轮；第 5 轮打平，各自拿回自己的筹码（含滚存的那一份）", () => {
   const g = CC.newGame({ seed: "滚存", deck: DECK });
-  quietRound(g, "flesh", "ice");                      // 雷鸣：冰打血肉 0
-  toBet1(g, "sand", "physical");                      // 沙暴：物理打沙 0
+  quietRound(g, "flesh", "ice");                      // 雷鸣：冰打肉体 0
+  toBet1(g, "sand", "physical");                      // 沙暴：物理打沙尘 0
   A(g, "player", "bet", { amount: 2 }); call(g, "dealer");
   A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);
-  quietRound(g, "spirit", "harmonic");                // 微光：谐波打灵体 0
+  quietRound(g, "spirit", "harmonic");                // 微光：谐波打星灵 0
   quietRound(g, "shield", "energy", { dw: "discard" }); // 酷暑：能量打护盾 0
   assert.ok(g.results.every(r => r.outcome === "tie" && r.rollover));
   assert.equal(g.sides.player.pot, 6); assert.equal(g.sides.dealer.pot, 6);
@@ -557,7 +719,7 @@ test("手上的筹码押光了、平局滚存里还有自己的一份：下一�
   const g = CC.newGame({ seed: "押光", deck: DECK, playerChips: 12 });
   toBet1(g, "flesh", "ice");
   A(g, "player", "bet", { amount: 11 }); call(g, "dealer");
-  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 雷鸣：冰打血肉 0
+  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 雷鸣：冰打肉体 0
   // 玩家押光了：第二轮下注照常（以前按较少一方封顶在 0，整轮跳过），庄家先；押光的玩家能过牌（或借了再下注）
   assert.equal(g.stage, "bet2"); assert.equal(g.sides.player.chips, 0);
   A(g, "dealer", "check");
@@ -581,7 +743,7 @@ test("手上的筹码押光了、平局滚存里还有自己的一份：下一�
   call(g, "player");
   A(g, "player", "reveal"); A(g, "player", "noNormal");
   A(g, "dealer", "check"); A(g, "player", "check");
-  // 沙暴里能量打灵体 +1：玩家拿走底池（滚存 12 + 12，这一轮各 2）
+  // 沙暴里能量打星灵 +1：玩家拿走底池（滚存 12 + 12，这一轮各 2）
   const r = g.results[1];
   assert.equal(r.winner, "player"); assert.equal(r.pot, 28);
   assert.equal(g.sides.player.chips, 3 - 2 + 28 - 1); assert.equal(g.sides.dealer.chips, 38 - 2 - 1);   // 第 3 轮照常下底注
@@ -633,7 +795,7 @@ test("暗弃要给后面每一轮留够元素牌：7 张元素牌最多弃 2 张
 test("常态：每局一次，代价是暗弃一张元素牌，清除当前天气；场上没有天气时不能用", () => {
   const g = CC.newGame({ seed: "常态", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
   toBet1(g, "flesh", "fire"); checks(g);
-  A(g, "player", "reveal");                           // 翻出微光：火打血肉变成 −1
+  A(g, "player", "reveal");                           // 翻出微光：火打肉体变成 −1
   assert.equal(g.stage, "normal");
   assert.ok(CC.legal(g, "player").some(o => o.type === "normal" && o.card === "physical"));
   A(g, "player", "normal", { card: "physical" });
@@ -646,7 +808,7 @@ test("常态：每局一次，代价是暗弃一张元素牌，清除当前天�
   assert.ok(dv.log.some(e => /玩家打出常态（暗弃一张元素牌），清除了天气〔微光〕/.test(e.text)));
   assert.doesNotMatch(JSON.stringify(dv), /"physical"|〔物理〕/);
   checks(g);
-  assert.equal(g.results[0].winner, "player");        // 没有天气：火打血肉 +1
+  assert.equal(g.results[0].winner, "player");        // 没有天气：火打肉体 +1
   // 以后不再问常态
   toBet1(g, "armor", "acid"); checks(g);
   A(g, "player", "reveal");
@@ -684,7 +846,7 @@ test("相位：翻到相位双方全押，上限是筹码较少一方的全部�
   const r = g.results[0];
   assert.equal(r.allIn, true);
   assert.deepEqual(J(r.bets), { dealer: 20, player: 20 });
-  assert.equal(r.winner, "player");                   // 相位没有修正：火打血肉 +1
+  assert.equal(r.winner, "player");                   // 相位没有修正：火打肉体 +1
   assert.equal(r.tier, 1); assert.equal(r.extra, 0);
   assert.equal(g.sides.player.chips, 70);
   assert.equal(g.sides.dealer.chips, 0);
@@ -712,7 +874,7 @@ test("相位轮打平：各自退回自己下的筹码（含滚存的那一份�
   const g = CC.newGame({ seed: "相位平", deck: ["thunder", "phase", "heat", "snow", "acid", "sand", "glow"] });
   quietRound(g, "flesh", "ice");                      // 雷鸣：平局，滚存各 1
   toBet1(g, "sand", "physical"); checks(g);
-  A(g, "player", "reveal");                           // 相位：物理打沙 0
+  A(g, "player", "reveal");                           // 相位：物理打沙尘 0
   const r = g.results[1];
   assert.equal(r.allIn, true); assert.equal(r.outcome, "tie"); assert.equal(r.refund, true);
   assert.deepEqual(J(r.bets), { dealer: 49, player: 49 });
@@ -767,7 +929,7 @@ test("分档赔付只有两档（主人 10/30 删掉「差 3 及以上」）：t
   assert.doesNotMatch(text, /差 3/);
 });
 
-test("分档赔付（整局里）：酷暑下火打血肉差 2，庄家这一轮下了 5 枚 → 再赔 2 枚", () => {
+test("分档赔付（整局里）：酷暑下火打肉体差 2，庄家这一轮下了 5 枚 → 再赔 2 枚", () => {
   const g = CC.newGame({ seed: "差2", deck: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"] });
   toBet1(g, "flesh", "fire");
   A(g, "player", "bet", { amount: 1 }); call(g, "dealer");
@@ -782,7 +944,7 @@ test("分档赔付（整局里）：酷暑下火打血肉差 2，庄家这一轮
   // 公开的结算只有胜负、分档和筹码变动，不说谁出了什么
   const text = CC.view(g, "dealer").log.find(e => e.t === "result").text;
   assert.match(text, /玩家赢（差 2）/);
-  assert.doesNotMatch(text, /火|血肉/);
+  assert.doesNotMatch(text, /火|肉体/);
 });
 
 /* ---------- 借贷 ---------- */
@@ -843,7 +1005,7 @@ test("借贷（每轮开始）：不够「底注 + 最低下注」但没输光�
 
 test("借贷（下注时）：轮到自己下注、手上不够「要跟的 + 最低下注额」可以先借，借完还是自己下注；借来的不算这一轮的输赢", () => {
   const g = CC.newGame({ seed: "下注借", deck: DECK, playerChips: 8 });
-  // 第 1 轮：玩家下 4、庄家跟，雷鸣里冰打血肉平局，滚存
+  // 第 1 轮：玩家下 4、庄家跟，雷鸣里冰打肉体平局，滚存
   toBet1(g, "flesh", "ice");
   A(g, "player", "bet", { amount: 4 }); call(g, "dealer");
   A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);
@@ -863,7 +1025,7 @@ test("借贷（下注时）：轮到自己下注、手上不够「要跟的 + �
   assert.deepEqual(J(opts.find(o => o.type === "raise")), { type: "raise", min: 2, max: 3 });
   assert.ok(!opts.some(o => o.type === "borrow"), "够了就不能再借");
   A(g, "player", "raise", { amount: 3 }); call(g, "dealer");
-  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 沙暴：物理打沙 0
+  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 沙暴：物理打沙尘 0
   checks(g);                                          // 玩家押光了，第二轮下注照常（下注不封顶，#496）：都过牌
   const r = g.results[1];
   assert.equal(r.outcome, "tie");
@@ -910,7 +1072,7 @@ test("借贷不设上限（#496 第 3 条）：一局里总共能借多少没有
   assert.deepEqual(J(CC.legal(g, "player")), [{ type: "fold" }, { type: "borrow", min: 3, max: 60, step: 3, need: 61 }]);
   A(g, "player", "borrow", { amount: 57 });
   call(g, "player");
-  A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);   // 沙暴：冰打灵体 −1，庄家又赢
+  A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);   // 沙暴：冰打星灵 −1，庄家又赢
   assert.equal(g.results[1].winner, "dealer");
   // 一局借了 36 + 3 + 57 = 96 枚，每借 3 枚还 4 枚：要还 128 枚
   assert.deepEqual([g.sides.player.loan, g.sides.player.owe], [96, 128]);
@@ -984,7 +1146,7 @@ test("view：对方的手牌、暗出的牌、暗弃的牌都不在里面；自�
   assert.ok(pv.log.every(e => !e.to || e.to === "player"));
   assert.ok(dv.log.every(e => !e.to || e.to === "dealer"));
   for (const k of ["fire", "ice", "electric", "火", "冰", "〔电〕"]) assert.ok(!JSON.stringify(dv).includes(k), k);
-  for (const k of ["flesh", "armor", "血肉", "装甲"]) assert.ok(!JSON.stringify(pv).includes(k), k);
+  for (const k of ["flesh", "armor", "肉体", "装甲"]) assert.ok(!JSON.stringify(pv).includes(k), k);
   assert.deepEqual(J(pv.me.history.map(h => h.card)), ["ice", "electric"]);
 });
 

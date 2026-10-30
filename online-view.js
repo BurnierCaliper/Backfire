@@ -653,6 +653,9 @@
     if (out.side === "dealer") {
       const p = get(g, "peek"); out.peek = obj(p) ? { card: id(get(p, "card")), where: id(get(p, "where")) } : null;
       out.deckTop = id(get(g, "deckTop")); out.deckBottom = id(get(g, "deckBottom"));
+      // 看过的天气（#502，偷看按顺序往下看）：堆顶往下连续看过的几张、压到牌堆底的几张、还有几张没看过
+      const ds = get(g, "deckSeen");
+      out.deckSeen = obj(ds) ? { top: arr(get(ds, "top")).map(id).filter(Boolean).slice(0, CASINO_CAP.hand), bottom: arr(get(ds, "bottom")).map(id).filter(Boolean).slice(0, CASINO_CAP.hand), unseen: number(get(ds, "unseen")) || 0 } : null;
     }
     return out;
   }

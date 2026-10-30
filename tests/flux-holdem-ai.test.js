@@ -63,7 +63,7 @@ test("胜率（期望份额）：在 0–1 之间，平均份额 = 1 ÷ 还在�
   A(g, "p1", "place", { where: "top" });
   const v = X.view(g, "p1");
   assert.deepEqual(J(v.peek), { card: "heat", where: "top" }, "庄家知道第 1 张天气是酷暑");
-  // 第 1 张层牌血肉、第 1 张天气酷暑（庄家知道）：火打血肉 +2，冰打血肉 −1
+  // 第 1 张层牌肉体、第 1 张天气酷暑（庄家知道）：火打肉体 +2，冰打肉体 −1
   const fire = AI.equity(v, "fire", "hard"), ice = AI.equity(v, "ice", "hard");
   assert.equal(fire.fair, 0.5);
   assert.equal(fire.n, 1);

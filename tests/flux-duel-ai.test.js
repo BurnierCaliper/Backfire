@@ -79,18 +79,18 @@ test("AI 只按自己能看到的东西做决定：对方暗出的牌不一样�
 
 test("推理（不亮牌）：按胜负、分档推出对方用掉了哪张——困难记整局，普通只看最近一轮", () => {
   const g = D.newGame({ seed: "推理", deck: DECK });
-  // 第 1 轮酷暑：甲出〔血肉〕〔火〕赢了差 3——对方那一对只可能是〔血肉〕配〔冰〕或〔谐波〕
+  // 第 1 轮酷暑：甲出〔肉体〕〔火〕赢了差 3——对方那一对只可能是〔肉体〕配〔冰〕或〔谐波〕
   quietRound(g, ["flesh", "fire"], ["flesh", "ice"]);
   assert.equal(g.results[0].tier, 3);
   const v2 = D.view(g, "a");
   assert.deepEqual(J(AI.candidates(v2, v2.results[0]).map(x => x.join("|")).sort()), ["flesh|harmonic", "flesh|ice"]);
   for (const level of ["normal", "hard"]) {
     const bel = AI.belief(v2, level);
-    assert.equal(mass(bel, ([l]) => l === "flesh"), 0, level + "：血肉用掉了");
+    assert.equal(mass(bel, ([l]) => l === "flesh"), 0, level + "：肉体用掉了");
     assert.ok(mass(bel, ([, e]) => e === "ice") < mass(bel, ([, e]) => e === "fire"), level + "：冰、谐波一半可能用掉了");
   }
   assert.ok(Math.abs(mass(AI.belief(v2, "easy"), ([l]) => l === "flesh") - 0.2) < 1e-9, "简单不推理");
-  // 第 2 轮雪天对出一样的牌（打平，推不出血肉）：第 3 轮困难还记着血肉用掉了，普通只看第 2 轮
+  // 第 2 轮雪天对出一样的牌（打平，推不出肉体）：第 3 轮困难还记着肉体用掉了，普通只看第 2 轮
   quietRound(g, ["armor", "acid"], ["armor", "acid"]);
   const v3 = D.view(g, "a");
   assert.equal(mass(AI.belief(v3, "hard"), ([l]) => l === "flesh"), 0);

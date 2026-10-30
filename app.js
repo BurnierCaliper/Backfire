@@ -14895,7 +14895,7 @@ function runSkillInner(id, optRun) {
         const kind = roleSkillLv(a) >= 15 && fl && fl.picks && LAYER[fl.picks.layer] ? fl.picks.layer : "shield";
         if (kind === "shield") addShieldLayer(t, r.total, false);   // 生存职责给的护盾，不是川川的磁场护盾
         else addTempLayer(t, kind, r.total);                        // 其他种类：战斗内的临时血量，战后去掉
-        lines.push(`缓冲：${t.name} 获得 ${r.total} 点${kind === "shield" ? "护盾" : LAYER[kind]}（${r.text}）。`);
+        lines.push(`缓冲：${t.name} 获得 ${r.total} 点${LAYER[kind]}（${r.text}）。`);
       }
     } else if (id === "role_dome") {
       if (!roleSpend(a, "role_dome")) lines.push("防护罩本场已用完。");

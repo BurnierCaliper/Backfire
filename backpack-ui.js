@@ -5,7 +5,8 @@
   "use strict";
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const TABS = [["material", "材料"], ["consumable", "消耗品"], ["mod", "改装件"], ["cyber", "义体"], ["key", "关键道具"]];
-  const CYBER = { armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  const CYBER = ["armor", "shield", "sand", "spirit"];   // 义体改造换成的层；层名只读 engine.js · LAYER（#510：全项目只留一份），没加载规则文件时写层的 id
+  const layerName = (t) => (typeof LAYER !== "undefined" && LAYER[t]) || t;
   const ui = { tab: "material", sel: "" };
 
   /** 一个分类下的行：个人的在前（标「自己的」），公用的在后 */
@@ -24,7 +25,7 @@
     let body;
     if (ui.tab === "cyber") {
       body = model.inBattle ? `<p class="r-hint">战斗中看不了义体方案（回到路线图或休整时再看）。</p>`
-        : (model.cyber || []).map(c => `<li class="bp-row"><b>${esc(c.name)}</b><small>${esc(Object.keys(CYBER).filter(k => Number((c.current || {})[k])).map(k => `${CYBER[k]} ${c.current[k]}`).join(" · ") || "没有义体改造")} · 已用 ${esc(c.used)}/${esc(c.limit)}</small></li>`).join("");
+        : (model.cyber || []).map(c => `<li class="bp-row"><b>${esc(c.name)}</b><small>${esc(CYBER.filter(k => Number((c.current || {})[k])).map(k => `${layerName(k)} ${c.current[k]}`).join(" · ") || "没有义体改造")} · 已用 ${esc(c.used)}/${esc(c.limit)}</small></li>`).join("");
       body = body ? (body.startsWith("<p") ? body : `<ul class="bp-list">${body}</ul>`) : `<p class="r-hint">没有义体信息。</p>`;
     } else {
       const rows = rowsOf(model, ui.tab);

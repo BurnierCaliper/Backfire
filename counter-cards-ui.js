@@ -16,10 +16,14 @@
  * 悬停预览（作者 10/29 在 PR #486 的评论）：人当玩家时，鼠标停在手里的元素牌上（手机上长按）弹出一个小预览，写这张牌按场上天气
  *   打五种层各得几分（counter-cards.js · cardChart，就是克制表里这张牌的一行）；天气变了跟着变；只写这张牌自己的数，不碰庄家出的牌；
  *   预览不接鼠标、摆在手牌上面，不挡出牌；长按松手不算点击（不会把牌出掉）。
+ * 庄家天气行动（#502）：场上有天气时「弃掉天气」「保留天气」，点了保留接着出现「偷看下一张」「不看」（天气堆里还有没看过的牌才有）；
+ *   偷看按顺序往下看，人当庄家时天气堆旁边列出看过的那几张（堆顶往下 / 堆底往上，只有庄家看得到）。
+ * 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步（谁跟注 / 过牌 / 弃牌，AI 走的也停一下）→ 判定中（两张牌背轻轻抖、底池发光，不亮牌）→ 结算横幅；
+ *   点一下桌面直接看结算，时长在 UI_CONFIG.settle。规则层那一步已经结算完、开了下一轮，过渡中桌上停在结算之前（settleView）。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
- *   CounterCardsUI.start({ side: "player", level: "hard", seed, fast })   直接开一局（fast：AI 不等，测试用）
+ *   CounterCardsUI.start({ side: "player", level: "hard", seed, fast })   直接开一局（fast：AI 不等、结算前也不停，测试用）
  *   CounterCardsUI.start({ game, side: "player", level, casino: { label, againText, onChange, onLeave, onAgain } })
  *                                                        赌场桌（#487，casino-ui.js 打开）：顶栏「离桌」、总结算「再来一局 / 离桌」交回给模式，
  *                                                        牌局每走一步叫 onChange（模式存档）；不能换边 / 换难度
@@ -33,6 +37,7 @@
     maxDiscs: 12,          // 筹码堆最多画几枚
     chipsPerDisc: 5,       // 每枚圆片代表几枚筹码
     logLines: 14,          // 侧栏记录显示最近几条
+    logStick: 24,          // 侧栏记录离底部不到这么多像素算「在底部」：有新记录时接着贴底；往上翻得更多就停在原处（像素）
     // 克制表（得分）：入口按钮、暂停菜单那一项的说明
     chart: {
       label: "克制表",
@@ -48,6 +53,17 @@
       margin: 8,           // 离屏幕边至少多少像素
       head: "打五种层",
       foot: "正分你赢 · 负分庄家赢 · 0 平局"
+    },
+    // 结算前的过渡（主人 10/30 试玩反馈，#499）：① 最后一步 → ② 判定中 → 结算横幅；过渡中点一下桌面（或「直接看结算」）直接看结算。fast（测试用）不停
+    settle: {
+      lastMs: 900,         // ① 最后一步停多久：谁跟注 / 过牌 / 弃牌了，筹码推进底池的动画放完；AI 走的这一步也在桌上、操作栏里停这么久（毫秒）
+      judgeMs: 1200,       // ② 「判定中」停多久：底池、桌上两张牌背、场上天气留着，牌背轻轻抖、底池发光，不亮牌（毫秒）；弃牌不用判定，没有这一段
+      reducedJudgeMs: 500, // 开着「减少动态效果」：不抖、不发光，「判定中」缩短成这么久；① 的文字照样停 lastMs（毫秒）
+      verbs: { check: "过牌", call: "跟注", fold: "弃牌", bet: "下注", raise: "加注" },   // 座位上标的「刚走的这一步」
+      judge: "判定中",
+      judgeNote: "不亮牌：系统按克制表和场上天气直接判胜负",
+      skip: "直接看结算",
+      skipHint: "点一下桌面也能直接看结算"
     }
   };
   const CC = () => root.CounterCards;
@@ -58,6 +74,7 @@
   const $ = (id) => doc().getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[ch]);
   const signed = (n) => (n > 0 ? "+" + n : String(n));
+  const reduced = () => !!(root.matchMedia && root.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   /* ---------- 牌面 ---------- */
   // 层牌图标：和 icons.js 同样的贴纸画法（底下一层粗描边，上面一层层的颜色）
@@ -146,7 +163,8 @@
   /* ---------- 状态 ---------- */
   const SETUP = { side: "player", level: "normal" };
   let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的），
-                          //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击）、win（跟注后追加窗口的倒计时：{ key, until, sec, timer }） }
+                          //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击）、win（跟注后追加窗口的倒计时：{ key, until, sec, timer }）、
+                          //   settle（结算前的过渡，见 settleStart） }
   let bound = false;
 
   function show(name) {
@@ -170,6 +188,7 @@
     bind();
     stopTimer();
     stopWindow();
+    dropSettle();
     closeChart();
     stopTip();
     enterScreen();
@@ -181,12 +200,13 @@
     bind();
     stopTimer();
     stopWindow();
+    dropSettle();
     stopTip();
     const side = opt.side === "dealer" ? "dealer" : "player";
     const level = AI().LEVELS.indexOf(opt.level) >= 0 ? opt.level : "normal";
     const seed = String(opt.seed || ("cc" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
     const game = opt.game || CC().newGame(Object.assign({ seed }, opt.gameOpt || {}));
-    S = { game, human: side, ai: CC().other(side), level, rng: CC().makeRng(seed + "|ai"), seen: game.results.length, banner: null, mode: null, amount: null,
+    S = { game, human: side, ai: CC().other(side), level, rng: CC().makeRng(seed + "|ai"), seen: game.results.length, banner: null, settle: null, mode: null, amount: null,
       anim: { deal: true }, fast: !!opt.fast, timer: null, revealKey: "", msg: "", last: {}, holdUntil: opt.fast ? 0 : Date.now() + UI_CONFIG.dealMs };
     S.casino = opt.casino || null;   // 赌场桌（#487）：顶栏 / 总结算的按钮、每一步存档交给打开牌桌的模式
     SETUP.side = side; SETUP.level = level;
@@ -200,6 +220,7 @@
   function leave() {
     stopTimer();
     stopWindow();
+    dropSettle();
     closeChart();
     stopTip();
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: "none" });
@@ -354,14 +375,15 @@
 
   /* ---------- 推进：人做一步 → 看有没有新的结算 / 新翻的天气 → AI 接着走 ---------- */
   function humanAct(a) {
-    if (!S || S.game.over) return;
+    if (!S || S.game.over || S.settle) return;
+    const pre = CC().view(S.game, S.human);   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
     try { CC().act(S.game, S.human, a); } catch (e) { S.msg = e.message; render(); return; }
     S.mode = null; S.amount = null; S.msg = "";
-    afterChange();
+    afterChange(pre);
   }
-  function afterChange() {
+  function afterChange(pre) {
     const g = S.game;
-    if (g.results.length > S.seen) { S.seen = g.results.length; S.banner = g.results[g.results.length - 1]; }
+    if (g.results.length > S.seen) { S.seen = g.results.length; settleStart(g.results[g.results.length - 1], pre); }
     const key = g.revealed ? g.round + ":" + g.revealed : "";
     if (key && key !== S.revealKey) { S.revealKey = key; S.anim.reveal = g.revealed; }
     render();
@@ -376,7 +398,7 @@
   }
   function schedule() {
     stopTimer();
-    if (!S || S.banner || S.game.over) return;
+    if (!S || S.banner || S.settle || S.game.over) return;
     if (CC().toAct(S.game).indexOf(S.ai) < 0) return;
     if (S.fast) { aiStep(); return; }
     S.timer = setTimeout(aiStep, Math.max(UI_CONFIG.aiDelay, (S.holdUntil || 0) - Date.now()));
@@ -384,14 +406,16 @@
   function aiStep() {
     if (!S) return;
     S.timer = null;
-    if (S.banner || S.game.over) return;
+    if (S.banner || S.settle || S.game.over) return;
+    const pre = CC().view(S.game, S.human);
     if (!AI().step(S.game, S.ai, S.level, S.rng)) { render(); return; }   // 没走成（不该发生）：别一直重排
-    afterChange();
+    afterChange(pre);
   }
-  /** fast：AI 不等、马上走（测试 / 真浏览器测试用）；打开时把正在等的那一步也马上走掉 */
+  /** fast：AI 不等、马上走（测试 / 真浏览器测试用）；打开时把正在等的那一步也马上走掉，结算前的过渡也不等了 */
   function setFast(on) {
     if (!S) return;
     S.fast = !!on;
+    if (S.fast && S.settle) { settleEnd(); return; }
     schedule();
   }
 
@@ -423,12 +447,14 @@
     W.timer = setTimeout(tickWindow, ((left - 1) % 1000) + 1);
   }
   function stopWindow() { if (S && S.win) { if (S.win.timer) clearTimeout(S.win.timer); S.win = null; } }
-  /** 倒计时到了：关窗（还没表态的都算放弃追加），进入下一步 */
+  /** 倒计时到了：关窗（还没表态的都算放弃追加），进入下一步。第二轮下注的窗口关了就结算：结算前的过渡（#499）从关窗之前的画面接着画 */
   function expireWindow() {
     stopWindow();
-    if (!S || !CC().closeWindow(S.game)) return;
+    if (!S || S.settle) return;
+    const pre = CC().view(S.game, S.human);
+    if (!CC().closeWindow(S.game)) return;
     S.mode = null; S.amount = null; S.msg = "";
-    afterChange();
+    afterChange(pre);
   }
   /** 倒计时：数字（每秒改一次）+ 一条缩短的进度条（--sec 整个窗口多长、--gone 已经过去多久，重画时接着走） */
   function windowClock() {
@@ -436,6 +462,102 @@
     const left = windowLeft(), sec = S.win.sec * 1000;
     return `<div class="cc-window" style="--sec:${sec}ms;--gone:${left - sec}ms"><span class="cc-clock" role="timer" aria-label="追加窗口倒计时"><b class="cc-count">${Math.ceil(left / 1000)}</b> 秒</span>`
       + `<span class="cc-winbar" aria-hidden="true"><i></i></span></div>`;
+  }
+
+  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：① 最后一步 → ② 判定中 → 结算横幅 ----------
+   * 以前一看到新的结算就弹横幅，最后一步（尤其是 AI 走的）一闪就进了结算。现在先停在最后一步（谁跟注 / 过牌 / 弃牌、筹码推进底池），
+   * 再「判定中」（两张牌背轻轻抖、底池发光，不亮牌），最后才弹横幅；弃牌不用判定，① 之后直接弹。过渡中 AI 不走、人也没有按钮可点，
+   * 点一下桌面（或操作栏的「直接看结算」）直接看结算。时长在 UI_CONFIG.settle；开着「减少动态效果」时动画去掉、判定中缩短，① 的文字照样停。
+   * 跟注后的追加窗口（#496）：第二轮下注跟注后先开窗口倒计时，窗口关上（双方都不追加 / 到时间）才结算，所以过渡从关窗之后才开始，倒计时期间不会进过渡；
+   *   这时 ① 从开窗的那一下跟注写起（lastSteps）。
+   * S.settle = { res（这一轮的结算）, pre（做最后一步之前的画面）, steps（最后一步的记录）, logEnd（记录停在哪）, acted（座位上标的那一步）, phase: "last" | "judge", timer } */
+  function settleStart(res, pre) {
+    if (S.fast || !pre) { S.banner = res; return; }
+    const log = CC().view(S.game, S.human).log;
+    const end = log.findIndex(e => e.t === "result" && e.res && e.res.r === res.r);
+    const logEnd = end < 0 ? log.length : end;
+    const steps = lastSteps(log, pre.log.length, logEnd);
+    const st = S.settle = { res, pre, steps, logEnd, acted: actedOf(steps), phase: "last", timer: null };
+    const rv = steps.find(e => e.t === "pw" && e.op === "reveal");
+    if (rv) S.anim.reveal = rv.weather;   // 翻到相位直接全押结算：翻牌、闪光放在过渡里（以前一结算就看不到了）
+    st.timer = setTimeout(() => settleNext(st), UI_CONFIG.settle.lastMs);
+  }
+  function settleNext(st) {
+    if (!S || S.settle !== st) return;   // 已经跳过了、换了一局
+    if (st.phase === "last" && st.res.outcome !== "fold") {
+      const T = UI_CONFIG.settle;
+      st.phase = "judge";
+      render();
+      st.timer = setTimeout(() => settleNext(st), reduced() ? T.reducedJudgeMs : T.judgeMs);
+      return;
+    }
+    settleEnd();
+  }
+  /** 过渡放完（或点了跳过）：弹出结算横幅，赢家那边的筹码堆「收进来」 */
+  function settleEnd() {
+    const st = S && S.settle;
+    if (!st) return;
+    clearTimeout(st.timer);
+    S.settle = null;
+    S.banner = st.res;
+    S.anim.collect = st.res.winner;
+    render();
+    schedule();
+  }
+  /** 不放了（回设置页、换一局、离开牌桌）：停掉计时，当成已经弹出横幅（不画） */
+  function dropSettle() {
+    if (!S || !S.settle) return;
+    clearTimeout(S.settle.timer);
+    S.banner = S.settle.res;
+    S.settle = null;
+  }
+  /** 过渡中的画面：规则层这一步已经结算完、开了下一轮，桌上要停在「最后一步做完、还没结算」——
+   *  两边的筹码和底池 = 做这一步之前的画面 + 这一步推进底池的筹码（结算记下的这一轮下注额 res.bets 减去之前已经下的），
+   *  桌上两张牌背、场上天气、顶栏的轮数照这一轮；手牌、暗弃、天气堆照现在的（结算不动它们）；记录、每轮结算里还没有这一轮的结果 */
+  function settleView(v, st) {
+    const r = st.res, pre = st.pre;
+    const seat = (now, was, k) => Object.assign({}, now, { chips: was.chips == null ? null : was.chips - (r.bets[k] - was.bet), bet: r.bets[k], pot: was.pot });
+    const mine = v.me.history.filter(h => h.r === r.r).pop();
+    return Object.assign({}, v, {
+      round: r.r, over: false, stage: "settle", waiting: [], myTurn: false, legal: [], betting: null, loanAsk: null, peek: null, final: null,
+      allIn: r.allIn, pot: pre.me.pot + pre.opp.pot + r.bets.dealer + r.bets.player,
+      me: Object.assign(seat(v.me, pre.me, S.human), { card: mine ? mine.card : pre.me.card }),
+      opp: Object.assign(seat(v.opp, pre.opp, v.opponent), { played: true }),
+      results: v.results.slice(0, -1), log: v.log.slice(0, st.logEnd)
+    });
+  }
+  /** 最后一步的记录：记录里从 from 到结算那一条（logEnd）之前。追加窗口关了才结算的（这一步只记了一条「追加窗口关闭 / 到时间」）：
+   *  从开窗的那一下跟注写起——「庄家跟注 3 枚。追加窗口到时间了，没人加注。」，座位上标「跟注 3 枚」；开窗那一条（规则说明）不写 */
+  function lastSteps(log, from, logEnd) {
+    if (log[from] && log[from].t === "window" && log[from].op === "close") {
+      for (let i = from - 1; i > 0; i--) {
+        if (log[i].t === "window" && log[i].op === "open") { if (log[i - 1].t === "bet") from = i - 1; break; }
+      }
+    }
+    return log.slice(from, logEnd).filter(e => !(e.t === "window" && e.op === "open"));
+  }
+  /** 最后一步在座位上标一下：下注那一步写「跟注 1 枚」「过牌」「弃牌」，翻天气 / 暗弃 / 常态写做了哪种 */
+  function actedOf(steps) {
+    const e = steps.find(x => x.by && !x.to), V = UI_CONFIG.settle.verbs;
+    if (!e) return null;
+    const label = e.t === "bet" ? (V[e.op] || "") + (e.amount ? ` ${e.amount} 枚` : "")
+      : e.t === "pw" && e.op === "reveal" ? "翻开" + CC().weatherName(e.weather)
+      : e.t === "skip" ? "暗弃跳过" : e.t === "normal" ? "打出常态" : e.t === "play" ? "暗出" : "";
+    return label ? { side: e.by, label } : null;
+  }
+  /** 最后一步的记录（规则层写「玩家 / 庄家……」）：人自己做的改写成「你……」 */
+  function stepText(e) {
+    const me = sideName(S.human);
+    return e.by === S.human && e.text.indexOf(me) === 0 ? "你" + e.text.slice(me.length) : e.text;
+  }
+  /** 过渡中的操作栏：① 最后一步做了什么；② 判定中（最后一步还写着）。都有「直接看结算」 */
+  function settleHtml() {
+    const st = S.settle, T = UI_CONFIG.settle;
+    const last = st.steps.map(stepText).join(" ") || "这一轮的下注结束了。";
+    const head = st.phase === "judge"
+      ? `<p class="cc-prompt cc-judging">${esc(T.judge)}</p><p class="cc-info">${esc(last)} ${esc(T.judgeNote)}。</p>`
+      : `<p class="cc-prompt cc-last">${esc(last)}</p>`;
+    return `${head}<div class="cc-btns">${btn("skipSettle", esc(T.skip), { title: T.skipHint })}</div>`;
   }
 
   /* ---------- 画面 ---------- */
@@ -465,7 +587,7 @@
     return `<details class="cc-rules"><summary>${esc(C.name)} 规则</summary><ul>
       <li><b>牌</b>：庄家 ${C.layers.length} 张层牌（${C.layers.map(CC().cardName).join("、")}），每轮必须打出一张；玩家 ${C.elements.length} 张元素牌（${C.elements.map(CC().cardName).join("、")}）+ 1 张常态（每局一次）；天气堆 ${C.weathers.length} 张（${C.weathers.map(CC().weatherName).join("、")}），开局洗混，抽完就没了，新翻的天气顶替旧天气。</li>
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
-      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
+      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
       <li><b>下注不封顶</b>：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比你手上的还多时，要跟就先向主持方借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方封顶。</li>
       <li><b>跟注后追加</b>：一方跟注后有 ${C.callWindowSec} 秒追加窗口，双方都还可以加注或弃牌；有人加注就照常轮到对方跟注、加注或弃牌，对方跟注后再开一次窗口；${C.callWindowSec} 秒内没人动作，这个下注回合结束。窗口里的加注也算进每回合最多加注 ${C.maxRaises} 次，次数用完以后跟注直接结束。</li>
@@ -477,7 +599,7 @@
   }
   function render() {
     if (!S) return;
-    const v = CC().view(S.game, S.human);
+    const now = CC().view(S.game, S.human), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
     const app = $("cc-game");
     if (!app) return;
     app.dataset.weather = v.weather || "none";
@@ -488,7 +610,7 @@
     if (board) board.innerHTML = boardHtml(v);
     if (actions) actions.innerHTML = actionsHtml(v);
     tickWindow();    // 倒计时接着数（窗口开着才有）
-    if (side) side.innerHTML = sideHtml(v);
+    if (side) { const was = logScroll(side); side.innerHTML = sideHtml(v); stickLog(side, was); }
     if (banner) {
       const h = S.banner ? bannerHtml(S.banner, v) : v.over ? finalHtml(v) : "";
       banner.innerHTML = h;
@@ -511,6 +633,23 @@
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
   }
+  /** 庄家看过的天气（#502，偷看按顺序往下看）：放在天气堆旁边，只有人当庄家时画（view 里只有庄家有 deckSeen）。
+   *  堆顶往下：从堆顶数连续看过的几张；堆底往上：压到牌堆底的几张，第一张在最底下 */
+  function seenHtml(v) {
+    const s = v.deckSeen;
+    if (S.human !== "dealer" || !s || (!s.top.length && !s.bottom.length)) return "";
+    const mini = (w) => `<span class="cc-mini" style="--c:${weatherColor(w)}" data-weather="${w}">${root.Icons ? root.Icons.weather(w) : ""}${esc(CC().weatherName(w))}</span>`;
+    const row = (label, list, at) => (list.length ? `<span class="cc-seen-row" data-at="${at}"><i>${label}</i>${list.map(mini).join("")}</span>` : "");
+    return `<div class="cc-seen" title="你偷看过的天气，只有你看得到">
+        <small>你看过的（只有你看得到）</small>${row("堆顶往下", s.top, "top")}${row("堆底往上", s.bottom.slice().reverse(), "bottom")}
+        <small class="cc-seen-left">${s.unseen ? `还有 ${s.unseen} 张没看过` : "剩下的都看过了"}</small>
+      </div>`;
+  }
+  /** 庄家下一次偷看的是哪张：堆顶往下看过几张，就看那几张后面那一张（#502，不会重复看同一张） */
+  function nextPeekText(v) {
+    const n = v.deckSeen ? v.deckSeen.top.length : 0;
+    return n ? `下一张没看过的（从上往下第 ${n + 1} 张，上面 ${n} 张你看过了）` : "堆顶那张";
+  }
   function boardHtml(v) {
     const deal = !!S.anim.deal, me = v.me, opp = v.opp;
     // 整块重画时只给变了的东西放动画：筹码数变了才落一次，刚暗出的牌才飞上桌
@@ -518,6 +657,10 @@
     const anim = { opp: bump("oppChips", opp.chips), me: bump("myChips", me.chips), pot: bump("pot", v.pot),
       oppThrow: bump("oppThrow", v.round + ":" + opp.played) && opp.played, myThrow: bump("myThrow", v.round + ":" + me.card) && !!me.card };
     const oppName = sideName(v.opponent);
+    // 结算前的过渡：刚走的这一步标在座位上；判定中两张牌背轻轻抖、底池发光；弹出横幅时赢家那边的筹码堆「收进来」
+    const judging = !!(S.settle && S.settle.phase === "judge"), J = judging ? " cc-judging" : "";
+    const acted = (k) => (S.settle && S.settle.acted && S.settle.acted.side === k ? `<small class="cc-acted">${esc(S.settle.acted.label)}</small>` : "");
+    const collect = (k) => (S.anim.collect && S.anim.collect === k ? "cc-collect" : "");
     const oppHand = Array.from({ length: opp.handCount }, (_, i) => backHtml({ cls: deal ? "cc-deal" : "", delay: deal ? i : null })).join("");
     const myPlayable = playableSet(v);
     const myHand = me.hand.map((c, i) => {
@@ -532,34 +675,34 @@
     const potShare = me.pot + opp.pot;
     const flash = reveal ? `<div class="cc-flash" style="--c:${weatherColor(reveal)}" aria-hidden="true"></div>` : "";
     const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small>只有你看得到</small>${weatherCardHtml(v.peek.card)}</div>` : "";
-    const known = S.human === "dealer" && (v.deckTop || v.deckBottom)
-      ? `<small class="cc-known">${v.deckTop ? `堆顶：${esc(CC().weatherName(v.deckTop))}` : ""}${v.deckTop && v.deckBottom ? " · " : ""}${v.deckBottom ? `堆底：${esc(CC().weatherName(v.deckBottom))}` : ""}</small>` : "";
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}</div>
+        <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${acted(v.opponent)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
-        ${chipsHtml(opp.chips, { title: oppName + "的筹码", label: opp.infinite ? "庄家筹码无限" : "", anim: anim.opp })}
+        ${chipsHtml(opp.chips, { title: oppName + "的筹码", label: opp.infinite ? "庄家筹码无限" : "", anim: anim.opp, cls: collect(v.opponent) })}
       </div>
       <div class="cc-center">
         <div class="cc-wzone">
-          <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small>${known}</div>
+          <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small></div>
+          ${seenHtml(v)}
           <div class="cc-wnow">${weatherCardHtml(v.weather, { cls: reveal ? "cc-flip" : "" })}<small>场上天气</small></div>
           ${v.gone.length ? `<div class="cc-gone" title="离场的天气">${v.gone.map(w => `<span class="cc-mini" style="--c:${weatherColor(w)}">${root.Icons ? root.Icons.weather(w) : ""}${esc(CC().weatherName(w))}</span>`).join("")}</div>` : ""}
           ${peek}
         </div>
-        <div class="cc-pot${v.allIn ? " allin" : ""}">
+        <div class="cc-pot${v.allIn ? " allin" : ""}${J}">
           ${chipsHtml(v.pot, { cls: "cc-potstack", title: "底池", label: "底池", anim: anim.pot })}
           ${potShare ? `<small class="cc-roll">含滚存 ${potShare} 枚</small>` : ""}
           <span class="cc-bets"><span>${oppName}本轮 ${opp.bet}</span><span>你本轮 ${me.bet}</span></span>
         </div>
-        <div class="cc-slots">
+        <div class="cc-slots${J}">
           <div class="cc-slot">${opp.played ? backHtml({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }) : `<span class="cc-empty">${oppName}还没出牌</span>`}</div>
           <div class="cc-slot">${me.card ? backHtml({ mine: me.card, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }) : `<span class="cc-empty">你还没出牌</span>`}</div>
+          ${judging ? `<b class="cc-judge" aria-hidden="true">${esc(UI_CONFIG.settle.judge)}</b>` : ""}
         </div>
       </div>
       <div class="cc-seat cc-me">
-        ${chipsHtml(me.chips, { title: "你的筹码", anim: anim.me })}
+        ${chipsHtml(me.chips, { title: "你的筹码", anim: anim.me, cls: collect(S.human) })}
         <div class="cc-hand">${myHand || `<span class="cc-empty">手牌打完了</span>`}</div>
-        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}${loanTag(me, "你")}</div>
+        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}${loanTag(me, "你")}${acted(S.human)}</div>
       </div>`;
   }
   /** 向主持方借了多少、结束时要还多少（公开的） */
@@ -601,6 +744,7 @@
   }
   function actionsHtml(v) {
     const msg = S.msg ? `<p class="cc-msg" role="alert">${esc(S.msg)}</p>` : "";
+    if (S.settle) return settleHtml() + msg;
     if (v.over) return `<p class="cc-prompt">对局结束。</p>${msg}`;
     if (S.banner) return `<p class="cc-prompt">看一下这一轮的结算。</p>${msg}`;
     const oppName = sideName(v.opponent);
@@ -621,19 +765,28 @@
         b = (o ? loanBtns(o, broke) : "") + btn("noLoan", broke ? "不借（结束对局）" : "不借", { primary: !broke });
         break;
       }
-      case "dealerWeather":
-        if (v.weather) {
-          p = `庄家天气行动：场上是〔${esc(CC().weatherName(v.weather))}〕，弃掉还是保留？`;
-          b = btn("weather", "弃掉天气", { data: { op: "discard" } }) + btn("weather", "保留天气", { data: { op: "keep" }, primary: true });
+      case "dealerWeather": {
+        // 庄家天气行动（#502）：场上有天气 → 弃掉 / 保留，保留以后接着问「偷看下一张」「不看」（天气堆里还有没看过的才问）；没有天气 → 偷看下一张 / 不动
+        const W = esc(CC().weatherName(v.weather)), canPeek = v.legal.some(o => o.op === "peek");
+        if (v.weather && canPeek && S.mode === "keep") {
+          p = `保留场上的〔${W}〕。要不要接着偷看天气堆里${nextPeekText(v)}？玩家看得到你偷看后放回原位还是压到牌堆底，看不到是哪张。`;
+          b = btn("weather", "偷看下一张", { data: { op: "peek" }, primary: true }) + btn("weather", "不看", { data: { op: "keep" } });
+        } else if (v.weather) {
+          p = `庄家天气行动：场上是〔${W}〕，弃掉还是保留？${canPeek ? "保留以后还可以接着偷看下一张。" : v.deckCount ? "天气堆里剩下的你都看过了，保留以后不能再偷看。" : ""}`;
+          b = btn("weather", "弃掉天气", { data: { op: "discard" } })
+            + (canPeek ? btn("mode", "保留天气", { data: { mode: "keep" }, primary: true }) : btn("weather", "保留天气", { data: { op: "keep" }, primary: true }));
         } else {
-          p = "庄家天气行动：场上没有天气。可以偷看天气堆顶的一张（玩家看得到你放回原位还是放到牌堆底）。";
-          b = btn("weather", "偷看堆顶", { data: { op: "peek" }, primary: true }) + btn("weather", "不动", { data: { op: "pass" } });
+          p = `庄家天气行动：场上没有天气。可以偷看天气堆里${nextPeekText(v)}（玩家看得到你放回原位还是压到牌堆底，看不到是哪张）。`;
+          b = btn("weather", "偷看下一张", { data: { op: "peek" }, primary: true }) + btn("weather", "不动", { data: { op: "pass" } });
         }
         break;
-      case "dealerPeek":
-        p = `堆顶是〔${esc(CC().weatherName(v.peek && v.peek.card))}〕。放回原位，还是放到牌堆底？`;
-        b = btn("place", "放回原位", { data: { where: "top" }, primary: true }) + btn("place", "放到牌堆底", { data: { where: "bottom" } });
+      }
+      case "dealerPeek": {
+        const pk = v.peek || {};
+        p = `${pk.at ? `天气堆从上往下第 ${pk.at + 1} 张` : "堆顶"}是〔${esc(CC().weatherName(pk.card))}〕。放回原位，还是压到牌堆底？`;
+        b = btn("place", "放回原位", { data: { where: "top" }, primary: true }) + btn("place", "压到牌堆底", { data: { where: "bottom" } });
         break;
+      }
       case "play":
         p = S.human === "dealer" ? "选一张层牌暗出（每轮必须出一张）。" : "选一张元素牌暗出（常态不能当出牌）。";
         break;
@@ -730,11 +883,23 @@
       const o = outcomeOf(r, S.human);
       return `<li class="cc-res ${o.cls}"><b>第 ${r.r} 轮</b><span>${esc(o.text)}</span><span class="cc-wxname">${esc(CC().weatherName(r.weather))}</span><span class="cc-delta">${signed(r.delta[S.human])}</span></li>`;
     }).join("");
-    const log = v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
+    // 记录按时间顺序，最新的在最下面（和战斗记录一样；以前最新的在最上面）
+    const log = v.log.slice(-UI_CONFIG.logLines).map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
     // 克制表的入口放在最上面（以前这里是折叠的「克制速查」小表，换成打开完整克制表的按钮）
     return `${MU() ? chartBtn(v) : ""}<h3>每轮结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
       ${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;
+  }
+  /** 侧栏的记录滚到了哪（整块重画之前看一眼）：null = 还没画过；bottom = 在底部（离底不到 logStick 像素，或者根本不用滚）。
+   *  猜大猜小（counter-cards-guess-ui.js）的侧栏也借这两个 */
+  function logScroll(side) {
+    const el = side.querySelector(".cc-log");
+    return el ? { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight <= UI_CONFIG.logStick } : null;
+  }
+  /** 重画之后：原来在底部（或第一次画）就滚到底看新记录；玩家往上翻着看旧的就停在原处，不强行拉回去（同联机的消息列表 online-ui.js · fillList） */
+  function stickLog(side, was) {
+    const el = side.querySelector(".cc-log");
+    if (el) el.scrollTop = !was || was.bottom ? el.scrollHeight : was.top;
   }
   /** 一轮的结果从 side 这一方看：只有胜负、分档 */
   function outcomeOf(r, side) {
@@ -787,6 +952,8 @@
   /* ---------- 点击 ---------- */
   function onClick(e) {
     const b = e.target && e.target.closest ? e.target.closest("[data-cc]") : null;
+    // 结算前的过渡：点一下桌面（牌桌、操作栏里按钮以外的地方）直接看结算；顶栏、侧栏照常
+    if (S && S.settle && !b && e.target && e.target.closest && e.target.closest(".cc-table, #cc-actions")) { settleEnd(); return; }
     if (!b || b.disabled) return;
     // 长按看预览、松手后浏览器要是还补了一下点击：不算出牌（只拦长按的那一张、只拦一下）
     const sw = S && S.tipSwallow;
@@ -800,6 +967,7 @@
       case "again": start({ side: S ? S.human : SETUP.side, level: S ? S.level : SETUP.level }); return;
       case "swap": start({ side: CC().other(S ? S.human : SETUP.side), level: S ? S.level : SETUP.level }); return;
       case "dismiss": if (S) { S.banner = null; render(); schedule(); } return;
+      case "skipSettle": settleEnd(); return;   // 结算前的过渡：直接看结算
       case "chart": openChart(); return;   // 只开克制表，不动对局和操作栏
       case "leave": casinoHook("onLeave"); return;          // 赌场桌：离桌
       case "casinoAgain": casinoHook("onAgain"); return;    // 赌场桌：同一张桌子再开一局（再交入场费）
@@ -855,7 +1023,8 @@
   root.CounterCardsUI = {
     // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用；倒计时到时间的时刻留着，下次重画接着数）
     UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
-    cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
+    cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
+    cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };

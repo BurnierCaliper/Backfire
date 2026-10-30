@@ -19,7 +19,7 @@ function fresh(seed, opt) {
   return { c, run, R: c.Rogue, CC: c.CounterCards, K: c.Casino, st: c.S.state };
 }
 const A = (CC, g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
-/** 相位全押打赢（火打血肉），后面每一轮庄家都弃牌：桌上从 B 枚打到 2B + 4 枚 */
+/** 相位全押打赢（火打肉体），后面每一轮庄家都弃牌：桌上从 B 枚打到 2B + 4 枚 */
 function winGame(CC, g) {
   A(CC, g, "dealer", "weather", { op: "pass" });
   A(CC, g, "dealer", "play", { card: "flesh" }); A(CC, g, "player", "play", { card: "fire" });

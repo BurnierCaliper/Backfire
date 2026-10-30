@@ -2,9 +2,10 @@
 // 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌；
 // 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）；
 // 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）；
-// 下注不封顶时跟不起的下注栏、跟注后追加窗口的倒计时（#496，真浏览器的 2 条同克制表，没装 Playwright 时用机器自带的 Chrome）。
+// 下注不封顶时跟不起的下注栏、跟注后追加窗口的倒计时（#496）；
+// 结算前的过渡（最后一步 → 判定中 → 结算横幅，点一下桌面跳过；追加窗口关上之后才开始）、侧栏的记录按时间顺序（#499）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
-// 克制表、悬停预览的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
+// 克制表、悬停预览、追加窗口、结算前的过渡的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -186,6 +187,352 @@ test("结算横幅只有胜负、分档和筹码变动，不亮牌；点「继�
   assert.ok(seen >= 1, "看到了结算横幅");
 });
 
+/** 小 DOM 不排版：给侧栏的记录列表一个假的高度（每条 30px、框高 100px），量滚动位置照浏览器的样子来；元素的类是所有页面共用的，用完一定要 stop() */
+function fakeLogBox(p) {
+  const proto = p.w.Element.prototype, log = (el) => el.classList.contains("cc-log");
+  const fake = { scrollHeight() { return log(this) ? this.children.length * 30 : 0; }, clientHeight() { return log(this) ? 100 : 0; } };
+  const saved = {};
+  Object.keys(fake).forEach(k => { saved[k] = Object.getOwnPropertyDescriptor(proto, k); Object.defineProperty(proto, k, { get: fake[k], configurable: true }); });
+  return { stop: () => Object.keys(saved).forEach(k => Object.defineProperty(proto, k, saved[k])) };
+}
+
+test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排，最新的一条在最下面（和战斗记录一样）；有新记录时滚到底，玩家往上翻着看旧的就停在原处；每轮结算第 1 轮在上面", (t) => {
+  const p = page();
+  const box = fakeLogBox(p);
+  t.after(box.stop);
+  const N = p.UI.UI_CONFIG.logLines;
+  const list = () => p.$("#cc-side .cc-log");
+  const texts = () => Array.from(list().querySelectorAll("li")).map(li => li.textContent);
+  const want = () => Array.from(p.UI.view().log.slice(-N), e => e.text);   // 页面里的数组先转成这边的
+  const atBottom = () => list().scrollHeight - list().scrollTop - list().clientHeight <= 0;
+  p.UI.start({ side: "player", level: "normal", seed: "记录顺序", fast: true });   // 庄家（AI）走完天气行动、暗出
+  assert.deepEqual(texts(), want(), "按时间顺序：先发生的在上面");
+  assert.match(texts()[0], /^第 1 轮：双方各下 1 枚底注/, "最早的一条在最上面");
+  assert.equal(texts()[texts().length - 1], "庄家暗出了一张牌。", "最新的一条在最下面");
+  assert.ok(atBottom(), "一开始就贴底");
+  // 人出牌：新记录接在最下面，滚到底
+  click(p.$('#cc-board button.cc-can[data-card="fire"]'));
+  assert.deepEqual(texts(), want());
+  assert.equal(texts()[texts().length - 1], "你暗出了〔火〕。", "新记录在最下面");
+  assert.ok(list().lastElementChild.classList.contains("cc-private"), "只给自己看的照旧标出来");
+  assert.ok(list().scrollHeight > list().clientHeight + 24, "记录多到要滚动了：" + texts().length + " 条");
+  assert.ok(atBottom(), "有新记录：滚到底");
+  // 玩家往上翻着看旧的：重画、来了新记录都停在原处，不强行拉回去
+  list().scrollTop = 20;
+  p.UI.render();
+  assert.equal(list().scrollTop, 20, "重画：停在原处");
+  const before = p.UI.view().log.length;
+  click(p.$('#cc-actions [data-cc="check"]'));   // 人过牌，庄家（AI）接着下注 / 过牌
+  assert.ok(p.UI.view().log.length > before, "来了新记录");
+  assert.deepEqual(texts(), want());
+  assert.equal(list().scrollTop, 20, "往上翻着：不拉回最底下");
+  // 翻回最底下：再来新记录就接着贴底
+  list().scrollTop = list().scrollHeight - list().clientHeight;
+  for (let i = 0; i < 10 && p.UI.state().game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.deepEqual(texts(), want());
+  assert.ok(atBottom(), "在底部：新记录来了接着贴底");
+  assert.ok(texts().length <= N, `最多显示最近 ${N} 条`);
+  // 打完一局：每轮结算第 1 轮在上面；记录照旧按时间顺序、最后一条是对局结束
+  playThrough(p, p.CC.makeRng("记录顺序"));
+  const rounds = Array.from(p.$$("#cc-side .cc-results .cc-res > b")).map(b => b.textContent);
+  assert.deepEqual(rounds, Array.from(p.UI.state().game.results, r => `第 ${r.r} 轮`), "每轮结算：第 1 轮在上面");
+  assert.equal(rounds[0], "第 1 轮");
+  assert.deepEqual(texts(), want());
+  assert.match(texts()[texts().length - 1], /^对局结束/, "最后一条是对局结束");
+  assert.ok(atBottom());
+  assert.match(read("counter-cards.css"), /\.cc-log\s*\{[^}]*overflow-y:\s*auto/, "记录自己带滚动条");
+});
+
+/* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步 → 判定中 → 结算横幅；用假时钟（t.mock.timers）一段段往前拨 ---------- */
+/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出肉体，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；
+ *  庄家先过牌（open：庄家先下注这么多枚，轮到人跟注） */
+function bet2Game(p, seed, card, deck, open) {
+  const g = p.CC.newGame({ seed, deck: deck || ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+  const A = (side, type, extra) => p.CC.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card });
+  A("player", "check"); A("dealer", "check");
+  A("player", "reveal"); if (g.stage === "normal") A("player", "noNormal");
+  if (open) A("dealer", "bet", { amount: open }); else A("dealer", "check");
+  return g;
+}
+/** 庄家（AI）第二轮下注时照 type 走（跟注 / 过牌……），跟注后的追加窗口（#496）里不追加；别的时候照常 */
+function aiBet2(p, type) {
+  const step = p.w.CounterCardsAI.step;
+  p.w.CounterCardsAI.step = (game, side, level, rng) => (game.stage !== "bet2" ? step(game, side, level, rng)
+    : !!p.CC.act(game, side, { type: game.betting.window ? "pass" : type }));
+}
+/** 桌上某一摞筹码写着几枚（seat：.cc-me / .cc-opp / .cc-pot） */
+const chipsOn = (p, seat) => Number(p.$(`#cc-board ${seat} .cc-chips > b`).textContent);
+
+test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后一步（过牌），横幅不马上出来——先停在最后一步，再「判定中」，按 UI_CONFIG.settle 的时长依次过去才弹结算横幅；过渡中桌上停在结算之前、不亮牌，记录和每轮结算里还没有这一轮的结果", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();   // 页面开着「减少动态效果」：判定中停 reducedJudgeMs
+  const T = p.UI.UI_CONFIG.settle;
+  assert.ok(T && T.lastMs > 0 && T.judgeMs > 0 && T.reducedJudgeMs > 0 && T.reducedJudgeMs <= T.judgeMs, "时长放在 UI_CONFIG.settle");
+  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打肉体 +2：玩家赢
+  p.UI.start({ side: "player", level: "normal", game: g });   // 不是 fast
+  const banner = p.$("#cc-banner"), bar = () => p.$("#cc-actions"), board = () => p.$("#cc-board");
+  const before = { me: chipsOn(p, ".cc-me"), pot: chipsOn(p, ".cc-pot") };
+  click(bar().querySelector('[data-cc="check"]'));
+  assert.equal(g.results.length, 1, "规则层已经结算完");
+  assert.equal(g.round, 2, "也开了下一轮");
+  const st = p.UI.state();
+  // ① 最后一步
+  assert.ok(!visible(banner), "横幅不马上出来");
+  assert.equal(st.settle.phase, "last");
+  assert.equal(bar().querySelector(".cc-prompt").textContent, "你过牌。", "操作栏写最后一步做了什么");
+  assert.deepEqual(Array.from(bar().querySelectorAll("button[data-cc]"), b => b.dataset.cc), ["skipSettle"], "过渡中只有「直接看结算」");
+  assert.equal(board().querySelector(".cc-me .cc-acted").textContent, "过牌", "座位上标着刚走的这一步");
+  assert.ok(!board().querySelector(".cc-opp .cc-acted"));
+  assert.ok(!board().querySelector("button.cc-can"), "过渡中点不了出牌");
+  assert.match(p.$("#cc-top .cc-round").textContent, /第 1 \/ 5 轮/, "顶栏还是这一轮");
+  const slots = board().querySelectorAll(".cc-slot");
+  assert.ok(slots[0].querySelector(".cc-back") && slots[1].querySelector(".cc-back"), "桌上两张暗牌（牌背）");
+  assert.match(slots[1].querySelector(".cc-peek").textContent, /火/, "自己那张照旧在角上标一下");
+  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("肉体"), "不亮牌");
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-pot")], [before.me, before.pot], "过牌：筹码不动，底池还是结算之前的");
+  assert.match(board().querySelector(".cc-wnow").textContent, /酷暑/, "场上天气");
+  assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 0, "每轮结算里还没有这一轮");
+  assert.ok(!p.$("#cc-side .cc-log").textContent.includes("第 1 轮：玩家赢"), "记录里还没有这一轮的结果");
+  assert.equal(p.$("#cc-side .cc-log").lastElementChild.textContent, "玩家过牌。", "记录停在最后一步");
+  t.mock.timers.tick(T.lastMs - 1);
+  assert.equal(st.settle.phase, "last", "最后一步停 lastMs");
+  t.mock.timers.tick(1);
+  // ② 判定中
+  assert.equal(st.settle.phase, "judge");
+  assert.ok(!visible(banner));
+  assert.match(bar().querySelector(".cc-prompt").textContent, /^判定中/);
+  assert.match(bar().textContent, /你过牌。/, "最后一步还写着");
+  assert.ok(board().querySelector(".cc-slots.cc-judging .cc-back") && board().querySelector(".cc-pot.cc-judging"), "两张牌背轻轻抖、底池发光");
+  assert.match(board().querySelector(".cc-judge").textContent, /判定中/);
+  assert.ok(!board().querySelector('[data-face="flesh"]'), "判定中也不亮牌");
+  t.mock.timers.tick(T.reducedJudgeMs - 1);
+  assert.ok(!visible(banner), "开着减少动态效果：判定中停 reducedJudgeMs");
+  t.mock.timers.tick(1);
+  // ③ 结算横幅
+  assert.ok(visible(banner) && banner.querySelector('[data-cc="dismiss"]'), "最后才弹出结算横幅");
+  assert.equal(st.settle, null);
+  assert.match(banner.textContent, /你赢了/);
+  assert.ok(board().querySelector(".cc-me .cc-chips.cc-collect") && !board().querySelector(".cc-opp .cc-chips.cc-collect"), "赢家那边的筹码堆收进来");
+  assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 1);
+  assert.ok(p.$("#cc-side .cc-log").textContent.includes("第 1 轮：玩家赢"));
+  click(banner.querySelector('[data-cc="dismiss"]'));
+  assert.ok(st.timer, "点「继续」：庄家（AI）接着走");
+  // 减少动态效果：过渡里的动画都去掉（最后一步的文字照样停，上面查过）
+  const motion = read("counter-cards.css").match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/)[1];
+  [".cc-who .cc-acted", ".cc-slots.cc-judging .cc-back", ".cc-pot.cc-judging .cc-potstack", ".cc-chips.cc-collect b"].forEach(s => assert.ok(motion.includes(s), "减少动态效果：" + s + " 不动"));
+});
+
+test("结算前的过渡：AI 走的最后一步（庄家跟注）也停一下；跟注后的追加窗口（#496）倒计时期间不进过渡，到时间关窗之后才开始——操作栏从这一下跟注写起「庄家跟注 1 枚。 追加窗口到时间了，没人加注。」，标在庄家的座位上；没开减少动态效果时判定中停 judgeMs；过渡中、横幅开着 AI 都不接着走", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();
+  p.w.matchMedia = () => ({ matches: false });   // 没开「减少动态效果」
+  const T = p.UI.UI_CONFIG.settle, U = p.UI.UI_CONFIG, sec = p.CC.CC_CONFIG.callWindowSec;
+  const g = bet2Game(p, "AI跟注", "fire");
+  aiBet2(p, "call");   // 庄家（AI）这一步一定跟注，窗口里不追加
+  p.UI.start({ side: "player", level: "normal", game: g });
+  click(p.$('#cc-actions [data-cc="bet"]'));   // 人下注 1 枚（最低）
+  const before = { opp: chipsOn(p, ".cc-opp"), pot: chipsOn(p, ".cc-pot") };
+  assert.match(p.$("#cc-actions").textContent, /庄家正在想/);
+  t.mock.timers.tick(U.dealMs);   // 开局 AI 等发牌动画放完才走
+  // 庄家跟注：筹码推进底池，开了追加窗口——倒计时期间不进过渡
+  const st = p.UI.state();
+  assert.ok(g.betting && g.betting.window, "庄家跟注，开了追加窗口");
+  assert.deepEqual([chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [before.opp - 1, before.pot + 1], "跟注的筹码推进底池");
+  assert.ok(p.$("#cc-board .cc-opp .cc-chips.cc-anim") && p.$("#cc-board .cc-pot .cc-chips.cc-anim"), "筹码推进底池的动画");
+  t.mock.timers.tick(U.aiDelay);
+  assert.equal(g.betting.window.passed.dealer, true, "庄家（AI）在窗口里马上决定：不追加");
+  t.mock.timers.tick(sec * 1000 - U.aiDelay - 1);
+  assert.ok(g.betting && g.betting.window && g.results.length === 0, "人还有倒计时");
+  assert.equal(st.settle, null, "倒计时期间不进过渡");
+  assert.ok(!visible(p.$("#cc-banner")));
+  assert.ok(p.$("#cc-actions .cc-count") && p.$('#cc-actions [data-cc="pass"]'), "操作栏照旧是倒计时和「不加注」");
+  t.mock.timers.tick(1);
+  // 到时间关窗、结算：过渡从这里才开始
+  assert.equal(g.results.length, 1, "到时间关窗，结算了");
+  assert.equal(st.settle.phase, "last");
+  assert.ok(!visible(p.$("#cc-banner")));
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "庄家跟注 1 枚。 追加窗口到时间了，没人加注。", "最后一步从开窗的那一下跟注写起");
+  assert.equal(p.$("#cc-board .cc-opp .cc-acted").textContent, "跟注 1 枚", "桌上：标在庄家的座位上");
+  assert.ok(!p.$("#cc-board .cc-me .cc-acted"));
+  assert.deepEqual([chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [before.opp - 1, before.pot + 1], "桌上停在结算之前");
+  assert.ok(!p.$("#cc-actions .cc-count") && st.win === null, "倒计时收起");
+  const before2 = JSON.stringify(g);
+  t.mock.timers.tick(T.lastMs);
+  assert.equal(st.settle.phase, "judge");
+  t.mock.timers.tick(T.judgeMs - 1);
+  assert.ok(!visible(p.$("#cc-banner")), "没开减少动态效果：判定中停 judgeMs");
+  t.mock.timers.tick(1);
+  assert.ok(visible(p.$("#cc-banner")));
+  t.mock.timers.tick(5000);
+  assert.equal(JSON.stringify(g), before2, "过渡中、横幅开着 AI 都不接着走");
+  click(p.$('#cc-banner [data-cc="dismiss"]'));
+  t.mock.timers.tick(U.aiDelay);
+  assert.notEqual(JSON.stringify(g), before2, "点「继续」以后 AI 接着走");
+});
+
+test("结算前的过渡：人跟注、在追加窗口（#496）里点「不加注」——双方都不追加、窗口关上才开始过渡（人先点、AI 后表态，或者反过来都一样）；操作栏写「你跟注 2 枚。 双方都不追加，追加窗口关闭。」，座位上标「跟注 2 枚」", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const T = page().UI.UI_CONFIG.settle, U = page().UI.UI_CONFIG;
+  const open = (seed) => {
+    const p = page(), g = bet2Game(p, seed, "fire", null, 2);   // 庄家先下注 2 枚，轮到人跟注
+    aiBet2(p, "call");
+    p.UI.start({ side: "player", level: "normal", game: g });   // 不是 fast：AI 等 dealMs 才在窗口里表态
+    click(p.$('#cc-actions [data-cc="call"]'));
+    assert.ok(g.betting && g.betting.window, "人跟注，开了追加窗口");
+    return { p, g, st: p.UI.state() };
+  };
+  const check = ({ p, g, st }, why) => {
+    assert.equal(g.results.length, 1, why + "：窗口关了，结算了");
+    assert.equal(st.settle.phase, "last", why);
+    assert.equal(p.$("#cc-actions .cc-prompt").textContent, "你跟注 2 枚。 双方都不追加，追加窗口关闭。", why + "：最后一步从开窗的那一下跟注写起");
+    assert.equal(p.$("#cc-board .cc-me .cc-acted").textContent, "跟注 2 枚", why + "：标在自己的座位上");
+    assert.deepEqual(Array.from(p.$$("#cc-actions button[data-cc]"), b => b.dataset.cc), ["skipSettle"], why + "：只有「直接看结算」");
+    assert.ok(!p.$("#cc-actions .cc-count") && st.win === null, why + "：倒计时收起");
+    t.mock.timers.tick(T.lastMs);
+    assert.equal(st.settle.phase, "judge", why);
+    t.mock.timers.tick(T.reducedJudgeMs);
+    assert.ok(visible(p.$("#cc-banner")) && !st.settle, why + "：最后才弹结算横幅");
+  };
+  // 人先点「不加注」，AI 还没表态：等 AI，不进过渡
+  let o = open("不加注1");
+  click(o.p.$('#cc-actions [data-cc="pass"]'));
+  assert.ok(o.g.betting.window && o.g.results.length === 0, "AI 还没表态，窗口开着");
+  assert.equal(o.st.settle, null, "倒计时期间不进过渡");
+  assert.match(o.p.$("#cc-actions .cc-prompt").textContent, /你不加注了，等庄家/);
+  t.mock.timers.tick(U.dealMs);   // AI 也不追加：关窗
+  check(o, "人先点、AI 后表态");
+  // AI 先表态，人再点「不加注」
+  o = open("不加注2");
+  t.mock.timers.tick(U.dealMs);
+  assert.ok(o.g.betting.window.passed.dealer && o.st.settle === null, "AI 不追加了，人还有倒计时：不进过渡");
+  click(o.p.$('#cc-actions [data-cc="pass"]'));
+  check(o, "AI 先表态、人后点");
+});
+
+test("counter-cards.css 的 @keyframes 不重名：同名的后写的会盖掉前面的（合并 #496 时，赢家筹码「收进来」时数字亮一下和追加窗口的进度条都叫 ccWin，进度条就不缩短了）", () => {
+  const names = Array.from(read("counter-cards.css").matchAll(/@keyframes\s+([\w-]+)/g), m => m[1]);
+  assert.ok(names.includes("ccWin"), "追加窗口的进度条");
+  assert.deepEqual(names.filter((n, i) => names.indexOf(n) !== i), [], "重名的 @keyframes");
+});
+
+test("结算前的过渡：翻到相位直接全押结算——最后一步是翻开相位：桌上翻牌、闪一下（以前一结算就看不到了），全押的筹码推进底池，操作栏写翻开了什么、双方全押", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();
+  const g = p.CC.newGame({ seed: "相位过渡", deck: ["phase", "heat", "glow", "acid", "thunder", "snow", "sand"] });
+  const A = (side, type, extra) => p.CC.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card: "fire" });
+  A("player", "check"); A("dealer", "check");
+  p.UI.start({ side: "player", level: "normal", game: g });
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [49, 49, 2]);
+  click(p.$('#cc-actions [data-cc="reveal"]'));
+  assert.ok(g.results.length === 1 && g.results[0].allIn, "翻到相位：全押、结算了");
+  assert.equal(p.UI.state().settle.phase, "last");
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "你翻开了新天气〔相位〕。 翻到相位：本轮双方全押，各押 50 枚（筹码较少一方的全部筹码）。");
+  assert.ok(p.$("#cc-board .cc-flash") && p.$("#cc-board .cc-wnow .cc-flip"), "翻牌、闪一下");
+  assert.match(p.$("#cc-board .cc-wnow").textContent, /相位/);
+  assert.equal(p.$("#cc-board .cc-me .cc-acted").textContent, "翻开相位");
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [0, 0, 100], "全押：手上的都推进底池");
+  assert.ok(p.$("#cc-board .cc-pot.allin"));
+  assert.ok(!visible(p.$("#cc-banner")));
+});
+
+test("结算前的过渡：点一下桌面直接看结算（最后一步、判定中都行；操作栏的「直接看结算」也行），点侧栏不算；弃牌不用判定，最后一步之后直接弹横幅；fast（测试用）不停", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const T = page().UI.UI_CONFIG.settle;
+  const open = (seed, fast) => { const p = page(); const g = bet2Game(p, seed, "fire"); p.UI.start({ side: "player", level: "normal", game: g, fast }); return p; };
+  // 最后一步的时候点牌桌
+  let p = open("跳过1");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  assert.equal(p.UI.state().settle.phase, "last");
+  click(p.$("#cc-side h3"));
+  assert.ok(p.UI.state().settle && !visible(p.$("#cc-banner")), "点侧栏不算");
+  click(p.$("#cc-board .cc-deck"));
+  assert.equal(p.UI.state().settle, null);
+  assert.ok(visible(p.$("#cc-banner")), "点一下桌面：直接看结算");
+  t.mock.timers.tick(5000);
+  assert.ok(visible(p.$("#cc-banner")), "跳过以后计时也停了，横幅留着");
+  // 判定中点操作栏的「直接看结算」
+  p = open("跳过2");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  t.mock.timers.tick(T.lastMs);
+  assert.equal(p.UI.state().settle.phase, "judge");
+  const skip = p.$('#cc-actions [data-cc="skipSettle"]');
+  assert.equal(skip.textContent, T.skip);
+  click(skip);
+  assert.ok(visible(p.$("#cc-banner")) && !p.UI.state().settle);
+  // 判定中点桌上的牌背
+  p = open("跳过3");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  t.mock.timers.tick(T.lastMs);
+  click(p.$("#cc-board .cc-slot .cc-back"));
+  assert.ok(visible(p.$("#cc-banner")), "判定中点一下桌面也行");
+  // 弃牌：不用判定
+  p = open("弃牌");
+  click(p.$('#cc-actions [data-cc="fold"]'));
+  assert.equal(p.UI.state().settle.phase, "last");
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "你弃牌。");
+  assert.equal(p.$("#cc-board .cc-me .cc-acted").textContent, "弃牌");
+  t.mock.timers.tick(T.lastMs);
+  assert.ok(visible(p.$("#cc-banner")), "弃牌：最后一步之后直接弹横幅");
+  assert.match(p.$("#cc-banner").textContent, /你弃牌/);
+  // fast（测试 / 真浏览器测试用）：不停，直接弹
+  p = open("fast", true);
+  click(p.$('#cc-actions [data-cc="check"]'));
+  assert.equal(p.UI.state().settle, null);
+  assert.ok(visible(p.$("#cc-banner")), "fast：不停");
+});
+
+test("结算前的过渡：不开 fast 和 AI 打完一局（人当庄家）——每一轮都是「最后一步 → 判定中 → 横幅」，过渡中 AI 不动、只有「直接看结算」、桌上只有牌背；最后一轮的横幅点「看总结算」才出总结算", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page(), T = p.UI.UI_CONFIG.settle, rng = p.CC.makeRng("过渡整局");
+  p.UI.start({ side: "dealer", level: "hard", seed: "过渡整局" });
+  const st = () => p.UI.state(), g = st().game, banner = p.$("#cc-banner"), snap = () => JSON.stringify(g);
+  const tickUntil = (done) => { for (let i = 0; i < 200 && !done(); i++) t.mock.timers.tick(50); assert.ok(done(), "AI 一直没走"); };
+  let seen = 0, lastBanner = false;
+  for (let guard = 0; guard < 600; guard++) {
+    if (g.betting && g.betting.window) assert.ok(!st().settle && !visible(banner), "跟注后的追加窗口（#496）倒计时期间不进过渡");
+    if (st().settle) {
+      const res = g.results[g.results.length - 1], before = snap();
+      assert.ok(!visible(banner), `第 ${res.r} 轮：横幅不马上出来`);
+      assert.equal(st().settle.phase, "last");
+      assert.match(p.$("#cc-top .cc-round").textContent, new RegExp(`第 ${res.r} / 5 轮`));
+      assert.equal(p.$$("#cc-side .cc-results .cc-res").length, g.results.length - 1, "每轮结算里还没有这一轮");
+      assert.deepEqual(Array.from(p.$$("#cc-actions button[data-cc]"), b => b.dataset.cc), ["skipSettle"]);
+      assert.ok(!p.$("#cc-actions .cc-count") && !st().win, "过渡中没有追加窗口的倒计时");
+      assert.ok(!p.$("#cc-board button.cc-can") && !p.$("#cc-board .cc-slot [data-face]"), "点不了牌，桌上只有牌背");
+      t.mock.timers.tick(T.lastMs);
+      if (res.outcome !== "fold") {
+        assert.equal(st().settle.phase, "judge", `第 ${res.r} 轮：判定中`);
+        t.mock.timers.tick(T.reducedJudgeMs);
+      }
+      assert.ok(visible(banner) && banner.querySelector('[data-cc="dismiss"]') && !banner.querySelector(".cc-final"), `第 ${res.r} 轮：最后才弹结算横幅`);
+      assert.equal(snap(), before, "过渡中 AI 不动");
+      seen++;
+      continue;
+    }
+    if (visible(banner)) {
+      if (banner.querySelector(".cc-final")) break;
+      const d = banner.querySelector('[data-cc="dismiss"]');
+      lastBanner = g.over;
+      if (g.over) assert.equal(d.textContent, "看总结算");
+      click(d);
+      continue;
+    }
+    if (p.CC.toAct(g).indexOf(st().ai) >= 0) { const before = snap(); tickUntil(() => snap() !== before); continue; }   // AI 等一会儿走一步
+    const card = p.$("#cc-board button.cc-can");
+    if (card) { click(card); continue; }
+    const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && b.dataset.cc !== "amt" && b.dataset.cc !== "mode");
+    assert.ok(btns.length, "没有能点的按钮：" + g.stage);
+    const bet = btns.filter(b => ["check", "call", "bet", "raise", "fold", "pass"].includes(b.dataset.cc));   // pass：追加窗口里的「不加注」
+    click(bet.length ? (rng() < 0.1 ? bet.find(b => b.dataset.cc === "fold") : bet[Math.floor(rng() * bet.length)]) : btns.find(b => b.classList.contains("primary")) || btns[0]);
+  }
+  assert.ok(g.over && p.$("#cc-banner .cc-final"), "打完了，有总结算");
+  assert.equal(seen, g.results.length, "每一轮都有过渡");
+  assert.ok(seen >= 1);
+  if (g.log[g.log.length - 2].t === "result") assert.ok(lastBanner, "最后一轮结算完结束的：那一轮的横幅点「看总结算」才出总结算");
+});
+
 test("AI 平时等一会儿再走（开局等发牌动画放完）；setFast(true) 把正在等的那一步马上走掉", () => {
   const p = page();
   p.UI.start({ side: "player", level: "normal", seed: "等一等" });
@@ -224,7 +571,7 @@ for (const side of ["player", "dealer"]) for (const level of LEVELS) {
   });
 }
 
-test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 / 牌堆底；玩家（AI）看不到", () => {
+test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 / 压到牌堆底；玩家（AI）看不到", () => {
   const p = page();
   p.UI.start({ side: "dealer", level: "normal", seed: "偷看", fast: true, gameOpt: { deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] } });
   click(p.$('#cc-actions [data-cc="weather"][data-op="peek"]'));
@@ -234,9 +581,132 @@ test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 /
   assert.match(peek.textContent, /只有你看得到/);
   click(p.$('#cc-actions [data-cc="place"][data-where="bottom"]'));
   assert.ok(!p.$("#cc-board .cc-peekcard"));
-  assert.match(p.$("#cc-board .cc-deck").textContent, /堆底：微光/, "庄家记得放到牌堆底的是哪张");
+  assert.match(p.$('#cc-board .cc-seen [data-at="bottom"]').textContent, /堆底往上\s*微光/, "庄家记得压到牌堆底的是哪张（天气堆旁边）");
   const pv = p.CC.view(p.UI.state().game, "player");
   assert.doesNotMatch(JSON.stringify(pv), /glow|微光/);
+});
+
+/* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
+/** 人当庄家：第 1 轮庄家不动、玩家翻出雷鸣；第 2 轮庄家保留雷鸣以后偷看堆顶的微光、放回原位，玩家暗弃跳过
+ *  → 第 3 轮轮到人做庄家天气行动，场上还是雷鸣，天气堆从上往下是微光（看过）、酷暑、雪天…… */
+function keptGame(p, seed) {
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed, deck: ["thunder", "glow", "heat", "snow", "acid", "sand", "phase"] });
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "check"); A(g, "dealer", "check");
+  A(g, "player", "reveal"); A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" });
+  A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+  A(g, "player", "check"); A(g, "dealer", "check");
+  A(g, "player", "skip", { card: "fire" });
+  if (g.stage === "normal") A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  p.UI.start({ side: "dealer", level: "normal", game: g, seed, fast: true });
+  return g;
+}
+const btnTexts = (p) => Array.from(p.$$("#cc-actions .cc-btns button")).map(b => b.textContent);
+
+test("庄家天气行动（#502）：人当庄家、场上有天气——「弃掉天气」「保留天气」；点「保留天气」以后出现「偷看下一张」「不看」（这时还没定），偷看的是没看过的下一张，压到牌堆底；天气堆旁边列出看过的几张，玩家看不到", () => {
+  const p = page();
+  const g = keptGame(p, "保留以后偷看");
+  assert.equal(g.round, 3); assert.equal(g.stage, "dealerWeather"); assert.equal(g.weather, "thunder");
+  const bar = () => p.$("#cc-actions");
+  assert.match(bar().textContent, /场上是〔雷鸣〕，弃掉还是保留？保留以后还可以接着偷看下一张。/);
+  assert.deepEqual(btnTexts(p), ["弃掉天气", "保留天气"]);
+  assert.ok(bar().querySelector('[data-cc="mode"][data-mode="keep"]').classList.contains("primary"));
+  // 天气堆旁边：第 2 轮看过、放回原位的微光
+  const seen = () => p.$("#cc-board .cc-seen");
+  assert.ok(seen(), "天气堆旁边列出庄家看过的");
+  assert.match(seen().textContent, /只有你看得到/);
+  assert.match(seen().querySelector('[data-at="top"]').textContent, /^堆顶往下\s*微光$/);
+  assert.ok(!seen().querySelector('[data-at="bottom"]'));
+  assert.match(seen().textContent, /还有 5 张没看过/);
+  // 点「保留天气」：接着问偷不偷看；对局还没动
+  const before = JSON.stringify(g);
+  click(bar().querySelector('[data-cc="mode"][data-mode="keep"]'));
+  assert.equal(JSON.stringify(g), before, "点了保留还没定，对局不动");
+  assert.deepEqual(btnTexts(p), ["偷看下一张", "不看"]);
+  assert.match(bar().textContent, /保留场上的〔雷鸣〕。要不要接着偷看天气堆里下一张没看过的（从上往下第 2 张，上面 1 张你看过了）？/);
+  assert.ok(bar().querySelector('[data-cc="weather"][data-op="peek"]').classList.contains("primary"));
+  // 偷看下一张：看到的是微光下面的酷暑
+  click(bar().querySelector('[data-cc="weather"][data-op="peek"]'));
+  assert.equal(g.stage, "dealerPeek"); assert.equal(g.weather, "thunder", "天气保留在场上");
+  const card = p.$("#cc-board .cc-peekcard");
+  assert.ok(card && /酷暑/.test(card.textContent) && /只有你看得到/.test(card.textContent));
+  assert.match(bar().textContent, /天气堆从上往下第 2 张是〔酷暑〕。放回原位，还是压到牌堆底？/);
+  assert.deepEqual(btnTexts(p), ["放回原位", "压到牌堆底"]);
+  // 压到牌堆底：只挪酷暑，微光还在堆顶
+  click(bar().querySelector('[data-cc="place"][data-where="bottom"]'));
+  assert.deepEqual(J(g.deck), ["glow", "snow", "acid", "sand", "phase", "heat"]);
+  assert.ok(!p.$("#cc-board .cc-peekcard"));
+  assert.match(seen().querySelector('[data-at="top"]').textContent, /^堆顶往下\s*微光$/);
+  assert.match(seen().querySelector('[data-at="bottom"]').textContent, /^堆底往上\s*酷暑$/);
+  assert.match(seen().textContent, /还有 4 张没看过/);
+  const log = p.$("#cc-side .cc-log").textContent;
+  assert.ok(log.includes("你偷看到天气堆从上往下第 2 张是〔酷暑〕（上面 1 张你已经看过）。"), "私人记录写看到的是第几张、是什么");
+  assert.ok(log.includes("庄家保留了场上的天气〔雷鸣〕。") && log.includes("庄家偷看了天气堆从上往下第 2 张，压到了牌堆底。"));
+  // 玩家看不到庄家看过的牌
+  assert.doesNotMatch(JSON.stringify(p.CC.view(g, "player")), /glow|微光|heat|酷暑/);
+});
+
+test("庄家天气行动（#502）：点「保留天气」再点「不看」= 保留、不看，直接暗出；人当玩家时桌上没有庄家看过的牌", () => {
+  const p = page();
+  const g = keptGame(p, "保留不看");
+  click(p.$('#cc-actions [data-cc="mode"][data-mode="keep"]'));
+  click(p.$('#cc-actions [data-cc="weather"][data-op="keep"]'));
+  assert.equal(g.weather, "thunder");
+  assert.equal(g.stage, "play", "直接暗出（AI 玩家也出了，等人出牌）");
+  assert.equal(g.peek, null, "没有偷看");
+  assert.deepEqual(J(p.CC.view(g, "dealer").deckSeen.top), ["glow"]);
+  assert.ok(p.$("#cc-board button.cc-can"), "轮到人出层牌");
+  assert.match(p.$("#cc-side .cc-log").textContent, /庄家保留了场上的天气〔雷鸣〕。/);
+  // 人当玩家：庄家（测试替它走）偷看过堆顶，桌上看不出来
+  const q = page();
+  const h = q.CC.newGame({ seed: "玩家看不到", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
+  q.CC.act(h, "dealer", { type: "weather", op: "peek" }); q.CC.act(h, "dealer", { type: "place", where: "top" });
+  q.CC.act(h, "dealer", { type: "play", card: "flesh" });
+  q.UI.start({ side: "player", level: "normal", game: h, fast: true });
+  assert.ok(!q.$("#cc-board .cc-seen"), "玩家这边没有「庄家看过的」");
+  assert.doesNotMatch(q.$("#cc-board").textContent, /微光/);
+  assert.match(q.$("#cc-side .cc-log").textContent, /庄家偷看了天气堆顶的一张，放回原位。/);
+});
+
+test("庄家天气行动（#502）：天气堆里剩下的都看过了——「保留天气」直接保留（不再问偷不偷看），提示写剩下的都看过了", () => {
+  const p = page();
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed: "全看过", deck: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"] });
+  [["flesh", "ice"], ["sand", "physical"], ["spirit", "harmonic"], ["shield", "energy"]].forEach(([dc, pc]) => {
+    A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "bottom" });
+    A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+    A(g, "player", "check"); A(g, "dealer", "check");
+    A(g, "player", "reveal"); A(g, "player", "noNormal");
+    A(g, "dealer", "check"); A(g, "player", "check");
+  });
+  p.UI.start({ side: "dealer", level: "normal", game: g, fast: true });
+  assert.equal(g.round, 5); assert.equal(g.weather, "heat");
+  const bar = p.$("#cc-actions");
+  assert.match(bar.textContent, /场上是〔酷暑〕，弃掉还是保留？天气堆里剩下的你都看过了，保留以后不能再偷看。/);
+  assert.deepEqual(btnTexts(p), ["弃掉天气", "保留天气"]);
+  assert.ok(!bar.querySelector('[data-op="peek"]') && !bar.querySelector('[data-cc="mode"]'));
+  assert.match(p.$('#cc-board .cc-seen [data-at="bottom"]').textContent, /^堆底往上\s*相位\s*微光\s*酸雨$/, "第一张在最底下");
+  assert.match(p.$("#cc-board .cc-seen").textContent, /剩下的都看过了/);
+  click(bar.querySelector('[data-cc="weather"][data-op="keep"]'));
+  assert.equal(g.stage, "play");
+  assert.equal(g.weather, "heat");
+});
+
+test("规则说明的庄家天气行动照 #502 写：保留以后还能接着偷看、按顺序往下看、压到牌堆底；设置页和对局中的侧栏都是", () => {
+  const p = page();
+  click(p.$("#t-cc"));
+  const roundLine = (where) => Array.from(p.$$(where + " .cc-rules li")).map(li => li.textContent).find(t => t.startsWith("每轮"));
+  const want = "② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③";
+  assert.ok(roundLine("#cc-setup").includes(want), "设置页");
+  click(p.$('[data-cc="start"]'));
+  p.UI.stop();   // 人当玩家：庄家（AI）在等发牌动画，这里不用它走
+  assert.ok(roundLine("#cc-side").includes(want), "对局中的侧栏");
+  assert.ok(!p.$("#scr-cc").textContent.includes("放到牌堆底") && !p.$("#scr-cc").textContent.includes("偷看堆顶一张"), "旧说法不再出现");
 });
 
 test("翻开天气：桌上换成那张天气牌、闪一下，放对应的天气特效（weather-fx.js）；没有天气时特效收掉", () => {
@@ -448,7 +918,7 @@ test("下注不封顶（#496）：人能押过对方的全部筹码（「最大�
 });
 
 /* ---------- 跟注后的追加窗口（#496 第 2 条）：倒计时、「加注」「弃牌」「不加注」，到时间自动进入下一步 ---------- */
-/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉，玩家暗出冰、过牌，庄家下注 1 枚——轮到人跟注 */
+/** 人当玩家；庄家（测试替它走）不动天气、暗出肉体，玩家暗出冰、过牌，庄家下注 1 枚——轮到人跟注 */
 function windowGame(p, seed) {
   const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
   const g = CC.newGame({ seed, deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"] });
@@ -535,6 +1005,20 @@ test("追加窗口里：点「加注」关窗、照常轮到 AI 应对（算进�
   assert.ok(g4.betting.window, "对局停在窗口里，不会自己往下走");
 });
 
+test("手机竖屏（max-width: 600px）：High Flux 牌桌的操作栏固定在屏幕底部（position: sticky; bottom: 0），排在侧栏后面、底色不透明、让开 iPhone 底部的横条；电脑上照旧（#499 第 3 项；位置在真浏览器那条量）", () => {
+  const css = read("counter-cards.css");
+  const phone = css.match(/@media \(max-width: 600px\) \{([\s\S]*?)\n\}/);
+  assert.ok(phone, "有手机竖屏（max-width: 600px）那一段");
+  const rule = phone[1].match(/#scr-cc \.cc-actions\s*\{([^}]*)\}/);
+  assert.ok(rule, "只管 High Flux 的牌桌（#scr-cc）");
+  assert.match(rule[1], /position:\s*sticky/);
+  assert.match(rule[1], /bottom:\s*0/);
+  assert.match(rule[1], /order:\s*1/, "排在侧栏后面：翻到哪都在最底下，滑到底时侧栏露得出来");
+  assert.match(rule[1], /background:\s*#[0-9a-f]{3,6}\b/i, "底色不透明：盖在牌桌上面时看不到底下的牌");
+  assert.match(rule[1], /env\(safe-area-inset-bottom/, "让开 iPhone 底部的横条");
+  assert.doesNotMatch(css.replace(phone[0], "").replace(/\/\*[\s\S]*?\*\//g, ""), /sticky/, "别的宽度不贴底");
+});
+
 test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按扣还之后的筹码数", () => {
   const p = page();
   const CC = p.CC;
@@ -556,7 +1040,7 @@ test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按�
 /* ---------- 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论） ---------- */
 const J = v => JSON.parse(JSON.stringify(v));
 const fmt = s => (s > 0 ? "+" + s : s < 0 ? "−" + -s : "0");
-/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉；天气堆第一张是酷暑 */
+/** 人当玩家；庄家（测试替它走）不动天气、暗出肉体；天气堆第一张是酷暑 */
 function heatGame(p, seed) {
   const game = p.CC.newGame({ seed, deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
   p.CC.act(game, "dealer", { type: "weather", op: "pass" });
@@ -590,9 +1074,9 @@ test("克制表：顶栏最前面是「菜单」（和战斗、单局的顶栏�
   assert.equal(box.querySelector(".ws-tape").textContent, "克制表");
   assert.match(box.querySelector(".mu-weather").textContent, /天气 常态/);
   assert.equal(box.querySelectorAll("[data-mu-cell]").length, 35);
-  assert.equal(box.querySelector('[data-mu-cell="0:0"]').textContent.trim(), "+1", "火 → 血肉 +1");
+  assert.equal(box.querySelector('[data-mu-cell="0:0"]').textContent.trim(), "+1", "火 → 肉体 +1");
   assert.equal(box.querySelector('[data-mu-cell="0:1"]').textContent.trim(), "−1", "火 → 装甲 −1");
-  assert.equal(box.querySelector('[data-mu-cell="5:0"]').textContent.trim(), "0", "物理 → 血肉 0");
+  assert.equal(box.querySelector('[data-mu-cell="5:0"]').textContent.trim(), "0", "物理 → 肉体 0");
   assert.ok(box.querySelector('th.mu-row.mu-e-fire svg.eicon'), "行头有属性图标");
   assert.equal(JSON.stringify(game), before, "打开克制表不动牌局");
   click(box.querySelector("[data-mu-close]"));
@@ -628,7 +1112,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   const box = p.$("#mu-overlay");
   const fireFlesh = () => box.querySelector('[data-mu-cell="0:0"]');
   click(fireFlesh());
-  assert.match(box.querySelector(".mu-detail").textContent, /火 → 血肉：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
+  assert.match(box.querySelector(".mu-detail").textContent, /火 → 肉体：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
   const td = fireFlesh();
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
   betThrough(p, game, "bet1");
@@ -639,7 +1123,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   assert.equal(game.weather, "heat");
   assert.ok(p.UI.chartOpen(), "还开着");
   assert.match(box.querySelector(".mu-weather").textContent, /天气 酷暑/);
-  assert.match(fireFlesh().textContent, /\+1\s*→\s*\+2/, "火 → 血肉：+1 → +2");
+  assert.match(fireFlesh().textContent, /\+1\s*→\s*\+2/, "火 → 肉体：+1 → +2");
   assert.ok(fireFlesh().classList.contains("changed"));
   assert.match(box.querySelector(".mu-detail").textContent, /玩家赢 \+2（原来 玩家赢 \+1） · 克制 \+1；酷暑：火 \+1/);
   assert.equal(box.parentNode.dataset.weather, "heat", "卡片套上酷暑的底纹");
@@ -671,7 +1155,7 @@ for (const side of ["player", "dealer"]) {
       const box = p.$("#mu-overlay");
       assert.ok(visible(box) && p.UI.chartOpen(), where + "：打开了");
       assert.equal(box.querySelector(".mu-weather").textContent, "天气 " + p.CC.weatherName(g.weather), where + "：按场上的天气");
-      assert.equal(box.querySelector('[data-mu-cell="0:0"] b').textContent, fmt(p.CC.score("fire", "flesh", g.weather)), where + "：火 → 血肉的得分");
+      assert.equal(box.querySelector('[data-mu-cell="0:0"] b').textContent, fmt(p.CC.score("fire", "flesh", g.weather)), where + "：火 → 肉体的得分");
       click(box.querySelector("[data-mu-close]"));
       assert.ok(!visible(box) && !p.UI.chartOpen(), where + "：关掉了");
       assert.equal(JSON.stringify(g), before, where + "：对局没动");
@@ -741,7 +1225,7 @@ const handCard = (p, face) => p.$(`#cc-board .cc-me [data-face="${face}"]`);
 const tipScores = (p) => Array.from(p.$$("#cc-tip [data-layer] b")).map(b => b.textContent);
 const chartRow = (p, el, w) => J(p.CC.chart(w).cells[p.CC.CC_CONFIG.elements.indexOf(el)].map(x => fmt(x.value)));   // 克制表里这张牌的一行（页面里的数组先转成这边的）
 
-test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里的元素牌上弹出小预览——这张牌按场上天气打血肉、装甲、护盾、沙、灵体各得几分（+1 / 0 / −1，就是克制表里这张牌的一行，配色同克制表），移开就收起，不动牌局", () => {
+test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里的元素牌上弹出小预览——这张牌按场上天气打肉体、装甲、护盾、沙尘、星灵各得几分（+1 / 0 / −1，就是克制表里这张牌的一行，配色同克制表），移开就收起，不动牌局", () => {
   const p = page();
   const game = heatGame(p, "悬停");
   const tip = p.$("#cc-tip"), before = JSON.stringify(game);
@@ -755,7 +1239,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里�
   assert.match(tip.textContent, /天气 常态/);
   const cells = Array.from(tip.querySelectorAll("[data-layer]"));
   assert.deepEqual(cells.map(x => x.dataset.layer), ["flesh", "armor", "shield", "sand", "spirit"]);
-  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["血肉", "装甲", "护盾", "沙", "灵体"]);
+  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["肉体", "装甲", "护盾", "沙尘", "星灵"]);
   assert.ok(cells.every(x => x.querySelector("svg.eicon")), "每一层带层的图标");
   assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
   assert.deepEqual(tipScores(p), chartRow(p, "fire", null), "就是克制表里火这一行");
@@ -782,7 +1266,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里�
   assert.equal(JSON.stringify(game), before, "看预览不动牌局");
 });
 
-test("悬停预览：开着的时候场上的天气变了，预览跟着变（翻开酷暑：火打血肉 +1 → +2；微光反转、酸雨打装甲另 +1 也对），整块重画后照旧挂在这张牌上", () => {
+test("悬停预览：开着的时候场上的天气变了，预览跟着变（翻开酷暑：火打肉体 +1 → +2；微光反转、酸雨打装甲另 +1 也对），整块重画后照旧挂在这张牌上", () => {
   const p = page();
   const game = heatGame(p, "预览跟着变");
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
@@ -946,6 +1430,53 @@ test("手机长按：轻点照常出牌、不弹预览；按住时手指挪开�
   assert.ok(!visible(tip), "轻点不弹预览");
 });
 
+/* 庄家天气行动（#502，真浏览器）：没装 Playwright 时用机器自带的 Chrome（同下面克制表那几条），都没有才跳过 */
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：人当庄家——保留天气以后点「偷看下一张」、压到牌堆底，天气堆旁边列出看过的几张（#502）：在屏幕里，牌桌没有横向溢出`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto(GAME_URL);
+    // 同上面 keptGame：第 3 轮轮到人做庄家天气行动，场上是雷鸣，堆顶的微光第 2 轮看过
+    await page.evaluate(() => {
+      const A = (g, side, type, extra) => CounterCards.act(g, side, Object.assign({ type }, extra || {}));
+      const g = CounterCards.newGame({ seed: "真浏览器偷看", deck: ["thunder", "glow", "heat", "snow", "acid", "sand", "phase"] });
+      A(g, "dealer", "weather", { op: "pass" });
+      A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+      A(g, "player", "check"); A(g, "dealer", "check");
+      A(g, "player", "reveal"); A(g, "player", "noNormal");
+      A(g, "dealer", "check"); A(g, "player", "check");
+      A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "top" });
+      A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+      A(g, "player", "check"); A(g, "dealer", "check");
+      A(g, "player", "skip", { card: "fire" });
+      if (g.stage === "normal") A(g, "player", "noNormal");
+      A(g, "dealer", "check"); A(g, "player", "check");
+      CounterCardsUI.start({ side: "dealer", level: "normal", game: g, fast: true });
+    });
+    await page.click('#cc-actions [data-cc="mode"][data-mode="keep"]', T);
+    await page.click('#cc-actions [data-cc="weather"][data-op="peek"]', T);
+    await page.waitForSelector("#cc-board .cc-peekcard", T);
+    await page.click('#cc-actions [data-cc="place"][data-where="bottom"]', T);
+    await page.waitForSelector('#cc-board .cc-seen [data-at="bottom"]', T);
+    const m = await page.evaluate(() => {
+      const box = document.querySelector("#cc-board .cc-seen"), r = box.getBoundingClientRect(), deck = document.querySelector("#cc-board .cc-deck").getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, vw: innerWidth, deckRight: deck.right, deckTop: deck.top, deckBottom: deck.bottom, top: r.top, bottom: r.bottom,
+        rows: [...box.querySelectorAll(".cc-seen-row")].map(x => x.textContent.replace(/\s+/g, "")), overflow: document.getElementById("scr-cc").scrollWidth - innerWidth };
+    });
+    assert.deepEqual(m.rows, ["堆顶往下微光", "堆底往上酷暑"]);
+    assert.ok(m.width > 0 && m.left >= 0 && m.right <= m.vw, `「你看过的」在屏幕里：${JSON.stringify(m)}`);
+    assert.ok(m.left >= m.deckRight - 1 || m.top >= m.deckBottom - 1, `摆在天气堆旁边（右边或下面），不盖住天气堆：${JSON.stringify(m)}`);
+    assert.ok(m.overflow <= 1, "牌桌没有横向溢出：" + m.overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
+
 /* ---------- 真浏览器（没装 Playwright 时跳过） ---------- */
 function findPlaywright() {
   try { return require("playwright"); } catch (e) {}
@@ -1089,6 +1620,62 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
   });
 }
 
+/* 结算前的过渡（真浏览器，#499）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
+/** 人当玩家，走到第二轮下注、轮到人（同上面 Node 里的 bet2Game；在页面里跑）；两段各停 ms（机器忙时也来得及量） */
+function settleSetup(o) {
+  const g = CounterCards.newGame({ seed: o.seed, deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+  const A = (side, type, extra) => CounterCards.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card: "fire" });
+  A("player", "check"); A("dealer", "check"); A("player", "reveal"); if (g.stage === "normal") A("player", "noNormal"); A("dealer", "check");
+  Object.assign(CounterCardsUI.UI_CONFIG.settle, { lastMs: o.ms, judgeMs: o.ms });
+  CounterCardsUI.start({ side: "player", level: "normal", game: g });
+}
+/** 量一下过渡（在页面里跑）：到了哪一段、操作栏写什么、座位上的标签和「判定中」在不在牌桌里、「判定中」压没压到底池（手机上底池就在正上方）、
+ *  横幅出没出来、有没有横向溢出 */
+function measureSettle() {
+  const st = CounterCardsUI.state(), q = (s) => document.querySelector(s), table = q(".cc-table").getBoundingClientRect();
+  const inside = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.left >= Math.max(0, table.left) - 1 && r.right <= Math.min(innerWidth, table.right) + 1 && r.top >= table.top - 1 && r.bottom <= table.bottom + 1; };
+  const judge = q("#cc-board .cc-judge"), j = judge && judge.getBoundingClientRect(), pot = q("#cc-board .cc-pot").getBoundingClientRect();
+  return { phase: st.settle ? st.settle.phase : null, banner: !q("#cc-banner").hidden, prompt: q("#cc-actions .cc-prompt").textContent,
+    acted: (q("#cc-board .cc-acted") || {}).textContent || "", actedIn: inside(q("#cc-board .cc-acted")), judgeIn: inside(judge),
+    judgeClear: !!j && (j.top >= pot.bottom - 1 || j.bottom <= pot.top + 1 || j.left >= pot.right - 1 || j.right <= pot.left + 1),
+    collect: !!q("#cc-board .cc-me .cc-chips.cc-collect"), overflow: q("#scr-cc").scrollWidth - innerWidth };
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：结算前的过渡——最后一步（操作栏写着、座位上标着）→ 判定中（标签在牌桌里）→ 结算横幅（赢家的筹码收进来），没有横向溢出；点一下桌面直接看结算`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.goto(GAME_URL);
+    await page.evaluate(settleSetup, { seed: "过渡-真浏览器", ms: 2500 });
+    await page.click('#cc-actions [data-cc="check"]', T);
+    const m1 = await page.evaluate(measureSettle);
+    assert.deepEqual([m1.phase, m1.banner, m1.prompt, m1.acted], ["last", false, "你过牌。", "过牌"], "① 最后一步：" + JSON.stringify(m1));
+    assert.ok(m1.actedIn, "座位上的标签在牌桌里、在屏幕里");
+    await page.waitForSelector("#cc-board .cc-judge", T);
+    const m2 = await page.evaluate(measureSettle);
+    assert.deepEqual([m2.phase, m2.banner], ["judge", false], "② 判定中");
+    assert.match(m2.prompt, /^判定中/);
+    assert.ok(m2.judgeIn, "「判定中」在牌桌里、在屏幕里");
+    assert.ok(m2.judgeClear, "「判定中」不压到底池");
+    await page.waitForSelector("#cc-banner:not([hidden])", T);
+    const m3 = await page.evaluate(measureSettle);
+    assert.deepEqual([m3.phase, m3.banner, m3.collect], [null, true, true], "③ 结算横幅，赢家的筹码收进来");
+    for (const m of [m1, m2, m3]) assert.ok(m.overflow <= 1, "没有横向溢出：" + m.overflow + "px");
+    // 点一下桌面：直接看结算（两段各停 2.5 秒，不跳过的话 1 秒内等不到横幅）
+    await page.evaluate(settleSetup, { seed: "过渡-跳过", ms: 2500 });
+    await page.click('#cc-actions [data-cc="check"]', T);
+    await page.click("#cc-board .cc-deck", T);
+    await page.waitForSelector("#cc-banner:not([hidden])", { timeout: 1000 });
+    assert.deepEqual(errors, []);
+  });
+}
+
 /* 悬停预览（真浏览器）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
 /** 手指按下 / 抬起：Playwright 没有长按，直接发 Chrome 调试协议的触摸事件（备用浏览器 tests/cdp-browser.js 有 page.send；Playwright 开一个 CDP 会话） */
 async function touchAt(page, type, x, y) {
@@ -1219,6 +1806,74 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
       await press('#cc-actions [data-cc="raise"]');
       await page.waitForFunction(() => CounterCardsUI.state().game.log.some(e => e.t === "bet" && e.op === "raise" && e.by === "player" && e.window), null, T);
     }
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 手机竖屏：操作栏固定在屏幕底部（主人 10/30 试玩反馈，#499 第 3 项；真浏览器，同上没装 Playwright 时用机器自带的 Chrome，都没有才跳过） */
+/** 量一下（在页面里跑）：操作栏怎么定位、贴没贴在屏幕底部，里面每个按钮 / 倒计时的位置，牌桌、侧栏的位置，滚到哪了 */
+function measureDock() {
+  const scr = document.getElementById("scr-cc"), bar = document.getElementById("cc-actions");
+  const box = (el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width }; };
+  const items = [...bar.querySelectorAll("button[data-cc], .cc-clock")].map(el => Object.assign({ what: el.dataset.cc || "倒计时" }, box(el)));
+  return { vw: innerWidth, vh: innerHeight, scroll: scr.scrollTop, maxScroll: scr.scrollHeight - scr.clientHeight, pos: getComputedStyle(bar).position,
+    bar: box(bar), table: box(document.querySelector("#scr-cc .cc-table")), side: box(document.getElementById("cc-side")), items, overflow: scr.scrollWidth - innerWidth };
+}
+/** 操作栏里不在屏幕里的按钮 / 倒计时 */
+const offScreen = (m) => m.items.filter(x => !(x.width > 0 && x.top >= -1 && x.bottom <= m.vh + 1 && x.left >= -1 && x.right <= m.vw + 1)).map(x => x.what);
+const scrollCc = (page, to) => page.evaluate((y) => { const s = document.getElementById("scr-cc"); s.scrollTop = y === "end" ? s.scrollHeight : y; }, to);
+
+for (const vp of [{ width: 390, height: 844, tag: "手机 390×844", mobile: true }, { width: 1400, height: 900, tag: "桌面" }]) {
+  test(`真浏览器（${vp.tag}）：${vp.mobile ? "手机竖屏操作栏固定在屏幕底部（#499 第 3 项）——下注时（两行按钮）、追加窗口里（倒计时、加注、弃牌、不加注）所有按钮都在第一屏，不用滚动；往下滑也一直在底部；滑到最底下牌桌、侧栏都露得出来，不被操作栏挡住" : "电脑上操作栏照旧排在牌桌下面，不贴底"}`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext(Object.assign({ viewport: { width: vp.width, height: vp.height } }, vp.mobile ? { isMobile: true, hasTouch: true } : {}));
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });   // 不放发牌动画：量位置时牌已经在桌上
+    await page.goto(GAME_URL);
+    await page.evaluate(windowSetup);   // 下注：庄家下注 1 枚，轮到人跟注 / 加注 / 弃牌（两行按钮）
+    await page.waitForSelector('#cc-actions [data-cc="fold"]', T);
+    const bet = await page.evaluate(measureDock);
+    if (!vp.mobile) {
+      assert.equal(bet.pos, "static", "电脑上不贴底");
+      assert.ok(bet.bar.top >= bet.table.bottom, "照旧排在牌桌下面：" + JSON.stringify(bet));
+      assert.deepEqual(errors, []);
+      return;
+    }
+    assert.equal(bet.scroll, 0, "第一屏");
+    assert.deepEqual(bet.items.map(x => x.what).filter(w => w !== "amt"), ["call", "raise", "fold"]);
+    assert.deepEqual(offScreen(bet), [], "下注时所有按钮都在第一屏：" + JSON.stringify(bet));
+    assert.ok(Math.abs(bet.bar.bottom - bet.vh) <= 1, "操作栏贴在屏幕底部：" + JSON.stringify(bet.bar));
+    // 追加窗口：倒计时和按钮都在第一屏
+    await page.evaluate(() => document.querySelector('#cc-actions [data-cc="call"]').click());
+    await page.waitForSelector("#cc-actions .cc-count", T);
+    const win = await page.evaluate(measureDock);
+    assert.equal(win.scroll, 0, "第一屏");
+    assert.deepEqual(win.items.map(x => x.what).filter(w => w !== "amt"), ["倒计时", "raise", "fold", "pass"]);
+    assert.deepEqual(offScreen(win), [], "追加窗口：倒计时和所有按钮都在第一屏：" + JSON.stringify(win));
+    assert.ok(Math.abs(win.bar.bottom - win.vh) <= 1, "操作栏贴在屏幕底部：" + JSON.stringify(win.bar));
+    assert.ok(win.maxScroll > 0, "牌桌加侧栏比一屏高，要滚动（不然量不出贴底）");
+    // 往下滑一半（看侧栏）：操作栏还在底部，按钮照样点得到
+    await scrollCc(page, Math.round(win.maxScroll / 2));
+    const mid = await page.evaluate(measureDock);
+    assert.ok(mid.scroll > 0 && Math.abs(mid.bar.bottom - mid.vh) <= 1, "往下滑了操作栏还在底部：" + JSON.stringify(mid));
+    assert.deepEqual(offScreen(mid), []);
+    // 滑到最底下：侧栏、牌桌都在操作栏上面露出来（操作栏在排版里有自己的位置，不会一直挡着最后那一截）
+    await scrollCc(page, "end");
+    const end = await page.evaluate(measureDock);
+    assert.ok(end.scroll >= end.maxScroll - 1, "滑到底了");
+    assert.ok(end.side.bottom <= end.bar.top + 1 && end.table.bottom <= end.bar.top + 1, "最底下：侧栏、牌桌都在操作栏上面：" + JSON.stringify(end));
+    assert.ok(Math.abs(end.bar.bottom - end.vh) <= 1);
+    for (const m of [bet, win, mid, end]) assert.ok(m.overflow <= 1, "没有横向溢出：" + m.overflow + "px");
+    // 窗口里点「不加注」照常（点得到：在屏幕里的那个位置真的是这个按钮）
+    await scrollCc(page, 0);
+    const hit = await page.evaluate(() => { const el = document.querySelector('#cc-actions [data-cc="pass"]'), r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)); });
+    assert.ok(hit, "「不加注」没被别的东西盖住");
+    await page.tap('#cc-actions [data-cc="pass"]', T);
+    await page.waitForFunction(() => CounterCardsUI.state().game.stage === "weather", null, T);
     assert.deepEqual(errors, []);
   });
 }

@@ -25,6 +25,8 @@ async function fixture(t, mobile = false) {
     window.fixture = { calls: [], listeners: [], reject: "", view: { active: false, isHost: false, manualPhase: false, players: [], manual: { enemy: true }, enemyCatalog: [{ id: "thug_knife", name: "狂徒（匕首）" }], enemySkills: { enemy: [{ id: "en_aa", label: "普通攻击" }, { id: "en_gl", label: "榴弹标定" }] }, skillSteps: { en_gl: [{ key: "dest", type: "zone", label: "榴弹落点", zones: [1, 2], optional: false }] }, state: { units: [hero, enemy], zoneMode: 2, props: [{ id: "prop1", name: "爆炸桶", kind: "boom", zone: 1, level: 1, faction: "player", hp: 3, maxHp: 3, link: "1-2" }], fields: { 1: { fire: 0, ruinHp: 30, ruinMax: 30 }, 2: {} }, gaps: { "1-2": { type: "open", hp: 0, maxHp: 0, open: true } }, weather: "none", sandDir: "12" } }, emit() { this.listeners.forEach(f => f()); } };
     window.bridge = { getView: () => JSON.parse(JSON.stringify(fixture.view)), subscribe: fn => { fixture.listeners.push(fn); return () => { fixture.listeners = fixture.listeners.filter(x => x !== fn); }; }, submit: async cmd => { fixture.calls.push(JSON.parse(JSON.stringify(cmd))); return fixture.reject ? { ok: false, error: fixture.reject } : { ok: true }; } };
   });
+  // 层名（#510）：只放 engine.js · LAYER 这一张表（和 game.html 一样先于界面加载），不加载规则引擎
+  await page.addScriptTag({ content: require("./layer-names").script });
   // 入口在暂停页面里（#298）：pause-menu.js 先加载，online-gm-ui.js 往里登记「主持人工具」
   await page.addScriptTag({ path: path.join(__dirname, "..", "pause-menu.js") });
   await page.addScriptTag({ path: path.join(__dirname, "..", "online-gm-ui.js") });

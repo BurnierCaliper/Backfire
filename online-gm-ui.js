@@ -13,7 +13,7 @@
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
   const numericUnit = { hp: "最内层生命", shp: "坚毅生命（仅主持人）", shpMax: "坚毅生命上限", def: "架势", defMax: "架势上限", ap: "行动点", apMax: "行动点上限", bonus: "附赠行动", bonusMax: "附赠行动上限", atk: "个人 ATK", level: "等级", zone: "所在区", highEnergy: "高能层数" };
   const instantNames = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射" };
-  const layerNames = () => typeof LAYER !== "undefined" ? LAYER : { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘" };
+  const layerNames = () => typeof LAYER !== "undefined" ? LAYER : {};   // 层名只读 engine.js · LAYER（#510：全项目只留一份）
   const atkFxIds = () => typeof ATKFX !== "undefined" ? Object.keys(ATKFX).filter(k => ["combust", "icebreak", "bolt", "etch", "backflow", "inertia", "diffract"].includes(k)) : [];   // 同单机编辑器里的七种属性专属攻击效果
   const flagUnit = { stunned: "失衡", dying: "濒死", dead: "倒下", flying: "飞行" };
   const NO_TARGET = new Set("en_boom_fuse en_patrol_chase en_patrol_near en_gl en_gl_fire en_ant_shell en_ant_shell_fire en_riot_bottle en_riot_bottle_fireen_gas_ignite en_hunter_heat en_alarm_zap en_bigsand_summon en_bigsand_heal en_live_absorb en_giant_sand_pulse en_boat_arc en_king_hold en_king_exec en_thug_mutiny en_chi_cover ufo_stomp ufo_sweep ufo_prime ufo_boom en_agg2_overheat en_agg3_debris en_agg1_rush en_agg1_rush_prep ufo_summon".split(" "));

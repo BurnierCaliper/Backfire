@@ -7,7 +7,9 @@
  * 每轮：
  *   0. 借贷：手上的筹码不够这一轮「底注 + 最低下注额」的一方，先决定向不向主持方借（输光的一方先问，不借这一局就结束）；
  *   1. 双方各下 1 枚底注；
- *   2. 庄家天气行动：场上有天气 → 弃掉 / 保留；场上没有天气 → 偷看堆顶一张，放回原位或放到牌堆底（也可以不动）。玩家看得到庄家做了哪种操作；
+ *   2. 庄家天气行动：场上有天气 → 弃掉 / 保留（保留以后还可以接着偷看下一张）；场上没有天气 → 偷看下一张（也可以不动）。偷看完放回原位或压到牌堆底。
+ *      偷看按顺序往下看（#502，主人 10/30）：看的是庄家自己还没看过的下一张，不会重复看同一张；堆里剩下的都看过了就不能再偷看。
+ *      玩家看得到庄家做了哪种操作（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌；
  *   3. 双方暗出一张牌；
  *   4. 第一轮下注，玩家先；
  *   5. 玩家必须翻开一张新天气，除非暗弃任意一张手牌跳过（常态也可以弃，弃的牌不公开）；
@@ -72,11 +74,8 @@
     normal: "normal",                  // 常态：每局一次，代价是暗弃一张元素牌，清除当前天气；不能覆盖相位
     weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"],
     allInWeather: "phase",             // 翻到这张天气：本轮双方全押，打平各自退回自己下的筹码
-    cardNames: {
-      flesh: "血肉", armor: "装甲", shield: "护盾", sand: "沙", spirit: "灵体",
-      fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波",
-      normal: "常态"
-    },
+    // 牌名：层牌、元素牌不在这里另写，直接读 engine.js 的 LAYER / ELE（和战斗里同一份，战斗里改名牌桌跟着变，#509）；这里只放常态这类牌桌专用的名字
+    cardNames: { normal: "常态" },
     weatherNames: { heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" },
     sideNames: { dealer: "庄家", player: "玩家" },
     // 克制表（得分，chart()）：牌局中随时能开的完整克制表，matchup-ui.js 照平时克制表的样子画，格子写得分。
@@ -101,7 +100,13 @@
 
   const SIDES = ["dealer", "player"];
   const other = (side) => (side === "dealer" ? "player" : "dealer");
-  const cardName = (c) => CC_CONFIG.cardNames[c] || String(c);
+  /** 层牌、元素牌的名字：engine.js 的 LAYER / ELE（#509）；没加载 engine.js 时没有（开局、克制表本来就要先加载 engine.js） */
+  const engineName = (c) => {
+    if (CC_CONFIG.layers.indexOf(c) >= 0) return typeof LAYER !== "undefined" ? LAYER[c] : null;
+    if (CC_CONFIG.elements.indexOf(c) >= 0) return typeof ELE !== "undefined" ? ELE[c] : null;
+    return null;
+  };
+  const cardName = (c) => engineName(c) || CC_CONFIG.cardNames[c] || String(c);
   const weatherName = (w) => (w ? CC_CONFIG.weatherNames[w] || String(w) : "常态");
   const sideName = (s) => CC_CONFIG.sideNames[s] || s;
   const isElement = (c) => CC_CONFIG.elements.indexOf(c) >= 0;
@@ -262,7 +267,9 @@
       },
       betting: null, allIn: false, revealed: null, peek: null,
       loanAsk: null,             // 每轮开始还没决定借不借的一方（依次问，输光的在前）
-      know: { top: null, bottom: null },   // 庄家偷看过、知道位置的天气（只给庄家看）
+      // 庄家偷看过、知道位置的天气（只给庄家看）：top = 从堆顶往下连续看过的几张（top[0] 就是堆顶），
+      // bottom = 压到牌堆底的几张（按堆里的顺序，最后一张在最底下）；偷看看的是 top 后面那一张（#502）
+      know: { top: [], bottom: [] },
       normalUsed: false,
       results: [], log: [], final: null
     };
@@ -417,9 +424,12 @@
         const lo = loanOption(g, side);
         return (lo ? [lo] : []).concat([{ type: "noLoan" }]);
       }
-      case "dealerWeather":
-        if (g.weather) return [{ type: "weather", op: "discard" }, { type: "weather", op: "keep" }];
-        return g.deck.length ? [{ type: "weather", op: "peek" }, { type: "weather", op: "pass" }] : [];
+      case "dealerWeather": {
+        // 偷看（peek）：天气堆里还有庄家没看过的牌才行；场上有天气时 peek = 保留以后接着偷看，keep = 保留、不看（#502）
+        const peek = unseenOf(g) > 0 ? [{ type: "weather", op: "peek" }] : [];
+        if (g.weather) return [{ type: "weather", op: "discard" }, { type: "weather", op: "keep" }].concat(peek);
+        return peek.length ? peek.concat([{ type: "weather", op: "pass" }]) : [];
+      }
       case "dealerPeek":
         return [{ type: "place", where: "top" }, { type: "place", where: "bottom" }];
       case "play":
@@ -539,37 +549,47 @@
     if (!g.loanAsk.length) beginRound(g);
   }
 
-  /* 2. 庄家天气行动 */
+  /* 2. 庄家天气行动：场上有天气 → 弃掉 / 保留（keep）/ 保留以后接着偷看（peek）；场上没有天气 → 偷看（peek）/ 不动（pass） */
   function dealerWeather(g, op) {
+    const w = g.weather;
     if (op === "discard") {
-      const w = g.weather;
       g.gone.push(w); g.weather = null;
       note(g, { t: "dw", by: "dealer", op, weather: w, text: `庄家弃掉了场上的天气〔${weatherName(w)}〕。` });
       g.stage = "play";
-    } else if (op === "keep") {
-      note(g, { t: "dw", by: "dealer", op, weather: g.weather, text: `庄家保留了场上的天气〔${weatherName(g.weather)}〕。` });
-      g.stage = "play";
-    } else if (op === "peek") {
-      g.peek = { card: g.deck[0], where: null };
-      g.know.top = g.deck[0];
-      if (g.deck.length === 1) g.know.bottom = g.deck[0];
-      note(g, { t: "peekCard", by: "dealer", to: "dealer", card: g.deck[0], text: `你偷看到天气堆顶是〔${weatherName(g.deck[0])}〕。` });
-      g.stage = "dealerPeek";
-    } else {
+    } else if (op === "pass") {
       note(g, { t: "dw", by: "dealer", op: "pass", text: "庄家没有动天气。" });
       g.stage = "play";
+    } else {
+      // 保留：玩家看得到；保留以后要偷看（peek）就接着偷看下一张
+      if (w) note(g, { t: "dw", by: "dealer", op: "keep", weather: w, text: `庄家保留了场上的天气〔${weatherName(w)}〕。` });
+      if (op === "peek") peekNext(g); else g.stage = "play";
     }
     advance(g);
   }
+  /* 偷看按顺序往下看（#502，主人 10/30）：庄家记着堆顶往下连续看过的几张（know.top）和压到牌堆底的几张（know.bottom），
+   * 偷看看的是 know.top 后面那一张——自己还没看过的下一张，不会重复看同一张；中间没有没看过的牌了就不能再偷看 */
+  const unseenOf = (g) => g.deck.length - g.know.top.length - g.know.bottom.length;
+  /** 偷看的是第几张（at：从堆顶数，0 = 堆顶），公开记录、私人记录都这样写 */
+  const peekPos = (at) => (at ? `天气堆从上往下第 ${at + 1} 张` : "天气堆顶的一张");
+  /** 看到了就记着：这张还在原位，接在堆顶往下看过的那几张后面 */
+  function peekNext(g) {
+    const at = g.know.top.length, card = g.deck[at];
+    g.peek = { card, where: null, at };
+    g.know.top.push(card);
+    note(g, { t: "peekCard", by: "dealer", to: "dealer", card, at,
+      text: at ? `你偷看到${peekPos(at)}是〔${weatherName(card)}〕（上面 ${at} 张你已经看过）。` : `你偷看到天气堆顶是〔${weatherName(card)}〕。` });
+    g.stage = "dealerPeek";
+  }
+  /** 放回原位：这张留在原来的位置；压到牌堆底：只挪这一张（上面看过的不动），记录从堆顶那边挪到堆底那边，庄家记得堆底这张是什么 */
   function placePeek(g, where) {
-    const card = g.deck[0];
-    if (where === "bottom" && g.deck.length > 1) {
-      g.deck.push(g.deck.shift());
-      g.know.bottom = card;
-      g.know.top = null;
+    const at = g.peek.at, card = g.deck[at];
+    if (where === "bottom") {
+      g.know.top.pop();
+      g.deck.splice(at, 1); g.deck.push(card);
+      g.know.bottom.push(card);
     }
     g.peek.where = where;
-    note(g, { t: "dw", by: "dealer", op: "peek", where, text: where === "bottom" ? "庄家偷看了天气堆顶的一张，放到了牌堆底。" : "庄家偷看了天气堆顶的一张，放回原位。" });
+    note(g, { t: "dw", by: "dealer", op: "peek", where, at, text: `庄家偷看了${peekPos(at)}，${where === "bottom" ? "压到了牌堆底" : "放回原位"}。` });
     g.stage = "play";
     advance(g);
   }
@@ -685,9 +705,10 @@
     const w = g.deck.shift();
     if (g.weather) g.gone.push(g.weather);
     g.weather = w; g.revealed = w;
-    if (g.know.top) g.know.top = null;
-    if (g.know.bottom && !g.deck.length) g.know.bottom = null;
-    if (g.know.bottom && g.deck.length === 1) g.know.top = g.know.bottom;
+    // 翻开的总是真正的堆顶：庄家看过的记录跟着挪——是堆顶往下看过的第一张就拿掉它；
+    // 整堆都是压到底、看过的牌时，翻开的是其中最上面那张
+    if (g.know.top.length) g.know.top.shift();
+    else if (g.know.bottom.length > g.deck.length) g.know.bottom.shift();
     note(g, { t: "pw", by: "player", op: "reveal", weather: w, text: `玩家翻开了新天气〔${weatherName(w)}〕。` });
     if (w === CC_CONFIG.allInWeather) g.allIn = true;
     beginNormal(g);
@@ -818,7 +839,10 @@
   function advance(g) {
     if (g.over) return;
     if (g.stage === "dealerWeather" && !legal(g, "dealer").length) {
-      note(g, { t: "dw", by: "dealer", op: "none", text: "场上没有天气、天气堆也翻完了，庄家这一轮没有天气行动。" });
+      // 场上没有天气，天气堆翻完了，或者剩下的庄家都看过了（#502：看过的不能再看）
+      note(g, { t: "dw", by: "dealer", op: "none", text: g.deck.length
+        ? `场上没有天气、天气堆里剩下的 ${g.deck.length} 张庄家都看过了，庄家这一轮没有天气行动。`
+        : "场上没有天气、天气堆也翻完了，庄家这一轮没有天气行动。" });
       g.stage = "play";
     }
   }
@@ -853,9 +877,12 @@
     if (side === "player") v.me.spare = spareElements(g);
     if (side === "dealer") {
       v.peek = g.peek ? clone(g.peek) : null;
-      const top = g.know.top && g.deck[0] === g.know.top ? g.know.top : null;
-      const bottom = g.know.bottom && g.deck[g.deck.length - 1] === g.know.bottom ? g.know.bottom : null;
-      v.deckTop = top; v.deckBottom = bottom;
+      // 庄家看过的天气（#502，只给庄家）：deckSeen.top = 堆顶往下连续看过的几张，bottom = 压到牌堆底的几张（最后一张在最底下），
+      // unseen = 还有几张没看过；deckTop / deckBottom = 知道的堆顶 / 堆底那张（不知道是 null）
+      const k = g.know, n = g.deck.length;
+      v.deckSeen = { top: k.top.slice(), bottom: k.bottom.slice(), unseen: unseenOf(g) };
+      v.deckTop = k.top.length ? k.top[0] : n && k.bottom.length === n ? k.bottom[0] : null;
+      v.deckBottom = k.bottom.length ? k.bottom[k.bottom.length - 1] : n && k.top.length === n ? k.top[n - 1] : null;
     }
     return v;
   }
