@@ -299,12 +299,13 @@
     box.style.left = Math.round(left) + "px";
     box.style.top = Math.round(top) + "px";
   }
-  // 电脑：鼠标（笔）停到手里的元素牌上弹出，移开收起。手指碰到时浏览器发的 pointerover（pointerType = touch）不算，手机走下面的长按
+  // 电脑：鼠标（笔）停到手里的元素牌上弹出，移开收起。手指碰到时浏览器发的 pointerover（pointerType = touch）不算，手机走下面的长按。
+  // 长按弹出的预览，换成用鼠标（触屏电脑）挪到别处也收起
   function onTipOver(e) {
     if (!S || e.pointerType === "touch") return;
     const card = tipCard(e.target);
-    if (card) { if (!S.tip || S.tip.card !== card.dataset.ccTip) showTip(card.dataset.ccTip, "hover"); }
-    else if (S.tip && S.tip.via === "hover") hideTip();
+    if (card) { if (!S.tip || S.tip.card !== card.dataset.ccTip || S.tip.via !== "hover") showTip(card.dataset.ccTip, "hover"); }
+    else if (S.tip) hideTip();
   }
   function onTipOut(e) {
     if (!S || !S.tip || S.tip.via !== "hover" || e.pointerType === "touch") return;

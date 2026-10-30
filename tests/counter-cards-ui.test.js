@@ -734,7 +734,7 @@ test("悬停预览：不挡出牌——预览不接鼠标，开着时照样点�
   assert.ok(!visible(tip), "回到标题就收起");
 });
 
-test("手机长按：按住手里的元素牌一会儿弹出预览，松手不会把牌出掉（这一下不算点击）；预览留着看，手指碰别处就收起；再点一下这张牌照常出牌；系统的长按菜单不弹", async () => {
+test("手机长按：按住手里的元素牌一会儿弹出预览，松手不会把牌出掉（这一下不算点击）；预览留着看，手指碰别处（触屏电脑上换成鼠标挪到别处）就收起；再点一下这张牌照常出牌；系统的长按菜单不弹", async () => {
   const p = page();
   const game = heatGame(p, "长按");
   const tip = p.$("#cc-tip"), ms = p.UI.UI_CONFIG.tip.pressMs;
@@ -755,6 +755,13 @@ test("手机长按：按住手里的元素牌一会儿弹出预览，松手不�
   finger(p, p.$("#cc-board .cc-deck"), "touchstart", 10, 10);
   assert.ok(!visible(tip), "手指碰别处就收起");
   finger(p, p.$("#cc-board .cc-deck"), "touchend");
+  // 触屏电脑：长按弹出以后换成用鼠标，挪到别处也收起
+  finger(p, handCard(p, "fire"), "touchstart", 50, 50);
+  await wait(ms + 80);
+  finger(p, handCard(p, "fire"), "touchend");
+  assert.ok(visible(tip));
+  hover(p, p.$("#cc-board .cc-deck"));
+  assert.ok(!visible(tip), "换成鼠标挪到别处也收起");
   // 再长按一下，松手后轻点这张牌：照常出牌
   finger(p, handCard(p, "fire"), "touchstart", 50, 50);
   await wait(ms + 80);
