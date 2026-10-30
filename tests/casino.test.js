@@ -134,24 +134,26 @@ test("离桌结算：输的先扣赠送筹码，赠送的扣完了再扣普通�
   K.leave(w);                                                          // 打到一半离桌：下一轮的底注已经押进去，不退
   assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [50 - feeChips("vip") - 26, 10], "入场费和输的 26 枚全从赠送筹码里扣，普通筹码不动");
   // 押上去的有赠送也有普通，输的比赠送的多：赠送扣光，剩下的扣普通
-  const w2 = K.wallet({ gifted: true, gift: 20 * FACE, normal: 40 * FACE });
+  // （钱包里没押上去的只剩半枚，不够补上桌 1 枚：#520 起够 1 枚就先从钱包补、不问借贷）
+  const w2 = K.wallet({ gifted: true, gift: 20 * FACE, normal: 32.5 * FACE });
   g = K.sit(w2, "vip", 50, { deck: PHASE_FIRST });
   phaseAllIn(g, "armor", "fire");                                      // 全押输光：输 50 枚
   A(g, "player", "noLoan");
   const res = K.leave(w2);
   assert.equal(res.net, -50);
-  assert.deepEqual([K.chips(w2).gift, K.chips(w2).normal], [0, 60 - 50 - feeChips("vip")]);
+  assert.deepEqual([K.chips(w2).gift, K.chips(w2).normal], [0, 52.5 - 50 - feeChips("vip")], "没押上去的半枚普通筹码不动");
 });
 
 test("离桌结算：还不上的借款（桌上筹码是负数）先扣钱包里剩下的赠送筹码，再扣普通筹码，可以扣成负数（欠赌场的）", () => {
-  const w = K.wallet({ gifted: true, gift: (51 + feeChips("vip")) * FACE, normal: 0 });
+  // 交完入场费、押上买入，钱包里剩半枚赠送筹码：不够补上桌 1 枚（#520 起够 1 枚就先从钱包补），只能借
+  const w = K.wallet({ gifted: true, gift: (50.5 + feeChips("vip")) * FACE, normal: 0 });
   const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
   phaseAllIn(g, "armor", "fire");                      // 输光
   A(g, "player", "borrow", { amount: 3 });             // 借 3 还 4；下了 1 枚底注，手上 2 枚
   const res = K.leave(w);                              // 打到一半离桌：手上 2 枚 − 还 4 枚 = −2 枚
   assert.equal(res.chips, -2);
   assert.equal(res.net, -52);
-  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, -1], "交完入场费剩下的 51 枚赠送筹码扣光，还差 1 枚记成欠赌场的");
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, -1.5], "交完入场费剩下的半枚赠送筹码扣光，还差 1.5 枚记成欠赌场的");
 });
 
 test("打到一半的牌局跟着钱包存档：存了再读，接着打完、照样结算", () => {

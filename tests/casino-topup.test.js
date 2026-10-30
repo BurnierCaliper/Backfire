@@ -21,6 +21,26 @@ function rules() {
   RULES.forEach(f => vm.runInContext(read(f), c, { filename: f }));
   return { c, K: c.Casino, CC: c.CounterCards, D: c.FluxDuel, X: c.FluxHoldem, FACE: c.Casino.CONFIG.face };
 }
+const A = (CC, g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+/** High Flux 第 1 轮打到玩家翻天气之前：庄家不动天气，双方暗出，第一轮下注都过牌 */
+function toReveal(CC, g, dealerCard, playerCard) {
+  A(CC, g, "dealer", "weather", { op: "pass" });
+  A(CC, g, "dealer", "play", { card: dealerCard });
+  A(CC, g, "player", "play", { card: playerCard });
+  A(CC, g, "player", "check"); A(CC, g, "dealer", "check");
+}
+/** High Flux 第 1 轮：玩家翻开相位 → 双方全押，按 dealerCard / playerCard 判胜负（火打装甲 −1：玩家输光） */
+function phaseAllIn(CC, g, dealerCard, playerCard) {
+  toReveal(CC, g, dealerCard, playerCard);
+  A(CC, g, "player", "reveal");
+}
+/** Flux Duel 第 1 轮：双方暗出，第一轮下注都过牌，翻开相位 → 双方全押，直接比分 */
+function duelPhaseAllIn(D, g, mine, house) {
+  D.act(g, "a", { type: "play", layer: mine[0], element: mine[1] });
+  D.act(g, "b", { type: "play", layer: house[0], element: house[1] });
+  D.act(g, "a", { type: "check" }); D.act(g, "b", { type: "check" });
+}
+const topUps = (g) => g.log.filter(e => e.t === "topUp");
 
 /* ---------- 钱：从钱包拿多少、拿哪部分、记在哪（casino.js） ---------- */
 
@@ -157,4 +177,186 @@ test("玩家对赌押奎支：从那名角色的私人钱包补奎支（200 奎�
   const rd = K.pvpSettle(t, "dealer", wd, "dealer");
   assert.deepEqual([rd.chips, rd.net, rd.kuizhi], [52, -1, 52 * FACE], "押了 53 枚（10600 奎支），桌上剩 52 枚回钱包：输 200 奎支");
   assert.match(rd.text, /中途从钱包补了 3 枚），输 200 奎支/);
+});
+
+/* ---------- 牌局里：不够先从钱包补，钱包空了才借（counter-cards.js · bet.topUp，三种玩法共用） ---------- */
+
+test("High Flux 赌场桌：每轮开始不够「底注 + 最低注」时先从钱包补到够用，不问借贷；记录写「从钱包补了 N 枚到桌上」，总买入跟着加，离桌按总买入算净输赢", () => {
+  const { K, CC, FACE } = rules();
+  const w = K.wallet({ gifted: true, gift: 3 * FACE, normal: 57 * FACE });   // 贵宾室：桌上 1 枚 = 钱包 1 枚
+  const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });                      // 入场费 2 + 买入 50：赠送的 3 枚先用光，普通剩 8 枚
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, 8]);
+  phaseAllIn(CC, g, "armor", "fire");                                        // 相位全押：火打装甲 −1，玩家输光
+  assert.equal(g.round, 2);
+  assert.equal(g.loanAsk, null, "钱包里有筹码：不问借贷");
+  assert.equal(g.stage, "dealerWeather", "补完直接下底注，进庄家天气行动");
+  assert.deepEqual(J(topUps(g).map(e => [e.r, e.by, e.amount])), [[2, "player", 3]], "补到第 2 轮的底注 1 + 最低下注 2，不用凑整 3 枚");
+  assert.match(topUps(g)[0].text, /^玩家从钱包补了 3 枚到桌上。$/);
+  const iTop = g.log.indexOf(topUps(g)[0]), iRound = g.log.findIndex(e => e.t === "round" && e.r === 2);
+  assert.ok(iTop < iRound, "先补，再下第 2 轮的底注");
+  assert.equal(g.sides.player.chips, 2, "补上 3 枚，下了 1 枚底注");
+  assert.deepEqual([g.sides.player.start, g.casino.buyIn, w.seat.buyIn, w.seat.topUp], [53, 53, 53, 3], "补上来的算进总买入");
+  assert.deepEqual([g.sides.player.loan, g.sides.player.owe, K.chips(w).normal], [0, 0, 5], "没借，钱包少了 3 枚");
+  assert.equal(g.results[0].delta.player, -50, "补上来的不算上一轮的输赢");
+  // 后面每轮庄家都弃牌：玩家每轮赢 1 枚底注，够用就不再补
+  for (let guard = 0; !g.over; guard++) {
+    assert.ok(guard < 80, "打不完：" + g.stage);
+    const side = CC.toAct(g)[0];
+    if (g.stage === "dealerWeather") A(CC, g, "dealer", "weather", { op: g.weather ? "keep" : "pass" });
+    else if (g.stage === "play") for (const s of CC.toAct(g)) A(CC, g, s, "play", { card: CC.legal(g, s)[0].card });
+    else if (g.stage === "bet1" || g.stage === "bet2") A(CC, g, side, side === "dealer" ? "fold" : "check");
+    else assert.fail("没想到的阶段：" + g.stage);
+  }
+  assert.equal(topUps(g).length, 1);
+  assert.equal(g.final.chips.player, 3 + 4, "补完 3 枚，第 2–5 轮每轮赢庄家 1 枚底注");
+  assert.equal(g.final.net.player, 7 - 53, "对局结束按总买入算净输赢");
+  assert.match(g.log[g.log.length - 1].text, /买入 53 枚——庄家赢/);
+  const res = K.leave(w);
+  assert.deepEqual([res.chips, res.buyIn, res.topUp, res.net], [7, 53, 3, -46]);
+  assert.match(res.text, /离开贵宾室：桌上剩 7 枚（买入 53 枚，含从钱包补的 3 枚，输 46 枚），钱包少了 46 枚筹码/);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, 12], "桌上剩的 7 枚回到钱包的 5 枚上");
+});
+
+test("High Flux 赌场桌：钱包不够补满时先补光钱包（有多少补多少），剩下的缺口才问借不借", () => {
+  const { K, CC, FACE } = rules();
+  const w = K.wallet({ gifted: true, gift: 0, normal: 53 * FACE });          // 贵宾室坐下后钱包只剩 1 枚
+  const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
+  phaseAllIn(CC, g, "armor", "fire");                                        // 输光：第 2 轮要 3 枚
+  assert.deepEqual(J(topUps(g).map(e => e.amount)), [1]);
+  assert.match(topUps(g)[0].text, /^玩家从钱包补了 1 枚到桌上（钱包只够补这么多，还差 2 枚）。$/);
+  assert.equal(K.chips(w).normal, 0, "钱包补光了");
+  assert.equal(g.stage, "loan");
+  assert.deepEqual(J(g.loanAsk), ["player"], "剩下的缺口才问借不借");
+  const iTop = g.log.indexOf(topUps(g)[0]), iAsk = g.log.findIndex(e => e.t === "loanAsk");
+  assert.ok(iTop >= 0 && iTop < iAsk, "先补，再问借");
+  const lo = CC.legal(g, "player").find(o => o.type === "borrow");
+  assert.deepEqual([lo.min, lo.max, lo.need], [3, 3, 3], "借贷照旧：差 2 枚，借 3 枚一份");
+  A(CC, g, "player", "borrow", { amount: 3 });
+  assert.deepEqual([g.sides.player.chips, g.sides.player.loan, g.sides.player.owe, g.sides.player.start], [3, 3, 4, 51], "借来的不算买入");
+  assert.equal(w.seat.buyIn, 51);
+});
+
+test("High Flux 赌场桌：轮到自己下注时不够「要跟的 + 最低下注额」，先从钱包补到够用再下注（不出借贷）；钱包空了照旧借", () => {
+  const { K, CC, FACE } = rules();
+  // 第一轮下注：玩家过牌，庄家押到玩家手上的全部 49 枚——要跟 49 + 最低下注 1，手上只有 49
+  const setup = (normal) => {
+    const w = K.wallet({ gifted: true, gift: 0, normal: normal * FACE });
+    const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
+    A(CC, g, "dealer", "weather", { op: "pass" });
+    A(CC, g, "dealer", "play", { card: "armor" }); A(CC, g, "player", "play", { card: "fire" });
+    A(CC, g, "player", "check");
+    A(CC, g, "dealer", "bet", { amount: 49 });
+    return { w, g };
+  };
+  const { w, g } = setup(62);                                                // 钱包坐下后剩 10 枚
+  assert.equal(g.sides.player.chips, 50, "轮到玩家下注：先从钱包补了 1 枚");
+  assert.match(g.log[g.log.length - 1].text, /^玩家从钱包补了 1 枚到桌上。$/);
+  const L = CC.legal(g, "player");
+  assert.ok(L.some(o => o.type === "call" && o.amount === 49), "跟得起");
+  assert.ok(!L.some(o => o.type === "borrow"), "补够了：不出借贷");
+  assert.deepEqual([g.sides.player.start, w.seat.buyIn, K.chips(w).normal], [51, 51, 9]);
+  assert.equal(g.sides.player.roundStart, 51, "补上来的不算这一轮的输赢（本轮起点跟着加）");
+  // 钱包空了：照旧借
+  const empty = setup(52);
+  assert.equal(empty.g.sides.player.chips, 49);
+  assert.ok(!topUps(empty.g).length, "没补");
+  assert.ok(CC.legal(empty.g, "player").some(o => o.type === "borrow"), "钱包空了才借");
+});
+
+test("High Flux：存档读回来接着打，从读进来的钱包补（钱包读进来时登记这一局）", () => {
+  const { K, CC, FACE } = rules();
+  const w = K.wallet({ gifted: true, gift: 0, normal: 60 * FACE });
+  toReveal(CC, K.sit(w, "vip", 50, { deck: PHASE_FIRST }), "armor", "fire");
+  const w2 = K.wallet(J(w));                                                 // 存档 → 读档
+  A(CC, w2.seat.game, "player", "reveal");                                   // 相位全押输光
+  assert.deepEqual(J(topUps(w2.seat.game).map(e => e.amount)), [3]);
+  assert.deepEqual([K.chips(w2).normal, K.chips(w).normal], [5, 8], "补的是读进来的钱包");
+  assert.equal(w2.seat.buyIn, 53);
+});
+
+test("Flux Duel 赌场桌：每轮开始、轮到自己下注时不够都先从钱包补（人坐的 a），不问借贷；钱包不够补满才借；赌场那一方筹码无限不受影响", () => {
+  const { K, D, FACE } = rules();
+  const setup = (normal) => {
+    const w = K.wallet({ gifted: true, gift: 2 * FACE, normal: normal * FACE });   // 贵宾室：桌上 1 枚 = 钱包 1 枚
+    const g = K.sit(w, "duel-vip", 50, { deck: PHASE_FIRST });                    // 入场费 2 + 买入 50：赠送的 2 枚先用光
+    duelPhaseAllIn(D, g, ["flesh", "ice"], ["flesh", "fire"]);                    // 相位全押输光
+    return { w, g };
+  };
+  const { w, g } = setup(56);                                                // 坐下后普通剩 6 枚
+  assert.equal(g.results[0].winner, "b");
+  assert.equal(g.round, 2);
+  assert.deepEqual(J(topUps(g).map(e => [e.by, e.amount])), [["a", 4]], "第 2 轮底注 2 + 最低下注 2");
+  assert.match(topUps(g)[0].text, /^你从钱包补了 4 枚到桌上。$/);
+  assert.equal(g.loanAsk, null);
+  assert.equal(g.stage, "play", "不问借贷，下完底注接着暗出");
+  assert.deepEqual([g.sides.a.chips, g.sides.a.start, g.casino.buyIn, w.seat.buyIn, K.chips(w).normal], [2, 54, 54, 54, 2]);
+  assert.equal(g.sides.b.infinite, true);
+  // 第 2 轮 b 先手：b 下注 2 枚，轮到你要跟 2 + 最低下注 2，手上只有 2 → 再补 2 枚（下注回合和 High Flux 同一份代码）
+  D.act(g, "a", { type: "play", layer: "armor", element: "fire" });
+  D.act(g, "b", { type: "play", layer: "armor", element: "ice" });
+  assert.deepEqual(J(D.toAct(g)), ["b"]);
+  D.act(g, "b", { type: "bet", amount: 2 });
+  assert.deepEqual(J(topUps(g).map(e => e.amount)), [4, 2]);
+  assert.equal(g.sides.a.chips, 4);
+  assert.ok(D.legal(g, "a").some(o => o.type === "call"), "跟得起");
+  assert.ok(!D.legal(g, "a").some(o => o.type === "borrow"), "不出借贷");
+  assert.deepEqual([g.sides.a.start, w.seat.buyIn, K.chips(w).normal], [56, 56, 0]);
+  // 钱包不够补满：先补光，剩下的缺口才问借
+  const short = setup(52);                                                   // 坐下后普通剩 2 枚
+  assert.deepEqual(J(topUps(short.g).map(e => e.amount)), [2]);
+  assert.match(topUps(short.g)[0].text, /^你从钱包补了 2 枚到桌上（钱包只够补这么多，还差 2 枚）。$/);
+  assert.equal(short.g.stage, "loan");
+  assert.deepEqual(J(short.g.loanAsk), ["a"]);
+  assert.equal(K.chips(short.w).normal, 0);
+});
+
+test("Flux Hold'em 赌场桌：轮到你下注跟不起、每轮开始不够「盲注 + 最低注」都先从钱包补（只补你坐的 p1），不用借、也不用全押开边池；AI 座位照旧借", () => {
+  const { K, X, FACE } = rules();
+  const setup = (seed) => {
+    const w = K.wallet({ gifted: true, gift: 0, normal: 60 * FACE });        // 贵宾室：桌上 1 枚 = 钱包 1 枚；坐下后剩 8 枚
+    const g = K.sit(w, "holdem-vip", 50, { seed });
+    // 第 1 轮：你坐庄（偷看天气堆顶），大家盖牌；p2（小盲）加注到 50 全押，p3、p4 弃牌
+    X.act(g, "p1", { type: "place", where: "top" });
+    for (const id of g.order) X.act(g, id, { type: "play", card: X.legal(g, id).find(o => o.type === "play").card });
+    X.act(g, "p2", { type: "raise", amount: 48 });
+    X.act(g, "p3", { type: "fold" }); X.act(g, "p4", { type: "fold" });
+    return { w, g };
+  };
+  const { w, g } = setup("补0");
+  // 轮到你：要跟 50 + 最低下注 1，手上只有 50 → 先从钱包补 1 枚
+  assert.deepEqual(J(X.toAct(g)), ["p1"]);
+  assert.equal(g.sides.p1.chips, 51);
+  const L = X.legal(g, "p1");
+  assert.ok(L.some(o => o.type === "call" && o.amount === 50));
+  assert.ok(!L.some(o => o.type === "borrow" || o.type === "allIn"), "补够了：不借，也不用全押开边池");
+  X.act(g, "p1", { type: "call" });
+  // 亮牌输给 p2：第 2 轮开始你手上 1 枚，不够最低下注 2 枚（这一轮你不下盲注）→ 再补 1 枚
+  assert.deepEqual(J(g.results[0].winners), ["p2"]);
+  assert.equal(g.round, 2);
+  assert.deepEqual(J(topUps(g).map(e => [e.r, e.by, e.amount])), [[1, "p1", 1], [2, "p1", 1]]);
+  topUps(g).forEach(e => assert.match(e.text, /^你从钱包补了 1 枚到桌上。$/));
+  assert.equal(g.loanAsk, null);
+  assert.deepEqual([g.sides.p1.chips, g.sides.p1.start, g.casino.buyIn, w.seat.buyIn, K.chips(w).normal], [2, 52, 52, 52, 6]);
+  // 你赢了的那一局：输光的是 AI 座位（p2），第 2 轮照旧问它借不借，不从你的钱包补
+  const other = setup("补4");
+  X.act(other.g, "p1", { type: "call" });
+  assert.deepEqual(J(other.g.results[0].winners), ["p1"]);
+  assert.equal(other.g.stage, "loan");
+  assert.ok(other.g.loanAsk.includes("p2"), "AI 座位输光了照旧借");
+  assert.ok(topUps(other.g).every(e => e.by === "p1"), "只补你坐的座位");
+  assert.equal(K.chips(other.w).normal, 7, "你的钱包只补了你自己那 1 枚");
+});
+
+test("不接钱包的普通对局（本地玩法）照旧借贷：不补，也没有补筹码的记录", () => {
+  const { CC, D } = rules();
+  const g = CC.newGame({ seed: "本地", deck: PHASE_FIRST });
+  phaseAllIn(CC, g, "armor", "fire");                                        // 玩家输光（庄家也是 50 枚，全押各 50）
+  assert.equal(g.stage, "loan");
+  assert.deepEqual(J(g.loanAsk), ["player"]);
+  assert.ok(!topUps(g).length);
+  const d = D.newGame({ seed: "本地", deck: PHASE_FIRST });
+  duelPhaseAllIn(D, d, ["flesh", "ice"], ["flesh", "fire"]);
+  assert.equal(d.stage, "loan");
+  assert.deepEqual(J(d.loanAsk), ["a"]);
+  assert.ok(!topUps(d).length);
 });
