@@ -370,6 +370,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **巨型活沙吸收后出手按合并 atk 结算：`absorbSandsInto` 同步加上 `personalAtk`**（enemies.js · `absorbSandsInto`；测试 tests/giant-livesand-atk.test.js（新））
+  - **以前**：活沙被杀死吸收沙灵 / 沙漠生物时，只把饲料的 `atk` 加进 `livesand.atk`。卡面和吸收日志写的是合并后的 ATK（常见 50+），但出手走 `runEnemyActionInner` → `effectiveAtk` → `baseEffectiveAtk`（party.js），敌人只读 `personalAtk + weaponAtk`，**不读 `unit.atk`**。`personalAtk` 仍停在生成时的底值 7，穿刺 / 流沙漩涡 / 全域沙暴每一击都按约 7 点算，变巨后每回合伤害只有个位数。
+  - **现在**：吸收时 `atk` 与 `personalAtk` 加同一笔（有 `ivBase` 时一并改，和 `_raceAdd` 一致）。变巨后 `effectiveAtk` = 合并 atk，技能伤害跟卡面一致。
+  - **没改的**：吸收谁、加多少血 / def、变巨技能表、AI 选型都没动；图鉴说明本来就是「获得它们的全部血量和 atk」，与本次修复对齐。
+  - **测试**：tests/giant-livesand-atk.test.js（新，3 条，在没改的代码上都失败）：吸收后 `personalAtk` / `effectiveAtk` 等于合并 `atk`；流沙漩涡两人合计伤害 = 2×合并 atk（日志 `ATK N`）；近距穿刺伤害 = 合并 atk。
+
 - **柯尔特「废物利用」改成累积废料：敌人血量层每被摧毁一层都按种类记成柯尔特的废料，一次最多领生命上限的 50%，没领完的留着下次接着领**（PR #376，作者 10/26 定；app.js · `koltScrapAdd`（新）/ `koltScrapTotal` / `koltScrapClear` / `koltScrapSpend` / `dealTo` / `stripFocusLayer` / `resetBattleFlags` / `resetBattleRecords` / `SKILL_REQUIREMENT.kolt_scrap` / `runSkillInner`（`kolt_scrap`），skill-text.js 的卡面、party.js 的技能栏提示，training.js · `injectScrap`、tools/dpt.js · `endTurn` 的废料注入；测试 tests/kolt-scrap-accumulate.test.js（新），tests/card-update.test.js、tests/issue-218.test.js、tests/kolt-helu-ras-skills.test.js、tests/reduce-score.test.js、tests/rules.test.js、tests/audit-P4-heroes.test.js、tests/weapon-retrieve.test.js 改成往累积的废料里放）
   - **以前**：只记「上一个被摧毁的敌人血量层」（`state.lastBrokenLayer`）：新碎一层就把旧的盖掉，一击打穿好几层只记最里面那层；废物利用领一次（最多生命上限的一半）就整条清掉，那一层超出一半的部分直接作废。
   - **现在**：

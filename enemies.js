@@ -643,7 +643,14 @@ function absorbSandsInto(livesand) {
       layer.current = Math.max(0, Number(layer.current) || 0) + hp;
       layer.max = Math.max(layer.current, (Number(layer.max) || 0) + hp);
     }
-    livesand.atk = (livesand.atk || 0) + (u.atk || 0);
+    const gainAtk = u.atk || 0;
+    livesand.atk = (livesand.atk || 0) + gainAtk;
+    // 出手用 effectiveAtk → personalAtk（party.js · baseEffectiveAtk），只加 atk 卡面涨了伤害仍是吸收前的底值
+    if (livesand.personalAtk != null) livesand.personalAtk = (Number(livesand.personalAtk) || 0) + gainAtk;
+    if (livesand.ivBase) {
+      livesand.ivBase.atk = (Number(livesand.ivBase.atk) || 0) + gainAtk;
+      if (livesand.ivBase.personalAtk != null) livesand.ivBase.personalAtk = (Number(livesand.ivBase.personalAtk) || 0) + gainAtk;
+    }
     livesand.def = (livesand.def || 0) + 1;
     livesand.defMax = (livesand.defMax || 0) + 1;
     (u.layers || []).forEach(l => { l.current = 0; });
