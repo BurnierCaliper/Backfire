@@ -319,6 +319,54 @@ function trpgPayWith(payer, fn) {
     return out;
   } finally { state.kuizhi = pool; }
 }
+/* ---------- 赌场（#487）：跑团里去赌场，和庄家打 High Flux ----------
+ * 钱的规则在 casino.js（筹码钱包、200 奎支买 1 枚 / 1 枚卖 190、入场费、离桌结算），牌局在 counter-cards.js。
+ * 钱包记在 LEDGER.casino，跟着跑团存档走：
+ *   LEDGER.casino.party = 这个存档自己的钱包（本机跑团：主持人在「赌场」页带着大家玩，庄家是 AI）；
+ *   LEDGER.casino[角色 kit] = 联机玩家各自的钱包（按操控的角色记：换了房间、玩家 id 变了也认得）。
+ * 买筹码由谁付、卖筹码的钱进谁的钱包：队伍公账或某名角色的私人钱包（trpgPurse）。打到一半的牌局也在钱包里（seat.game）。 */
+const TRPG_CASINO_LOCAL = "party";
+function trpgCasinoWallet(key) {
+  if (typeof Casino === "undefined") throw new Error("没有加载赌场（casino.js）");
+  if (!LEDGER.casino || typeof LEDGER.casino !== "object") LEDGER.casino = {};
+  const k = key || TRPG_CASINO_LOCAL;
+  LEDGER.casino[k] = Casino.wallet(LEDGER.casino[k]);
+  return LEDGER.casino[k];
+}
+/** 付钱 / 收钱的钱包：队伍公账或还活着的角色 */
+function trpgCasinoPurse(who) {
+  const p = who || TRPG_PARTY_PURSE;
+  if (p !== TRPG_PARTY_PURSE && !trpgHeroes().some(h => h.kit === p && !h.dead)) throw new Error("没有这个钱包");
+  return p;
+}
+/** 进赌场：第一次来送赠送筹码（每个钱包只送一次）。返回日志行 */
+function trpgCasinoOpen(key) { return Casino.welcome(trpgCasinoWallet(key)).map(t => "赌场：" + t); }
+/** 界面用：钱包（按枚）、能卖几枚、付钱那个钱包的奎支、桌子、兑换价、坐着的这一局 */
+function trpgCasinoView(key, payer) {
+  const w = trpgCasinoWallet(key);
+  return { chips: Casino.chips(w), sellable: Casino.sellable(w), kuizhi: trpgPurse(payer || TRPG_PARTY_PURSE), tables: Casino.tables(),
+    buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, game: w.seat ? w.seat.game : null };
+}
+function trpgCasinoBuy(n, payer, key) {
+  const w = trpgCasinoWallet(key), p = trpgCasinoPurse(payer);
+  const r = Casino.buy(w, n, trpgPurse(p));
+  trpgPurseSet(p, trpgPurse(p) - r.cost);
+  return [`赌场：${r.text.replace(/。$/, "")}（由 ${trpgPurseName(p)} 付）。`];
+}
+function trpgCasinoSell(n, payee, key) {
+  const w = trpgCasinoWallet(key), p = trpgCasinoPurse(payee);
+  const r = Casino.sell(w, n);
+  trpgPurseSet(p, trpgPurse(p) + r.gain);
+  return [`赌场：${r.text.replace(/。$/, "")}（进 ${trpgPurseName(p)}）。`];
+}
+/** 坐上一张赌场桌开一局（先收入场费）；opt：dealer（"ai" / "gm"）、deck（测试用） */
+function trpgCasinoSit(table, buyIn, key, opt) {
+  const w = trpgCasinoWallet(key);
+  Casino.sit(w, table, buyIn, { dealer: opt && opt.dealer, deck: opt && opt.deck });
+  return [`赌场：坐上${w.seat.name}，买入 ${w.seat.buyIn} 枚，交入场费 ${w.seat.fee} 枚（不退）。`];
+}
+/** 离桌：桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退） */
+function trpgCasinoLeave(key) { return ["赌场：" + Casino.leave(trpgCasinoWallet(key)).text]; }
 /* ---------- 诊所：义体改造（规则和单局一样：growth.js · cyberPlanError / cyberLayersFor，价格 ROGUE_CLINIC.cyberPerHp）----------
  * 方案记在角色身上（u.cyberPlan），跟着跑团存档走（game.js · packHero）；升级后按方案重建血量层。
  * 主持人在「诊所」页直接改（可以选由谁付）；联机玩家在诊所开放时提交申请，主持人同意后才改，钱从那名角色的钱包出。 */
