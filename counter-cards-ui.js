@@ -1039,6 +1039,7 @@
     // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用；倒计时到时间的时刻留着，下次重画接着数）
     UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
     cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
+    cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };

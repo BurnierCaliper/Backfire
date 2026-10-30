@@ -429,6 +429,10 @@ function trpgCasinoLeave(key) {
 }
 
 /* ---------- 赌场 · 联机（hotseat-game.js 的 casino 指令；谁能动哪个钱包在那边查）---------- */
+/** 联机浮层（casino-online-ui.js）现在只画得出 High Flux 的牌局：Flux Duel / Flux Hold'em 的赌场桌（#488）先只在本机开
+ *  （长线养成、本机跑团），联机包里不放、联机也坐不上 */
+const TRPG_CASINO_ONLINE_GAMES = ["highflux"];
+const trpgCasinoOnlineTables = () => Casino.tables().filter(t => TRPG_CASINO_ONLINE_GAMES.indexOf(t.game || "highflux") >= 0);
 /** kit 这名角色坐着的牌局：{ kind: "ai" | "gm" | "pvp", side（人坐哪一方）, game（对赌还没开局是 null）, table, level（AI 庄家的难度）} 或 null */
 function trpgCasinoSeatOf(kit) {
   const c = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};   // 只读：联机包每一包都要看，不往存档里加东西
@@ -453,8 +457,10 @@ function trpgCasinoAct(kit, action, opt) {
   if (seat.kind === "ai") Casino.runAi(seat.game, seat.level);
   return [];
 }
-/** 坐上赌场桌（opt.dealer = "ai" / "gm"）；AI 坐庄的先走到轮到人 */
+/** 坐上赌场桌（opt.dealer = "ai" / "gm"）；AI 坐庄的先走到轮到人。联机只有 High Flux 的桌子（TRPG_CASINO_ONLINE_GAMES） */
 function trpgCasinoSitAt(kit, table, buyIn, opt) {
+  const t = Casino.tables().find(x => x.id === table);
+  if (t && !trpgCasinoOnlineTables().some(x => x.id === table)) throw new Error(`联机赌场暂时只有 ${CounterCards.CC_CONFIG.name} 的桌子：${t.gameName} 先在本机（长线养成、本机跑团）玩`);
   const notes = trpgCasinoSit(table, buyIn, kit, opt);
   const seat = trpgCasinoSeatOf(kit);
   if (seat && seat.kind === "ai") Casino.runAi(seat.game, seat.level);
@@ -501,7 +507,7 @@ function trpgCasinoPacket(kits, isGM) {
   };
   const out = {
     config: { buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, face: Casino.CONFIG.face, gift: Casino.CONFIG.gift },
-    tables: Casino.tables(),
+    tables: trpgCasinoOnlineTables(),
     open: Object.keys(tables).map(k => tables[k]).filter(t => t && !t.game).map(t => ({ id: t.id, stakeKind: t.stakeKind, start: t.start, dealer: nameOf(t.seats.dealer), player: nameOf(t.seats.player) })),
     mine: [], dealing: [], seated: []
   };

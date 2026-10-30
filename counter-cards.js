@@ -41,6 +41,7 @@
  *   CounterCards.chart(g.weather)            → 克制表（得分）：这个天气下每张元素牌打每张层牌的得分，格式同 matchup.js · matchupChart，
  *                                              牌局中随时能开（counter-cards-ui.js 交给 matchup-ui.js 照平时克制表的样子画）
  *   CounterCards.cardChart("fire", g.weather) → 悬停预览：这张元素牌在这个天气下打五种层各得几分（就是上面克制表里这张牌的一行）
+ *   CounterCards.bet.*                       → 两人对局的下注、借贷、追加窗口：Flux Duel（flux-duel.js，#488）直接用这一份（见文件末尾 bet 那一段）
  */
 (function (root) {
   "use strict";
@@ -206,11 +207,13 @@
     };
   }
 
-  /** 分差 → 分档（1 / 2；0 = 平局）：只有两档，分差超过 2 按差 2（tierExtra 的最后一档）算 */
-  function tierOf(diff) { return Math.min(Math.abs(Number(diff) || 0), CC_CONFIG.tierExtra.length - 1); }
+  /** 分差 → 分档（1 / 2；0 = 平局）：只有两档，分差超过 2 按差 2（tierExtra 的最后一档）算。
+   *  table：别的玩法自己的分档表（Flux Duel 三档，#488），不写 = CC_CONFIG.tierExtra */
+  function tierOf(diff, table) { return Math.min(Math.abs(Number(diff) || 0), (table || CC_CONFIG.tierExtra).length - 1); }
   /** 输家额外赔出的筹码（不含底池）：自己这一轮的下注额 × 分档倍率，半枚按 extraRound 取整；分档超过 2 也按差 2 */
-  function extraOf(tier, loserBet) {
-    const x = (CC_CONFIG.tierExtra[tierOf(tier)] || 0) * Math.max(0, Number(loserBet) || 0);
+  function extraOf(tier, loserBet, table) {
+    const t = table || CC_CONFIG.tierExtra;
+    const x = (t[tierOf(tier, t)] || 0) * Math.max(0, Number(loserBet) || 0);
     return CC_CONFIG.extraRound === "ceil" ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9);
   }
   function minBetOf(round) {
@@ -279,6 +282,24 @@
     g.log.push(Object.assign({ r: g.round }, entry));
   }
 
+  /* ---------- 两人对局的下注、借贷、追加窗口：High Flux 和别的两人玩法（Flux Duel，#488）共用同一份代码 ----------
+   * 别的玩法的对局带 g.mode（registerMode 登记的名字），由登记的钩子给：
+   *   seats（两方叫什么，例 ["a", "b"]）、name(g, 一方)（记录里怎么称呼）、ante(g)（这一轮的底注，借贷算「够不够」用）、
+   *   closeStreet(g, 第几次下注)（一个下注回合结束后接着走哪一步）、fold(g, 弃牌的一方)（弃牌以后怎么结算）。
+   * 没有 g.mode 的就是 High Flux 自己（庄家 / 玩家），走的还是原来的那几步 */
+  const MODES = {};
+  function registerMode(name, hooks) { MODES[name] = hooks; }
+  function modeOf(g) {
+    if (!g || !g.mode) return null;
+    return MODES[g.mode] || fail("没有登记这种玩法：" + g.mode);
+  }
+  const seatsOf = (g) => (modeOf(g) ? modeOf(g).seats : SIDES);
+  const opp = (g, side) => { const s = seatsOf(g); return side === s[0] ? s[1] : s[0]; };
+  const nameOf = (g, side) => (modeOf(g) ? modeOf(g).name(g, side) : sideName(side));
+  const anteOf = (g) => (modeOf(g) ? modeOf(g).ante(g) : CC_CONFIG.ante);
+  /** 两方各一个 false（下注回合的 acted、追加窗口的 passed） */
+  function flags(g) { const o = {}; seatsOf(g).forEach(k => { o[k] = false; }); return o; }
+
   /* ---------- 筹码 ---------- */
   const behind = (s) => (s.infinite ? Infinity : s.chips);
   function pay(s, n) {
@@ -288,13 +309,13 @@
   }
   /** 相位全押的上限（这一轮每一方押到多少，含底注）：筹码较少一方的全部筹码。下注不封顶（#496）以后只有相位全押还按它封顶 */
   function cap(g) {
-    const d = g.sides.dealer, p = g.sides.player;
-    return Math.min(d.bet + behind(d), p.bet + behind(p));
+    const [x, y] = seatsOf(g).map(k => g.sides[k]);
+    return Math.min(x.bet + behind(x), y.bet + behind(y));
   }
   /** 这一方现在最多还能押多少：自己手上的筹码（含借来的），不再按较少一方的筹码封顶（#496）。
    *  赌场的庄家筹码无限：押到对方这一轮已下的 + 手上的为止（对方不借就跟得上的数目，同以前的封顶） */
   function room(g, side) {
-    const me = g.sides[side], op = g.sides[other(side)];
+    const me = g.sides[side], op = g.sides[opp(g, side)];
     if (!me.infinite) return me.chips;
     return op.infinite ? 0 : Math.max(0, op.bet + op.chips - me.bet);
   }
@@ -310,23 +331,25 @@
   /** 这一步「够用」要多少筹码：每轮开始 = 底注 + 本轮最低下注额；轮到自己下注 = 要跟的 + 本轮最低下注额；其余时候不借 */
   function loanNeed(g, side) {
     const mb = minBetOf(g.round);
-    if (g.stage === "loan") return CC_CONFIG.ante + mb;
-    if (g.stage === "bet1" || g.stage === "bet2") return Math.max(0, g.sides[other(side)].st - g.sides[side].st) + mb;
+    if (g.stage === "loan") return anteOf(g) + mb;
+    if (g.stage === "bet1" || g.stage === "bet2") return Math.max(0, g.sides[opp(g, side)].st - g.sides[side].st) + mb;
     return 0;
   }
-  /** 现在最多能借多少枚（0 = 不能借）：手上的筹码不够这一步用才能借，一份 3 枚，借到补上缺口为止（缺口向上取整到 3 的倍数） */
-  function loanMax(g, side) {
-    const s = g.sides[side], L = CC_CONFIG.loan;
-    if (s.infinite) return 0;
-    const gap = loanNeed(g, side) - s.chips;
-    if (gap <= 0) return 0;
+  /** 手上 chips 枚、这一步够用要 need 枚时能借多少（纯函数，Flux Hold'em 也用，#488）：不够才能借，一份 3 枚，
+   *  借到补上缺口为止（缺口向上取整到 3 的倍数）。返回借贷的操作 { type: "borrow", min, max, step, need }，不能借返回 null */
+  function loanRange(need, chips) {
+    const L = CC_CONFIG.loan, gap = need - chips;
+    if (gap <= 0) return null;
     const units = L.maxUnits != null ? L.maxUnits : Math.ceil(gap / L.unit);
-    return Math.max(0, Math.floor(units)) * L.unit;
+    const max = Math.max(0, Math.floor(units)) * L.unit;
+    return max > 0 ? { type: "borrow", min: L.unit, max, step: L.unit, need } : null;
   }
+  /** 现在最多能借多少枚（0 = 不能借） */
+  function loanMax(g, side) { const o = loanOption(g, side); return o ? o.max : 0; }
   /** 能借时的操作：借 min–max 枚（step 的倍数）；need = 这一步够用要多少 */
   function loanOption(g, side) {
-    const max = loanMax(g, side), u = CC_CONFIG.loan.unit;
-    return max > 0 ? { type: "borrow", min: u, max, step: u, need: loanNeed(g, side) } : null;
+    const s = g.sides[side];
+    return s.infinite ? null : loanRange(loanNeed(g, side), s.chips);
   }
 
   function startRound(g) {
@@ -366,11 +389,16 @@
       case "loan": return g.loanAsk && g.loanAsk.length ? [g.loanAsk[0]] : [];
       case "dealerWeather": case "dealerPeek": return ["dealer"];
       case "play": return SIDES.filter(k => !g.sides[k].card);
-      // 跟注后的追加窗口：两边同时都能动作，放弃追加了的不再等
-      case "bet1": case "bet2": return g.betting.window ? SIDES.filter(k => !g.betting.window.passed[k]) : [g.betting.toAct];
+      case "bet1": case "bet2": return betWaiting(g);
       case "weather": case "normal": return ["player"];
       default: return [];
     }
+  }
+  /** 下注回合里等谁：平时是轮到的那一方；跟注后的追加窗口里两边同时都能动作，放弃追加了的不再等 */
+  function betWaiting(g) {
+    const b = g.betting;
+    if (g.over || !b || (g.stage !== "bet1" && g.stage !== "bet2")) return [];
+    return b.window ? seatsOf(g).filter(k => !b.window.passed[k]) : [b.toAct];
   }
   /** 玩家手里能拿去弃的元素牌还有几张（后面每一轮都还要留一张元素牌出） */
   function spareElements(g) {
@@ -406,28 +434,7 @@
         return [{ type: "place", where: "top" }, { type: "place", where: "bottom" }];
       case "play":
         return me.hand.filter(c => (side === "dealer" ? true : isElement(c))).map(card => ({ type: "play", card }));
-      case "bet1": case "bet2": {
-        const op = g.sides[other(side)], b = g.betting;
-        const toCall = op.st - me.st, rm = room(g, side), mb = minBetOf(g.round);
-        // 跟注后的追加窗口（双方已经跟平）：放弃追加，或者加注（还有加注次数、手上有筹码才行），或者弃牌；窗口里不借（借贷照旧在轮到自己下注时）
-        if (b.window) {
-          return [{ type: "pass" }].concat(b.raises < CC_CONFIG.maxRaises && rm > 0 ? [{ type: "raise", min: Math.min(mb, rm), max: rm }] : [], [{ type: "fold" }]);
-        }
-        const out = [];
-        if (toCall <= 0) {
-          out.push({ type: "check" });
-          if (rm > 0) out.push({ type: "bet", min: Math.min(mb, rm), max: rm });
-        } else {
-          // 下注不封顶（#496）：对方押得比自己手上的还多，跟不起——要跟就先借（下面的 borrow），不借只能弃牌
-          if (rm >= toCall) out.push({ type: "call", amount: toCall });
-          if (b.raises < CC_CONFIG.maxRaises && rm > toCall) out.push({ type: "raise", min: Math.min(mb, rm - toCall), max: rm - toCall });
-        }
-        out.push({ type: "fold" });
-        // 手上的筹码不够「要跟的 + 最低下注额」：可以先向主持方借（借完还是自己下注）
-        const lo = loanOption(g, side);
-        if (lo) out.push(lo);
-        return out;
-      }
+      case "bet1": case "bet2": return betLegal(g, side);
       case "weather": {
         const out = [{ type: "reveal" }];
         uniq(me.hand).filter(c => canDiscard(g, c)).forEach(card => out.push({ type: "skip", card }));
@@ -439,6 +446,38 @@
     }
   }
   function uniq(a) { return a.filter((x, i) => a.indexOf(x) === i); }
+  /** 下注回合里这一方能做的（High Flux 和 Flux Duel 共用）：过牌 / 下注 / 跟注 / 加注 / 弃牌、筹码不够时借；追加窗口里放弃追加 / 加注 / 弃牌 */
+  function betLegal(g, side) {
+    const me = g.sides[side], op = g.sides[opp(g, side)], b = g.betting;
+    const toCall = op.st - me.st, rm = room(g, side), mb = minBetOf(g.round);
+    // 跟注后的追加窗口（双方已经跟平）：放弃追加，或者加注（还有加注次数、手上有筹码才行），或者弃牌；窗口里不借（借贷照旧在轮到自己下注时）
+    if (b.window) {
+      return [{ type: "pass" }].concat(b.raises < CC_CONFIG.maxRaises && rm > 0 ? [{ type: "raise", min: Math.min(mb, rm), max: rm }] : [], [{ type: "fold" }]);
+    }
+    const out = [];
+    if (toCall <= 0) {
+      out.push({ type: "check" });
+      if (rm > 0) out.push({ type: "bet", min: Math.min(mb, rm), max: rm });
+    } else {
+      // 下注不封顶（#496）：对方押得比自己手上的还多，跟不起——要跟就先借（下面的 borrow），不借只能弃牌
+      if (rm >= toCall) out.push({ type: "call", amount: toCall });
+      if (b.raises < CC_CONFIG.maxRaises && rm > toCall) out.push({ type: "raise", min: Math.min(mb, rm - toCall), max: rm - toCall });
+    }
+    out.push({ type: "fold" });
+    // 手上的筹码不够「要跟的 + 最低下注额」：可以先向主持方借（借完还是自己下注）
+    const lo = loanOption(g, side);
+    if (lo) out.push(lo);
+    return out;
+  }
+  /** 别的两人玩法（Flux Duel，#488）在下注回合里做一步：先按 betLegal 查合不合法，借贷走 borrow，其余走 betAction（同 High Flux） */
+  function betStep(g, side, a) {
+    if (!a || typeof a.type !== "string") fail("操作格式不对");
+    if (betWaiting(g).indexOf(side) < 0) fail(`现在不是${nameOf(g, side)}下注的时候`);
+    const ok = betLegal(g, side).find(o => o.type === a.type);
+    if (!ok) fail(`${nameOf(g, side)}现在不能这样做（${a.type}）`);
+    if (a.type === "borrow") borrow(g, side, a, ok); else betAction(g, side, a, ok);
+    return g;
+  }
 
   /* ---------- 操作 ---------- */
   function fail(msg) { throw new Error(msg); }
@@ -476,7 +515,7 @@
         break;
       }
       case "noNormal": afterWeather(g); break;
-      case "borrow": borrow(g, side, a, ok); break;
+      case "borrow": borrow(g, side, a, ok); if (g.stage === "loan") nextLoan(g); break;   // 下注时借完还是自己下注
       case "noLoan": noLoan(g, side); break;
       default: fail("未知操作：" + a.type);
     }
@@ -488,7 +527,8 @@
     s.hand.splice(i, 1);
   }
 
-  /* 0. 借贷：向主持方借（每轮开始时 / 轮到自己下注时，筹码不够才能借），对局结束时扣还 */
+  /* 0. 借贷：向主持方借（每轮开始时 / 轮到自己下注时，筹码不够才能借），对局结束时扣还。
+   *  每轮开始时借完问下一个由调用的一方接着走（High Flux 的 act → nextLoan；别的玩法走自己的） */
   function borrow(g, side, a, opt) {
     const s = g.sides[side], u = CC_CONFIG.loan.unit;
     const n = Math.floor(Number(a.amount));
@@ -496,8 +536,7 @@
     const owe = repayOf(n);
     s.chips += n; s.loan += n; s.owe += owe;
     s.roundStart += n;                 // 借来的不算这一轮的输赢
-    note(g, { t: "loan", by: side, amount: n, owe, text: `${sideName(side)}向主持方借了 ${n} 枚筹码（对局结束时还 ${owe} 枚）。` });
-    if (g.stage === "loan") nextLoan(g);   // 下注时借完还是自己下注
+    note(g, { t: "loan", by: side, amount: n, owe, text: `${nameOf(g, side)}向主持方借了 ${n} 枚筹码（对局结束时还 ${owe} 枚）。` });
   }
   function noLoan(g, side) {
     const out = busted(g.sides[side]);
@@ -568,15 +607,16 @@
   }
 
   /* 4 / 6. 下注。下注不封顶（#496）：有一方手上押光了也照常下注（以前封顶在 0，整轮跳过）——押光的一方能过牌，对方下注时要跟就得先借 */
-  function openStreet(g, street) {
-    const first = street === 1 ? "player" : "dealer";
-    g.betting = { street, toAct: first, raises: 0, acted: { dealer: false, player: false }, opened: false };
-    SIDES.forEach(k => { g.sides[k].st = 0; });
+  function openStreet(g, street) { openBetting(g, street, street === 1 ? "player" : "dealer"); }
+  /** 开一个下注回合（第 street 次下注，first 先）：High Flux 和别的两人玩法共用 */
+  function openBetting(g, street, first) {
+    g.betting = { street, toAct: first, raises: 0, acted: flags(g), opened: false };
+    seatsOf(g).forEach(k => { g.sides[k].st = 0; });
     g.stage = street === 1 ? "bet1" : "bet2";
   }
   function betAction(g, side, a, opt) {
-    const me = g.sides[side], op = g.sides[other(side)], b = g.betting;
-    const label = sideName(side);
+    const me = g.sides[side], op = g.sides[opp(g, side)], b = g.betting;
+    const label = nameOf(g, side);
     const amountIn = (lo, hi, v, what) => {
       const n = Math.floor(Number(v));
       if (!Number.isFinite(n) || n < lo || n > hi) fail(`${what}要在 ${lo}–${hi} 枚之间`);
@@ -585,21 +625,25 @@
     b.acted[side] = true;
     if (a.type === "pass") {           // 追加窗口：这一方放弃追加（不公开），双方都放弃就关窗
       b.window.passed[side] = true;
-      if (SIDES.every(k => b.window.passed[k])) shutWindow(g, "pass");
+      if (seatsOf(g).every(k => b.window.passed[k])) shutWindow(g, "pass");
       return;
     }
     if (a.type === "check") {
       note(g, { t: "bet", by: side, op: "check", street: b.street, text: `${label}过牌。` });
-      if (b.acted[other(side)]) { closeStreet(g); return; }
-      b.toAct = other(side);
+      if (b.acted[opp(g, side)]) { closeStreet(g); return; }
+      b.toAct = opp(g, side);
       return;
     }
-    if (a.type === "fold") { note(g, { t: "bet", by: side, op: "fold", street: b.street, text: `${label}弃牌。` }); foldOut(g, side); return; }
+    if (a.type === "fold") {
+      note(g, { t: "bet", by: side, op: "fold", street: b.street, text: `${label}弃牌。` });
+      if (modeOf(g)) modeOf(g).fold(g, side); else foldOut(g, side);
+      return;
+    }
     if (a.type === "call") {
       const n = pay(me, op.st - me.st); me.st += n;
       note(g, { t: "bet", by: side, op: "call", amount: n, street: b.street, text: `${label}跟注 ${n} 枚。` });
       // 跟注后：还有加注次数、也还有人加得了注，就开追加窗口；不然这个下注回合直接结束
-      if (b.raises < CC_CONFIG.maxRaises && SIDES.some(k => room(g, k) > 0)) openWindow(g, side);
+      if (b.raises < CC_CONFIG.maxRaises && seatsOf(g).some(k => room(g, k) > 0)) openWindow(g, side);
       else closeStreet(g);
       return;
     }
@@ -616,17 +660,17 @@
       note(g, Object.assign({ t: "bet", by: side, op: "raise", amount: by, street: b.street,
         text: `${label}${inWindow ? "在追加窗口里" : ""}加注 ${by} 枚（这一轮下注合计 ${me.bet} 枚）。` }, inWindow ? { window: true } : {}));
     }
-    b.toAct = other(side);
+    b.toAct = opp(g, side);
   }
   /** 跟注后的追加窗口（#496 第 2 条）：双方都还可以加注或弃牌，都放弃追加（pass）或者到时间（closeWindow）就关窗、结束这个下注回合。
    *  by = 跟注的一方。规则层不计时，秒数 CC_CONFIG.callWindowSec 给界面倒计时；n = 这个下注回合的第几个窗口（界面按它认是不是同一个窗口） */
   function openWindow(g, by) {
     const b = g.betting;
     b.windows = (b.windows || 0) + 1;
-    b.window = { n: b.windows, by, passed: { dealer: false, player: false } };
+    b.window = { n: b.windows, by, passed: flags(g) };
     b.toAct = null;
     note(g, { t: "window", op: "open", by, street: b.street,
-      text: `${sideName(by)}跟注，开 ${CC_CONFIG.callWindowSec} 秒追加窗口：双方都还可以加注或弃牌，没人动作就结束这个下注回合。` });
+      text: `${nameOf(g, by)}跟注，开 ${CC_CONFIG.callWindowSec} 秒追加窗口：双方都还可以加注或弃牌，没人动作就结束这个下注回合。` });
   }
   /** 关窗、结束这个下注回合。why：pass（双方都放弃追加）/ timeout（到时间） */
   function shutWindow(g, why) {
@@ -644,6 +688,7 @@
   function closeStreet(g) {
     const street = g.betting ? g.betting.street : 1;
     g.betting = null;
+    if (modeOf(g)) { modeOf(g).closeStreet(g, street); return; }
     if (street === 1) beginWeather(g); else showdown(g);
   }
 
@@ -688,7 +733,7 @@
   /** 结算一轮的筹码（纯函数，不改传进来的东西）。
    *  diff：这一轮的得分（> 0 玩家赢，< 0 庄家赢，0 平局）；
    *  s：{ dealer: { bet, pot, chips, infinite }, player: {…} }——bet 是这一轮下的（含底注），pot 是自己在滚存底池里的那一份；
-   *  o：{ allIn: 相位轮, last: 最后一轮 }。
+   *  o：{ allIn: 相位轮, last: 最后一轮, tierExtra: 别的玩法自己的分档表（Flux Duel 三档，#488；不写 = CC_CONFIG.tierExtra）}。
    *  赢：赢家拿走整个底池（双方滚存的 + 这一轮下的），输家再按分档额外赔出自己这一轮下注额的 0 倍（差 1）/ 0.5 倍（差 2，分差超过 2 也按差 2）
    *  （最多赔光剩下的筹码）；
    *  平：相位轮、最后一轮各自拿回自己下的筹码（含滚存的那一份），其余滚存到下一轮。 */
@@ -696,14 +741,14 @@
     o = o || {};
     const d = s.dealer, p = s.player;
     const winner = diff > 0 ? "player" : diff < 0 ? "dealer" : null;
-    const tier = tierOf(diff);
+    const tier = tierOf(diff, o.tierExtra);
     const after = { dealer: { chips: d.chips, pot: d.pot }, player: { chips: p.chips, pot: p.pot } };
     const out = { winner, tier, extra: 0, pot: 0, refund: false, rollover: false, after };
     if (winner) {
       const loser = other(winner), l = s[loser];
       out.pot = d.pot + p.pot + d.bet + p.bet;
       after[winner].chips += out.pot;
-      let extra = extraOf(tier, l.bet);
+      let extra = extraOf(tier, l.bet, o.tierExtra);
       if (!l.infinite) extra = Math.min(extra, Math.max(0, l.chips));
       after[loser].chips -= extra; after[winner].chips += extra;
       out.extra = extra;
@@ -865,10 +910,17 @@
     }
   };
 
+  /** 两人对局的下注、借贷、追加窗口（#488）：别的两人玩法（Flux Duel）直接用这一份，不另写一套。
+   *  对局对象要有 mode（registerMode 登记过）、round、stage（"loan" / "bet1" / "bet2"……）、sides[一方] = { chips, bet, st, pot, infinite, loan, owe, roundStart }、
+   *  betting（open 开出来的）、log */
+  const bet = {
+    registerMode, open: openBetting, legal: betLegal, step: betStep, waiting: betWaiting,
+    loanOption, loanRange, borrow, room, cap, pay, busted, note
+  };
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
     chartScore, weatherScore, score, scoreParts, chart, cardChart, tierOf, extraOf, minBetOf, settle, repayOf,
-    newGame, toAct, legal, act, closeWindow, view, spareElements, resultText, casino, makeRng, hashSeed
+    newGame, toAct, legal, act, closeWindow, view, spareElements, resultText, casino, makeRng, hashSeed, shuffle, bet
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCards = api;
