@@ -370,6 +370,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **起身中高能自爆阈值按坚毅、不按临时护盾：补测试**（#340 相关；测试 tests/shield-overcharge-threshold.test.js（新））
+  - **说明**：逻辑本身已随 #415 进入 main（`highLifeOnShp`：起身中一律用坚毅和高能比，临时护盾不参与高能 / 微光蓄能的「血量」比较）。本 PR 不再改 app.js，只补这条测试。
+  - **测试**：tests/shield-overcharge-threshold.test.js（新）：起身中坚毅 37 + 护盾 6、高能 20 时 `currentLifeForHigh` 为 37、`checkHighBoom` 不自爆；高能 40（> 37）仍自爆。
 - **亡命之王被挟持时被杀：强盗头子继位同步翻倍 `personalAtk`（及 `ivBase`）**（app.js · `settleEnemyKill`；测试 tests/king.test.js）
   - **以前**：继位只执行 `boss.atk *= 2`（以及 def / defMax）。卡面 ATK 翻倍，但出手走 `effectiveAtk` → `baseEffectiveAtk`（party.js），敌人只读 `personalAtk + weaponAtk`，**不读 `unit.atk`**。`personalAtk` 仍停在继位前的底值，能量匕首 / 自制火枪每一击仍按旧 ATK 算（与巨型活沙吸收只加 `atk` 未同步 `personalAtk` 同类）。
   - **现在**：`atk` 与 `personalAtk` 各自 ×2（有 `ivBase` 时基线一并 ×2，和 `_raceAdd` / `absorbSandsInto` 一致）。不用已翻倍的 `atk` 回写 `personalAtk`，避免叠算。继位后 `effectiveAtk` = 翻倍后的 `personalAtk`，技能伤害跟卡面一致。
