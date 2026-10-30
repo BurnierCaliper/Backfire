@@ -182,8 +182,8 @@
     const seed = String(opt.seed || ("cc" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
     const game = opt.game || CC().newGame(Object.assign({ seed }, opt.gameOpt || {}));
     S = { game, human: side, ai: CC().other(side), level, rng: CC().makeRng(seed + "|ai"), seen: game.results.length, banner: null, mode: null, amount: null,
-      anim: { deal: true }, fast: !!opt.fast, timer: null, revealKey: "", msg: "", last: {}, holdUntil: opt.fast ? 0 : Date.now() + UI_CONFIG.dealMs,
-      casino: opt.casino || null };
+      anim: { deal: true }, fast: !!opt.fast, timer: null, revealKey: "", msg: "", last: {}, holdUntil: opt.fast ? 0 : Date.now() + UI_CONFIG.dealMs };
+    S.casino = opt.casino || null;   // 赌场桌（#487）：顶栏 / 总结算的按钮、每一步存档交给打开牌桌的模式
     SETUP.side = side; SETUP.level = level;
     enterScreen();
     show("game");
