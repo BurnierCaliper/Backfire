@@ -118,7 +118,7 @@ test("主持人坐庄：主持人的包里有这一桌（庄家那一方：偷�
   const top = book().wallets.ruby.seat.game.deck[0], topName = c.CounterCards.weatherName(top);
   assert.equal(casino("host").dealing[0].game.peek.card, top, "主持人看得到偷看的那张");
   assert.ok(casino("host").dealing[0].game.log.some(e => e.mine && e.text.includes(topName)), "主持人的记录里写着偷看到什么");
-  // 天气名用中文查（酸、沙既是天气也是牌的 id）；玩家那一方根本没有偷看的字段
+  // 天气名用中文查（acid、sand 既是天气也是牌的 id）；玩家那一方根本没有偷看的字段
   assert.ok(!has(casino("p2"), topName), "玩家的包里没有偷看到的天气");
   const pg = mine("p2", "ruby").seat.game;
   assert.ok(!("peek" in pg) && !("deckTop" in pg) && !("deckBottom" in pg));

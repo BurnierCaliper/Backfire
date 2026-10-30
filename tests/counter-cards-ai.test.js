@@ -45,7 +45,7 @@ test("两边任意难度都能和 AI 完整打完一局：每一步都合法，�
 
 test("AI 只按自己能看到的东西做决定：对方暗出的牌不一样、自己看到的一样 → 决定也一样；拿 JSON 化的 view 也能用", () => {
   for (const level of LEVELS) {
-    // 玩家方：庄家暗出血肉 / 灵体
+    // 玩家方：庄家暗出肉体 / 星灵
     const mk = (dealerCard) => {
       const g = CC.newGame({ seed: "同视角", deck: DECK });
       A(g, "dealer", "weather", { op: "pass" });
@@ -68,7 +68,7 @@ test("AI 只按自己能看到的东西做决定：对方暗出的牌不一样�
       A(g, "player", "play", { card: "ice" });
       A(g, "player", "check"); A(g, "dealer", "check");
       A(g, "player", "skip", { card: skip });
-      A(g, "dealer", "check"); A(g, "player", "check");       // 冰打血肉 0：平局
+      A(g, "dealer", "check"); A(g, "player", "check");       // 冰打肉体 0：平局
       A(g, "dealer", "weather", { op: "pass" });
       A(g, "player", "play", { card: playerCard });
       A(g, "dealer", "play", { card: "armor" });
@@ -83,7 +83,7 @@ test("AI 只按自己能看到的东西做决定：对方暗出的牌不一样�
 
 test("推理：困难记住整局的结果、排除已经推出来的牌；普通只看单轮结果（最近一轮），不跨轮记牌", () => {
   const g = CC.newGame({ seed: "推理", deck: DECK });
-  // 第 1 轮：没有天气，火打血肉 → 玩家赢差 1（只有血肉会这样）
+  // 第 1 轮：没有天气，火打肉体 → 玩家赢差 1（只有肉体会这样）
   A(g, "dealer", "weather", { op: "pass" });
   A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "fire" });
   A(g, "player", "check"); A(g, "dealer", "check");
@@ -166,7 +166,7 @@ test("整局里：玩家方 AI 有翻天气也有暗弃跳过；困难会用常�
   assert.ok(count.reveal.easy > count.skip.easy, "简单大多直接翻");
 });
 
-/** 打完第 1 轮：都过牌，雷鸣里冰打血肉平局（deck 第 1 张要是雷鸣） */
+/** 打完第 1 轮：都过牌，雷鸣里冰打肉体平局（deck 第 1 张要是雷鸣） */
 function afterTie(seed, deck) {
   const g = CC.newGame({ seed, deck });
   A(g, "dealer", "weather", { op: "pass" });
@@ -241,7 +241,7 @@ test("AI 也会借（下注时）：筹码不够、牌又好到想加注才借�
     CC.act(strong, "player", a);
     const next = AI.decide(CC.view(strong, "player"), level, CC.makeRng("s"));
     assert.ok(["call", "raise"].includes(next.type), level + "：借完接着下注");
-    // 雷鸣里出谐波：只赢沙
+    // 雷鸣里出谐波：只赢沙尘
     const weak = AI.decide(CC.view(mk("harmonic"), "player"), level, CC.makeRng("w"));
     assert.notEqual(weak.type, "borrow", level);
   }
@@ -295,7 +295,7 @@ test("下注不封顶（#496）：对方押得比自己手上的还多、跟不�
 });
 
 test("跟注后的追加窗口（#496）：AI 马上决定，不等倒计时——牌好就加注（算进加注次数，关窗后轮到对方），牌差不动作（pass），偶尔诈唬只加最低额；已经跟平了，窗口里从不弃牌；简单偶尔随手加注", () => {
-  // 第 1 轮平局（雷鸣）；第 2 轮庄家出沙、玩家出 playerCard，玩家下 2 枚、庄家跟注 → 开窗口
+  // 第 1 轮平局（雷鸣）；第 2 轮庄家出沙尘、玩家出 playerCard，玩家下 2 枚、庄家跟注 → 开窗口
   const mk = (playerCard) => {
     const g = afterTie("窗口AI", DECK);
     A(g, "dealer", "weather", { op: "keep" });
