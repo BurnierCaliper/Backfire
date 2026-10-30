@@ -628,7 +628,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   const box = p.$("#mu-overlay");
   const fireFlesh = () => box.querySelector('[data-mu-cell="0:0"]');
   click(fireFlesh());
-  assert.match(box.querySelector(".mu-detail").textContent, /火 → 血肉：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
+  assert.match(box.querySelector(".mu-detail").textContent, /火 → 肉体：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
   const td = fireFlesh();
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
   betThrough(p, game, "bet1");
@@ -755,7 +755,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里�
   assert.match(tip.textContent, /天气 常态/);
   const cells = Array.from(tip.querySelectorAll("[data-layer]"));
   assert.deepEqual(cells.map(x => x.dataset.layer), ["flesh", "armor", "shield", "sand", "spirit"]);
-  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["血肉", "装甲", "护盾", "沙", "灵体"]);
+  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["肉体", "装甲", "护盾", "沙尘", "星灵"]);
   assert.ok(cells.every(x => x.querySelector("svg.eicon")), "每一层带层的图标");
   assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
   assert.deepEqual(tipScores(p), chartRow(p, "fire", null), "就是克制表里火这一行");

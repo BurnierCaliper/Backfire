@@ -245,12 +245,12 @@ test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌�
   const playable = [...h.matchAll(/data-cso="act" data-cso-key="ruby" data-type="play" data-card="(\w+)"/g)].map(m => m[1]);
   assert.equal(playable.length, 7, "7 张元素牌能出（常态不能当出牌）");
   assert.ok(!/data-card="normal"/.test(h), "常态不能点");
-  assert.ok(!/血肉|"flesh"/.test(h), "主持人暗出的层牌不画");
+  assert.ok(!/肉体|"flesh"/.test(h), "主持人暗出的层牌不画");
   assert.match(h, /离桌（打到一半算认输）/);
   const g = UI.gmHtml(model("host"));
   assert.match(g, /你给 瑞比 坐庄/);
   assert.match(g, /data-cso-game="gm:ruby"/);
-  assert.match(g, /你暗出了〔血肉〕/, "主持人看得到自己（庄家）暗出的牌");
+  assert.match(g, /你暗出了〔肉体〕/, "主持人看得到自己（庄家）暗出的牌");
   assert.ok(!/data-type="play"/.test(g), "庄家已经出过牌了：主持人这边没有出牌按钮");
   assert.match(g, /等瑞比/);
   assert.match(g, /让他离桌/);

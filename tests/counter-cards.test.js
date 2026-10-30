@@ -313,7 +313,7 @@ test("暗出：玩家只能出元素牌（常态不能当出牌），庄家出�
   const dv = CC.view(g, "dealer"), pv = CC.view(g, "player");
   assert.equal(dv.opp.played, true); assert.equal(dv.opp.card, undefined); assert.equal(dv.opp.hand, undefined);
   assert.doesNotMatch(JSON.stringify(dv), /harmonic|谐波|"normal"|"fire"/);
-  assert.doesNotMatch(JSON.stringify(pv), /spirit|灵体|"flesh"|"armor"/);
+  assert.doesNotMatch(JSON.stringify(pv), /spirit|星灵|"flesh"|"armor"/);
   assert.equal(pv.opp.handCount, 4);
   assert.equal(g.stage, "bet1");
   assert.equal(g.betting.toAct, "player");
@@ -782,7 +782,7 @@ test("分档赔付（整局里）：酷暑下火打血肉差 2，庄家这一轮
   // 公开的结算只有胜负、分档和筹码变动，不说谁出了什么
   const text = CC.view(g, "dealer").log.find(e => e.t === "result").text;
   assert.match(text, /玩家赢（差 2）/);
-  assert.doesNotMatch(text, /火|血肉/);
+  assert.doesNotMatch(text, /火|肉体/);
 });
 
 /* ---------- 借贷 ---------- */
@@ -984,7 +984,7 @@ test("view：对方的手牌、暗出的牌、暗弃的牌都不在里面；自�
   assert.ok(pv.log.every(e => !e.to || e.to === "player"));
   assert.ok(dv.log.every(e => !e.to || e.to === "dealer"));
   for (const k of ["fire", "ice", "electric", "火", "冰", "〔电〕"]) assert.ok(!JSON.stringify(dv).includes(k), k);
-  for (const k of ["flesh", "armor", "血肉", "装甲"]) assert.ok(!JSON.stringify(pv).includes(k), k);
+  for (const k of ["flesh", "armor", "肉体", "装甲"]) assert.ok(!JSON.stringify(pv).includes(k), k);
   assert.deepEqual(J(pv.me.history.map(h => h.card)), ["ice", "electric"]);
 });
 

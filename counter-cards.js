@@ -71,11 +71,8 @@
     normal: "normal",                  // 常态：每局一次，代价是暗弃一张元素牌，清除当前天气；不能覆盖相位
     weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"],
     allInWeather: "phase",             // 翻到这张天气：本轮双方全押，打平各自退回自己下的筹码
-    cardNames: {
-      flesh: "血肉", armor: "装甲", shield: "护盾", sand: "沙", spirit: "灵体",
-      fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波",
-      normal: "常态"
-    },
+    // 牌名：层牌、元素牌不在这里另写，直接读 engine.js 的 LAYER / ELE（和战斗里同一份，战斗里改名牌桌跟着变，#509）；这里只放常态这类牌桌专用的名字
+    cardNames: { normal: "常态" },
     weatherNames: { heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" },
     sideNames: { dealer: "庄家", player: "玩家" },
     // 克制表（得分，chart()）：牌局中随时能开的完整克制表，matchup-ui.js 照平时克制表的样子画，格子写得分。
@@ -100,7 +97,13 @@
 
   const SIDES = ["dealer", "player"];
   const other = (side) => (side === "dealer" ? "player" : "dealer");
-  const cardName = (c) => CC_CONFIG.cardNames[c] || String(c);
+  /** 层牌、元素牌的名字：engine.js 的 LAYER / ELE（#509）；没加载 engine.js 时没有（开局、克制表本来就要先加载 engine.js） */
+  const engineName = (c) => {
+    if (CC_CONFIG.layers.indexOf(c) >= 0) return typeof LAYER !== "undefined" ? LAYER[c] : null;
+    if (CC_CONFIG.elements.indexOf(c) >= 0) return typeof ELE !== "undefined" ? ELE[c] : null;
+    return null;
+  };
+  const cardName = (c) => engineName(c) || CC_CONFIG.cardNames[c] || String(c);
   const weatherName = (w) => (w ? CC_CONFIG.weatherNames[w] || String(w) : "常态");
   const sideName = (s) => CC_CONFIG.sideNames[s] || s;
   const isElement = (c) => CC_CONFIG.elements.indexOf(c) >= 0;
