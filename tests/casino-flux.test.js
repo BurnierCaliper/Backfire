@@ -136,8 +136,9 @@ test("Flux Duel 赌场桌离桌：桌上剩下的按倍率回钱包——赢来�
   assert.equal(K.chips(w).normal, 54 * 50 / FACE, "用赠送筹码赢来的是普通筹码");
   assert.equal(w.seat, null);
   // 输：相位全押输光，不借就结束——押上去的 40 枚（赠送的）没了
-  w = K.wallet(null);
-  K.welcome(w);
+  // （钱包里没押上去的只剩 0.2 枚赠送筹码，不够补上桌 1 枚 = 0.25 枚：#520 起够 1 枚就先从钱包补、不问借贷）
+  const tiny = (10 + fee) * FACE + 40;                 // 买入 10 枚 + 入场费 0.5 枚，外加 0.2 枚
+  w = K.wallet({ gifted: true, gift: tiny, normal: 0 });
   g = K.sit(w, "duel-hall", 40, { deck: PHASE_FIRST });
   duelPhaseAllIn(D, g, ["flesh", "ice"], ["flesh", "fire"]);
   assert.equal(g.results[0].winner, "b");
@@ -145,10 +146,9 @@ test("Flux Duel 赌场桌离桌：桌上剩下的按倍率回钱包——赢来�
   assert.equal(g.over, true);
   res = K.leave(w);
   assert.deepEqual([res.chips, res.net], [0, -40]);
-  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [50 - fee - 10, 0]);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0.2, 0], "没押上去的 0.2 枚不动");
   // 打到一半离桌：输光后借 3 枚（还 4 枚）、下了第 2 轮的底注 2 枚——手上 1 枚 − 还 4 枚 = −3 枚，还不上的先扣钱包里的赠送筹码
-  w = K.wallet(null);
-  K.welcome(w);
+  w = K.wallet({ gifted: true, gift: tiny, normal: 0 });
   g = K.sit(w, "duel-hall", 40, { deck: PHASE_FIRST });
   duelPhaseAllIn(D, g, ["flesh", "ice"], ["flesh", "fire"]);
   D.act(g, "a", { type: "borrow", amount: 3 });
@@ -156,7 +156,7 @@ test("Flux Duel 赌场桌离桌：桌上剩下的按倍率回钱包——赢来�
   assert.deepEqual([g.sides.a.chips, g.sides.a.bet, g.sides.a.owe], [1, 2, 4]);
   res = K.leave(w);
   assert.deepEqual([res.chips, res.net, res.over], [-3, -43, false]);
-  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [50 - fee - 10 - 3 * 50 / FACE, 0]);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, -0.55], "还不上的 3 枚（0.75 枚）先扣剩下的 0.2 枚赠送筹码，还差 0.55 枚记成欠赌场的");
 });
 
 test("Flux Hold'em 赌场桌：人坐第一个座位，其余座位是这张桌子难度的 AI，开局筹码和你的买入一样多（赌场出）；Casino.runAi 只让 AI 那几个座位走，走到轮到你为止；离桌按倍率回钱包", () => {
@@ -190,7 +190,9 @@ test("Flux Hold'em 赌场桌：人坐第一个座位，其余座位是这张桌�
   const res = K.leave(w);
   assert.equal(res.chips, g.final.chips.p1);
   assert.equal(res.over, true);
-  assert.equal(K.chips(w).normal, 100 - 52 + g.final.chips.p1, "贵宾室桌上 1 枚 = 钱包 1 枚");
+  // 总买入 = 买入 50 枚 + 牌局里不够时从钱包补的（#520）
+  assert.equal(res.buyIn, 50 + res.topUp);
+  assert.equal(K.chips(w).normal, 100 - 2 - res.buyIn + g.final.chips.p1, "贵宾室桌上 1 枚 = 钱包 1 枚");
 });
 
 test("打到一半的 Flux 牌局跟着钱包存档：存了再读（JSON 原样），接着打完、照样离桌结算", () => {
@@ -213,7 +215,8 @@ test("打到一半的 Flux 牌局跟着钱包存档：存了再读（JSON 原样
     const res = K.leave(w2);
     const side = g2.casino.side;
     assert.equal(res.chips, g2.final.chips[side]);
-    const total = 50 - 2 * 10 / FACE + (res.chips - 40) * 10 / FACE;
+    // 净输赢按总买入算（买入 40 枚 + 牌局里不够时从读进来的钱包补的，#520）
+    const total = 50 - 2 * 10 / FACE + (res.chips - res.buyIn) * 10 / FACE;
     assert.ok(Math.abs(K.chips(w2).total - total) < 1e-9, `${table}：钱包 ${K.chips(w2).total}，应为 ${total}`);
   }
 });
@@ -397,7 +400,9 @@ test("坐下 Flux Hold'em 的桌子 → 打开 Flux Hold'em 的牌桌（赌场�
   assert.match(fin.querySelector('[data-fh="casinoAgain"]').textContent, /再来一局（买入 30 枚 \+ 入场费 2 枚）/);
   // 面板上：坐着时写坐在哪种玩法的哪张桌子，「看总结算」回到牌桌
   m.adapter.refresh();
-  assert.match(m.$(".cs-seat").textContent, /你坐在Flux Hold'em · 后巷小桌：买入 30 枚，交了入场费 2 枚 · 这一局打完了/);
+  // 买入写总买入：坐下时的 30 枚 + 牌局里不够时从钱包补的（#520）
+  assert.equal(m.w.seat.buyIn, 30 + (m.w.seat.topUp || 0));
+  assert.match(m.$(".cs-seat").textContent, new RegExp(`你坐在Flux Hold'em · 后巷小桌：买入 ${m.w.seat.buyIn} 枚.*交了入场费 2 枚 · 这一局打完了`));
   click(m.$('[data-casino="play"]'));
   assert.equal(UI.state().game, m.w.seat.game, "回到同一局");
   const g = m.w.seat.game, mine = g.final.chips.p1;

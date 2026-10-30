@@ -27,6 +27,7 @@
  *   跟注后有 3 秒追加窗口（#496，还可以加注或弃牌；秒数、pass / closeWindow 的用法同 High Flux）；弃牌的不参与比分。
  *   多人局不用分档赔付，只按底池结算。
  * 借贷 3 借 4 还、不设上限（同 High Flux：算借多少、记账、结束时扣还都直接用 counter-cards.js 的同一份代码）。5 轮后筹码最多的赢。
+ * 赌场桌（#520）：人坐的座位不够时先从钱包补到够用（CounterCards.bet.topUp，casino.js 注入），钱包空了才借；AI 座位照旧借。
  * 规则层不碰网页：AI 在 flux-holdem-ai.js，界面在 flux-holdem-ui.js。
  *
  *   const g = FluxHoldem.newGame({ seed: "A", players: [{ id: "p1", name: "你" }, { id: "p2" }, { id: "p3" }] });
@@ -237,8 +238,10 @@
     g.order.forEach(id => { const s = g.sides[id]; s.card = null; s.bet = 0; s.st = 0; s.folded = false; s.allIn = false; s.roundStart = s.chips; });
     g.betting = null; g.peek = null; g.allIn = null;
     positions(g);
-    // 借贷：手上不够「该下的盲注 + 最低下注额」的先问（输光的先问——输光了不借就出局），其余按座位顺序
+    // 借贷：手上不够「该下的盲注 + 最低下注额」的先问（输光的先问——输光了不借就出局），其余按座位顺序。
+    // 赌场桌先从钱包补，补不满的才借（#520，CounterCards.bet.topUp：只补人坐的那个座位）
     g.stage = "loan";
+    seated(g).forEach(id => B().topUp(g, id, owedBlind(g, id) + minBetNow(g)));
     g.loanAsk = seated(g).filter(id => loanAt(g, id)).sort((x, y) => Number(g.sides[y].chips <= 0) - Number(g.sides[x].chips <= 0));
     if (g.loanAsk.length) {
       note(g, { t: "loanAsk", ids: g.loanAsk.slice(), text: `第 ${g.round} 轮开始前：${g.loanAsk.map(id => nameOf(g, id)).join("、")}手上的筹码不够这一轮该下的盲注 + 最低下注额，可以向主持方借。` });
@@ -409,8 +412,14 @@
     const cur = Math.max(0, ...g.order.map(id => g.sides[id].st));
     // called：最后一次下注 / 加注之后有人跟过注（谁跟的）——这个下注回合打完时有人跟过才开追加窗口
     g.betting = { street, toAct: null, cur, lastRaise: street === 1 ? blindOf(g.round, 1) : 0, raises: 0, acted: {}, called: null, window: null, windows: 0 };
-    g.betting.toAct = nextToAct(g, g.dealer);
-    if (!g.betting.toAct) closeStreet(g);
+    const first = nextToAct(g, g.dealer);
+    if (first) turnTo(g, first); else closeStreet(g);
+  }
+  /** 轮到 id 下注：手上不够「要跟的 + 最低下注额」先从钱包补（#520，赌场桌；CounterCards.bet.topUp），补不满的可以借 */
+  function turnTo(g, id) {
+    const b = g.betting;
+    b.toAct = id;
+    B().topUp(g, id, Math.max(0, b.cur - g.sides[id].st) + minBetNow(g));
   }
   function betAction(g, id, a, opt) {
     const s = g.sides[id], b = g.betting, label = nameOf(g, id);
@@ -471,7 +480,7 @@
    *  （还有加注次数、至少两个人还能下注），不然（都过牌）结束这个下注回合 */
   function advance(g, id) {
     const b = g.betting, nxt = nextToAct(g, id);
-    if (nxt) { b.toAct = nxt; return; }
+    if (nxt) { turnTo(g, nxt); return; }
     const able = g.order.filter(k => canAct(g, k));
     if (b.called && b.raises < HOLDEM_CONFIG.maxRaises && able.length >= 2) { openWindow(g, b.called); return; }
     closeStreet(g);

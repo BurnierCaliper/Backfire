@@ -22,7 +22,8 @@
       duel: "两人对决：你坐第 1 轮先手，对手是赌场的 AI，筹码无限。",
       holdem: "多人公共牌桌：你坐第一个座位，其余座位是 AI，开局筹码和你的买入一样多（赌场出）。"
     },
-    rule: "赠送筹码只能下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码，能卖。入场费每开一局收一次、不退。",
+    rule: "赠送筹码只能下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码，能卖。入场费每开一局收一次、不退。"
+      + "牌局里桌上的筹码不够时，先自动从钱包补到够用（先拿赠送的），算进买入；钱包空了才问借不借。",
     leaveTitle: "离桌：桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退）"
   };
   const K = () => root.Casino;
@@ -60,11 +61,11 @@
       ${btn("sit", short ? `筹码不够（要 ${num(need)} 枚）` : "坐下", { data: { table: t.id }, disabled: short })}
     </div>`;
   }
-  /** 坐着的这一局：回到牌桌 / 离桌 */
+  /** 坐着的这一局：回到牌桌 / 离桌。买入写总买入（牌局里从钱包补的跟着加上，#520） */
   function seatHtml(v) {
     const s = v.chips.seat, g = v.game;
     const where = !g ? "" : g.over ? "这一局打完了" : `第 ${g.round} / ${g.rounds} 轮`;
-    return `<div class="cs-seat"><p>你坐在<b>${esc(s.name)}</b>：买入 ${s.buyIn} 枚，交了入场费 ${s.fee} 枚 · ${esc(where)}</p>
+    return `<div class="cs-seat"><p>你坐在<b>${esc(s.name)}</b>：买入 ${s.buyIn} 枚${s.topUp ? `（含从钱包补的 ${s.topUp} 枚）` : ""}，交了入场费 ${s.fee} 枚 · ${esc(where)}</p>
       <div class="cs-btns">${btn("play", g && g.over ? "看总结算" : "回到牌桌", { primary: true })}${btn("leave", "离桌", { title: UI_CONFIG.leaveTitle })}</div></div>`;
   }
   function html(v, o) {
@@ -134,10 +135,12 @@
     const T = g && TABLE_UI[K().gameOf(g)], ui = T && T.ui();
     if (!ui) return false;
     const t = v.tables.find(x => x.id === g.casino.table) || { name: g.casino.name, difficulty: g.casino.difficulty, entryFee: 0 };
-    const buyIn = g.casino.buyIn;
+    // 当初坐下时选的买入：「再来一局」照这个买（牌局里从钱包补的不算，#520）
+    const s = v.chips && v.chips.seat, buyIn = g.casino.buyIn - (s && s.topUp || 0);
     const leave = () => { msg = lines(adapter.leave()); adapter.back(); };
     ui.start(Object.assign(T.opt(g), { game: g, level: t.difficulty, casino: {
-      label: `${t.name} · 买入 ${buyIn} 枚`,
+      // 顶栏写总买入：牌局里从钱包补了就跟着加上（#520；牌桌每次重画都读一次）
+      get label() { return `${t.name} · 买入 ${g.casino.buyIn} 枚`; },
       leaveTitle: UI_CONFIG.leaveTitle,
       againText: `再来一局（买入 ${buyIn} 枚 + 入场费 ${t.entryFee} 枚）`,
       onChange: () => adapter.saved(),

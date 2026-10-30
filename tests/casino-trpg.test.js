@@ -85,6 +85,28 @@ test("跑团：坐桌（交入场费）→ 打完 → 离桌，赢来的进普�
   assert.equal(c.LEDGER.save().casino.wallets.party.seat, null);
 });
 
+test("跑团（本机）：牌局里桌上不够时先从这个存档的钱包补（不问借贷），跟着跑团存档走；离桌按总买入结算（#520）", () => {
+  const c = field();
+  send(c, { action: "casinoOpen" });                    // 赠送 50 枚
+  c.trpgCasinoSit("hall", 40, null, { deck: PHASE_FIRST });   // 买入 10 枚 + 入场费 0.5 枚：钱包剩 39.5 枚
+  const CC = c.CounterCards, g = c.trpgCasinoView().game;
+  A(CC, g, "dealer", "weather", { op: "pass" });
+  A(CC, g, "dealer", "play", { card: "armor" }); A(CC, g, "player", "play", { card: "fire" });
+  A(CC, g, "player", "check"); A(CC, g, "dealer", "check");
+  c.LEDGER.load(J(c.LEDGER.save()));                    // 存档 → 读档
+  const g2 = c.trpgCasinoView().game;
+  assert.ok(g2 !== g);
+  A(CC, g2, "player", "reveal");                        // 相位全押：火打装甲，玩家输光
+  assert.equal(g2.loanAsk, null, "钱包里有筹码：不问借贷");
+  assert.ok(g2.log.some(e => e.text === "玩家从钱包补了 3 枚到桌上。"), "牌局的记录里写着");
+  const v = c.trpgCasinoView();
+  assert.equal(v.chips.gift, 38.75, "桌上 3 枚 = 钱包 0.75 枚，先拿赠送的");
+  assert.deepEqual([v.chips.seat.buyIn, v.chips.seat.topUp], [43, 3], "座位上的买入加上");
+  assert.equal(c.LEDGER.save().casino.wallets.party.seat.topUp, 3, "跟着跑团存档走");
+  assert.match(J(send(c, { action: "casinoLeave" })).join(""), /离开大厅：桌上剩 2 枚（买入 43 枚，含从钱包补的 3 枚，输 41 枚）/);
+  assert.deepEqual([c.trpgCasinoView().chips.gift, c.trpgCasinoView().chips.normal], [39.25, 0]);
+});
+
 test("跑团的「赌场」页：第一次点开送赠送筹码、面板交给 casino-ui.js（奎支选单 = 由谁付 / 钱进谁的钱包）、牌局每走一步存档", () => {
   const ui = read("trpg-ui.js");
   assert.match(ui, /\["merchants", "商人"\], \["casino", "赌场"\]/, "页签里有「赌场」");

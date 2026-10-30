@@ -6,7 +6,8 @@
  * 没有常态。7 张天气洗混成一堆，每轮开始（下完底注）从堆顶拿一张背面朝上放好——谁都不能偷看、也不能翻，第一轮下注后、结算前自动翻开；
  * 第一轮下注时有人弃牌，这一张就盖着弃掉（谁都不知道是哪张）。
  * 每轮：
- *   0. 借贷：同 High Flux（手上不够「底注 + 最低下注额」的一方先决定借不借，输光的先问，不借这一局就结束）；
+ *   0. 借贷：同 High Flux（手上不够「底注 + 最低下注额」的一方先决定借不借，输光的先问，不借这一局就结束；
+ *      赌场桌先从钱包补，补不满的才借，#520）；
  *   1. 双方各下底注 = 1 × 轮数（DUEL_CONFIG.ante）；
  *   2. 同时暗出一张层牌 + 一张元素牌；
  *   3. 第一轮下注：先手每轮轮换（第 1 轮甲先、第 2 轮乙先……，同一轮的两次下注都是这一轮的先手先）；
@@ -133,8 +134,10 @@
     g.lead = leadOf(g, g.round);
     SEATS.forEach(k => { const s = g.sides[k]; s.layer = null; s.element = null; s.bet = 0; s.st = 0; s.roundStart = s.chips; });
     g.betting = null; g.allIn = false;
-    // 借贷：手上的筹码不够这一轮「底注 + 最低下注额」的一方先决定借不借；输光的先问——它不借这一局就结束了，免得另一方白借
+    // 借贷：手上的筹码不够这一轮「底注 + 最低下注额」的一方先决定借不借；输光的先问——它不借这一局就结束了，免得另一方白借。
+    // 赌场桌先从钱包补，补不满的才借（#520，同 High Flux：CounterCards.bet.topUp；下注回合里的也在那份代码里）
     g.stage = "loan";
+    SEATS.forEach(k => B().topUp(g, k));
     g.loanAsk = SEATS.filter(k => B().loanOption(g, k)).sort((x, y) => Number(B().busted(g.sides[y])) - Number(B().busted(g.sides[x])));
     if (g.loanAsk.length) {
       note(g, { t: "loanAsk", sides: g.loanAsk.slice(), text: `第 ${g.round} 轮开始前：${g.loanAsk.map(k => nameOf(g, k)).join("、")}手上的筹码不够这一轮的底注 + 最低下注额（${anteOf(g.round) + CC().minBetOf(g.round)} 枚），可以向主持方借。` });

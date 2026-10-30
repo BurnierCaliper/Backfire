@@ -659,10 +659,11 @@
     }
     return out;
   }
-  /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局 */
+  /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局。
+   *  buyIn = 总买入、topUp = 牌局里桌上不够时从钱包补了几枚（#520） */
   function projectCasinoSeat(s, withGame) {
     if (!obj(s)) return null;
-    const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round"], ["over"]), ["table", "level"]);
+    const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round", "topUp"], ["over"]), ["table", "level"]);
     enumField(s, out, "kind", ["ai", "gm", "pvp"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]);
     if (!out.kind) return null;
     const side = sideOf(get(s, "side")); if (side) out.side = side;
