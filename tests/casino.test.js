@@ -19,6 +19,8 @@ const A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extr
 const PHASE_FIRST = ["phase", "heat", "snow", "acid", "thunder", "sand", "glow"];
 const table = id => CC.casino.tables().find(t => t.id === id);
 const FACE = K.CONFIG.face;
+/** 这张桌子的入场费折成钱包里几枚 */
+const feeChips = id => table(id).entryFee * table(id).rate / FACE;
 
 /** 第一轮：庄家不动天气，双方暗出，第一轮下注都过牌，玩家翻开相位 → 双方全押，按 dealerCard / playerCard 判胜负 */
 function phaseAllIn(g, dealerCard, playerCard) {
@@ -60,9 +62,8 @@ test("钱包：赠送每个存档只送一次——再来、存档读档以后�
   const loaded = K.wallet(J(w));                       // 存档原样存、原样读
   assert.deepEqual(J(K.welcome(loaded)), []);
   assert.equal(K.chips(loaded).gift, 50);
-  // 赠送筹码输光了也不补
-  const vip = table("vip");
-  const g = K.sit(loaded, "vip", vip.minBuyIn, { deck: PHASE_FIRST });
+  // 赠送筹码输光了也不补：大厅买入 198 枚（49.5 枚）+ 入场费 2 枚（0.5 枚），正好用光赠送的 50 枚
+  const g = K.sit(loaded, "hall", 198, { deck: PHASE_FIRST });
   phaseAllIn(g, "armor", "fire");                      // 相位全押：火打装甲 −1，玩家输光
   A(g, "player", "noLoan");
   assert.equal(g.over, true);
@@ -90,37 +91,36 @@ test("坐桌：买入按桌子倍率从钱包里拿（先拿赠送的），押�
   assert.equal(g.sides.dealer.infinite, true, "赌场的庄家筹码无限");
   const ch = K.chips(w);
   assert.equal(ch.gift, 0, "先拿赠送的");
-  assert.equal(ch.normal, 20);
+  assert.equal(ch.normal, 70 - 50 - feeChips("vip"));
   assert.equal(ch.seat.stake, 50 * vip.rate / FACE);
   assert.throws(() => K.sit(w, "alley", alley.minBuyIn), /已经坐在桌上/);
   // 后巷小桌：每枚 10 奎支，桌上 20 枚 = 钱包 1 枚
   const w2 = K.wallet({ gifted: true, gift: 0, normal: 3 * FACE });
   K.sit(w2, "alley", 40);
-  assert.equal(K.chips(w2).normal, 3 - 40 * alley.rate / FACE);
+  assert.equal(K.chips(w2).normal, 3 - 40 * alley.rate / FACE - feeChips("alley"));
   assert.equal(K.tables().find(t => t.id === "alley").minBuyInChips, alley.minBuyIn * alley.rate / FACE);
 });
 
 test("离桌结算：赢来的进普通筹码，押上去的赠送筹码原样回来", () => {
-  const vip = table("vip");
+  const hall = table("hall");
   const w = K.wallet(null);
   K.welcome(w);                                        // 赠送 50 枚
-  const g = K.sit(w, "vip", vip.minBuyIn, { deck: PHASE_FIRST });
+  const g = K.sit(w, "hall", 40, { deck: PHASE_FIRST });   // 买入 40 枚 = 钱包 10 枚，入场费另扣
   phaseAllIn(g, "flesh", "fire");                      // 相位全押：火打血肉 +1，玩家翻倍
   dealerFoldsRest(g);                                  // 后面四轮庄家都弃牌：玩家每轮多赢 1 枚底注
   assert.equal(g.over, true);
-  assert.equal(g.final.chips.player, vip.minBuyIn * 2 + 4);
+  assert.equal(g.final.chips.player, 40 * 2 + 4);
   const res = K.leave(w);
-  assert.equal(res.net, vip.minBuyIn + 4);
+  assert.equal(res.net, 44);
   assert.equal(res.over, true);
   const ch = K.chips(w);
-  assert.equal(ch.gift, 50, "赠送筹码原样回来，不多不少");
-  assert.equal(ch.normal, (vip.minBuyIn + 4) * vip.rate / FACE, "用赠送筹码赢来的是普通筹码");
+  assert.equal(ch.gift, 50 - feeChips("hall"), "押上去的赠送筹码原样回来（只少了入场费）");
+  assert.equal(ch.normal, 44 * hall.rate / FACE, "用赠送筹码赢来的是普通筹码");
   assert.equal(ch.seat, null);
-  assert.match(res.text, /赢 54 枚/);
+  assert.match(res.text, /赢 44 枚/);
 });
 
 test("离桌结算：输的先扣赠送筹码，赠送的扣完了再扣普通筹码", () => {
-  const vip = table("vip");
   // 押上去的全是赠送筹码，输了一半：只少赠送筹码
   const w = K.wallet({ gifted: true, gift: 50 * FACE, normal: 10 * FACE });
   let g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
@@ -131,7 +131,7 @@ test("离桌结算：输的先扣赠送筹码，赠送的扣完了再扣普通�
   A(g, "dealer", "check"); A(g, "player", "check");                   // 火打装甲 −1：玩家输掉这一轮的 25 枚
   assert.equal(g.results[0].winner, "dealer");
   K.leave(w);                                                          // 打到一半离桌：下一轮的底注已经押进去，不退
-  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [24, 10], "输的 26 枚全从赠送筹码里扣，普通筹码不动");
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [50 - feeChips("vip") - 26, 10], "入场费和输的 26 枚全从赠送筹码里扣，普通筹码不动");
   // 押上去的有赠送也有普通，输的比赠送的多：赠送扣光，剩下的扣普通
   const w2 = K.wallet({ gifted: true, gift: 20 * FACE, normal: 40 * FACE });
   g = K.sit(w2, "vip", 50, { deck: PHASE_FIRST });
@@ -139,35 +139,33 @@ test("离桌结算：输的先扣赠送筹码，赠送的扣完了再扣普通�
   A(g, "player", "noLoan");
   const res = K.leave(w2);
   assert.equal(res.net, -50);
-  assert.deepEqual([K.chips(w2).gift, K.chips(w2).normal], [0, 10]);
+  assert.deepEqual([K.chips(w2).gift, K.chips(w2).normal], [0, 60 - 50 - feeChips("vip")]);
 });
 
 test("离桌结算：还不上的借款（桌上筹码是负数）先扣钱包里剩下的赠送筹码，再扣普通筹码，可以扣成负数（欠赌场的）", () => {
-  const vip = table("vip");
-  const w = K.wallet({ gifted: true, gift: 51 * FACE, normal: 0 });
+  const w = K.wallet({ gifted: true, gift: (51 + feeChips("vip")) * FACE, normal: 0 });
   const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
   phaseAllIn(g, "armor", "fire");                      // 输光
   A(g, "player", "borrow", { amount: 3 });             // 借 3 还 4；下了 1 枚底注，手上 2 枚
   const res = K.leave(w);                              // 打到一半离桌：手上 2 枚 − 还 4 枚 = −2 枚
   assert.equal(res.chips, -2);
   assert.equal(res.net, -52);
-  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, -1], "赠送的 51 枚扣光，还差 1 枚记成欠赌场的");
-  assert.ok(vip);
+  assert.deepEqual([K.chips(w).gift, K.chips(w).normal], [0, -1], "交完入场费剩下的 51 枚赠送筹码扣光，还差 1 枚记成欠赌场的");
 });
 
 test("打到一半的牌局跟着钱包存档：存了再读，接着打完、照样结算", () => {
-  const vip = table("vip");
+  const hall = table("hall");
   const w = K.wallet(null);
   K.welcome(w);
-  const g = K.sit(w, "vip", vip.minBuyIn, { deck: PHASE_FIRST });
+  const g = K.sit(w, "hall", 40, { deck: PHASE_FIRST });
   phaseAllIn(g, "flesh", "fire");
   const saved = JSON.parse(JSON.stringify(w));         // 存档：钱包连同桌上这一局
   const w2 = K.wallet(saved);
-  assert.equal(K.chips(w2).seat.table, "vip");
+  assert.equal(K.chips(w2).seat.table, "hall");
   dealerFoldsRest(w2.seat.game);
-  assert.equal(K.leave(w2).net, vip.minBuyIn + 4);
-  assert.equal(K.chips(w2).gift, 50);
-  assert.equal(K.chips(w2).normal, (vip.minBuyIn + 4) * vip.rate / FACE);
+  assert.equal(K.leave(w2).net, 44);
+  assert.equal(K.chips(w2).gift, 50 - feeChips("hall"));
+  assert.equal(K.chips(w2).normal, 44 * hall.rate / FACE);
 });
 
 /* ---------- 兑换：200 奎支买 1 枚，1 枚卖 190 奎支 ---------- */
@@ -214,18 +212,54 @@ test("兑换：1 枚普通筹码卖 190 奎支；赠送的不能卖、零头不�
 });
 
 test("用赠送筹码赢了一局以后：赢到的部分能卖成奎支，赠送的部分不能卖", () => {
-  const vip = table("vip");
+  const hall = table("hall");
   const w = K.wallet(null);
   K.welcome(w);                                        // 只有赠送的 50 枚
-  const g = K.sit(w, "vip", vip.minBuyIn, { deck: PHASE_FIRST });
+  const g = K.sit(w, "hall", 40, { deck: PHASE_FIRST });
   phaseAllIn(g, "flesh", "fire");
   dealerFoldsRest(g);
   K.leave(w);
-  const won = (vip.minBuyIn + 4) * vip.rate / FACE;    // 赢来的（普通筹码）
+  const won = 44 * hall.rate / FACE;                   // 赢来的 44 枚桌上筹码 = 钱包 11 枚（普通筹码）
+  assert.equal(won, 11);
   assert.equal(K.sellable(w), won);
   const r = K.sell(w, won);
   assert.equal(r.gain, won * 190);
-  assert.equal(K.chips(w).gift, 50);
-  assert.throws(() => K.sell(w, 1), /赠送的筹码不能换成奎支/, "赠送的 50 枚一枚也卖不了");
-  assert.equal(K.chips(w).gift, 50);
+  const gift = K.chips(w).gift;
+  assert.equal(gift, 50 - feeChips("hall"));
+  assert.throws(() => K.sell(w, 1), /赠送的筹码不能换成奎支/, "赠送的一枚也卖不了");
+  assert.equal(K.chips(w).gift, gift);
+});
+
+/* ---------- 入场费：赌场桌每开一局收一次，不退 ---------- */
+
+test("入场费：配置在每张桌子上（先按 2 枚占位），折成奎支是 2 枚 × 桌子倍率", () => {
+  CC.CC_CONFIG.casino.tables.forEach(t => assert.equal(t.entryFee, 2, t.id + " 的入场费"));
+  const ts = K.tables();
+  assert.deepEqual(J(ts.map(t => [t.id, t.entryFee, t.entryFeeChips])), [["alley", 2, 0.1], ["hall", 2, 0.5], ["vip", 2, 2]]);
+  ts.forEach(t => assert.equal(t.entryFeeChips * FACE, t.entryFee * t.rate, "入场费的面值 = 枚数 × 倍率"));
+});
+
+test("入场费：每开一局收一次、不退——打完一局只多赚的减掉入场费，再开一局再收；中途离桌也不退", () => {
+  const w = K.wallet({ gifted: true, gift: 0, normal: 60 * FACE });
+  const g = K.sit(w, "vip", 50, { deck: PHASE_FIRST });
+  assert.equal(K.chips(w).normal, 60 - 50 - 2, "坐下时收入场费");
+  assert.equal(K.chips(w).seat.fee, 2);
+  dealerFoldsRest(g);                                  // 五轮庄家都弃牌：桌上 +5
+  assert.equal(K.leave(w).net, 5);
+  assert.equal(K.chips(w).normal, 60 + 5 - 2, "净赚 = 桌上赢的 − 入场费");
+  K.sit(w, "vip", 50);                                 // 再开一局：再收一次
+  assert.equal(K.chips(w).normal, 63 - 52);
+  K.leave(w);                                          // 马上离桌：入场费不退（第一轮的底注也已经押进去）
+  assert.equal(K.chips(w).normal, 63 - 2 - 1);
+});
+
+test("入场费：也先扣赠送筹码；钱包只够买入、不够入场费就坐不下", () => {
+  const w = K.wallet(null);
+  K.welcome(w);
+  K.sit(w, "alley", 20);                               // 买入 20 枚 = 钱包 1 枚，入场费 2 枚 = 0.1 枚
+  assert.equal(K.chips(w).gift, 50 - 1 - 0.1);
+  assert.equal(K.chips(w).normal, 0);
+  const poor = K.wallet({ gifted: true, gift: 0, normal: 50 * FACE });
+  assert.throws(() => K.sit(poor, "vip", 50), /筹码不够.*入场费/);
+  assert.deepEqual([K.chips(poor).normal, K.chips(poor).seat], [50, null], "没坐成不收入场费");
 });

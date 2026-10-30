@@ -19,7 +19,8 @@
  *   Casino.chips(w)                              → { gift, normal, total, seat } 都按枚（可能有零头）
  *   Casino.buy(w, 枚数, 现有奎支) / Casino.sell(w, 枚数)   → 兑换：200 奎支买 1 枚（奎支不够不能买），1 枚卖 190 奎支（只卖普通筹码的整枚）；
  *                                                  奎支由各模式自己扣 / 加（返回的 cost / gain）
- *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌（庄家 = AI 或主持人，筹码无限），返回这一局
+ *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌开一局（庄家 = AI 或主持人，筹码无限）：先收入场费（每局一次、不退），
+ *                                                  再押买入；返回这一局
  *   Casino.leave(w)                              → 离桌：桌上剩下的筹码按倍率回钱包（输了先扣赠送的），返回结算
  */
 (function (root) {
@@ -74,7 +75,7 @@
     const s = w.seat;
     return {
       gift: toChips(w.gift), normal: toChips(w.normal), total: toChips(w.gift + w.normal), gifted: w.gifted,
-      seat: s ? { kind: s.kind, table: s.table, name: s.name, buyIn: s.buyIn, rate: s.rate, stake: toChips(s.stake.gift + s.stake.normal), over: !!(s.game && s.game.over) } : null
+      seat: s ? { kind: s.kind, table: s.table, name: s.name, buyIn: s.buyIn, rate: s.rate, fee: s.fee || 0, stake: toChips(s.stake.gift + s.stake.normal), over: !!(s.game && s.game.over) } : null
     };
   }
   /* ---------- 兑换：奎支 ⇄ 筹码（只按整枚） ---------- */
@@ -128,11 +129,14 @@
   }
 
   /* ---------- 赌场桌：庄家是 AI 或主持人（筹码无限，代表赌场） ---------- */
-  /** 能坐的桌子：#486 的配置（倍率 rate、最低买入 minBuyIn、庄家 AI 难度），另带折成钱包多少枚 */
+  /** 入场费（桌上的枚数）：CC_CONFIG.casino.tables[i].entryFee，每开一局收一次、不退 */
+  const feeOf = (t) => Math.max(0, Math.floor(Number(t.entryFee) || 0));
+  /** 能坐的桌子：#486 的配置（倍率 rate、最低买入 minBuyIn、庄家 AI 难度）+ 入场费 entryFee，另带折成钱包多少枚 */
   function tables() {
-    return CC().casino.tables().map(t => Object.assign(t, { minBuyInChips: toChips(t.minBuyIn * t.rate), perChip: toChips(t.rate) }));
+    return CC().casino.tables().map(t => Object.assign(t, { entryFee: feeOf(t), minBuyInChips: toChips(t.minBuyIn * t.rate), entryFeeChips: toChips(feeOf(t) * t.rate), perChip: toChips(t.rate) }));
   }
-  /** 坐上赌场桌：买入 buyIn 枚这张桌子的筹码（不少于最低买入），按倍率从钱包里拿（先拿赠送的）。
+  /** 坐上赌场桌开一局：先收入场费（这张桌子的 entryFee 枚，按倍率折成钱包里的筹码，先扣赠送的，不退），
+   *  再买入 buyIn 枚这张桌子的筹码（不少于最低买入），按倍率从钱包里拿（先拿赠送的）押在桌上。
    *  opt：seed / deck（测试用）/ dealer（"ai" 或 "gm"：谁当庄家，只记着，规则一样）。返回这一局（CounterCards 的对局） */
   function sit(w, tableId, buyIn, opt) {
     opt = opt || {};
@@ -142,11 +146,12 @@
     if (!t) fail("没有这张桌子：" + tableId);
     const n = Math.floor(Number(buyIn));
     if (!Number.isFinite(n) || n < t.minBuyIn) fail(`${t.name}最低买入 ${t.minBuyIn} 枚`);
-    const value = n * t.rate;
-    if (w.gift + w.normal < value) fail(`筹码不够：买入 ${n} 枚要钱包里 ${fmt(value)} 枚，现有 ${fmt(w.gift + w.normal)} 枚`);
+    const fee = feeOf(t), value = n * t.rate, feeValue = fee * t.rate;
+    if (w.gift + w.normal < value + feeValue) fail(`筹码不够：买入 ${n} 枚${fee ? `加入场费 ${fee} 枚` : ""}要钱包里 ${fmt(value + feeValue)} 枚，现有 ${fmt(w.gift + w.normal)} 枚`);
     const game = CC().casino.newGame(t.id, n, { seed: opt.seed, deck: opt.deck });
+    take(w, feeValue);                   // 入场费：交给赌场，不退
     const stake = take(w, value);
-    w.seat = { kind: opt.dealer === "gm" ? "gm" : "ai", table: t.id, name: t.name, rate: t.rate, buyIn: n, stake, game };
+    w.seat = { kind: opt.dealer === "gm" ? "gm" : "ai", table: t.id, name: t.name, rate: t.rate, buyIn: n, fee, stake, game };
     return game;
   }
   /** 离桌：桌上剩下的筹码（扣还向主持方借的；打到一半离桌，已经押进底池的不退）按倍率回钱包。

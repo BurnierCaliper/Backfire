@@ -73,11 +73,13 @@
     },
     // 赌场（预留接口，桌子的数值都是占位）：玩家坐「玩家」一方，用自己的筹码，买入不少于 minBuyIn；庄家筹码无限。
     // rate = 每枚筹码折多少奎支（不同桌子的筹码倍率）；difficulty = 庄家 AI 的难度，跟倍率挂钩
+    // entryFee = 入场费（#487，主人 10/30）：AI 或主持人当庄的赌场桌每开一局收一次，不退；按这张桌子的筹码算，
+    //   折成奎支就是 entryFee × rate（2 枚 × 桌子倍率）。先按 2 枚占位，之后试玩再调。钱包怎么扣在 casino.js
     casino: {
       tables: [
-        { id: "alley", name: "后巷小桌", rate: 10, minBuyIn: 20, difficulty: "easy" },
-        { id: "hall", name: "大厅", rate: 50, minBuyIn: 30, difficulty: "normal" },
-        { id: "vip", name: "贵宾室", rate: 200, minBuyIn: 50, difficulty: "hard" }
+        { id: "alley", name: "后巷小桌", rate: 10, minBuyIn: 20, difficulty: "easy", entryFee: 2 },
+        { id: "hall", name: "大厅", rate: 50, minBuyIn: 30, difficulty: "normal", entryFee: 2 },
+        { id: "vip", name: "贵宾室", rate: 200, minBuyIn: 50, difficulty: "hard", entryFee: 2 }
       ]
     }
   };
