@@ -16,6 +16,8 @@
  * 悬停预览（作者 10/29 在 PR #486 的评论）：人当玩家时，鼠标停在手里的元素牌上（手机上长按）弹出一个小预览，写这张牌按场上天气
  *   打五种层各得几分（counter-cards.js · cardChart，就是克制表里这张牌的一行）；天气变了跟着变；只写这张牌自己的数，不碰庄家出的牌；
  *   预览不接鼠标、摆在手牌上面，不挡出牌；长按松手不算点击（不会把牌出掉）。
+ * 庄家天气行动（#502）：场上有天气时「弃掉天气」「保留天气」，点了保留接着出现「偷看下一张」「不看」（天气堆里还有没看过的牌才有）；
+ *   偷看按顺序往下看，人当庄家时天气堆旁边列出看过的那几张（堆顶往下 / 堆底往上，只有庄家看得到）。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
@@ -465,7 +467,7 @@
     return `<details class="cc-rules"><summary>${esc(C.name)} 规则</summary><ul>
       <li><b>牌</b>：庄家 ${C.layers.length} 张层牌（${C.layers.map(CC().cardName).join("、")}），每轮必须打出一张；玩家 ${C.elements.length} 张元素牌（${C.elements.map(CC().cardName).join("、")}）+ 1 张常态（每局一次）；天气堆 ${C.weathers.length} 张（${C.weathers.map(CC().weatherName).join("、")}），开局洗混，抽完就没了，新翻的天气顶替旧天气。</li>
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
-      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
+      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
       <li><b>下注不封顶</b>：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比你手上的还多时，要跟就先向主持方借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方封顶。</li>
       <li><b>跟注后追加</b>：一方跟注后有 ${C.callWindowSec} 秒追加窗口，双方都还可以加注或弃牌；有人加注就照常轮到对方跟注、加注或弃牌，对方跟注后再开一次窗口；${C.callWindowSec} 秒内没人动作，这个下注回合结束。窗口里的加注也算进每回合最多加注 ${C.maxRaises} 次，次数用完以后跟注直接结束。</li>
@@ -511,6 +513,23 @@
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
   }
+  /** 庄家看过的天气（#502，偷看按顺序往下看）：放在天气堆旁边，只有人当庄家时画（view 里只有庄家有 deckSeen）。
+   *  堆顶往下：从堆顶数连续看过的几张；堆底往上：压到牌堆底的几张，第一张在最底下 */
+  function seenHtml(v) {
+    const s = v.deckSeen;
+    if (S.human !== "dealer" || !s || (!s.top.length && !s.bottom.length)) return "";
+    const mini = (w) => `<span class="cc-mini" style="--c:${weatherColor(w)}" data-weather="${w}">${root.Icons ? root.Icons.weather(w) : ""}${esc(CC().weatherName(w))}</span>`;
+    const row = (label, list, at) => (list.length ? `<span class="cc-seen-row" data-at="${at}"><i>${label}</i>${list.map(mini).join("")}</span>` : "");
+    return `<div class="cc-seen" title="你偷看过的天气，只有你看得到">
+        <small>你看过的（只有你看得到）</small>${row("堆顶往下", s.top, "top")}${row("堆底往上", s.bottom.slice().reverse(), "bottom")}
+        <small class="cc-seen-left">${s.unseen ? `还有 ${s.unseen} 张没看过` : "剩下的都看过了"}</small>
+      </div>`;
+  }
+  /** 庄家下一次偷看的是哪张：堆顶往下看过几张，就看那几张后面那一张（#502，不会重复看同一张） */
+  function nextPeekText(v) {
+    const n = v.deckSeen ? v.deckSeen.top.length : 0;
+    return n ? `下一张没看过的（从上往下第 ${n + 1} 张，上面 ${n} 张你看过了）` : "堆顶那张";
+  }
   function boardHtml(v) {
     const deal = !!S.anim.deal, me = v.me, opp = v.opp;
     // 整块重画时只给变了的东西放动画：筹码数变了才落一次，刚暗出的牌才飞上桌
@@ -532,8 +551,6 @@
     const potShare = me.pot + opp.pot;
     const flash = reveal ? `<div class="cc-flash" style="--c:${weatherColor(reveal)}" aria-hidden="true"></div>` : "";
     const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small>只有你看得到</small>${weatherCardHtml(v.peek.card)}</div>` : "";
-    const known = S.human === "dealer" && (v.deckTop || v.deckBottom)
-      ? `<small class="cc-known">${v.deckTop ? `堆顶：${esc(CC().weatherName(v.deckTop))}` : ""}${v.deckTop && v.deckBottom ? " · " : ""}${v.deckBottom ? `堆底：${esc(CC().weatherName(v.deckBottom))}` : ""}</small>` : "";
     return `${flash}<div class="cc-seat cc-opp">
         <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
@@ -541,7 +558,8 @@
       </div>
       <div class="cc-center">
         <div class="cc-wzone">
-          <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small>${known}</div>
+          <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small></div>
+          ${seenHtml(v)}
           <div class="cc-wnow">${weatherCardHtml(v.weather, { cls: reveal ? "cc-flip" : "" })}<small>场上天气</small></div>
           ${v.gone.length ? `<div class="cc-gone" title="离场的天气">${v.gone.map(w => `<span class="cc-mini" style="--c:${weatherColor(w)}">${root.Icons ? root.Icons.weather(w) : ""}${esc(CC().weatherName(w))}</span>`).join("")}</div>` : ""}
           ${peek}
@@ -621,19 +639,28 @@
         b = (o ? loanBtns(o, broke) : "") + btn("noLoan", broke ? "不借（结束对局）" : "不借", { primary: !broke });
         break;
       }
-      case "dealerWeather":
-        if (v.weather) {
-          p = `庄家天气行动：场上是〔${esc(CC().weatherName(v.weather))}〕，弃掉还是保留？`;
-          b = btn("weather", "弃掉天气", { data: { op: "discard" } }) + btn("weather", "保留天气", { data: { op: "keep" }, primary: true });
+      case "dealerWeather": {
+        // 庄家天气行动（#502）：场上有天气 → 弃掉 / 保留，保留以后接着问「偷看下一张」「不看」（天气堆里还有没看过的才问）；没有天气 → 偷看下一张 / 不动
+        const W = esc(CC().weatherName(v.weather)), canPeek = v.legal.some(o => o.op === "peek");
+        if (v.weather && canPeek && S.mode === "keep") {
+          p = `保留场上的〔${W}〕。要不要接着偷看天气堆里${nextPeekText(v)}？玩家看得到你偷看后放回原位还是压到牌堆底，看不到是哪张。`;
+          b = btn("weather", "偷看下一张", { data: { op: "peek" }, primary: true }) + btn("weather", "不看", { data: { op: "keep" } });
+        } else if (v.weather) {
+          p = `庄家天气行动：场上是〔${W}〕，弃掉还是保留？${canPeek ? "保留以后还可以接着偷看下一张。" : v.deckCount ? "天气堆里剩下的你都看过了，保留以后不能再偷看。" : ""}`;
+          b = btn("weather", "弃掉天气", { data: { op: "discard" } })
+            + (canPeek ? btn("mode", "保留天气", { data: { mode: "keep" }, primary: true }) : btn("weather", "保留天气", { data: { op: "keep" }, primary: true }));
         } else {
-          p = "庄家天气行动：场上没有天气。可以偷看天气堆顶的一张（玩家看得到你放回原位还是放到牌堆底）。";
-          b = btn("weather", "偷看堆顶", { data: { op: "peek" }, primary: true }) + btn("weather", "不动", { data: { op: "pass" } });
+          p = `庄家天气行动：场上没有天气。可以偷看天气堆里${nextPeekText(v)}（玩家看得到你放回原位还是压到牌堆底，看不到是哪张）。`;
+          b = btn("weather", "偷看下一张", { data: { op: "peek" }, primary: true }) + btn("weather", "不动", { data: { op: "pass" } });
         }
         break;
-      case "dealerPeek":
-        p = `堆顶是〔${esc(CC().weatherName(v.peek && v.peek.card))}〕。放回原位，还是放到牌堆底？`;
-        b = btn("place", "放回原位", { data: { where: "top" }, primary: true }) + btn("place", "放到牌堆底", { data: { where: "bottom" } });
+      }
+      case "dealerPeek": {
+        const pk = v.peek || {};
+        p = `${pk.at ? `天气堆从上往下第 ${pk.at + 1} 张` : "堆顶"}是〔${esc(CC().weatherName(pk.card))}〕。放回原位，还是压到牌堆底？`;
+        b = btn("place", "放回原位", { data: { where: "top" }, primary: true }) + btn("place", "压到牌堆底", { data: { where: "bottom" } });
         break;
+      }
       case "play":
         p = S.human === "dealer" ? "选一张层牌暗出（每轮必须出一张）。" : "选一张元素牌暗出（常态不能当出牌）。";
         break;
