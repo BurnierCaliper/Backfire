@@ -6,12 +6,15 @@
  * 第 1 步：位置、收起、功能；第 2 步：白天 / 夜晚 / 天气换色——颜色都是 CSS 变量 --olp-*，值在 online-paper.js 的配置表（PAPER.palette / weathers），
  *   online-ui.js 按这一包的光影和天气写到 body 上（body[data-olp-time] / [data-olp-weather] 记着是哪一套）。
  *   战场铺满整个画面；顶上一条（.olp-top）；顶栏下面中间挂行动顺序吊牌（.olp-tags）；左上角队伍（hd2d-shell.js 的 .hd2d-party）；
- *   右上「工具 ▾」下拉（.olp-tools）；右边战斗记录 / 小队聊天的抽屉（#online-side）；底下技能栏（hd2d-shell.js 的 .g-hud）。 */
+ *   右上「工具 ▾」下拉（.olp-tools）；右边战斗记录 / 小队聊天的抽屉（#online-side）；左下角技能栏（hd2d-shell.js 的 .g-hud，#384）。 */
 body.ol-paper {
   --olp-top: 6px;            /* 顶栏离上边 */
   --olp-bar: 46px;           /* 顶栏高 */
   --olp-under: 100px;        /* 顶栏 + 吊牌下面：队伍、抽屉、浮着的提示从这里往下 */
   --olp-edge: 14px;          /* 面板离屏幕边 */
+  --olp-foot: 10px;          /* 技能栏、拉到底的抽屉（窗口够宽时）离下边 */
+  --olp-side: 340px;         /* 右边的抽屉（战斗记录 / 小队聊天）拉开时多宽 */
+  /* 技能栏多宽（贴着左边）；窗口够宽时还让开抽屉那一列（下面「窗口够宽」那一段） */
   --olp-dock: min(960px, calc(100vw - 2 * var(--olp-edge)));
   /* 纸片的影子 + 天气给纸边加的那一圈（沙暴发黄、雪是一层霜、雨是深色水渍、雾发灰；--olp-edge-fx 也在配置表里） */
   --olp-shadow: 2px 5px 6px rgba(0, 0, 0, .45), var(--olp-edge-fx, inset 0 0 0 transparent);
@@ -172,9 +175,10 @@ body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collaps
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pm.weapon { margin-left: 0; }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell > .hd2d-party.collapsed .olp-party-tools, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell > .hd2d-party.collapsed > .party > .pc-sheet { display: none; }
 
-/* ---------- 底下技能栏（hd2d-shell.js 的 .g-hud）：浮在战场底下中间；收起成一行（「技能 ▲ 谁 · 轮到你了」）---------- */
+/* ---------- 左下角技能栏（hd2d-shell.js 的 .g-hud）：浮在战场左下角（#384：以前在底下中间，挪到左下角空着的地方，右边的抽屉好拉到底）；
+ * 收起成一行（「技能 ▲ 谁 · 轮到你了」）---------- */
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell {
-  position: absolute; z-index: 11; left: 0; right: 0; bottom: 10px; display: block; width: var(--olp-dock); max-height: none; margin: 0 auto; padding: 12px 16px 10px; overflow: visible;
+  position: absolute; z-index: 11; left: var(--olp-edge); right: auto; bottom: var(--olp-foot); display: block; width: var(--olp-dock); max-height: none; margin: 0; padding: 12px 16px 10px; overflow: visible;
   color: var(--olp-kraft-ink); background: var(--olp-kraft); background-image: none; border: 0; box-shadow: var(--olp-shadow);
 }
 body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell::before, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell::before { display: none; }   /* skin.css 的黄黑警示条：纸片上不要 */
@@ -192,7 +196,7 @@ body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed > .hint:n
 
 /* ---------- 右边：战斗记录 / 小队聊天的抽屉（#online-side）——平时只剩右边缘一个竖标签「记录 · 聊天」，有新消息挂数字 ---------- */
 body.ol-paper .ol-side {
-  top: var(--olp-under); right: var(--olp-edge); bottom: auto; width: min(340px, calc(100vw - 2 * var(--olp-edge)));
+  top: var(--olp-under); right: var(--olp-edge); bottom: auto; width: min(var(--olp-side), calc(100vw - 2 * var(--olp-edge)));
   height: min(560px, calc(100vh - var(--olp-under) - 210px)); min-height: 260px;
   color: var(--olp-paper-ink); background: var(--olp-paper); border: 0; box-shadow: var(--olp-shadow);
 }
@@ -358,6 +362,16 @@ body.ol-paper #online-side .ol-side-log > .olp-rc-total { text-align: center; fo
   body.ol-paper .ol-side:not(.ol-side-collapsed) .ol-side-tabs > .ol-side-collapse:not([hidden]) { margin-left: auto; padding-inline: 12px; }
   body.ol-paper #online-side:not(.ol-side-collapsed)::after { right: 78px; }
 }
+/* ---------- 窗口够宽（#384）：左下角的技能栏让开右边抽屉那一列，战斗记录 / 小队聊天的抽屉拉开时一直到底（不再给技能栏让出底下那一截）----------
+ * 够宽 = 1280px 起（常见的笔记本 1280 × 720 也算）：技能栏让开抽屉以后至少还有 1280 − 抽屉 340 − 三道边 14 × 3 = 898px，技能吊牌照旧一排至少两个
+ * （仪表最宽的灯要 874px，再窄就一排一个、技能栏高出一大截）；1280–1341px 技能栏比 960 窄一点，仪表窄、一排本来放得下三个的
+ * （川川要 932px、拉斯缪尔要 938px）分别在 1314px、1320px 以下多折一行（和别人一样三排）。
+ * 更窄的电脑窗口（761–1279px）：技能栏照旧差不多横贯（也贴着左边），抽屉照旧停在技能栏上面（联机按上面那条留 240px，单机按量到的技能栏高 --olp-dock-h）。
+ * 单机的抽屉（#g-log，game-paper.css）也写在这里：分界的宽度只写这一处（@media 里用不了 CSS 变量） */
+@media (min-width: 1280px) {
+  body.ol-paper { --olp-dock: min(960px, calc(100vw - 3 * var(--olp-edge) - var(--olp-side))); }
+  body.ol-paper .ol-side:not(.ol-side-collapsed), body.ol-paper.g-paper .g-app > .g-log.gp-drawer:not(.gp-collapsed) { bottom: var(--olp-foot); height: auto; }
+}
 /* 小队聊天的输入框在纸的最底下：一条横线（像写在纸上），掷骰 / 发送是贴上去的小标签 */
 body.ol-paper #online-side .ol-side-form { padding: 10px 14px 14px; }
 body.ol-paper #online-side .ol-side-form textarea { font: 15px/20px var(--olp-sans); color: var(--olp-paper-ink); background: transparent; border: 0; border-bottom: 2px solid var(--olp-paper-ink); }
@@ -409,7 +423,7 @@ body.ol-paper #online-side .ol-side-chat li p { font-family: var(--olp-sans); fo
    * 放不下的是提示栏自己滚。从上往下：「技能 ▼ · 谁 · 轮到你了」、纳米仪表一行小条、技能吊牌一行（放不下横着滑，不往下堆）、「唤出」「结束行动」同一行、提示。
    * 联机：没手动点过「技能 ▼ / ▲」时默认收着、轮到你才展开（online-ui.js · paintPaperHud） */
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell.dock-closed,
-  body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell.dock-closed { bottom: 0; width: 100%; padding: 8px 8px calc(6px + env(safe-area-inset-bottom)); }
+  body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell.dock-closed { left: 0; bottom: 0; width: 100%; padding: 8px 8px calc(6px + env(safe-area-inset-bottom)); }
   body.online-player.ol-paper .ol-battle > .g-hud.hd2d-shell, body.ol-paper.g-paper .g-app > .g-hud.hd2d-shell {   /* 技能栏是 <footer>：online.css 的「.ol-ui footer」那一条（换行、两头对齐、留空）压回去 */
     display: flex; flex-flow: column nowrap; justify-content: flex-start; align-items: stretch; gap: 0; max-height: var(--olp-dock-max);
   }

@@ -1,7 +1,7 @@
 /* 单机战斗画面的纸片风排版（#339，game-paper.js；和联机玩家的同一套样子，设计在 docs/ui-paper/）
  * 只在 body.ol-paper.g-paper 时生效：game-paper.js 只在单机的战斗画面开着新画面（3D 战场建好了）时加这两个类；
  * 新画面关着时的旧画面一条都套不上（每条规则都以 body.ol-paper.g-paper 开头）。
- * 和联机一样的部分（顶栏胶带、吊牌、左上角队伍、底下技能栏、纸纹、字体……）都在 online-paper.css（那边的规则加了单机 .g-app 的那一份选择器，
+ * 和联机一样的部分（顶栏胶带、吊牌、左上角队伍、左下角技能栏、纸纹、字体……）都在 online-paper.css（那边的规则加了单机 .g-app 的那一份选择器，
  * 不另写一套），这里只放单机独有的几块：
  *   · #g-app 不再分顶栏 / 战场 / 右侧栏的格子，战场铺满整个画面
  *   · 旧顶栏（.g-top）原地变成「工具 ▾」下拉：同一批按钮，分组排好（game-paper.js · GPAPER.tools），平时藏着
@@ -56,8 +56,9 @@ body.ol-paper.g-paper .g-app > .g-top a.g-btn { display: flex; align-items: cent
 /* ---------- 右边：战斗记录的抽屉（#g-log）——平时只剩右边缘一个竖标签「战斗记录」；拉出来是一长条收据 ---------- */
 body.ol-paper.g-paper .g-app > .g-log.gp-drawer {
   position: fixed; z-index: 45; top: calc(var(--olp-under) + 30px); right: var(--olp-edge); bottom: auto; left: auto;
-  display: flex; flex-direction: column; width: min(340px, calc(100vw - 2 * var(--olp-edge)));
-  /* 让开底下的技能栏（--olp-dock-h：game-paper.js 量的实际高度，技能多了换行变高也跟着让） */
+  display: flex; flex-direction: column; width: min(var(--olp-side), calc(100vw - 2 * var(--olp-edge)));
+  /* 让开底下的技能栏（--olp-dock-h：game-paper.js 量的实际高度，技能多了换行变高也跟着让）；
+   * 窗口够宽时技能栏在左下角让开了这一列，拉开的抽屉一直到底（online-paper.css「窗口够宽」那一段，#384） */
   height: min(560px, calc(100vh - var(--olp-under) - 30px - var(--olp-dock-h, 210px) - 24px)); min-height: 200px; overflow: visible; transform: none; transition: none;
   color: var(--olp-receipt-ink); background: var(--olp-receipt); background-image: none; border: 0; box-shadow: var(--olp-shadow);
 }
@@ -182,16 +183,18 @@ body.ol-paper.g-paper #hs-bar .hs-button { min-height: 32px; padding: 3px 10px; 
   body.ol-paper.g-paper .g-app > .g-log.gp-drawer.ol-chat-mode > .gp-drawer-tab { display: block !important; }
 }
 
-/* ---------- 浮在战场上的：悬停预演只在预演时出来（挂在技能栏右上方）；评分、横幅、回合大字让开顶栏和抽屉 ---------- */
+/* ---------- 浮在战场上的：悬停预演只在预演时出来（挂在技能栏右上方：右边对齐技能栏的右端，跟着技能栏在左下角，不压在拉开的抽屉底下，#384）；
+ * 评分、横幅、回合大字让开顶栏和抽屉 ---------- */
 body.ol-paper.g-paper .g-app > .pvbox { display: none; }
 body.ol-paper.g-paper .g-app > .pvbox.live {
-  display: block; position: fixed; z-index: 28; right: calc(var(--olp-edge) + 48px); bottom: calc(var(--olp-dock-h, 200px) + 18px); left: auto; top: auto;
-  width: min(340px, calc(100vw - 2 * var(--olp-edge))); max-height: 34vh; min-height: 0; overflow-y: auto; pointer-events: none; padding: 10px 14px;
+  --gp-pv-w: min(340px, calc(100vw - 2 * var(--olp-edge)));
+  display: block; position: fixed; z-index: 28; left: calc(var(--olp-edge) + var(--olp-dock) - var(--gp-pv-w)); bottom: calc(var(--olp-dock-h, 200px) + 18px); right: auto; top: auto;
+  width: var(--gp-pv-w); max-height: 34vh; min-height: 0; overflow-y: auto; pointer-events: none; padding: 10px 14px;
   color: var(--olp-paper-ink); background: var(--olp-card); background-image: none; border: 0; box-shadow: var(--olp-shadow);
 }
 body.ol-paper.g-paper .g-app > .pvbox.live :is(h4, .ln.key) { color: var(--olp-paper-ink); text-shadow: none; }
 body.ol-paper.g-paper .g-rank { top: calc(var(--olp-under) + 4px); right: calc(var(--olp-edge) + 52px); bottom: auto; }
-body.ol-paper.g-paper.gp-drawer-open .g-rank { right: calc(var(--olp-edge) + min(340px, calc(100vw - 2 * var(--olp-edge))) + 18px); }
+body.ol-paper.g-paper.gp-drawer-open .g-rank { right: calc(var(--olp-edge) + min(var(--olp-side), calc(100vw - 2 * var(--olp-edge))) + 18px); }
 body.ol-paper.g-paper .banner { top: calc(var(--olp-under) + 52px); left: 50%; transform: translateX(-50%); }
 body.ol-paper.g-paper .phase-card { left: 0; right: 0; }
 
