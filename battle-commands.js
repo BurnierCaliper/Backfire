@@ -419,7 +419,21 @@
       case "setRegion": value = battleLookSet({ region: cmd.value }); break;
       case "setScene": value = battleLookSet({ scene: cmd.value }); break;
       case "setLight": value = battleLookSet({ light: cmd.value }); break;
-      case "rollEncounter": value = rollEncounter({ region: cmd.region, ...(cmd.faction ? { faction: cmd.faction } : {}) }); break;
+      case "rollEncounter": {
+        // 联机 / 同屏 / 战斗面板：按即将上场的英雄数（liveHeroCount，不夹 2–4）和可选敌人等级算代币基线。
+        // 兜底不调 syncPartySizeFromField（会改缩放人数和下拉框）。
+        const ps = cmd.partySize != null ? Number(cmd.partySize)
+          : (typeof liveHeroCount === "function" ? liveHeroCount()
+            : (Number(state.partySize) || 0));
+        const lv = cmd.level != null ? Number(cmd.level) : (Number(g.level) || null);
+        value = rollEncounter({
+          region: cmd.region,
+          partySize: ps,
+          ...(lv != null && !Number.isNaN(lv) ? { level: lv } : {}),
+          ...(cmd.faction ? { faction: cmd.faction } : {})
+        });
+        break;
+      }
       case "rollBossEncounter": { const bosses = Object.keys(ENEMY_INFO || {}).filter(k => ENEMY_INFO[k].boss && ENEMY_INFO[k].regions.indexOf(cmd.region) >= 0); if (bosses.length) value = rollBossEncounter(bosses[Math.floor(Math.random() * bosses.length)], { region: cmd.region }); break; }
       case "selectEncounter": g.lastEncounter = cmd.encounter; value = cmd.encounter; break;
       case "setDrops": state.battleDrops = typeof normalizeBattleDrops === "function" ? normalizeBattleDrops(cmd.drops) : null; value = state.battleDrops; break;

@@ -265,11 +265,12 @@ RUN.start({ seed: "ABC123" });   // 不给种子就自动生成一个
 
 ### 2. 随机遭遇（代币制）
 
-每场战斗 4 枚代币：**杂兵 1 枚，精英 2 枚**。所以一场是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。空投蜂群、下水道清扫机三只一组，整组记 1 枚。
+普通战代币基线由 `encounterTokenBudget(partySize, level)`（查 `ENCOUNTER_TOKEN_RULES`）决定：**默认 4 枚**；**恰好 4 人队且遭遇敌人等级 ≥ 10 时为 5 枚**。杂兵 1 枚、精英 2 枚，所以 4 枚时是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵；5 枚时是 **5 杂兵 / 1 精英 + 3 杂兵 / 2 精英 + 1 杂兵**。空投蜂群、下水道清扫机三只一组，整组记 1 枚。
 
-- **5%** 概率这场变成 5 枚代币
+- **5%** 概率在基线上再 +1（基线 4 → 5；4 人 L10+ 的基线 5 → 6）。上场单位仍受下方上限约束，不会因为多枚代币摆出超过 12 只成组杂兵。
 - **5%** 概率无视阵营限制，变成混战
 - **上场单位上限** `ENCOUNTER_UNIT_CAP = 12`（对齐 4 枚 × 每组 3 只）：抽的时候若再来一组会超过 12 只，就改抽装得下的杂兵 / 精英；能花完代币时尽量花完，实在装不下才停。带车退代币后的补抽也走同一上限（剩余名额还要减去车本身占的 1）。首领的固定随从不走这套。
+- 精英战 / 遭遇战 / 悬赏等写死 `tokens` 的不走人数基线；首领随从规则不变。
 
 敌人数据写在 `ENEMY_INFO`：阵营、出没区域、代币、成组数量。
 
@@ -369,6 +370,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 测试：`tests/effects.test.js` 每条效果一个用例。
 
 ## 规则改动记录
+
+- **4 人队且敌人等级 ≥ 10：普通战代币基线 5（其余仍 4）**（run.js · `encounterTokenBudget` / `ENCOUNTER_TOKEN_RULES`、`rollEncounter`；rogue.js 普通战传入 `partySize` / `level`；battle-commands.js / game.js 联机与战斗面板按上场英雄数传入；测试 tests/token-budget-party.test.js）
+  - **以前**：普通战代币基线固定 `ENCOUNTER_TOKENS = 4`，与队伍人数、敌人等级无关；仅 5% 概率变成 5 枚。
+  - **现在**：`encounterTokenBudget(partySize, level)` 查 `ENCOUNTER_TOKEN_RULES`（`[{ partySize: 4, minLevel: 10, tokens: 5 }]`）—— **恰好 4 人**且**遭遇敌人等级 ≥ 10** 时基线 5，其它情况（3 人 / 2 人 / 1 人、或 4 人但等级 ≤ 9、人数未知）仍是 4。原有 5% 上滚仍是基线 +1：普通 4→5，4 人 L10+ 则 5→6；上场单位继续受 `ENCOUNTER_UNIT_CAP = 12` 约束（六枚全抽成组杂兵也最多 12 只）。战斗面板预览按 `spec.tokens` 写「· N 代币」（≠ 4 时）。依据模拟 **PR #425（未合并）**（`docs/balance/token5-forecast-1027.md`）：normal 条件下 4 人队 10 级代币 4→5 胜率约 97%→89%（−8pp）、15 级 −2.5pp、20 级 −4.5pp，可接受；5 级 −11pp 偏紧，故只对 L10+ 开；3 人队掉点更多，维持 4 枚。
+  - **没改的**：精英战写死 5 枚、遭遇战 3 枚、悬赏 / 三方混战两边各 3 枚、首领本体与固定随从（`rollBossEncounter`）、混战 5%、车占代币与补抽、阵营 / 区域池、`ENCOUNTER_UNIT_CAP = 12` 本身；精英战 / XP / 掉落预算未改（主人另定）。
+  - **测试**：tests/token-budget-party.test.js（新，在没改的代码上失败）：`encounterTokenBudget` / 规则表；`rollEncounter` 基线与 5% 上滚；单位上限；面板 `dispatch` 与 `Rogue.battleSpec`（4p 普通 L10→5、3p→4、4p 精英仍 5、4p L8→4）；README 整节按条目标题查找。
 
 - **起身中高能自爆阈值按坚毅、不按临时护盾：补测试**（#340 相关；测试 tests/shield-overcharge-threshold.test.js（新））
   - **说明**：逻辑本身已随 #415 进入 main（`highLifeOnShp`：起身中一律用坚毅和高能比，临时护盾不参与高能 / 微光蓄能的「血量」比较）。本 PR 不再改 app.js，只补这条测试。
