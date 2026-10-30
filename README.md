@@ -370,6 +370,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **亡命之王被挟持时被杀：强盗头子继位同步翻倍 `personalAtk`（及 `ivBase`）**（app.js · `settleEnemyKill`；测试 tests/king.test.js）
+  - **以前**：继位只执行 `boss.atk *= 2`（以及 def / defMax）。卡面 ATK 翻倍，但出手走 `effectiveAtk` → `baseEffectiveAtk`（party.js），敌人只读 `personalAtk + weaponAtk`，**不读 `unit.atk`**。`personalAtk` 仍停在继位前的底值，能量匕首 / 自制火枪每一击仍按旧 ATK 算（与巨型活沙吸收只加 `atk` 未同步 `personalAtk` 同类）。
+  - **现在**：`atk` 与 `personalAtk` 各自 ×2（有 `ivBase` 时基线一并 ×2，和 `_raceAdd` / `absorbSandsInto` 一致）。不用已翻倍的 `atk` 回写 `personalAtk`，避免叠算。继位后 `effectiveAtk` = 翻倍后的 `personalAtk`，技能伤害跟卡面一致。
+  - **没改的**：哗变触发 / 解除、挟持易伤、狂徒反水、def / defMax 翻倍、继位改名与 `promoted` 标记、技能表与 AI。
+  - **测试**：tests/king.test.js「继位」一条改为同时断言 `personalAtk` / `effectiveAtk` 翻倍；新增「能量匕首按翻倍 personalAtk 结算」「有 ivBase 时基线一并翻倍」（在没改的代码上失败）。
+
 - **警卫队队长（蜥蜴）：ATK 每级 +1、酸弹骰数每 5 级 +1、AI 优先后排**（engine.js · `enemyPresets` 的 `captain_lizard` / `sewerEliteOf`；enemies.js · `en_liz`；ai.js · `aim: "back"`；bestiary.js；docs/sewer-maintenance.md；测试 tests/captain-lizard-rules.test.js（新）、tests/sewer-elites.test.js）
   - **以前**：
     - ATK = 7 + ⌊等级/2⌋ + ⌊等级/5⌋（1 / 5 / 10 / 15 / 20 级：7、10、14、17、21）。
