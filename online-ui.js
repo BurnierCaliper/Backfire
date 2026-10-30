@@ -5,7 +5,12 @@
   let mounted;
   const esc = value => String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const copy = value => JSON.parse(JSON.stringify(value));
-  const labels = { flesh: "生命", armor: "护甲", shield: "护盾", sand: "砂甲", spirit: "灵体", none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", phase: "相位" };
+  // 层名只认规则文件里的那一份（engine.js · LAYER，#510：全项目只留一份层名，这里不另写）；规则文件没加载时（只测显示端的测试页）是空表
+  const layerNames = () => (typeof LAYER !== "undefined" ? LAYER : {});
+  /** 单位卡层条上的层名：认不出的层按肉体写（也读 LAYER） */
+  const layerLabel = type => layerNames()[type] || layerNames().flesh || type;
+  // 天气名（engine.js 里没有天气名，和 app.js · WEATHER_CN 同一套）。以前和层名挤在一张表里，沙暴的 sand 和沙尘层撞键，只好在用的地方另写「沙暴」
+  const WEATHER_NAMES = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const names = { nano: "纳米", nanoReserve: "储备", bean: "咖啡豆", liquid: "咖啡液", durability: "耐久", shield: "盾", charge: "充能", energyPct: "能量", light: "光", debrisCount: "碎块", burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振", weak: "虚弱", inspire: "振奋", hide: "躲藏", advantage: "优势", chase: "紧追", sturdy: "坚固" };
   // 玩家右侧栏收起（#298）：电脑上把「战斗 / 小队」右侧栏收成一条窄边（只剩展开按钮，收起时来了新消息挂数字），战斗画面变宽；
   // 收起状态记在这台电脑上。手机竖屏的右侧栏在底部，照旧用自己的「展开 ▴ / 收起 ▾」
@@ -583,7 +588,7 @@
       if (weather === "sand" && /^[123]{2}$/.test(data.sandDir || "")) details.push(`风向 ${data.sandDir[0]} 区 → ${data.sandDir[1]} 区`);
       if (weather === "phase" && [0, 1, 2, 3].includes(data.phaseStep)) details.push(`相位 ${["波谷", "平衡", "波峰", "平衡"][data.phaseStep]}（${data.phaseStep}）`);
       if (data.weatherLocked) details.push("天气已锁定");
-      return `<aside class="ol-weather ol-weather-${weather}" aria-label="天气"><span class="ol-weather-icon" aria-hidden="true">${symbols[weather]}</span><div><b>${esc(weather === "sand" ? "沙暴" : labels[weather])}</b>${details.length ? `<small>${esc(details.join(" · "))}</small>` : ""}</div></aside>`;
+      return `<aside class="ol-weather ol-weather-${weather}" aria-label="天气"><span class="ol-weather-icon" aria-hidden="true">${symbols[weather]}</span><div><b>${esc(WEATHER_NAMES[weather])}</b>${details.length ? `<small>${esc(details.join(" · "))}</small>` : ""}</div></aside>`;
     }
     // 决斗的两队（#472）、每队单独计分的几项（app.js · SCORE_PART_NAMES 里原本的分数；玩家画面自己写名字，不读规则）
     const DUEL_TEAM_NAMES = { "1队": "1 队", "2队": "2 队" };
@@ -647,11 +652,10 @@
         return `<li><span><b>${esc(t.name)}</b><small>${esc(odds)}</small></span>${res}</li>`;
       }).join("")}</ul></article>`).join("")}</section>`;
     }
-    /** 聚焦：和本地卡片一样写成「聚焦护甲 火→[冰]→电」（方括号是下一步要的属性） */
+    /** 聚焦：和本地卡片一样写成「聚焦装甲 火→[冰]→电」（方括号是下一步要的属性） */
     function focusTokens(u) {
       const ele = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
-      const layer = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
-      return (u.focuses || []).map(f => "聚焦" + (layer[f.layerType] || f.layerType) + " " + (f.seq || []).map((e, i) => i === f.step ? "[" + (ele[e] || e) + "]" : (ele[e] || e)).join("→"));
+      return (u.focuses || []).map(f => "聚焦" + (layerNames()[f.layerType] || f.layerType) + " " + (f.seq || []).map((e, i) => i === f.step ? "[" + (ele[e] || e) + "]" : (ele[e] || e)).join("→"));
     }
     /** 高能值：淡青绿色的液体灌进一条总血条，液面越过血量就会自爆 */
     /** 主机算好的状态行（和本地卡片一样）；旧主机没发就只拼聚焦 */
@@ -674,7 +678,7 @@
       if (u.dying) conditions.unshift("倒地"); if (u.dead) conditions.unshift("阵亡"); if (u.stunned) conditions.unshift("失衡"); if (u.flying) conditions.push("飞行"); conditions.push(...statusTokens(u).filter(t => !(HI && HI.covered(t)) && !conditions.includes(t)));
       const gauge = HI && u.hud && view.screen !== "exploration" ? HI.gauge(u.hud) : "";
       const available = view.screen === "battle" && u.isPlayer && owner === own() && hs().currentUnitId === u.id && hs().phase === "acting";
-      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(labels[l.type] || "生命")}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(labels[l.type] || "生命")}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack, b.title)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
+      return `<article class="ol-unit${u.isPlayer ? " ol-ally" : " ol-enemy"}${selectedActor === u.id ? " ol-selected" : ""}" data-unit-id="${esc(u.id)}"><header><h3>${esc(u.name || u.id)}</h3><small>Lv${esc(u.level || 1)}</small></header>${owner ? `<small>${esc(playerName(owner))}${u.weaponOf ? " · 武器人" : ""}</small>` : ""}${u.isPlayer && !u.weaponOf ? `<p class="ol-xp">经验 ${esc(u.xp ?? 0)}${typeof xpToNext === "function" && xpToNext(u.level || 1) ? ` / ${esc(xpToNext(u.level || 1))}` : ""}</p>` : ""}${view.screen === "exploration" && u.isPlayer && !u.weaponOf && owner === own() ? attrMarkup(u) : ""}<div class="ol-layers">${(u.layers || []).map(l => `<div class="ol-layer"><span>${esc(layerLabel(l.type))}</span><meter min="0" max="${esc(Math.max(1, Number(l.max) || 1))}" value="${esc(Math.max(0, Number(l.current) || 0))}" aria-label="${esc(layerLabel(l.type))}"></meter><b>${esc(l.current ?? 0)} / ${esc(l.max ?? 0)}</b></div>`).join("")}${highBar(u)}</div><div class="ol-points"><span>行动 ${esc(u.ap ?? 0)} / ${esc(u.apMax ?? 0)}</span><span>附赠 ${esc(u.bonus ?? 0)} / ${esc(u.bonusMax ?? 0)}</span>${u.def != null ? `<span>架势 ${esc(u.def)} / ${esc(u.defMax ?? u.def)}</span>` : ""}</div>${gauge ? `<div class="hi-gauge ol-gauge" aria-label="${esc(u.name || "")}的角色仪表">${gauge}</div>` : resources.length ? `<p class="ol-muted">${esc(resources.join(" · "))}</p>` : ""}${badges.length ? `<div class="hi-badges ol-badges">${badges.map(b => HI.badge(b.key, b.stack, b.title)).join("")}</div>` : ""}${conditions.length ? `<p class="ol-conditions">${esc(conditions.join(" · "))}</p>` : ""}${available ? button("选择行动", "actor", `data-actor="${esc(u.id)}"`, disabled(), true) : ""}<span class="ol-popup" aria-live="polite"></span></article>`;
     }
     /* ---------- 联机单局（online-rogue.js 在房主那里算好，按收件人发来） ---------- */
     // 按钮灰掉要写原因：off 传字符串 = 灰掉，并把这句话写在按钮旁边
@@ -840,7 +844,7 @@
       return head + over + choice + waits + loot + lootLog + vote + last + heroes + board + task + shop + smith + bpBox + parts + unmount + clinic + cwEntry + workshop + log;
     }
     /** 义体改造：和单机诊所一样填装甲 / 护盾 / 沙尘层的点数、要不要换成星灵；价格按房主发来的单价估 */
-    const CYBER_LAYERS = [["armor", "装甲"], ["shield", "护盾"], ["sand", "沙尘"]];
+    const CYBER_LAYERS = ["armor", "shield", "sand"].map(k => [k, layerNames()[k] || k]);   // [层 id, 层名]，层名读 engine.js · LAYER
     const cyberDraft = {};   // 正在填的改造方案（重画时保留）
     function cyberPlanOf(kit) {
       const sel = `[data-cyber-box="${CSS.escape(kit)}"]`, box = (!suppliesBox.hidden && suppliesBox.querySelector(sel)) || stage.querySelector(sel);
@@ -857,7 +861,7 @@
     }
     function cyberMarkup(c, purse, action, label) {
       const cur = cyberDraft[c.kit] || c.cyber.current || {};
-      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${label}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button(label || "改造", action || "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
+      return `<li class="ol-cyber" data-cyber-box="${esc(c.kit)}"><span>义体改造（肉体 ${esc(c.cyber.fleshMax)}，最多改 ${esc(c.cyber.limit)} 点）</span>${CYBER_LAYERS.map(([k, label]) => `<label>${esc(label)}<input type="number" min="0" max="${esc(c.cyber.limit)}" step="1" data-cy-layer="${k}" value="${esc(Number(cur[k]) || 0)}"></label>`).join("")}<label><input type="checkbox" data-cy-spirit${cur.spirit ? " checked" : ""}> 换成星灵</label>${button(label || "改造", action || "rogueCyber", `data-kit="${esc(c.kit)}" data-purse="${esc(purse)}"`, disabled())}</li>`;
     }
     /** 跑团诊所（主持人开放时）：给自己的角色填改造方案、提交申请，主持人同意后才生效；钱从这名角色的钱包出 */
     function trpgClinicMarkup() {
@@ -927,7 +931,7 @@
       const chain = screen === "battle" && global.Chain && data.chainStatus ? `<div class="ol-chain">${global.Chain.barHtml(data.chainStatus)}</div>` : "";
       return `<div class="olp-float">${note}${screen === "ended" ? resultMarkup() : ""}${chain}${checksMarkup(screen === "battle")}</div><div class="ol-battle-slot"></div>`;
     }
-    const weatherName = w => (w === "sand" ? "沙暴" : labels[w] || labels.none);
+    const weatherName = w => WEATHER_NAMES[w] || WEATHER_NAMES.none;
     /** 夜晚：这一包的光影（pv.light：傍晚也算夜）；旧主机没发光影就按游戏时钟 */
     function paperNight(data) {
       if (data && data.light) return data.light !== "day";

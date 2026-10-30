@@ -53,6 +53,8 @@ async function open(t, mobile = false) {
     // when no rules state or battle engine exists in its environment.
     for (const name of ["GAME", "state", "BattleCommands", "dispatch", "skillFlowSteps", "previewOf", "Screens"]) Object.defineProperty(window, name, { configurable: true, get() { throw new Error("Display touched rules: " + name); } });
   });
+  // 层名（#510）：只放 engine.js · LAYER 这一张表（和 game.html 一样先于界面加载），不加载规则引擎
+  await page.addScriptTag({ content: require("./layer-names").script });
   for (const file of ["hud-icons.js", "unit-card.js", "unit-tip.js", "online-battle.js", "pause-menu.js", "online-ui.js"]) await page.addScriptTag({ path: path.resolve(__dirname, "..", file) });
   return { page, errors };
 }
@@ -505,6 +507,17 @@ test("D3 display: 敌人身上的聚焦在玩家画面上写出来（和本地�
   await player(page);
   await page.evaluate(() => { fixture.view.state.units[2].focuses = [{ layerType: "flesh", seq: ["fire", "ice", "electric"], step: 1 }]; fixture.emit(); });
   assert.match(await page.locator('#online-stage [data-unit-id="enemy"]').first().innerText(), /聚焦肉体 火→\[冰\]→电/);
+  assert.deepEqual(o.errors, []);
+});
+
+test("#510 单位卡的层条：层名读 engine.js · LAYER（肉体 / 装甲 / 护盾 / 沙尘 / 星灵，以前另写了一套），认不出的层按肉体写", async t => {
+  const o = await open(t); if (!o) return; const { page } = o;
+  await player(page, { screen: "exploration" });
+  await page.evaluate(() => { fixture.view.state.units[0].layers = ["flesh", "armor", "shield", "sand", "spirit", "unknown"].map(type => ({ type, current: 5, max: 10 })); fixture.emit(); });
+  const card = page.locator('#online-stage .ol-unit[data-unit-id="a"]');
+  const names = ["肉体", "装甲", "护盾", "沙尘", "星灵", "肉体"];
+  assert.deepEqual(await card.locator(".ol-layer > span").allTextContents(), names);
+  assert.deepEqual(await card.locator(".ol-layer > meter").evaluateAll(els => els.map(e => e.getAttribute("aria-label"))), names);
   assert.deepEqual(o.errors, []);
 });
 
