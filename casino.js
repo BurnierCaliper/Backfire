@@ -14,6 +14,7 @@
  *   - 输的时候先扣赠送筹码，赢的时候进普通筹码（用赠送筹码赢来的也是普通筹码）。
  *   - seat：正坐在桌上的这一局（null = 没坐桌）。买入的筹码从钱包里拿出来押在桌上（先拿赠送的），
  *     离桌时按桌上剩下的结算回钱包。打到一半的牌局也在这里，跟着存档走。
+ *     牌局里桌上不够时先从钱包补（#520，见下面 topUp）：补上来的也押在桌上、算进买入，seat.topUp 记一共补了多少。
  *
  *   const w = Casino.wallet(存档里的钱包或 null)   → 补齐字段
  *   Casino.welcome(w)                            → 第一次玩：送赠送筹码（只送一次），返回说明
@@ -25,6 +26,7 @@
  *                                                  再押买入；返回这一局
  *   Casino.leave(w)                              → 离桌：桌上剩下的筹码按倍率回钱包（输了先扣赠送的），返回结算
  *   Casino.runAi(这一局, 难度)                    → 赌场那几方（AI）走到轮到人
+ *   Casino.topUp(w, 还差几枚)                     → 桌上不够时先从钱包补（#520）：补到够用，钱包不够就有多少补多少；牌局里由规则层自己来问（refill）
  */
 (function (root) {
   "use strict";
@@ -106,7 +108,8 @@
   }
 
   /* ---------- 钱包 ---------- */
-  /** 补齐字段（存档里读出来的、旧存档没有的都走这里）；原地改，返回同一个对象 */
+  /** 补齐字段（存档里读出来的、旧存档没有的都走这里）；原地改，返回同一个对象。
+   *  坐着赌场桌的：顺便登记「这一局不够时从这个钱包补」（#520，见下面 topUp） */
   function wallet(w) {
     w = w && typeof w === "object" ? w : {};
     w.v = 1;
@@ -114,6 +117,7 @@
     w.gift = Math.max(0, int(w.gift));
     w.normal = int(w.normal);
     w.seat = w.seat && typeof w.seat === "object" ? w.seat : null;
+    bind(w);
     return w;
   }
   /** 第一次玩：送赠送筹码。每个钱包只送一次（gifted），送过就什么都不做 */
@@ -129,9 +133,10 @@
   function chips(w) {
     wallet(w);
     const s = w.seat;
+    // topUp：牌局里从钱包补上桌的（#520；赌场桌按桌上的枚数，已经算进 buyIn；对赌按枚，开局押的 start 不含）
     const seat = !s ? null : s.kind === "pvp"
-      ? { kind: "pvp", table: s.table, side: s.side, stakeKind: s.stakeKind, start: s.start, stake: toChips(s.stake.gift + s.stake.normal), kuizhi: s.kuizhi || 0 }
-      : { kind: s.kind, table: s.table, name: s.name, buyIn: s.buyIn, rate: s.rate, fee: s.fee || 0, stake: toChips(s.stake.gift + s.stake.normal), over: !!(s.game && s.game.over) };
+      ? { kind: "pvp", table: s.table, side: s.side, stakeKind: s.stakeKind, start: s.start, stake: toChips(s.stake.gift + s.stake.normal), kuizhi: s.kuizhi || 0, topUp: s.topUp || 0 }
+      : { kind: s.kind, table: s.table, name: s.name, buyIn: s.buyIn, rate: s.rate, fee: s.fee || 0, stake: toChips(s.stake.gift + s.stake.normal), over: !!(s.game && s.game.over), topUp: s.topUp || 0 };
     return { gift: toChips(w.gift), normal: toChips(w.normal), total: toChips(w.gift + w.normal), gifted: w.gifted, seat };
   }
   /* ---------- 兑换：奎支 ⇄ 筹码（只按整枚） ---------- */
@@ -221,6 +226,7 @@
     take(w, feeValue);                   // 入场费：交给赌场，不退
     const stake = take(w, value);
     w.seat = { kind: opt.dealer === "gm" ? "gm" : "ai", table: t.id, name: t.name, rate: t.rate, buyIn: n, fee, stake, game };
+    bind(w);
     return game;
   }
   /** 人那一方桌上剩多少（三种玩法一样算，同 CounterCards.casino.cashOut）：剩下的筹码扣还向主持方借的（对局结束时已经扣过）；
@@ -233,7 +239,8 @@
     return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: s.loan, owe: s.owe };
   }
   /** 离桌：桌上剩下的筹码（扣还向主持方借的；打到一半离桌，已经押进底池的不退）按倍率回钱包。
-   *  返回 { table, chips（桌上剩下的枚数）, buyIn, net（桌上净输赢，枚）, value（剩下的折多少面值）, netChips（钱包净变化，枚）, over, text } */
+   *  净输赢按总买入算（坐下时的买入 + 牌局里从钱包补的，#520）。
+   *  返回 { table, chips（桌上剩下的枚数）, buyIn（总买入）, topUp（其中从钱包补的）, net（桌上净输赢，枚）, value（剩下的折多少面值）, netChips（钱包净变化，枚）, over, text } */
   function leave(w) {
     wallet(w);
     const s = w.seat;
@@ -243,9 +250,67 @@
     const back = out.chips * s.rate;
     const paid = payBack(w, s.stake, back);
     w.seat = null;
-    const res = { table: s.table, name: s.name, chips: out.chips, buyIn: s.buyIn, net: out.net, value: back, netChips: toChips(paid.net), over: !!s.game.over, gift: toChips(paid.gift), normal: toChips(paid.normal) };
-    res.text = `离开${s.name}：桌上剩 ${out.chips} 枚（买入 ${s.buyIn} 枚，${out.net >= 0 ? "赢" : "输"} ${Math.abs(out.net)} 枚），钱包${paid.net >= 0 ? "多了" : "少了"} ${fmt(Math.abs(paid.net))} 枚筹码。`;
+    const topUp = s.topUp || 0;
+    const res = { table: s.table, name: s.name, chips: out.chips, buyIn: s.buyIn, topUp, net: out.net, value: back, netChips: toChips(paid.net), over: !!s.game.over, gift: toChips(paid.gift), normal: toChips(paid.normal) };
+    res.text = `离开${s.name}：桌上剩 ${out.chips} 枚（买入 ${s.buyIn} 枚${topUp ? `，含从钱包补的 ${topUp} 枚` : ""}，${out.net >= 0 ? "赢" : "输"} ${Math.abs(out.net)} 枚），钱包${paid.net >= 0 ? "多了" : "少了"} ${fmt(Math.abs(paid.net))} 枚筹码。`;
     return res;
+  }
+
+  /* ---------- 桌上不够时先从钱包补（#520，主人 10/30） ----------
+   * 牌局里桌上的筹码不够（每轮开始不够「底注 + 最低下注额」，或者轮到自己下注时不够「要跟的 + 最低下注额」）时，
+   * 规则层（counter-cards.js · bet.topUp，三种玩法共用）先问这里能从钱包补多少（refill），补不满的缺口才问借不借。
+   * 补到正好够用为止（缺口同借贷的算法，只是不用凑整 3 枚）；钱包不够补满就有多少补多少（按桌子的倍率折成整枚，零头补不了）。
+   *   赌场桌（AI / 主持人坐庄）：只补人那一方（赌场那几方不补：庄家筹码无限，Flux Hold'em 的 AI 座位由赌场出）；
+   *     和买入一样先拿赠送筹码、再拿普通筹码，押在桌上；补上来的算进买入（seat.buyIn、对局的 casino.buyIn 跟着加，
+   *     seat.topUp 记一共补了多少），离桌结算按总买入算净输赢。
+   *   玩家对赌：押筹码的只补普通筹码（赠送的不能押，同 #487），桌上 1 枚 = 钱包 1 枚；押奎支的从那个人的私人钱包补奎支
+   *     （1 枚 = CASINO_CONFIG.face 奎支，奎支由模式扣：pvpBind 给的 purse）；结算按「开局押的 + 补的」算净输赢。
+   * 对局对象原样存在存档里，读回来是新的对象：钱包每次读进来（wallet）、坐下（sit）时登记「这一局从这个钱包补」，
+   * 对赌桌由模式动这一桌之前登记（pvpBind）。没登记的对局（本地玩法里不接钱包的普通对局）补不到，照旧借贷。 */
+  const SOURCE = new WeakMap();        // 对局 → (一方, 还差几枚) → 补了几枚
+  /** 人坐赌场桌的哪一方：High Flux 是玩家，Flux 记在对局的 casino.side */
+  const humanOf = (g) => (gameOf(g) === "highflux" ? "player" : g.casino && g.casino.side);
+  /** 登记：这个钱包坐着的赌场桌（AI / 主持人坐庄），人那一方不够时从这个钱包补 */
+  function bind(w) {
+    const s = w.seat;
+    if (s && s.kind !== "pvp" && s.game && typeof s.game === "object") SOURCE.set(s.game, (side, gap) => (side === humanOf(s.game) ? topUp(w, gap) : 0));
+  }
+  /** 从钱包补 gap 枚（桌上的枚数）到坐着的这一桌：补到够用为止，钱包不够就有多少补多少。返回补了几枚（钱包空了 = 0）。
+   *  purse（对赌押奎支时）：{ have() 那个人现有多少奎支, spend(奎支) 扣掉 }，由模式给 */
+  function topUp(w, gap, purse) {
+    const s = w.seat, want = Math.max(0, Math.floor(Number(gap) || 0)), F = CASINO_CONFIG.face;
+    if (!s || !want) return 0;
+    let n = 0;
+    if (s.kind !== "pvp") {
+      n = Math.min(want, Math.floor(Math.max(0, w.gift + w.normal) / s.rate));
+      if (n > 0) {
+        const got = take(w, n * s.rate);   // 同买入：先拿赠送的，再拿普通的
+        s.stake.gift += got.gift; s.stake.normal += got.normal;
+        s.buyIn += n;
+        if (s.game && s.game.casino) s.game.casino.buyIn += n;
+      }
+    } else if (s.stakeKind === "chips") {
+      n = Math.min(want, Math.floor(Math.max(0, w.normal) / F));
+      if (n > 0) { w.normal -= n * F; s.stake.normal += n * F; }
+    } else if (purse) {
+      n = Math.min(want, Math.floor(Math.max(0, Number(purse.have()) || 0) / F));
+      if (n > 0) { purse.spend(n * F); s.kuizhi = (s.kuizhi || 0) + n * F; }
+    }
+    if (n > 0) s.topUp = (s.topUp || 0) + n;
+    return n;
+  }
+  /** 规则层来问（counter-cards.js · bet.setTopUp 注入的就是它）：这一局的这一方还差 gap 枚，能从钱包补多少（已经补上桌了）。没登记的对局 0 */
+  function refill(g, side, gap) {
+    const f = g && typeof g === "object" ? SOURCE.get(g) : null;
+    return f ? f(side, gap) : 0;
+  }
+  /** 对赌桌：模式动这一桌之前登记两边从哪补——walletOf(一方) = 坐这一方的人的钱包；purseOf(一方) = 押奎支时那个人的私人钱包（{ have(), spend(奎支) }） */
+  function pvpBind(t, walletOf, purseOf) {
+    if (!t || !t.game) return;
+    SOURCE.set(t.game, (side, gap) => {
+      const w = t.seats[side] ? walletOf(side) : null, s = w && w.seat;
+      return s && s.kind === "pvp" && s.table === t.id && s.side === side ? topUp(w, gap, purseOf && purseOf(side)) : 0;
+    });
   }
 
   /** 赌场桌的庄家是 AI 时：轮到赌场那几方就让 AI 走（各玩法 AI 的 step，只看那一方的 view），直到轮到人或者这一局结束。
@@ -326,14 +391,15 @@
   }
   /** 对赌的一方结算离桌：押筹码的按桌上剩下的回钱包（输了扣普通筹码，还不上的借款也只扣普通筹码）；
    *  押奎支的返回 kuizhi = 要加回奎支钱包多少（负数 = 还要再扣）。leaver = 先离桌认输的是哪一方（打完了、没开局都不用给）。
-   *  返回 { side, chips（桌上剩下的枚数）, net（净输赢，枚）, kuizhi（押奎支：钱包要加多少奎支）, text } */
+   *  净输赢按开局押的 + 牌局里从钱包补的算（#520）。
+   *  返回 { side, chips（桌上剩下的枚数）, net（净输赢，枚）, topUp（从钱包补了几枚）, kuizhi（押奎支：钱包要加多少奎支）, text } */
   function pvpSettle(t, side, w, leaver) {
     wallet(w);
     const s = w.seat;
     if (!s || s.kind !== "pvp" || s.table !== t.id || s.side !== side) fail("没坐在这张桌子的这一方");
-    const back = pvpBack(t, side, leaver);
-    const net = back - t.start;
-    const res = { side, chips: back, net, kuizhi: 0 };
+    const back = pvpBack(t, side, leaver), topUp = s.topUp || 0;
+    const net = back - t.start - topUp;
+    const res = { side, chips: back, net, topUp, kuizhi: 0 };
     if (s.stakeKind === "chips") payBack(w, s.stake, back * CASINO_CONFIG.face, { noGift: true });
     else res.kuizhi = back * CASINO_CONFIG.face;
     w.seat = null;
@@ -341,12 +407,15 @@
     const unit = s.stakeKind === "chips" ? "枚筹码" : "奎支";
     const amount = (n) => (s.stakeKind === "chips" ? fmt(Math.abs(n) * CASINO_CONFIG.face) : String(Math.abs(n) * CASINO_CONFIG.face));
     res.text = !t.game ? `对赌还没开局就离桌，押的原样退回。`
-      : `对赌结算（${CC().sideName(side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
+      : `对赌结算（${CC().sideName(side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚${topUp ? `，中途从钱包补了 ${topUp} 枚` : ""}），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
     return res;
   }
 
   const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, games, gameOf, tables, sit, cashOut, leave, payBack, runAi,
+    topUp, refill, pvpBind,
     STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle };
+  // 桌上不够时先从钱包补（#520）：把 refill 注入三种玩法共用的下注 / 借贷代码（counter-cards.js · bet.setTopUp）
+  if (root.CounterCards && root.CounterCards.bet && root.CounterCards.bet.setTopUp) root.CounterCards.bet.setTopUp(refill);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Casino = api;
 })(typeof window !== "undefined" ? window : globalThis);
