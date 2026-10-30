@@ -24,6 +24,10 @@
  *   CounterCardsGuess.act(h, "p1", { type: "pass" })         → 这一轮不押（第一轮不押 = 这一手后面都不能押）
  *   CounterCardsGuess.view(h, "p1")                          → 这名玩家能看到的（没翻开的牌、种子都不在里面）
  *   CounterCardsGuess.board({ element: "fire" })             → 这一步的赔率表：每种结果的 k、赔率、开不开盘
+ * 赌命版（黑市 NPC 当庄）：
+ *   CounterCardsGuess.newHand({ table: GUESS_CONFIG.life.id, players: [{ id: "ruby", name: "瑞比" }] })   → 押坚毅的一手（只要 id 和名字）
+ *   CounterCardsGuess.act(h, "ruby", { type: "bet", bets: { "0": true } })   → 每格押上这一轮的固定点数
+ *   CounterCardsGuess.lifeBill(h, "ruby")                    → 结算后给接入的那一边的账（押输了几点、奖品）：由它去扣坚毅、发奖；界面不用
  */
 (function (root) {
   "use strict";
@@ -46,6 +50,22 @@
       { id: "street", name: "街边桌", mult: 1 },
       { id: "backroom", name: "里屋", mult: 5 }
     ],
+    // 赌命版（黑市 NPC 当庄，#489 正文 + 主人 10/30 的补充）：押的是坚毅生命。规则层根本不读坚毅——能不能押、能押什么、
+    // 画面上写什么，都和角色还剩多少坚毅无关（剩下的比押的少也照样能押：不然试几次就推得出还剩多少）。
+    // 每格押上固定代价（第 1–3 轮各几点，规则文字可以写明）；不收入场费；第一轮没押的后两轮照样不能押。
+    // 结算：押输的格子只交给接入的那一边（lifeBill）去扣坚毅，画面只写「坚毅受创」，不写数字；扣光即真死（接入层照长线养成 / 跑团的死亡规则）。
+    // 赢了：押上的点数 × 赔率（向下取整）折成奎支；单格赔率够高另给稀有材料（取够得着的最高一档）。赔率比普通桌高。
+    // 数值都是占位，待主人定；义体奖励还没做（义体不是背包里的东西，要先定怎么给）。
+    life: {
+      id: "black", name: "黑市赌命桌", dealer: "黑市庄家",
+      odds: [35, 35],          // 赔率系数：普通桌 32/35，赌命桌不抽水（占位）
+      stake: [1, 2, 4],        // 第 1–3 轮每格押上几点坚毅（固定代价，占位）
+      kuizhiPerPoint: 100,     // 赢了：押上的点数 × 赔率（向下取整）× 这么多奎支（占位）
+      items: [                 // 单格赔率达到 minOdds 另给的稀有材料（取够得着的最高一档，占位）
+        { minOdds: 10, item: "mat_crystal", n: 1 },
+        { minOdds: 20, item: "mat_heart", n: 1 }
+      ]
+    },
     cardKinds: { element: "元素", weather: "天气", layer: "层牌" }
   };
   const RESULT_LO = () => Math.min.apply(null, GUESS_CONFIG.results);
@@ -111,10 +131,17 @@
   /** 桌子算好入场费和每轮最低注（× 倍率） */
   function tableInfo(t) {
     const G = GUESS_CONFIG, m = Number(t.mult) || 1;
-    return { id: t.id, name: t.name, mult: m, entry: Math.round(G.entry * m), minBet: G.minBet.map(n => Math.round(n * m)), odds: G.odds.slice() };
+    return { id: t.id, name: t.name, life: false, mult: m, entry: Math.round(G.entry * m), minBet: G.minBet.map(n => Math.round(n * m)), odds: G.odds.slice() };
   }
+  /** 赌命桌：押坚毅，每格固定代价（minBet 就是这一轮每格押上几点），不收入场费，赔率系数另算 */
+  function lifeTable() {
+    const L = GUESS_CONFIG.life;
+    return { id: L.id, name: L.name, dealer: L.dealer, life: true, mult: 1, entry: 0, stake: L.stake.slice(), minBet: L.stake.slice(), odds: L.odds.slice() };
+  }
+  /** 普通桌（筹码）；赌命桌不在这里，用 tableOf(GUESS_CONFIG.life.id) */
   function tables() { return GUESS_CONFIG.tables.map(tableInfo); }
   function tableOf(id) {
+    if (id && id === GUESS_CONFIG.life.id) return lifeTable();
     const t = GUESS_CONFIG.tables.find(x => x.id === (id || GUESS_CONFIG.tables[0].id));
     if (!t) fail("没有这张桌子：" + id);
     return tableInfo(t);
@@ -130,8 +157,8 @@
   }
 
   /* ---------- 开一手 ---------- */
-  /** opt：seed；table（桌子 id，默认第一张）；players：[{ id, name, chips }]（几名玩家同桌，各押各的）；
-   *  deal（测试用：指定三张牌 { element, weather, layer }） */
+  /** opt：seed；table（桌子 id，默认第一张；赌命桌是 GUESS_CONFIG.life.id）；players：[{ id, name, chips }]（几名玩家同桌，各押各的；
+   *  赌命桌只要 id 和名字——不收、也不看坚毅）；deal（测试用：指定三张牌 { element, weather, layer }） */
   function newHand(opt) {
     opt = opt || {};
     needCC();
@@ -146,14 +173,14 @@
     if (!list.length) fail("至少要有一名玩家");
     const players = list.map((p, i) => ({
       id: String(p.id != null ? p.id : "p" + (i + 1)), name: String(p.name || "玩家" + (i + 1)),
-      chips: Math.max(0, Math.floor(Number(p.chips) || 0)), paid: 0,
+      chips: t.life ? null : Math.max(0, Math.floor(Number(p.chips) || 0)), paid: 0,
       in: true,          // 第一轮押了（或者还没轮到第一轮）：后两轮还能押
       acted: {},         // 第几轮 → "bet" / "pass"
-      slips: []          // 押注：{ round, result, amount, odds（下注那一刻锁定）}
+      slips: []          // 押注：{ round, result, amount（赌命桌 = 押上几点坚毅）, odds（下注那一刻锁定）}
     }));
     players.forEach((p, i) => { if (players.findIndex(x => x.id === p.id) !== i) fail("玩家 id 重复：" + p.id); });
-    // 入场费（不退）：交不起的坐不上桌
-    players.forEach(p => {
+    // 入场费（不退）：交不起的坐不上桌。赌命桌不收
+    if (!t.life) players.forEach(p => {
       if (p.chips < t.entry) fail(`${p.name}的筹码不够入场费 ${t.entry} 枚`);
       p.chips -= t.entry; p.paid = t.entry;
     });
@@ -164,7 +191,9 @@
       shown: { element: null, weather: null, layer: null },   // 翻开的牌
       players, board: null, boards: [], log: [], result: null
     };
-    note(h, { t: "open", text: `${t.name}：庄家抽了一张元素、一张天气、一张层牌，都盖在桌上。入场费 ${t.entry} 枚（不退）。` });
+    note(h, { t: "open", text: t.life
+      ? `${t.name}：${t.dealer}抽了一张元素、一张天气、一张层牌，都盖在桌上。押的是坚毅生命，每格押上固定的点数。`
+      : `${t.name}：庄家抽了一张元素、一张天气、一张层牌，都盖在桌上。入场费 ${t.entry} 枚（不退）。` });
     openRound(h, 1);
     return h;
   }
@@ -201,17 +230,21 @@
     if (h.over) return [];
     return eligible(h).filter(p => !p.acted[h.round]).map(p => p.id);
   }
+  /** 这一轮每格至少押多少（赌命桌 = 每格押上几点坚毅，固定） */
   function minBetOf(h) { return h.table.minBet[Math.max(0, Math.min(h.table.minBet.length - 1, h.round - 1))]; }
   /** 这名玩家现在能做的：
-   *  { type: "bet", round, cells: [{ result, odds, k }]（开盘的格子）, min（每格至少押多少）, max（几格加起来最多押多少 = 手上的筹码）}
-   *  （手上不够最低注就没有这一项）、{ type: "pass" } */
+   *  普通桌 { type: "bet", round, cells: [{ result, odds, k }]（开盘的格子）, min（每格至少押多少）, max（几格加起来最多押多少 = 手上的筹码）}
+   *  （手上不够最低注就没有这一项）；
+   *  赌命桌 { type: "bet", round, cells, stake（每格押上几点坚毅，固定）, unit: "shp" }——押坚毅永远能下，不看角色还剩多少；
+   *  { type: "pass" } */
   function legal(h, id) {
     const p = playerOf(h, id);
     if (!p || toAct(h).indexOf(p.id) < 0) return [];
     const cells = h.board.cells.filter(x => x.open).map(x => ({ result: x.result, odds: x.odds, k: x.k }));
     const out = [];
     const min = minBetOf(h);
-    if (cells.length && p.chips >= min) out.push({ type: "bet", round: h.round, cells, min, max: p.chips });
+    if (cells.length && h.table.life) out.push({ type: "bet", round: h.round, cells, stake: min, unit: "shp" });
+    else if (cells.length && p.chips >= min) out.push({ type: "bet", round: h.round, cells, min, max: p.chips });
     out.push({ type: "pass" });
     return out;
   }
@@ -233,26 +266,51 @@
     return h;
   }
   /** 这一轮押哪几格：bets = { 结果: 押多少 }，每格至少押最低注（整数），几格加起来不超过手上的筹码；不开盘的格子押不进去。
+   *  赌命桌每格押的是这一轮的固定代价（写 true 或者正好那个点数），不看、也不扣角色的坚毅（结算后由接入的那一边扣）。
    *  押注按现在这张赔率表锁定 */
   function placeBets(h, p, bets) {
     const keys = Object.keys(bets && typeof bets === "object" ? bets : {});
     if (!keys.length) fail("至少押一格");
-    const min = minBetOf(h);
+    const min = minBetOf(h), life = h.table.life;
     const lines = keys.map(key => {
       const r = Number(key);
       const cell = h.board.cells.find(x => x.result === r);
       if (!cell) fail("没有这一格：" + key);
       if (!cell.open) fail(`${label(r)} 这一格不开盘`);
-      const n = Number(bets[key]);
-      if (!Number.isInteger(n) || n < min) fail(`第 ${h.round} 轮每格至少押 ${min} 枚（整数）`);
+      const n = life ? min : Number(bets[key]);
+      if (life && bets[key] !== true && Number(bets[key]) !== min) fail(`赌命桌每格押的是固定代价：第 ${h.round} 轮押上 ${min} 点坚毅`);
+      if (!life && (!Number.isInteger(n) || n < min)) fail(`第 ${h.round} 轮每格至少押 ${min} 枚（整数）`);
       return { round: h.round, result: r, amount: n, odds: cell.odds };
     });
-    const total = lines.reduce((s, x) => s + x.amount, 0);
-    if (total > p.chips) fail(`筹码不够：这一轮押了 ${total} 枚，手上只有 ${p.chips} 枚`);
-    p.chips -= total;
+    if (!life) {
+      const total = lines.reduce((s, x) => s + x.amount, 0);
+      if (total > p.chips) fail(`筹码不够：这一轮押了 ${total} 枚，手上只有 ${p.chips} 枚`);
+      p.chips -= total;
+    }
     lines.forEach(x => p.slips.push(x));
     p.acted[h.round] = "bet";
-    note(h, { t: "bet", by: p.id, text: `${p.name}押 ${lines.map(x => `${label(x.result)}（${x.odds} 倍）${x.amount} 枚`).join("、")}。` });
+    note(h, { t: "bet", by: p.id, text: life
+      ? `${p.name}押上坚毅：${lines.map(x => `${label(x.result)}（${x.odds} 倍，押上 ${x.amount} 点）`).join("、")}。`
+      : `${p.name}押 ${lines.map(x => `${label(x.result)}（${x.odds} 倍）${x.amount} 枚`).join("、")}。` });
+  }
+  /** 赌命桌赢了拿什么：每格押上的点数 × 赔率（向下取整）× kuizhiPerPoint 奎支；单格赔率够高另给稀有材料（取够得着的最高一档） */
+  function prizeOf(slips) {
+    const L = GUESS_CONFIG.life, items = {};
+    let kuizhi = 0;
+    slips.forEach(x => {
+      kuizhi += payoutOf(x.amount, x.odds) * L.kuizhiPerPoint;
+      const tier = L.items.filter(t => x.odds >= t.minOdds).sort((a, b) => b.minOdds - a.minOdds)[0];
+      if (tier) items[tier.item] = (items[tier.item] || 0) + tier.n;
+    });
+    return { kuizhi, items: Object.keys(items).map(id => ({ id, n: items[id] })) };
+  }
+  /** 奖品写成一句话（奎支、材料名字照 items.js 的目录） */
+  function prizeText(prize) {
+    const cat = typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : (root.ITEM_CATALOG || {});
+    const parts = [];
+    if (prize.kuizhi) parts.push(`${prize.kuizhi} 奎支`);
+    prize.items.forEach(x => parts.push(`${(cat[x.id] && cat[x.id].name) || x.id} ×${x.n}`));
+    return parts.join("、") || "没有奖品";
   }
 
   /* ---------- 结算：翻开层牌，用 CounterCards.score 算结果，猜中的连本带利拿回 ---------- */
@@ -268,30 +326,56 @@
         x.pay = x.win ? payoutOf(x.amount, x.odds) : 0;
         won += x.pay; staked += x.amount;
       });
+      if (h.table.life) {
+        // 赌命桌：押输的格子名义上押上了几点（due）只交给接入的那一边去扣（lifeBill），不进画面、不进记录；记录只写「坚毅受创」
+        const hits = p.slips.filter(x => x.win);
+        p.prize = prizeOf(hits);
+        p.hurt = p.slips.some(x => !x.win);
+        p.due = p.slips.filter(x => !x.win).reduce((s, x) => s + x.amount, 0);
+        if (p.slips.length) note(h, { t: "pay", by: p.id, text: `${p.name}：${[hits.length ? `押中 ${hits.length} 格，赢得 ${prizeText(p.prize)}` : "没押中", p.hurt ? "坚毅受创" : ""].filter(Boolean).join("；")}。` });
+        return;
+      }
       p.chips += won;
       p.won = won;
       p.net = won - staked - p.paid;
       if (p.slips.length) note(h, { t: "pay", by: p.id, text: won ? `${p.name}押中，连本带利拿回 ${won} 枚。` : `${p.name}没押中。` });
     });
   }
+  /** 赌命桌这一手的账（只给接入的那一边用：长线养成 / 跑团去扣坚毅、发奖）：
+   *  { lost: 押输的那几格名义上押上的点数加起来, prize: { kuizhi, items: [{ id, n }] }, hurt: 有没有押输的 }。
+   *  界面不拿这个——画面上只写「坚毅受创」；还没结算、不是赌命桌 → null */
+  function lifeBill(h, id) {
+    const p = playerOf(h, id);
+    if (!p || !h.table.life || !h.over) return null;
+    return { lost: p.due, prize: clone(p.prize), hurt: p.hurt };
+  }
 
   /* ---------- 这名玩家能看到的东西 ---------- */
-  /** 没翻开的牌（secret）、种子都不在里面；押注、赔率表、翻开的牌、记录是公开的 */
+  /** 没翻开的牌（secret）、种子都不在里面；押注、赔率表、翻开的牌、记录是公开的。
+   *  赌命桌：押注写每格押上的固定点数（stake，规则文字）；结算只有押中没有（win）、奖品（prize）、坚毅受没受创（hurt），
+   *  押输了一共多少点（due）不在里面——规则层本来就不知道角色还剩多少坚毅 */
   function view(h, id) {
     const p = playerOf(h, id);
     if (!p) fail("没有这名玩家：" + id);
     const t = h.table;
-    const slip = (x) => (h.over ? { round: x.round, result: x.result, amount: x.amount, odds: x.odds, win: x.win, pay: x.pay } : { round: x.round, result: x.result, amount: x.amount, odds: x.odds });
+    const slip = (x) => {
+      const o = { round: x.round, result: x.result, odds: x.odds };
+      if (t.life) o.stake = x.amount; else o.amount = x.amount;
+      if (h.over) { o.win = x.win; if (!t.life) o.pay = x.pay; }
+      return o;
+    };
     const seat = (x) => ({ id: x.id, name: x.name, in: x.in, acted: clone(x.acted), slips: x.slips.map(slip) });
     const wait = toAct(h);
+    const mine = t.life ? (h.over ? { prize: clone(p.prize), hurt: p.hurt } : {})
+      : Object.assign({ chips: p.chips, paid: p.paid }, h.over ? { won: p.won, net: p.net } : {});
     return {
-      table: { id: t.id, name: t.name, mult: t.mult, entry: t.entry, minBet: t.minBet.slice() },
+      table: { id: t.id, name: t.name, life: !!t.life, dealer: t.dealer || null, mult: t.mult, entry: t.entry, minBet: t.minBet.slice() },
       stage: h.stage, round: h.round, rounds: GUESS_CONFIG.order.length, over: h.over,
       shown: clone(h.shown),
       board: clone(h.board), minBet: minBetOf(h),
       waiting: wait, myTurn: wait.indexOf(p.id) >= 0,
       legal: legal(h, p.id),
-      me: Object.assign(seat(p), { chips: p.chips, paid: p.paid }, h.over ? { won: p.won, net: p.net } : {}),
+      me: Object.assign(seat(p), mine),
       others: h.players.filter(x => x !== p).map(seat),
       result: h.result ? clone(h.result) : null,
       log: clone(h.log)
@@ -300,7 +384,7 @@
 
   const api = {
     GUESS_CONFIG, label, outcome, tally, oddsOf, payoutOf, board, tables, tableOf, dealOf,
-    newHand, toAct, legal, act, view
+    newHand, toAct, legal, act, view, lifeBill, prizeText
   };
   // 配置挂到 High Flux 的 CC_CONFIG 上（同一份对象）
   if (CC() && CC().CC_CONFIG) CC().CC_CONFIG.guess = GUESS_CONFIG;

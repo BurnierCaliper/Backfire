@@ -41,6 +41,17 @@ button.ccg-cell:hover { border-color: var(--sk-hazard, #f2c230); }
 .ccg-line .ccg-res { font-size: 18px; }
 .ccg-line small { color: #ffe08a; font-size: 12px; }
 
+/* ---------- 赌命桌：押的是坚毅生命。牌桌换成暗红的毡面；押注条、结算只写固定代价和「坚毅受创」，没有数字 ---------- */
+[data-table="life"] .cc-table {
+  background-color: #2a1212;
+  background-image: var(--sk-noise), radial-gradient(ellipse at 50% 45%, #4a1d1a 0%, #2c1110 45%, #170807 100%);
+}
+.ccg-lifeseat .cc-who small:first-of-type { color: #ffb38a; }
+.ccg-stake { color: #ffb38a !important; }
+.ccg-grit { margin: 0; padding: 2px 12px; font: 800 16px var(--sk-tag, var(--ui)); color: #0b0806; background: #c9bfae; transform: rotate(-1deg); }
+.ccg-grit.hurt { color: var(--sk-canvas, #ece0c6); background: var(--sk-blood, #d8322a); }
+.ccg-dead { margin: 0; padding: 4px 14px; font: 800 18px var(--sk-tag, var(--ui)); color: var(--sk-canvas, #ece0c6); background: #0b0806; border: 2px solid var(--sk-blood, #d8322a); }
+
 /* ---------- 结算横幅：三张牌摆小一点 ---------- */
 .ccg-result .ccg-slots { gap: 8px; }
 .ccg-mini .cc-card { width: 56px; height: 80px; }
