@@ -13,8 +13,6 @@ const LAYER = require("./layer-names");
 const ROOT = path.resolve(__dirname, "..");
 // 不扫的目录：测试、第三方库（vendor）、装出来的依赖和测试产物
 const SKIP_DIRS = new Set([".git", "node_modules", "tests", "vendor", "dist", "playwright-report", "test-results", ".wrangler"]);
-// High Flux（counter-cards*.js、casino*.js）的错名（血肉 / 沙 / 灵体）在 #509 里修，先放过这几份文件。#509 合并后去掉
-const HIGH_FLUX = /^(counter-cards|casino)[^/]*\.js$/;
 // 键和层 id 一样、但不是层名的写法：天气「沙暴」、路面「沙地」「松软沙地」、资源「盾」（online-ui.js · names）
 const NOT_LAYER = { sand: ["沙暴", "沙地", "松软沙地"], shield: ["盾"] };
 const OLD_NAMES = ["砂甲", "护甲层", "灵体", "血肉"];
@@ -35,7 +33,7 @@ function scanned(dir = ROOT, out = []) {
   }
   return out;
 }
-const FILES = scanned().filter(f => !HIGH_FLUX.test(f));
+const FILES = scanned();   // High Flux（counter-cards*.js、casino*.js）在 #509 改好以后也一起查
 /** 要查的源码：engine.js 去掉 LAYER 那一份（正式名就写在那里） */
 const source = f => {
   const src = fs.readFileSync(path.join(ROOT, f), "utf8");
