@@ -6,6 +6,9 @@
  *       天气堆放在桌边，翻开天气时有闪光和对应的天气特效（weather-fx.js，和战场同一套）。
  * 暗出的牌一律显示牌背（自己的那张在角上标一下是什么）；结算只显示胜负、分档和筹码变动，不亮牌。
  * 筹码不够时（每轮开始 / 轮到自己下注）操作栏里有「借 3 枚（还 4）」这样的按钮；借了多少、要还多少写在两边的座位上；
+ * 下注不封顶（#496）：「最大」是自己手上的筹码；对方押得比自己手上的还多时没有「跟注」，只有借的按钮（从够跟的数目起）和「弃牌」；
+ * 跟注后的追加窗口（#496）：操作栏里倒计时（秒数读 CC_CONFIG.callWindowSec）、「加注」「弃牌」「不加注」，到时间自动关窗进入下一步
+ *   （规则层 CounterCards.closeWindow）；AI 在窗口里马上决定，人有完整的倒计时；
  * 总结算按最终筹码数（扣还借款之后）定胜负。
  * 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论）——和平时一样，顶栏最前面的「菜单」（Esc 也行）→「克制表」；
  *   侧栏、结算横幅上也有直接打开的按钮。用平时的克制表浮层（matchup-ui.js），格子是按场上天气算好的得分（counter-cards.js · chart）；
@@ -140,7 +143,7 @@
   /* ---------- 状态 ---------- */
   const SETUP = { side: "player", level: "normal" };
   let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的），
-                          //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击） }
+                          //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击）、win（跟注后追加窗口的倒计时：{ key, until, sec, timer }） }
   let bound = false;
 
   function show(name) {
@@ -163,6 +166,7 @@
   function open() {
     bind();
     stopTimer();
+    stopWindow();
     closeChart();
     stopTip();
     enterScreen();
@@ -173,6 +177,7 @@
     opt = opt || {};
     bind();
     stopTimer();
+    stopWindow();
     stopTip();
     const side = opt.side === "dealer" ? "dealer" : "player";
     const level = AI().LEVELS.indexOf(opt.level) >= 0 ? opt.level : "normal";
@@ -190,6 +195,7 @@
   function stopTimer() { if (S && S.timer) { clearTimeout(S.timer); S.timer = null; } }
   function leave() {
     stopTimer();
+    stopWindow();
     closeChart();
     stopTip();
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: "none" });
@@ -378,6 +384,49 @@
     schedule();
   }
 
+  /* ---------- 跟注后的追加窗口（#496）：倒计时 ----------
+   * 规则层不计时（CounterCards.closeWindow 关窗）：这里按 CC_CONFIG.callWindowSec 倒计时，到时间就关窗、进入下一步。
+   * 同一个窗口（第几轮 · 第几个下注回合 · 这一回合第几个窗口）只计一次时，整块重画（改加注额、AI 走了一步）接着数，不从头数；
+   * 数字每到整秒改一次，只改数字不整块重画（免得按着「+」时按钮被换掉）；进度条是 CSS 动画，重画时按已经过去的时间接着走。
+   * AI 在窗口里照常由 schedule 马上走（fast 不等，平时等 aiDelay），人有完整的倒计时。用 setTimeout 一秒一秒排（不用 setInterval） */
+  const windowKey = (v) => (v.betting && v.betting.window ? `${v.round}:${v.betting.street}:${v.betting.window.n}` : "");
+  /** 画面之前：窗口开着就记下这个窗口什么时候到时间（同一个窗口不重记）；窗口关了、横幅盖着、对局结束就停掉倒计时 */
+  function syncWindow(v) {
+    const key = S.banner || v.over ? "" : windowKey(v);
+    if (!key) { stopWindow(); return; }
+    if (S.win && S.win.key === key) return;
+    stopWindow();
+    S.win = { key, until: Date.now() + v.betting.window.sec * 1000, sec: v.betting.window.sec, timer: null };
+  }
+  /** 还剩多少毫秒（窗口没开着是 0） */
+  const windowLeft = () => (S && S.win ? Math.max(0, S.win.until - Date.now()) : 0);
+  /** 改一下倒计时的数字，排下一次（到下一个整秒）；到时间了就关窗（另排一下再关：render 里调到时不在画面画到一半时又整块重画） */
+  function tickWindow() {
+    const W = S && S.win;
+    if (!W) return;
+    if (W.timer) { clearTimeout(W.timer); W.timer = null; }
+    const left = W.until - Date.now();
+    if (left <= 0) { W.timer = setTimeout(expireWindow, 0); return; }
+    const el = $("cc-actions") && $("cc-actions").querySelector(".cc-count");
+    if (el) el.textContent = String(Math.ceil(left / 1000));
+    W.timer = setTimeout(tickWindow, ((left - 1) % 1000) + 1);
+  }
+  function stopWindow() { if (S && S.win) { if (S.win.timer) clearTimeout(S.win.timer); S.win = null; } }
+  /** 倒计时到了：关窗（还没表态的都算放弃追加），进入下一步 */
+  function expireWindow() {
+    stopWindow();
+    if (!S || !CC().closeWindow(S.game)) return;
+    S.mode = null; S.amount = null; S.msg = "";
+    afterChange();
+  }
+  /** 倒计时：数字（每秒改一次）+ 一条缩短的进度条（--sec 整个窗口多长、--gone 已经过去多久，重画时接着走） */
+  function windowClock() {
+    if (!S || !S.win) return "";
+    const left = windowLeft(), sec = S.win.sec * 1000;
+    return `<div class="cc-window" style="--sec:${sec}ms;--gone:${left - sec}ms"><span class="cc-clock" role="timer" aria-label="追加窗口倒计时"><b class="cc-count">${Math.ceil(left / 1000)}</b> 秒</span>`
+      + `<span class="cc-winbar" aria-hidden="true"><i></i></span></div>`;
+  }
+
   /* ---------- 画面 ---------- */
   const sideName = (s) => CC().sideName(s);
   function renderSetup() {
@@ -407,9 +456,11 @@
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
       <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
+      <li><b>下注不封顶</b>：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比你手上的还多时，要跟就先向主持方借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方封顶。</li>
+      <li><b>跟注后追加</b>：一方跟注后有 ${C.callWindowSec} 秒追加窗口，双方都还可以加注或弃牌；有人加注就照常轮到对方跟注、加注或弃牌，对方跟注后再开一次窗口；${C.callWindowSec} 秒内没人动作，这个下注回合结束。窗口里的加注也算进每回合最多加注 ${C.maxRaises} 次，次数用完以后跟注直接结束。</li>
       <li><b>分档赔付</b>：差 1 赢家拿走底池；差 2 赢家拿走底池，输家再赔自己这一轮下注额的 0.5 倍（半枚向下取整）。</li>
       <li><b>相位</b>：翻到相位，本轮双方全押，上限是筹码较少一方的全部筹码；打平各自退回。</li>
-      <li><b>借贷</b>：筹码不够时可以向主持方借——每轮开始时手上不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。${C.loan.unit} 枚一份，最少借 ${C.loan.unit} 枚，最多借到补上缺口；每借 ${C.loan.unit} 枚，对局结束时还 ${C.loan.repay} 枚（${C.loan.unit}→${C.loan.repay}、${C.loan.unit * 2}→${C.loan.repay * 2}），结算时从筹码里扣，还不上的记成负数。输光了不借，这一局就结束。</li>
+      <li><b>借贷</b>：筹码不够时可以向主持方借——每轮开始时手上不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。${C.loan.unit} 枚一份，最少借 ${C.loan.unit} 枚，最多借到补上缺口；每借 ${C.loan.unit} 枚，对局结束时还 ${C.loan.repay} 枚（${C.loan.unit}→${C.loan.repay}、${C.loan.unit * 2}→${C.loan.repay * 2}），结算时从筹码里扣，还不上的记成负数。一局里总共借多少不设上限，借几次都行。输光了不借，这一局就结束。</li>
       <li><b>胜负</b>：${C.rounds} 轮打完（或有一方输光又不借）后，按最终筹码数（扣还借款之后）比，多的赢。</li>
     </ul></details>`;
   }
@@ -420,10 +471,12 @@
     if (!app) return;
     app.dataset.weather = v.weather || "none";
     app.dataset.side = S.human;
+    syncWindow(v);   // 跟注后的追加窗口：先记下什么时候到时间，操作栏按它写剩几秒
     const top = $("cc-top"), board = $("cc-board"), actions = $("cc-actions"), side = $("cc-side"), banner = $("cc-banner");
     if (top) top.innerHTML = topHtml(v);
     if (board) board.innerHTML = boardHtml(v);
     if (actions) actions.innerHTML = actionsHtml(v);
+    tickWindow();    // 倒计时接着数（窗口开着才有）
     if (side) side.innerHTML = sideHtml(v);
     if (banner) {
       const h = S.banner ? bannerHtml(S.banner, v) : v.over ? finalHtml(v) : "";
@@ -498,12 +551,14 @@
   function loanTag(s, who) {
     return s.loan ? `<small class="cc-loan" title="${esc(who)}向主持方借了 ${s.loan} 枚，对局结束时还 ${s.owe} 枚">借 ${s.loan} 枚 · 结束时还 ${s.owe} 枚</small>` : "";
   }
-  /** 借贷按钮：一份一个（借 3 / 借 6 ……），写上结束时要还多少 */
-  function loanBtns(o, primary) {
+  /** 借贷按钮：一份一个（借 3 / 借 6 ……），写上结束时要还多少。from：从多少枚起（跟不起时从够跟的数目起，
+   *  下注不封顶以后要跟的可能很多，借得比这少也跟不了，不画；最多到补上缺口，所以最多三个按钮）；primary：第一个是主按钮 */
+  function loanBtns(o, primary, from) {
     let out = "";
-    for (let n = o.min; n <= o.max; n += o.step) {
+    const first = Math.max(o.min, from || 0);
+    for (let n = first; n <= o.max; n += o.step) {
       const back = CC().repayOf(n);
-      out += btn("borrow", `借 ${n} 枚（还 ${back}）`, { data: { amount: n }, cls: "cc-loanbtn", primary: primary && n === o.min, title: `向主持方借 ${n} 枚，对局结束时还 ${back} 枚` });
+      out += btn("borrow", `借 ${n} 枚（还 ${back}）`, { data: { amount: n }, cls: "cc-loanbtn", primary: primary && n === first, title: `向主持方借 ${n} 枚，对局结束时还 ${back} 枚` });
     }
     return out;
   }
@@ -535,6 +590,8 @@
     if (S.banner) return `<p class="cc-prompt">看一下这一轮的结算。</p>${msg}`;
     const oppName = sideName(v.opponent);
     if (!v.myTurn) {
+      // 追加窗口里自己放弃追加了：等对方（或者到时间）
+      if (v.betting && v.betting.window) return `${windowClock()}<p class="cc-prompt cc-wait">你不加注了，等${oppName}……</p>${infoLine(v)}${msg}`;
       const wait = v.stage === "play" && v.me.card ? `你已经暗出了牌，等${oppName}出牌……` : `${oppName}正在想……`;
       return `<p class="cc-prompt cc-wait">${wait}</p>${infoLine(v)}${msg}`;
     }
@@ -566,6 +623,7 @@
         p = S.human === "dealer" ? "选一张层牌暗出（每轮必须出一张）。" : "选一张元素牌暗出（常态不能当出牌）。";
         break;
       case "bet1": case "bet2":
+        if (v.betting && v.betting.window) return `${windowClock()}${windowControls(v, has)}${infoLine(v)}${msg}`;
         ({ p, b } = betControls(v, has));
         break;
       case "weather": {
@@ -598,31 +656,55 @@
     if (v.allIn) parts.push("相位全押");
     return `<p class="cc-info">${parts.join(" · ")}</p>`;
   }
+  /** 加注额：加减、「最大」，和下注 / 加注按钮（下注栏、追加窗口共用） */
+  function amountControls(o, verb, act) {
+    return `<span class="cc-amount" role="group" aria-label="${verb}额">`
+      + btn("amt", "−", { data: { d: -1 }, disabled: S.amount <= o.min, title: "少一枚" })
+      + `<b class="cc-amt">${S.amount}</b>`
+      + btn("amt", "+", { data: { d: 1 }, disabled: S.amount >= o.max, title: "多一枚" })
+      + btn("amt", "最大", { data: { set: "max" }, disabled: S.amount >= o.max, title: `最多 ${o.max} 枚` })
+      + `</span>` + btn(act, `${verb} ${S.amount}`, { cls: "cc-hot" });
+  }
+  /** 跟注后的追加窗口（#496）：倒计时在上面（windowClock）；「加注」（加注额照平时）、「弃牌」、「不加注」（默认，到时间也是这样）。
+   *  加注次数用完不会开窗口；手上没筹码就没有「加注」 */
+  function windowControls(v, has) {
+    const w = v.betting.window, raise = has("raise");
+    if (raise && (S.amount == null || S.amount < raise.min || S.amount > raise.max)) S.amount = raise.min;
+    const who = w.by === S.human ? "你" : sideName(w.by), next = v.stage === "bet1" ? "翻天气" : "结算";
+    let p = `${who}跟注了。${w.sec} 秒追加窗口：双方都还可以加注或弃牌，没人动作就进入${next}。`;
+    if (raise) p += ` 加注至少 ${raise.min} 枚（算进这一回合的加注次数）。`;
+    else p += " 你手上没有筹码了，加不了注。";
+    const b = (raise ? amountControls(raise, "加注", "raise") : "")
+      + btn("fold", "弃牌", { cls: "cc-danger", title: "立即判负：输掉自己已下的筹码（包括自己在滚存底池里的那一份）" })
+      + btn("pass", "不加注", { primary: true, title: "放弃追加：双方都不加注就不用等到时间" });
+    return `<p class="cc-prompt">${p}</p><div class="cc-btns">${b}</div>`;
+  }
   function betControls(v, has) {
     const first = v.stage === "bet1" ? "第一轮下注（玩家先）" : "第二轮下注（庄家先）";
     const opp = sideName(v.opponent);
     const bet = has("bet"), raise = has("raise"), call = has("call");
+    const toCall = v.betting ? v.betting.toCall : 0;
+    // 下注不封顶（#496）：对方押得比你手上的还多，跟不起——没有「跟注」，要跟就先借，不借只能弃牌
+    const short = toCall > 0 && !call;
     const o = bet || raise;
     if (o) {
       if (S.amount == null || S.amount < o.min || S.amount > o.max) S.amount = o.min;
     }
-    let p = call ? `${first}：${opp}下了注，要跟 ${call.amount} 枚。` : `${first}：还没人下注。`;
+    let p = toCall > 0 ? `${first}：${opp}下了注，要跟 ${toCall} 枚。` : `${first}：还没人下注。`;
     let b = "";
     if (has("check")) b += btn("check", "过牌", { primary: !o });
     if (call) b += btn("call", `跟注 ${call.amount}`, { primary: true });
     if (o) {
-      const verb = bet ? "下注" : "加注";
-      b += `<span class="cc-amount" role="group" aria-label="${verb}额">`
-        + btn("amt", "−", { data: { d: -1 }, disabled: S.amount <= o.min, title: "少一枚" })
-        + `<b class="cc-amt">${S.amount}</b>`
-        + btn("amt", "+", { data: { d: 1 }, disabled: S.amount >= o.max, title: "多一枚" })
-        + btn("amt", "最大", { data: { set: "max" }, disabled: S.amount >= o.max, title: `最多 ${o.max} 枚` })
-        + `</span>` + btn(bet ? "bet" : "raise", `${verb} ${S.amount}`, { cls: "cc-hot" });
+      b += amountControls(o, bet ? "下注" : "加注", bet ? "bet" : "raise");
       p += bet ? ` 下注至少 ${o.min} 枚。` : ` 加注至少 ${o.min} 枚。`;
     }
     b += btn("fold", "弃牌", { cls: "cc-danger", title: "立即判负：输掉自己已下的筹码（包括自己在滚存底池里的那一份）" });
     const lo = has("borrow");
-    if (lo) {
+    if (lo && short) {
+      // 借的按钮从够跟的数目起（缺口向上取整到一份），够跟的那个是主按钮
+      p += ` 你手上只有 ${v.me.chips} 枚，跟不起：要跟就先向主持方借（每借 ${v.loan.unit} 枚，结束时还 ${v.loan.repay} 枚），不借只能弃牌。借完还是你下注。`;
+      b += loanBtns(lo, true, Math.ceil((toCall - v.me.chips) / lo.step) * lo.step);
+    } else if (lo) {
       p += ` 手上的筹码不够（这一步要 ${lo.need} 枚，你只有 ${v.me.chips} 枚），可以先向主持方借（每借 ${v.loan.unit} 枚，结束时还 ${v.loan.repay} 枚），借完还是你下注。`;
       b += loanBtns(lo, false);
     }
@@ -708,7 +790,7 @@
       case "weather": humanAct({ type: "weather", op: d.op }); break;
       case "place": humanAct({ type: "place", where: d.where }); break;
       case "play": humanAct({ type: "play", card: d.card }); break;
-      case "check": case "call": case "fold": case "reveal": case "noNormal": case "noLoan": humanAct({ type: act }); break;
+      case "check": case "call": case "fold": case "pass": case "reveal": case "noNormal": case "noLoan": humanAct({ type: act }); break;
       case "bet": case "raise": humanAct({ type: act, amount: S.amount }); break;
       case "borrow": humanAct({ type: "borrow", amount: Number(d.amount) }); break;
       case "skip": case "normal": humanAct({ type: act, card: d.card }); break;
@@ -752,7 +834,9 @@
   }
 
   root.CounterCardsUI = {
-    UI_CONFIG, open, start, render, stop: stopTimer, setFast, cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods,
+    // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用；倒计时到时间的时刻留着，下次重画接着数）
+    UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
+    cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods,
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
