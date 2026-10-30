@@ -3552,10 +3552,13 @@ function settleBattleRewards(outcome) {
     outcome: bs.rewardSettlement.outcome, grade: bs.rewardSettlement.grade,
     finishBonus: null, xpBonus: 0, totalXpBonus: bs.rewardSettlement.xpBonus,
     ups: bs.rewardSettlement.ups.slice(), drops: bs.rewardSettlement.drops || null, trpgXp: bs.rewardSettlement.trpgXp || [], alreadySettled: true,
-    ...(bs.rewardSettlement.duel ? { duel: bs.rewardSettlement.duel } : {}), ...(bs.rewardSettlement.teams ? { teams: bs.rewardSettlement.teams } : {})
+    ...(bs.rewardSettlement.duel ? { duel: bs.rewardSettlement.duel } : {}), ...(bs.rewardSettlement.teams ? { teams: bs.rewardSettlement.teams } : {}),
+    ...(bs.rewardSettlement.winners ? { winners: bs.rewardSettlement.winners } : {})
   };
   // 每队单独计分（#472）：场上有两个以上玩家阵营时各阵营的分数（只是显示，不给奖励），结算面板给所有人看
   const teams = pvpTeamScores();
+  // 按阵营分出的胜负（主持人分阵营，#445）：哪几个阵营获胜，联机玩家的结算标题、公开记录写「X 获胜」，不是人人都「战斗胜利」（#490）
+  const winners = outcome === "win" && !duelOn ? pvpWinnersPublic() : [];
   // 决斗（enemies.js · PVP_DUEL_CFG，#472）：没有掉落、经验、奎支，不评级、不升级，也不记进战场记录（最近 10 场）、图鉴。
   // 只带上分出的胜负和两队各自的分数
   if (duelOn) {
@@ -3599,7 +3602,14 @@ function settleBattleRewards(outcome) {
   if (typeof careerRecordBattle === "function") careerRecordBattle(outcome, grade, { name: encName, drops });
   if (typeof bestiaryRecordBattle === "function") bestiaryRecordBattle(outcome);   // 敌人图鉴：这场出现过的敌人记为遭遇过
   if (teams.length) bs.rewardSettlement.teams = teams;
-  return Object.assign({ outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, trpgXp, alreadySettled: false }, teams.length ? { teams } : {});
+  if (winners.length) bs.rewardSettlement.winners = winners;
+  return Object.assign({ outcome, grade, finishBonus, xpBonus, totalXpBonus: xpBonus, ups: ups.slice(), drops, trpgXp, alreadySettled: false }, teams.length ? { teams } : {}, winners.length ? { winners } : {});
+}
+/** 按阵营分出的胜负（#445，pvpBattleOutcome）：获胜的玩家阵营 [{ id, name }]（只有阵营 id / 名字，给所有人看）。
+ *  不是按阵营判的（没配置阵营、场上只有一个玩家阵营）、还没分出来时是空的 */
+function pvpWinnersPublic() {
+  const r = typeof pvpBattleOutcome === "function" ? pvpBattleOutcome() : null;
+  return r && r.winners.length ? r.winners.map(id => ({ id, name: (playerFactionInfo(id) || { name: id }).name })) : [];
 }
 
 /* 战斗掉落：主持人在「战场配置」或战斗模板里设好（奎支 + 物品），打赢才给，进背包。

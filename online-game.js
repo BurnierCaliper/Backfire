@@ -680,7 +680,9 @@
         // 战斗结果进公开记录（只写结果，不带评分 / 坚毅数值）；决斗（#472）写哪一队赢 / 平局
         const r = value && value.duel && value.duel.result;
         const kind = r ? "duel" : { win: "victory", lose: "defeat", retreat: "retreat" }[cmd.outcome];
-        if (kind && outer) { publicLogs.push(r ? { kind, event: "end", winner: r.winner, why: r.why, turn: state.turnNo, at: Date.now() } : { kind, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+        // 主持人分阵营按阵营分出胜负（#490）：「战斗胜利」换成哪几个阵营获胜（只带阵营名字）
+        const winners = !r && value && Array.isArray(value.winners) && value.winners.length ? value.winners.map(w => w && w.name).filter(Boolean) : null;
+        if (kind && outer) { publicLogs.push(r ? { kind, event: "end", winner: r.winner, why: r.why, turn: state.turnNo, at: Date.now() } : Object.assign({ kind, turn: state.turnNo, at: Date.now() }, winners ? { winners } : {})); publicLogs = publicLogs.slice(-100); }
       }
       if (cmd.type === "startCombat" || cmd.type === "battle.setup") settledResult = null;
       // 决斗（#472）：开战时抛硬币的结果大家都看得到（online-view.js · projectLogs 只认队伍 id，按模板写）

@@ -220,15 +220,17 @@
       return emit("table");
     }
     /** 准备画面里给角色（kit）选队：team = "1队" / "2队"，null 不参加。owner 是这名角色归谁操控（hotseat-game.js 按角色分配查好）：
-     *  只能给自己操控的角色选（主持人给没分配给玩家的选）；每队最多 max 人 */
-    function pickDuel(id, kit, team, owner) {
+     *  只能给自己操控的角色选（主持人给没分配给玩家的选）；每队最多 max 人。eligible：现在还能参加的角色 kit（hotseat-game.js 给）——
+     *  人数只数这些（选了队以后死亡 / 被移出队伍的不占名额，和准备画面、开始决斗时数的一样，#490）；不给就全数 */
+    function pickDuel(id, kit, team, owner, eligible) {
       operator(id);
       const d = table.duel, C = duelCfg();
       if (!d || d.status !== "prep") fail("table_duel", "决斗还没开始准备");
       if (typeof kit !== "string" || !/^[\w-]{1,40}$/.test(kit)) fail("table_duel", "没有这名角色");
       if (id !== owner) fail("table_owner", "只能给自己操控的角色选队");
       if (team != null && !C.teams.some(x => x.id === team)) fail("table_duel", "没有这一队");
-      if (team != null && d.teams[kit] !== team && Object.keys(d.teams).filter(k => d.teams[k] === team).length >= C.max) fail("table_duel", `${duelTeamName(team)}已经满 ${C.max} 人了`);
+      const counts = k => d.teams[k] === team && (!Array.isArray(eligible) || eligible.includes(k));
+      if (team != null && d.teams[kit] !== team && Object.keys(d.teams).filter(counts).length >= C.max) fail("table_duel", `${duelTeamName(team)}已经满 ${C.max} 人了`);
       const next = Object.assign({}, d.teams);
       if (team == null) delete next[kit]; else next[kit] = team;
       d.teams = next;
