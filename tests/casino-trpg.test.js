@@ -71,7 +71,7 @@ test("跑团：坐桌（交入场费）→ 打完 → 离桌，赢来的进普�
   assert.equal(g2.stage, "play");
   A(c.CounterCards, g2, "player", "play", { card: "fire" });
   A(c.CounterCards, g2, "player", "check"); A(c.CounterCards, g2, "dealer", "check");
-  A(c.CounterCards, g2, "player", "reveal");                      // 相位全押：火打血肉，玩家翻倍
+  A(c.CounterCards, g2, "player", "reveal");                      // 相位全押：火打肉体，玩家翻倍
   const CC = c.CounterCards;
   for (let guard = 0; !g2.over; guard++) {
     assert.ok(guard < 80);

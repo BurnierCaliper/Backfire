@@ -244,7 +244,7 @@ test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排
 });
 
 /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步 → 判定中 → 结算横幅；用假时钟（t.mock.timers）一段段往前拨 ---------- */
-/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出血肉，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；
+/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出肉体，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；
  *  庄家先过牌（open：庄家先下注这么多枚，轮到人跟注） */
 function bet2Game(p, seed, card, deck, open) {
   const g = p.CC.newGame({ seed, deck: deck || ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
@@ -269,7 +269,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后
   const p = page();   // 页面开着「减少动态效果」：判定中停 reducedJudgeMs
   const T = p.UI.UI_CONFIG.settle;
   assert.ok(T && T.lastMs > 0 && T.judgeMs > 0 && T.reducedJudgeMs > 0 && T.reducedJudgeMs <= T.judgeMs, "时长放在 UI_CONFIG.settle");
-  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打血肉 +2：玩家赢
+  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打肉体 +2：玩家赢
   p.UI.start({ side: "player", level: "normal", game: g });   // 不是 fast
   const banner = p.$("#cc-banner"), bar = () => p.$("#cc-actions"), board = () => p.$("#cc-board");
   const before = { me: chipsOn(p, ".cc-me"), pot: chipsOn(p, ".cc-pot") };
@@ -289,7 +289,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后
   const slots = board().querySelectorAll(".cc-slot");
   assert.ok(slots[0].querySelector(".cc-back") && slots[1].querySelector(".cc-back"), "桌上两张暗牌（牌背）");
   assert.match(slots[1].querySelector(".cc-peek").textContent, /火/, "自己那张照旧在角上标一下");
-  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("血肉"), "不亮牌");
+  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("肉体"), "不亮牌");
   assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-pot")], [before.me, before.pot], "过牌：筹码不动，底池还是结算之前的");
   assert.match(board().querySelector(".cc-wnow").textContent, /酷暑/, "场上天气");
   assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 0, "每轮结算里还没有这一轮");
@@ -918,7 +918,7 @@ test("下注不封顶（#496）：人能押过对方的全部筹码（「最大�
 });
 
 /* ---------- 跟注后的追加窗口（#496 第 2 条）：倒计时、「加注」「弃牌」「不加注」，到时间自动进入下一步 ---------- */
-/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉，玩家暗出冰、过牌，庄家下注 1 枚——轮到人跟注 */
+/** 人当玩家；庄家（测试替它走）不动天气、暗出肉体，玩家暗出冰、过牌，庄家下注 1 枚——轮到人跟注 */
 function windowGame(p, seed) {
   const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
   const g = CC.newGame({ seed, deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"] });
@@ -1040,7 +1040,7 @@ test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按�
 /* ---------- 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论） ---------- */
 const J = v => JSON.parse(JSON.stringify(v));
 const fmt = s => (s > 0 ? "+" + s : s < 0 ? "−" + -s : "0");
-/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉；天气堆第一张是酷暑 */
+/** 人当玩家；庄家（测试替它走）不动天气、暗出肉体；天气堆第一张是酷暑 */
 function heatGame(p, seed) {
   const game = p.CC.newGame({ seed, deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
   p.CC.act(game, "dealer", { type: "weather", op: "pass" });
@@ -1074,9 +1074,9 @@ test("克制表：顶栏最前面是「菜单」（和战斗、单局的顶栏�
   assert.equal(box.querySelector(".ws-tape").textContent, "克制表");
   assert.match(box.querySelector(".mu-weather").textContent, /天气 常态/);
   assert.equal(box.querySelectorAll("[data-mu-cell]").length, 35);
-  assert.equal(box.querySelector('[data-mu-cell="0:0"]').textContent.trim(), "+1", "火 → 血肉 +1");
+  assert.equal(box.querySelector('[data-mu-cell="0:0"]').textContent.trim(), "+1", "火 → 肉体 +1");
   assert.equal(box.querySelector('[data-mu-cell="0:1"]').textContent.trim(), "−1", "火 → 装甲 −1");
-  assert.equal(box.querySelector('[data-mu-cell="5:0"]').textContent.trim(), "0", "物理 → 血肉 0");
+  assert.equal(box.querySelector('[data-mu-cell="5:0"]').textContent.trim(), "0", "物理 → 肉体 0");
   assert.ok(box.querySelector('th.mu-row.mu-e-fire svg.eicon'), "行头有属性图标");
   assert.equal(JSON.stringify(game), before, "打开克制表不动牌局");
   click(box.querySelector("[data-mu-close]"));
@@ -1112,7 +1112,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   const box = p.$("#mu-overlay");
   const fireFlesh = () => box.querySelector('[data-mu-cell="0:0"]');
   click(fireFlesh());
-  assert.match(box.querySelector(".mu-detail").textContent, /火 → 血肉：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
+  assert.match(box.querySelector(".mu-detail").textContent, /火 → 肉体：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
   const td = fireFlesh();
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
   betThrough(p, game, "bet1");
@@ -1123,7 +1123,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   assert.equal(game.weather, "heat");
   assert.ok(p.UI.chartOpen(), "还开着");
   assert.match(box.querySelector(".mu-weather").textContent, /天气 酷暑/);
-  assert.match(fireFlesh().textContent, /\+1\s*→\s*\+2/, "火 → 血肉：+1 → +2");
+  assert.match(fireFlesh().textContent, /\+1\s*→\s*\+2/, "火 → 肉体：+1 → +2");
   assert.ok(fireFlesh().classList.contains("changed"));
   assert.match(box.querySelector(".mu-detail").textContent, /玩家赢 \+2（原来 玩家赢 \+1） · 克制 \+1；酷暑：火 \+1/);
   assert.equal(box.parentNode.dataset.weather, "heat", "卡片套上酷暑的底纹");
@@ -1155,7 +1155,7 @@ for (const side of ["player", "dealer"]) {
       const box = p.$("#mu-overlay");
       assert.ok(visible(box) && p.UI.chartOpen(), where + "：打开了");
       assert.equal(box.querySelector(".mu-weather").textContent, "天气 " + p.CC.weatherName(g.weather), where + "：按场上的天气");
-      assert.equal(box.querySelector('[data-mu-cell="0:0"] b').textContent, fmt(p.CC.score("fire", "flesh", g.weather)), where + "：火 → 血肉的得分");
+      assert.equal(box.querySelector('[data-mu-cell="0:0"] b').textContent, fmt(p.CC.score("fire", "flesh", g.weather)), where + "：火 → 肉体的得分");
       click(box.querySelector("[data-mu-close]"));
       assert.ok(!visible(box) && !p.UI.chartOpen(), where + "：关掉了");
       assert.equal(JSON.stringify(g), before, where + "：对局没动");
@@ -1225,7 +1225,7 @@ const handCard = (p, face) => p.$(`#cc-board .cc-me [data-face="${face}"]`);
 const tipScores = (p) => Array.from(p.$$("#cc-tip [data-layer] b")).map(b => b.textContent);
 const chartRow = (p, el, w) => J(p.CC.chart(w).cells[p.CC.CC_CONFIG.elements.indexOf(el)].map(x => fmt(x.value)));   // 克制表里这张牌的一行（页面里的数组先转成这边的）
 
-test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里的元素牌上弹出小预览——这张牌按场上天气打血肉、装甲、护盾、沙、灵体各得几分（+1 / 0 / −1，就是克制表里这张牌的一行，配色同克制表），移开就收起，不动牌局", () => {
+test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里的元素牌上弹出小预览——这张牌按场上天气打肉体、装甲、护盾、沙尘、星灵各得几分（+1 / 0 / −1，就是克制表里这张牌的一行，配色同克制表），移开就收起，不动牌局", () => {
   const p = page();
   const game = heatGame(p, "悬停");
   const tip = p.$("#cc-tip"), before = JSON.stringify(game);
@@ -1239,7 +1239,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里�
   assert.match(tip.textContent, /天气 常态/);
   const cells = Array.from(tip.querySelectorAll("[data-layer]"));
   assert.deepEqual(cells.map(x => x.dataset.layer), ["flesh", "armor", "shield", "sand", "spirit"]);
-  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["血肉", "装甲", "护盾", "沙", "灵体"]);
+  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["肉体", "装甲", "护盾", "沙尘", "星灵"]);
   assert.ok(cells.every(x => x.querySelector("svg.eicon")), "每一层带层的图标");
   assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
   assert.deepEqual(tipScores(p), chartRow(p, "fire", null), "就是克制表里火这一行");
@@ -1266,7 +1266,7 @@ test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里�
   assert.equal(JSON.stringify(game), before, "看预览不动牌局");
 });
 
-test("悬停预览：开着的时候场上的天气变了，预览跟着变（翻开酷暑：火打血肉 +1 → +2；微光反转、酸雨打装甲另 +1 也对），整块重画后照旧挂在这张牌上", () => {
+test("悬停预览：开着的时候场上的天气变了，预览跟着变（翻开酷暑：火打肉体 +1 → +2；微光反转、酸雨打装甲另 +1 也对），整块重画后照旧挂在这张牌上", () => {
   const p = page();
   const game = heatGame(p, "预览跟着变");
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
