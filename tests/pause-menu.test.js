@@ -34,7 +34,7 @@ test("配置表：文字、菜单项、先后都在 PAUSE_MENU 里；联机标�
     assert.ok(C.items[id] && C.items[id].label, "菜单项有名字：" + id);
     assert.equal(typeof C.order[id], "number", "菜单项有先后：" + id);
   }
-  assert.deepEqual(plain(C.screens), ["battle", "run", "trpg"], "单机：战斗、单局、跑团探索画面能开");
+  assert.deepEqual(plain(C.screens), ["battle", "run", "trpg", "counter"], "单机：战斗、单局、跑团探索画面、High Flux 的牌桌（#485）能开");
   const local = M.html([{ id: "matchup", label: "克制表", hint: "", badge: 0 }], false), online = M.html([], true);
   assert.match(local, /<h2 id="pm-title">暂停<\/h2>/);
   assert.doesNotMatch(local, /pm-note/);
