@@ -12,10 +12,10 @@ const H = require("../tests/headless");
 const ROOT = path.resolve(__dirname, "..");
 const LEVELS = ["easy", "normal", "hard"];
 
-/** 加载规则（不带网页）：counter-cards.js + flux-holdem.js + flux-holdem-ai.js */
+/** 加载规则（不带网页）：counter-cards.js + counter-cards-ai.js（按温度加权抽签，#521）+ flux-holdem.js + flux-holdem-ai.js */
 function load() {
   const c = H.load();
-  for (const f of ["counter-cards.js", "flux-holdem.js", "flux-holdem-ai.js"]) vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), c, { filename: f });
+  for (const f of ["counter-cards.js", "counter-cards-ai.js", "flux-holdem.js", "flux-holdem-ai.js"]) vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), c, { filename: f });
   return c;
 }
 /** 打 games 局 players 人的 AI 自对局，返回统计。opt.levels：固定每个座位的难度（不写就轮流换） */

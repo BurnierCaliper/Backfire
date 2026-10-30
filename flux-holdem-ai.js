@@ -13,17 +13,23 @@
  *     比留在牌局里能分到的还多，就弃牌（能过牌也弃）。
  *   借贷：每轮开始落后才借（输光了也一样），领先不借；困难先估一下剩下几轮追不追得上。下注时跟不起：胜率够就借到够跟，一般就全押，不然弃牌。
  *   跟注后的追加窗口：马上决定，牌好就加注，不然不动作；窗口里不弃牌（同 High Flux 的 AI）。
+ *   带随机性（#521，同 High Flux 的 AI，按温度加权抽签、下注额用 counter-cards-ai.js 的同一份——要先加载它）：
+ *     普通 / 困难盖牌不再只盖胜率最高的那张，按胜率加权抽签（playTemp：普通高、困难低但不是 0）；
+ *     庄家偷看后留在顶上还是压到堆底按好处两选一（choiceTemp），差不多时两边都会选；下注额普通在双倍的门槛附近两种都下、困难上下浮动。
+ *     随机数只用传进来的 rng，同一个种子打出同样的一局。
  * 所有阈值都在 AI_CONFIG。
  *
  *   FluxHoldemAI.decide(view, "hard", rng)       → 一个操作（交给 FluxHoldem.act）
  *   FluxHoldemAI.step(对局, "p2", "hard", rng)    → 让这名玩家做一步（不是他的回合返回 null）
  *   FluxHoldemAI.playOut(对局, { p1: "hard", p2: "easy", … })   → 都交给 AI 打到结束（测试 / 统计用）
  *   FluxHoldemAI.equity(view, "fire", "hard")    → 这张牌在亮牌时的期望份额 { e, fair, n }
+ *   FluxHoldemAI.cardOdds(view, "hard")          → 盖牌那一步每张牌会被抽中的概率 { 牌: 概率 }（decide 就按它抽，#521）
  */
 (function (root) {
   "use strict";
   const CC = () => root.CounterCards;
   const X = () => root.FluxHoldem;
+  const HF = () => root.CounterCardsAI;     // 按温度加权抽签、下注额（#521）用 High Flux 的 AI 的同一份
 
   const AI_CONFIG = {
     easy: {
@@ -48,14 +54,20 @@
       seen: false,           // 记不记之前亮牌公开过的牌
       peekMargin: 0.02,      // 庄家：留在顶上比压到堆底好这么多才留
       phaseKeep: 0.05,       // 庄家偷看到相位：手牌最好那张的胜率比平均份额高这么多才留在顶上（翻开就全押）
-      phaseEdge: 0           // 后面还可能翻到相位时，胜率比平均份额低于这个数才算被逼全押亏不亏（亏得多就弃牌）
+      phaseEdge: 0,          // 后面还可能翻到相位时，胜率比平均份额低于这个数才算被逼全押亏不亏（亏得多就弃牌）
+      playTemp: 0.05,        // 盖牌按胜率加权抽签的温度（#521，同 High Flux 的 AI；胜率是 0–1 的份额）：越高越随机，0 = 只盖胜率最高的那张
+      choiceTemp: 0.03,      // 庄家偷看后留在顶上 / 压到堆底：按好处两选一的温度（#521）——差得不多时两边都会选
+      sizeTemp: 0.05         // 下注额的温度（#521）：多出来的胜率在 bigEdge 附近时最低额、双倍都会下
     },
     hard: {
       betEdge: 0.1, bigEdge: 0.3, raiseEdge: 0.25, callSlack: 0.08, cheapCall: 0.25, bluff: 0.1, loanEdge: 0.2, allInEdge: -0.02,
       seen: true, peekMargin: 0.01, phaseKeep: 0.02, phaseEdge: 0,
       sizePot: 0.6,          // 下注额 ≈ 最低额 + 底池 × 多出来的胜率 × 这个系数
       aggrRead: 0.12,        // 这一回合别人每下注 / 加注一次，自己的胜率往下调这么多 ÷ 对手人数（人多时一次下注说明不了几个人的牌）
-      loanGrowth: 2.2        // 借贷：一轮最多能把筹码翻几倍，估算借了还追不追得上
+      loanGrowth: 2.2,       // 借贷：一轮最多能把筹码翻几倍，估算借了还追不追得上
+      playTemp: 0.03,        // 盖牌的温度（#521）：比普通低，但不是 0
+      choiceTemp: 0.02,      // 两选一的温度（#521）：比普通低
+      sizeJitter: 0.25       // 下注额（#521）：按底池算出来的、比最低额多出来的那部分上下浮动 25%
     }
   };
   const LEVELS = ["easy", "normal", "hard"];
@@ -174,25 +186,29 @@
   }
 
   /* ---------- 各步的决定 ---------- */
+  /** 盖牌（#521 改成混合策略，同 High Flux 的 AI）：简单随手盖；普通 / 困难按 playOdds 的概率抽一张——胜率越高越容易盖，但不是 100% */
   function playCard(ctx) {
     const cards = ctx.opts.filter(o => o.type === "play").map(o => o.card);
     if (ctx.level === "easy") return { type: "play", card: pick(cards, ctx.rng) };
-    let best = cards[0], bestV = -Infinity;
-    cards.forEach(c => { const x = equity(ctx.v, c, ctx.level).e + ctx.rng() * 1e-6; if (x > bestV) { bestV = x; best = c; } });
-    return { type: "play", card: best };
+    return { type: "play", card: HF().draw(cards, playOdds(ctx, cards), ctx.rng) };
+  }
+  /** 盖每张牌的概率（#521）：按胜率（期望份额）加权抽签，温度 playTemp */
+  function playOdds(ctx, cards) {
+    return HF().softOdds(cards.map(c => equity(ctx.v, c, ctx.level).e), ctx.cfg.playTemp);
   }
   /** 庄家：偷看到的那张当第 1 张天气，比压到堆底（第 1 张换成别的）好就留在顶上。
-   *  偷看到相位（相位不改得分，留在顶上就是翻开就全押）：手牌最好那张的胜率比平均份额高 phaseKeep 才留 */
+   *  偷看到相位（相位不改得分，留在顶上就是翻开就全押）：手牌最好那张的胜率比平均份额高 phaseKeep 才留。
+   *  #521 起两种都按好处两选一（温度 choiceTemp）：差得多几乎总选好的那边，差不多时两边都会选 */
   function place(ctx) {
-    const v = ctx.v;
+    const v = ctx.v, choose = (a, b) => ({ type: "place", where: HF().softChoose(a, b, ctx.cfg.choiceTemp, ctx.rng) ? "top" : "bottom" });
     if (ctx.level === "easy" || !v.peek) return { type: "place", where: ctx.rng() < ctx.cfg.peekKeep ? "top" : "bottom" };
     if (v.peek.card === conf().allInWeather && v.deckCount > 1) {
       const qs = v.me.hand.map(c => equity(v, c, ctx.level, { w1: v.peek.card }));
-      return { type: "place", where: Math.max(...qs.map(q => q.e)) - qs[0].fair >= ctx.cfg.phaseKeep ? "top" : "bottom" };
+      return choose(Math.max(...qs.map(q => q.e)) - qs[0].fair, ctx.cfg.phaseKeep);
     }
     const best = (force) => Math.max(...v.me.hand.map(c => equity(v, c, ctx.level, force).e));
     const keep = best({ w1: v.peek.card }), away = v.deckCount > 1 ? best({ not: v.peek.card }) : keep;
-    return { type: "place", where: keep >= away - ctx.cfg.peekMargin ? "top" : "bottom" };
+    return choose(keep + ctx.cfg.peekMargin, away);
   }
   /** 身家：手上的 + 这一轮押下去的 − 欠的 */
   const worth = (s) => (s.chips || 0) + (s.bet || 0) - (s.owe || 0);
@@ -274,10 +290,10 @@
     if (ctx.level === "hard") e = Math.max(0, e - ctx.cfg.aggrRead * aggression(v) / Math.max(1, q.n));
     return { e, fair: q.fair, edge: e - q.fair, phase: q.phase };
   }
-  /** 下注额：普通牌很好时双倍最低额；困难按底池 × 多出来的胜率 */
+  /** 下注额：普通牌很好时双倍最低额；困难按底池 × 多出来的胜率。#521 起带随机性（High Flux 的 AI 的同一份 betSize）：
+   *  普通在 bigEdge 附近最低额、双倍都会下（sizeTemp），困难多出来的那部分上下浮动 sizeJitter */
   function size(ctx, o, edge) {
-    if (ctx.level === "hard") return o.min + ctx.v.pot * Math.max(0, edge) * ctx.cfg.sizePot;
-    return o.min * (edge >= ctx.cfg.bigEdge ? 2 : 1);
+    return HF().betSize(o.min, ctx.v.pot, edge, ctx.level, ctx.cfg, ctx.rng);
   }
   /** 借多少才够跟注：缺口向上取整到一份，夹在这次能借的范围里 */
   function loanToCall(v, o) {
@@ -307,6 +323,16 @@
     }
     return a;
   }
+  /** 盖牌那一步每张牌会被抽中的概率 { 牌: 概率 }（#521，测试 / 调参用；decide 就按它抽）：简单是平均的；不是盖牌的时候返回 null */
+  function cardOdds(view, level) {
+    if (!view || view.stage !== "play" || !view.legal || !view.legal.length) return null;
+    level = LEVELS.indexOf(level) >= 0 ? level : "normal";
+    const cards = view.legal.filter(o => o.type === "play").map(o => o.card);
+    const p = level === "easy" ? cards.map(() => 1 / cards.length) : playOdds({ v: view, level, cfg: AI_CONFIG[level] }, cards);
+    const out = {};
+    cards.forEach((c, i) => { out[c] = p[i]; });
+    return out;
+  }
   function step(g, id, level, rng) {
     if (X().toAct(g).indexOf(id) < 0) return null;
     const a = decide(X().view(g, id), level, rng);
@@ -326,7 +352,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, decide, step, playOut, equity, scenarios };
+  const api = { AI_CONFIG, LEVELS, decide, step, playOut, equity, scenarios, cardOdds };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.FluxHoldemAI = api;
 })(typeof window !== "undefined" ? window : globalThis);
