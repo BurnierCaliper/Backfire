@@ -1433,9 +1433,11 @@
           if (G.koHold) { const h = AttackFx.ko(rectOf(b.id), { hold: "manual", track }); if (h) G.koHandles.push({ h, slow: !!s.killBig }); }
           else AttackFx.ko(rectOf(b.id), { hold: s.killBig ? 3200 : 1650, track });
         }
-        stamp(b.id, s && s.isPlayer ? "倒下" : "击倒", "kill");
+        // 配置物（爆炸桶、电池……）被打掉盖「摧毁」，不算我方有人倒下：快照里不是敌方的配置物 isPlayer 也是 true（snapProp：定卡片排在哪一边、画成哪一方），
+        // 以前打爆同区有人的爆炸桶，炸到人那一下的快照里桶已经倒下，会盖「倒下」、弹「爆炸桶 阵亡」（#382）
+        stamp(b.id, s && s.isProp ? "摧毁" : s && s.isPlayer ? "倒下" : "击倒", "kill");
         longest = Math.max(longest, 520);
-        if (s && s.isPlayer) fallen.push(s);
+        if (s && s.isPlayer && !s.isProp) fallen.push(s);
       }
       if (b.kind === "down") { if (window.Sfx && !G.sim) Sfx.ui("ko"); stamp(b.id, "濒死", "kill"); longest = Math.max(longest, 520); }
       if (b.kind === "heal") {
@@ -1807,7 +1809,7 @@
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
           await wait(chain ? 40 : 55);
         } else {
-          if (e.kind === "status" && e.text && window.Sfx && !G.sim) Sfx.ui(/振奋|坚固|坚挺|优势|躲藏|护盾|铁壁|免疫/.test(e.text) ? "shield" : /无效|打不动|触发/.test(e.text) ? "" : "debuff");
+          if (e.kind === "status" && e.text && window.Sfx && !G.sim) Sfx.ui(/振奋|坚固|坚挺|优势|躲藏|护盾|铁壁|免疫/.test(e.text) ? "shield" : /无效|打不动|触发|落空/.test(e.text) ? "" : "debuff");
           if (e.text && !paperPop(e.unitId, e)) popup(e.unitId, e.text, "txt e-" + e.element);
           if (e.kind === "status" && e.text && window.HudIcons) procBadge(e.unitId, HudIcons.keyOf(e.text));
           deferStun(beatsBefore); await playBeats(beatsBefore.filter(b => b.kind !== "stun"));
@@ -3762,7 +3764,10 @@
     } catch (err) {
       names = (spec.enemies || []).map(e => e.preset);
     }
-    const extra = spec.extraToken ? " · 五代币" : "";
+    // 非默认枚数才标出来（基线 5 / 上滚到 6 等）；用实际 spec.tokens，不写死旧的固定文案
+    const tokN = Number(spec.tokens);
+    const tokBase = (typeof ENCOUNTER_TOKENS !== "undefined") ? ENCOUNTER_TOKENS : 4;
+    const extra = (tokN > 0 && tokN !== tokBase) ? (` · ${tokN} 代币`) : "";
     const mix = spec.mixed ? " · 混战" : "";
     return (spec.name || "遭遇") + extra + mix + (names.length ? " · " + names.join("、") : "");
   }
@@ -5723,7 +5728,12 @@
     $("g-enc-close").onclick = () => $("g-enc-sheet").classList.remove("show");
     $("g-enc-roll").onclick = () => {
       if (typeof rollEncounter !== "function") { flashHint("遭遇系统未加载"); return; }
-      const spec = dispatch({ type: "battle.panel", action: "rollEncounter", region: $("g-enc-region").value, faction: $("g-enc-faction").value || null }).value;
+      const spec = dispatch({
+        type: "battle.panel", action: "rollEncounter",
+        region: $("g-enc-region").value, faction: $("g-enc-faction").value || null,
+        partySize: (typeof liveHeroCount === "function" ? liveHeroCount() : 0),
+        level: Number($("g-level") && $("g-level").value) || Number(G.level) || null
+      }).value;
       $("g-enc-preview").textContent = encSummary(spec);
       startEncounter(spec);
     };

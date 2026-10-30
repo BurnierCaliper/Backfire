@@ -24,7 +24,7 @@ const RESULTS = [-2, -1, 0, 1, 2];
 const clamp = n => Math.max(-2, Math.min(2, n));
 
 // 规则里的三张赔率表（主人 10/30；null = 不开）
-const ROUND1 = { "-2": 8, "-1": 3.5, "0": 2, "1": 4.5, "2": 18 };
+const ROUND1 = { "-2": 8, "-1": 3.5, "0": 2, "1": 4, "2": 18 };   // 主人 10/30（#497）：酸雨也豁免谐波，+1 由 4.5 变 4
 const ROUND2 = {
   fire: [6, 3, 2.5, 5, 16],
   acid: [5, 4.5, 2.5, 4.5, 10],
@@ -32,7 +32,7 @@ const ROUND2 = {
   ice: [10, 3, 1.5, 6, null],
   energy: [32, 10, 1.5, 3, 10],
   physical: [10, 3, 1.5, 6, null],
-  harmonic: [6, 2, 4.5, 4.5, 32]
+  harmonic: [10, 2, 4, 4, 32]   // #497：酸雨不再给谐波 −1（以前 6 / 2 / 4.5 / 4.5 / 32）
 };
 const ROUND3 = { 1: 4.5, 2: 2, 3: 1.5, 4: null, 5: null };   // k = 得出这个结果的层牌数
 const oddsRow = (b) => J(b.cells.map(x => (x.open ? x.odds : null)));
@@ -80,7 +80,7 @@ test("计分直接用 CounterCards.score：相位以外照原样（超出 ±2 �
 test("245 种组合的分布：三张都盖着 245 种，翻了元素 35 种，再翻天气 5 种；每种结果各几种", () => {
   const all = G.tally({});
   assert.equal(all.N, 245);
-  assert.deepEqual(J(all.k), { "-2": 27, "-1": 62, "0": 95, "1": 49, "2": 12 });
+  assert.deepEqual(J(all.k), { "-2": 25, "-1": 62, "0": 96, "1": 50, "2": 12 });   // #497 以后（以前 27 / 62 / 95 / 49 / 12）
   let sum = 0;
   for (const el of C.elements) {
     const t = G.tally({ element: el });
@@ -130,7 +130,7 @@ test("赔率 = 32/35 × N ÷ k：第一轮（245 种）、第二轮（按元素�
   assert.deepEqual([...ks].sort(), [1, 2, 3, 4], "第三轮 k = 1 / 2 / 3 / 4 都出现过");
   // 赔率不是硬编码的表：改了系数跟着变（35/35 = 不抽水）
   const fair = G.board({}, [35, 35]);
-  assert.deepEqual(oddsRow(fair), [9, 3.5, 2.5, 5, 20]);
+  assert.deepEqual(oddsRow(fair), [9, 3.5, 2.5, 4.5, 20]);
 });
 
 test("取整：不满 5 倍向下取到 0.5，满 5 倍向下取整；赔出半枚向下取整（连本带利）", () => {
@@ -161,7 +161,7 @@ test("抽水：名义 32/35（约 8.6%）；取整后每一格的实际抽水都
   boards.forEach(b => b.cells.filter(x => x.open).forEach(x => { n++; assert.ok(rake(b, x) >= nominal - 1e-12, `${x.result}：抽水 ${rake(b, x)}`); }));
   assert.ok(n > 100);
   const b1 = G.board({}), zero = b1.cells.find(x => x.result === 0);
-  assert.ok(Math.abs(rake(b1, zero) - 0.2245) < 0.001, "第一轮押 0 约 22%");
+  assert.ok(Math.abs(rake(b1, zero) - 0.2163) < 0.001, "第一轮押 0 约 22%");   // #497 以后 1 − 2 × 96 / 245
   const k2 = { N: 5 };
   assert.ok(Math.abs(rake(k2, { odds: ROUND3[2], k: 2 }) - 0.2) < 1e-9, "第三轮 k = 2 是 20%");
 });

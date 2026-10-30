@@ -152,8 +152,8 @@ test("铁壁也受过载和雷鸣的反伤增益", () => {
 
 /* ---------- Helumica 聚焦 ---------- */
 
-function focusField() {
-  const { c, S } = setup(["chuan", "helu"], [{ id: "bandit_boss", lv: 1, zone: 1 }]);
+function focusField(extra) {
+  const { c, S } = setup(["chuan", "helu"].concat(extra || []), [{ id: "bandit_boss", lv: 1, zone: 1 }]);
   const ch = kit(S, "chuan"), helu = kit(S, "helu"), foe = foesOf(S)[0];
   ready(ch, 1); helu.zone = 2; foe.zone = 1; S.weather = "none";
   foe.def = foe.defMax = 30;
@@ -184,17 +184,19 @@ test("聚焦：Helumica 协助攻击的那一击推进过，就不再「直接�
 });
 
 test("聚焦的层被打碎后清除聚焦：不再抹第二次、不再给 2 击破、不再记成废物利用来源", () => {
-  const { c, S, helu, foe } = focusField();
+  const { c, S, helu, foe } = focusField(["kolt"]);                     // 带上柯尔特：废料记在他身上
+  const kolt = kit(S, "kolt");
   foe.focuses[0].seq = ["acid", "acid"];
   hit(c, helu, foe, { flat: 400 });                                    // 一下打碎装甲层（物理，不推进序列）
   assert.equal(foe.layers.find(l => l.type === "armor").current, 0);
   assert.equal(foe.focuses.length, 0, "聚焦跟着清掉");
-  S.lastBrokenLayer = null;                                            // 被废物利用领走
+  assert.deepEqual(plain(kolt.resources.scrapStore), { armor: 200 }, "打碎的那一层记成废料");
+  kolt.resources.scrapStore = {};                                      // 被废物利用领走
   const def0 = foe.def;
   hit(c, helu, foe, { flat: 5, element: "acid" });
   hit(c, helu, foe, { flat: 5, element: "acid" });
   assert.equal(foe.def, def0, "没有抹层的 2 击破");
-  assert.equal(S.lastBrokenLayer, null, "同一层没有被重新记成来源");
+  assert.deepEqual(plain(kolt.resources.scrapStore), {}, "同一层没有被重新记成来源");
 });
 
 /* ---------- 龙哥 ---------- */

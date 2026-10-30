@@ -229,7 +229,8 @@ test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排
   assert.equal(list().scrollTop, 20, "往上翻着：不拉回最底下");
   // 翻回最底下：再来新记录就接着贴底
   list().scrollTop = list().scrollHeight - list().clientHeight;
-  for (let i = 0; i < 10 && p.UI.state().game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  // 跟注后的 3 秒追加窗口（#496）里点「不加注」（AI 下注了、人跟注以后会开窗口）
+  for (let i = 0; i < 10 && p.UI.state().game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]') || p.$('#cc-actions [data-cc="pass"]'));
   assert.deepEqual(texts(), want());
   assert.ok(atBottom(), "在底部：新记录来了接着贴底");
   assert.ok(texts().length <= N, `最多显示最近 ${N} 条`);
@@ -590,7 +591,7 @@ test("庄家（人）偷看天气堆顶：只有自己看得到，放回原位 /
 /* ---------- 偷看出来的天气牌：标签不被图标挡住、效果文字排在牌里（主人 10/30，#499 第 4 项） ---------- */
 /** 七种天气牌上写的：名字、元素修正、附加说明（规则文字，同 weatherMods）；酸雨排第一（修正最多，以前溢出得最厉害） */
 const PEEK_CARDS = {
-  acid: { name: "酸雨", els: ["火 -1", "酸 +1", "电 +1", "冰 -1", "物理 -1", "谐波 -1"], notes: ["酸、冰以外打装甲 +1"] },
+  acid: { name: "酸雨", els: ["火 -1", "酸 +1", "电 +1", "冰 -1", "物理 -1"], notes: ["酸、冰以外打装甲 +1"] },   // #497：酸雨也豁免谐波（以前还有「谐波 -1」）
   glow: { name: "微光", els: ["能量 +1"], notes: ["能量以外克制反转"] },
   phase: { name: "相位", els: [], notes: ["翻到时双方全押"] },
   snow: { name: "雪天", els: ["火 -1", "酸 -1", "冰 +1", "物理 +1"], notes: [] },
@@ -629,7 +630,7 @@ test("偷看出来的天气牌（主人 10/30，#499 第 4 项）：「只有你
   const p = page(), now = p.UI.weatherCardHtml("acid");
   assert.doesNotMatch(now, /cc-wx-fit|cc-wx-head|cc-mods-el|cc-mods-note/);
   assert.match(now, /<i class="cc-corner">酸雨<\/i>/);
-  assert.match(now, /火 -1<br>酸 \+1<br>电 \+1<br>冰 -1<br>物理 -1<br>谐波 -1<br>酸、冰以外打装甲 \+1<\/small>/);
+  assert.match(now, /火 -1<br>酸 \+1<br>电 \+1<br>冰 -1<br>物理 -1<br>酸、冰以外打装甲 \+1<\/small>/);   // #497：酸雨不再写谐波 -1
 });
 
 /* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */

@@ -643,7 +643,14 @@ function absorbSandsInto(livesand) {
       layer.current = Math.max(0, Number(layer.current) || 0) + hp;
       layer.max = Math.max(layer.current, (Number(layer.max) || 0) + hp);
     }
-    livesand.atk = (livesand.atk || 0) + (u.atk || 0);
+    const gainAtk = u.atk || 0;
+    livesand.atk = (livesand.atk || 0) + gainAtk;
+    // 出手用 effectiveAtk → personalAtk（party.js · baseEffectiveAtk），只加 atk 卡面涨了伤害仍是吸收前的底值
+    if (livesand.personalAtk != null) livesand.personalAtk = (Number(livesand.personalAtk) || 0) + gainAtk;
+    if (livesand.ivBase) {
+      livesand.ivBase.atk = (Number(livesand.ivBase.atk) || 0) + gainAtk;
+      if (livesand.ivBase.personalAtk != null) livesand.ivBase.personalAtk = (Number(livesand.ivBase.personalAtk) || 0) + gainAtk;
+    }
     livesand.def = (livesand.def || 0) + 1;
     livesand.defMax = (livesand.defMax || 0) + 1;
     (u.layers || []).forEach(l => { l.current = 0; });
@@ -2261,12 +2268,53 @@ function wakeDormant(u, culprit, notes, why) {
   notes.push(`${u.name} ${why || "被惊动"}，解除休眠。`);
   if (u.kit === "alarm_bot" && culprit && hostileTo(u, culprit)) alarmApplyHigh(u, culprit, notes);
 }
-/** 我方单位进入某区（自己走、被推都算）：叫醒那一区休眠的敌人（app.js · doMoveInner / displaceTo 调用） */
-function dormantAfterMove(mover, notes) {
+/** mover 进了它现在所在的区：叫醒那一区和它敌对的休眠敌人 */
+function dormantWakeIn(mover, notes) {
   if (!mover || mover.kind) return;
   (state.units || []).forEach(u => {
     if (u.dormant && !u.isPlayer && !u.dead && !u.hidden && hostileTo(u, mover) && Number(u.zone) === Number(mover.zone)) wakeDormant(u, mover, notes, `${mover.name} 进入它所在的区`);
   });
+}
+/** 我方单位进入某区（自己走、被推、紧追跟上……都算）：叫醒那一区休眠的敌人
+ *  （app.js · doMoveInner / displaceTo / chaseFollow、灯协助格挡成功跟到进攻者那一区 performAssistBlock、夕夏回合开始跟上抓着的敌人 beginRound 调用）。
+ *  这次行动里技能直接换过区、还没补算的先补上（先到的算吵醒它的人） */
+function dormantAfterMove(mover, notes) {
+  dormantLedgerSync(notes);
+  dormantWakeIn(mover, notes);
+}
+/* 技能里直接改所在区的移动（突进、猛扑、逃离、燕飞、协助攻击跟到目标那一区……）不走 doMoveInner / displaceTo，以前叫不醒休眠的敌人（#379）。
+ * 照驻波墙的做法（app.js · waveLedgerOpen）：一次行动（runSkill / doMove）开始时记下每个在场单位在哪一区（state._dormantLedger），
+ * 出手之前（dealTo）、别的移动叫醒之前（dormantAfterMove）和行动结束时补算——换了区的单位照「进入它所在的区」叫醒那一区休眠的敌人。
+ * 一起到的（带人同行、点火突进带人……）先算这次行动的出手方。只看最后到了哪一区，路上经过的区不算（和冻土、伏击一样）。
+ * 场上没有休眠的敌人时什么都不记 */
+function dormantLedgerOpen(actor) {
+  if (state._dormantLedger || !(state.units || []).some(u => u && u.dormant && !u.isPlayer && !u.dead)) return false;
+  const zones = {};
+  (state.units || []).forEach(u => { if (u && u.id != null && u.zone != null && !u.dead && !u.hidden && !u.fused && !u._removed) zones[u.id] = Number(u.zone); });
+  state._dormantLedger = { by: actor ? actor.id : null, zones };
+  return true;
+}
+function dormantLedgerSync(notes) {
+  const led = state._dormantLedger;
+  if (!led) return;
+  const out = notes || [];
+  const list = (state.units || []).slice();
+  const first = list.findIndex(u => u && led.by != null && u.id === led.by);
+  if (first > 0) list.unshift(list.splice(first, 1)[0]);   // 出手方先算
+  list.forEach(u => {
+    if (!u || u.id == null) return;
+    // 不在场上的不记（收回的武器人、倒下的）：再上场时从那一区重新记，不算进区
+    if (u.zone == null || u.dead || u.hidden || u.fused || u._removed) { delete led.zones[u.id]; return; }
+    const now = Number(u.zone), was = led.zones[u.id];
+    led.zones[u.id] = now;
+    if (was == null || was === now) return;   // 这次行动里才上场的（唤出、援军）不算进区
+    dormantWakeIn(u, out);
+  });
+  if (!notes && out.length) appendLog(out.join("\n"));
+}
+function dormantLedgerClose(own) {
+  if (!own) return;
+  try { dormantLedgerSync(); } finally { state._dormantLedger = null; }
 }
 /** 敌人受到伤害：同阵营（含可混编的阵营，不含异星生物）休眠的单位都被叫醒，自己挨打也醒（app.js · dealTo 调用） */
 function dormantOnAllyHurt(target, attacker) {
@@ -3024,7 +3072,7 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
   }
   if (id === "en_liz") {
     if (!needT()) return true;
-    aa(t, { element: "acid", mult: 1, diceN: 1, diceS: 6, baseBreak: 2 });
+    aa(t, { element: "acid", mult: 1, diceN: addedDiceByLevel(a.level), diceS: 6, baseBreak: 2 });
     return true;
   }
   if (id === "en_liz_assist") {

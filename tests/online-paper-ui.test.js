@@ -1,5 +1,6 @@
 // 联机玩家战斗画面的「纸片风」界面（#308，online-paper.js / online-paper.css）——要浏览器的那部分：
-//   · 联机玩家开着新画面时是新排版（战场铺满、顶栏、吊牌、左上角队伍、底下技能栏、右边缘的抽屉标签），关着新画面 / 主持人还是原样
+//   · 联机玩家开着新画面时是新排版（战场铺满、顶栏、吊牌、左上角队伍、左下角技能栏、右边缘的抽屉标签），关着新画面 / 主持人还是原样
+//   · #384：窗口够宽时技能栏让开右边抽屉那一列，记录 / 聊天的抽屉拉开一直到底
 //   · 各块能收起 / 展开、状态记在本机（重新挂一次界面还是那样），收着时小队来了新消息挂数字
 //   · 「工具 ▾」下拉里的每一项和原来舞台顶上那一排的按钮是同一个（同一个 data-online、打开同一个浮层），原来那排不在了；点完收起
 //   · 吊牌上的 ⇅ 点开「延后 / 换位」：点的就是热座栏原来的按钮（发同样的 orderMove、进同样的换位状态）
@@ -132,7 +133,7 @@ const paperOn = page => page.evaluate(() => document.body.classList.contains("ol
 const rect = (page, sel) => page.evaluate(sel => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height, vw: innerWidth, vh: innerHeight }; }, sel);
 const settle = page => page.waitForTimeout(80);
 
-test("联机玩家开着新画面：战场铺满；顶上一条写联机跑团 · 房间码 · 第 N 回合 · 时间 · 天气，右边镜头 / 工具 / 菜单；吊牌挂在顶栏下面；队伍在左上角、技能栏在底下、记录 / 聊天收成右边缘的竖标签", { timeout: 60000 }, async t => {
+test("联机玩家开着新画面：战场铺满；顶上一条写联机跑团 · 房间码 · 第 N 回合 · 时间 · 天气，右边镜头 / 工具 / 菜单；吊牌挂在顶栏下面；队伍在左上角、技能栏在左下角、记录 / 聊天收成右边缘的竖标签", { timeout: 60000 }, async t => {
   const o = await paperPage(t); if (!o) return; const { page } = o;
   await asPlayer(page);
   await page.waitForFunction(() => document.body.classList.contains("ol-paper"));
@@ -165,9 +166,9 @@ test("联机玩家开着新画面：战场铺满；顶上一条写联机跑团 �
   const party = await rect(page, ".hd2d-party");
   assert.ok(party.left < 30 && party.top > bar.bottom && party.top < 160, "队伍在左上角：" + JSON.stringify(party));
   assert.deepEqual(await page.locator(".hd2d-party .olp-party-tools [data-online]").evaluateAll(els => els.map(e => e.dataset.online + ":" + e.dataset.info)), ["info:sheet", "info:armory", "info:bag"]);
-  // 底下技能栏
+  // 左下角技能栏（#384：以前在底下中间）
   const dock = await rect(page, ".ol-battle > .g-hud");
-  assert.ok(dock.bottom > dock.vh - 30 && Math.abs((dock.left + dock.right) / 2 - dock.vw / 2) < 4 && dock.width < dock.vw - 40, "技能栏浮在底下中间：" + JSON.stringify(dock));
+  assert.ok(dock.bottom > dock.vh - 30 && dock.left < 30 && dock.width < dock.vw - 40, "技能栏浮在左下角：" + JSON.stringify(dock));
   assert.ok(await page.isVisible('.ol-battle [data-ob-skill="ruby_aa"]'), "技能照旧（同一个按钮）");
   assert.match(await page.locator(".ol-battle .hd2d-dock-row").innerText(), /轮到你了/);
   // 右边：平时只剩右边缘的竖标签
@@ -1057,5 +1058,65 @@ test("选中技能以后技能栏先收起（#362）：主机问目标时技能�
   await page.waitForTimeout(300);
   assert.deepEqual(await look(), before, "打完展开：交给新画面的面板、--olp-dock-h 还是没变");
   assert.equal(await page.evaluate(() => localStorage.getItem("backfire-hd2d-dock")), null, "自己收起 / 展开的不记在本机");
+  assert.deepEqual(o.errors, []);
+});
+
+/* ---------- #384：技能栏挪到左下角（以前在底下中间），右边的记录 / 聊天抽屉拉开一直到底 ---------- */
+/** 纸片画面排版的几个数（online-paper.css 开头的变量）：面板离屏幕边、技能栏 / 拉到底的抽屉离下边、抽屉多宽 */
+const paperVars = page => page.evaluate(() => { const s = getComputedStyle(document.body), px = k => parseFloat(s.getPropertyValue(k)); return { edge: px("--olp-edge"), foot: px("--olp-foot"), side: px("--olp-side") }; });
+
+test("#384 技能栏在左下角：窗口够宽（1280px 起）时让开右边抽屉那一列；记录 / 聊天的抽屉拉开从吊牌下面一直到底（底边和技能栏对齐、在技能栏右边）——战斗记录排到最底下，小队聊天的便利贴排到底、输入框在最底下点得到", { timeout: 90000 }, async t => {
+  for (const [w, h] of [[1440, 900], [1280, 720]]) {
+    const o = await paperPage(t, { context: { viewport: { width: w, height: h } } }); if (!o) return; const { page } = o;
+    await asPlayer(page);
+    await page.waitForSelector("#online-side [data-side-collapse]", { state: "visible" });
+    // 等技能栏、技能吊牌贴上纸纹（吊牌贴上才是 150px 宽，技能栏的高度这时才定下来）
+    await page.waitForFunction(() => !!document.querySelector(".ol-battle > .g-hud[data-olp-tex]") && [...document.querySelectorAll(".ol-battle > .g-hud .skills .sk")].every(b => b.dataset.olpTex) && OnlinePaper.pending() === 0, null, { timeout: 30000 });
+    await settle(page);
+    const V = await paperVars(page), tag = `${w}×${h}`;
+    const dock = await rect(page, ".ol-battle > .g-hud");
+    assert.ok(Math.abs(dock.left - V.edge) < 1 && Math.abs(dock.bottom - (h - V.foot)) < 1 && dock.right <= w - 2 * V.edge - V.side + 1, `${tag} 技能栏在左下角、让开抽屉那一列：` + JSON.stringify(dock));
+    // 拉开：从吊牌下面一直到底（底边和技能栏对齐），在技能栏右边；战斗记录（收据）铺满整个抽屉
+    await page.click("#online-side [data-side-collapse]");
+    await page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+    await settle(page);
+    const drawer = await rect(page, "#online-side"), log = await rect(page, "#online-side .ol-side-log");
+    assert.ok(Math.abs(drawer.bottom - dock.bottom) < 1 && drawer.top < 140 && drawer.left >= dock.right + V.edge - 1 && Math.abs(drawer.right - (w - V.edge)) < 1,
+      `${tag} 抽屉一直到底、在技能栏右边：` + JSON.stringify([drawer, dock]));
+    assert.ok(log.bottom > drawer.bottom - 2 && log.height > h - 200, `${tag} 战斗记录排到最底下：` + JSON.stringify(log));
+    // 小队聊天：便利贴那张纸一直到底，输入框在纸的最底下、点得到（不被技能栏挡住）
+    await page.click('#online-side [data-side="chat"]');
+    await say(page, "c1", "p2", "我先上");
+    await page.waitForFunction(() => /我先上/.test(document.querySelector("#online-side .ol-side-chat").textContent));
+    const chat = await page.evaluate(() => {
+      const side = document.getElementById("online-side").getBoundingClientRect(), list = document.querySelector("#online-side .ol-side-chat").getBoundingClientRect();
+      const ta = document.querySelector("#online-side .ol-side-form textarea"), r = ta.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { sideBottom: side.bottom, list: Math.round(list.height), ta: Math.round(r.bottom), hit: hit === ta };
+    });
+    assert.ok(chat.hit && chat.sideBottom - chat.ta < 24 && chat.list > h - 320, `${tag} 小队聊天一直到底，输入框在最底下、点得到：` + JSON.stringify(chat));
+    await shot(page, `paper-384-${w}x${h}-chat`);
+    assert.deepEqual(o.errors, []);
+  }
+});
+
+test("#384 不到 1280px：电脑上（1024 × 768）技能栏也贴着左边，照旧差不多横贯（960 宽，不为抽屉变窄），抽屉照旧停在技能栏上面；手机竖屏（390 × 844）技能栏照旧横贯最底下", { timeout: 60000 }, async t => {
+  let o = await paperPage(t, { context: { viewport: { width: 1024, height: 768 } } }); if (!o) return;
+  await asPlayer(o.page);
+  await o.page.waitForSelector("#online-side [data-side-collapse]", { state: "visible" });
+  await o.page.click("#online-side [data-side-collapse]");
+  await o.page.waitForFunction(() => !document.getElementById("online-side").classList.contains("ol-side-collapsed"));
+  await o.page.waitForFunction(() => !!document.querySelector(".ol-battle > .g-hud[data-olp-tex]") && [...document.querySelectorAll(".ol-battle > .g-hud .skills .sk")].every(b => b.dataset.olpTex) && OnlinePaper.pending() === 0, null, { timeout: 30000 });
+  await settle(o.page);
+  const V = await paperVars(o.page);
+  const dock = await rect(o.page, ".ol-battle > .g-hud"), drawer = await rect(o.page, "#online-side");
+  assert.ok(Math.abs(dock.left - V.edge) < 1 && Math.abs(dock.width - 960) < 1 && Math.abs(dock.bottom - (dock.vh - V.foot)) < 1, "技能栏贴着左下角、照旧 960 宽：" + JSON.stringify(dock));
+  assert.ok(drawer.bottom <= dock.top && drawer.height >= 260, "抽屉照旧停在技能栏上面：" + JSON.stringify([drawer, dock]));
+  assert.deepEqual(o.errors, []);
+  o = await paperPage(t, { context: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }); if (!o) return;
+  await asPlayer(o.page);
+  await o.page.waitForSelector("#online-paper .olp-top", { state: "visible" });
+  await settle(o.page);
+  const phone = await rect(o.page, ".ol-battle > .g-hud");
+  assert.ok(Math.abs(phone.left) < 1 && Math.abs(phone.right - phone.vw) < 1 && Math.abs(phone.bottom - phone.vh) < 1, "手机：技能栏横贯最底下：" + JSON.stringify(phone));
   assert.deepEqual(o.errors, []);
 });

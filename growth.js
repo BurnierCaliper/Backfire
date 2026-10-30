@@ -7,7 +7,7 @@ const XP_BY_RANK = {
 const ENEMY_RANK = {
   guard_sword: "minion", guard_gun: "minion", thug_knife: "minion", thug_hammer: "minion",
   boomcar: "minion", sand_beast: "minion", sand_human: "minion", buoy: "minion",
-  dumpdrone: "minion", mine_guard: "minion", mine_overseer: "minion", flint_sweeper: "minion", alarm_bot: "minion", meteor_miner: "minion", meteor_spider: "minion", meteor_centipede: "minion", sandfish_drive: "minion", sandfish_ambush: "minion", dust_bug: "minion", tube_worm: "minion", sandfish_lead: "elite", swarm: "minion", crow: "minion", patrol_car: "minion",
+  dumpdrone: "minion", mine_guard: "minion", mine_overseer: "minion", flint_sweeper: "minion", alarm_bot: "minion", meteor_miner: "minion", meteor_spider: "minion", meteor_centipede: "elite", sandfish_drive: "minion", sandfish_ambush: "minion", dust_bug: "minion", tube_worm: "minion", sandfish_lead: "elite", swarm: "minion", crow: "minion", patrol_car: "minion",
   mecha_mg: "elite", mecha_gl: "elite", bandit_boss: "elite", captain_wolf: "elite",
   captain_ox: "elite", captain_lizard: "elite", bigsand: "elite", livesand: "elite",
   giant: "elite", patrolboat: "elite", spreader: "elite", ant_guard: "elite", gas_collector: "elite", ant_hunter: "elite", watchcrow: "elite", dustbody: "elite",

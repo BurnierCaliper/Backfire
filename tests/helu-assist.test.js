@@ -55,10 +55,41 @@ test("协助扫描：在敌人那一区结算，选项照环境扫描；放弃�
   assert.equal(st.props.length, n0 + 1);
   assert.equal(st.props[st.props.length - 1].zone, 2, "区域固定为敌人所在的区");
   assert.equal(st.heluScanQueue.length, 0);
-  assert.ok(!helu.resources.scanned, "不占用本场主动扫描");
+  assert.equal(helu.resources.scanned, true, "算扫描过当前战场（#397）");
   assist(c, st, helu, foe);
   c.Commands.dispatch({ type: "heluScanAnswer", picks: null });
   assert.equal(st.heluScanQueue.length, 0);
+});
+
+test("协助扫描结算后算扫描过当前战场：频域造物能用了（#397）", () => {
+  const { c, st, helu, foe } = field();
+  helu.level = 9;
+  assert.match(String(c.skillRequirementError(helu, "helu_forge")), /扫描/, "还没扫描：频域造物用不了");
+  assist(c, st, helu, foe);
+  c.Commands.dispatch({ type: "heluScanAnswer", picks: { act: "spawn" } });
+  assert.equal(helu.resources.scanned, true);
+  assert.equal(c.skillRequirementError(helu, "helu_forge"), null);
+  st.combatPhase = "player";
+  helu.ap = 5;
+  c.dispatch({ type: "skill", actor: helu.id, skill: "helu_forge", target: null, picks: { gap: "1-2", element: "fire", mode: "dampen" } });
+  assert.equal(st.gaps["1-2"].type, "wave", "放出了驻波墙");
+  assert.equal(helu.ap, 4);
+  // 同一个记号：驻波在相位中推进、大气干扰在沙暴中调转风向也认
+  st.weather = "phase";
+  assert.equal(c.skillRequirementError(helu, "helu_wave"), null);
+  st.weather = "sand";
+  assert.equal(c.skillRequirementError(helu, "helu_storm"), null);
+  // 主动「环境扫描」没有每场次数限制，照样能用
+  assert.equal(c.skillRequirementError(helu, "helu_scan"), null);
+});
+
+test("放弃了协助扫描不算扫描过：频域造物照旧用不了（#397）", () => {
+  const { c, st, helu, foe } = field();
+  helu.level = 9;
+  assist(c, st, helu, foe);
+  c.Commands.dispatch({ type: "heluScanAnswer", picks: null });
+  assert.ok(!helu.resources.scanned);
+  assert.match(String(c.skillRequirementError(helu, "helu_forge")), /扫描/);
 });
 
 test("模拟器会自动结算协助扫描队列", () => {

@@ -54,7 +54,7 @@ test("数值：两个精英 1 / 5 / 10 / 15 / 20 级（2 人队）的护盾 / �
   get(c, "ENEMY_IV.off++");   // 个体值不波动
   const mult = get(c, "BOSS_POSTURE_MULT"), eliteMin = get(c, "ELITE_RULE_MIN_LEVEL");
   // [护盾, 星灵, 架势（文档的数；10 级起的精英照现有规则再 ×0.6）, ATK]
-  const TABLE = { 1: [12, 14, 4, 7], 5: [42, 22, 4, 10], 10: [82, 32, 4, 14], 15: [117, 42, 4, 17], 20: [157, 52, 4, 21] };
+  const TABLE = { 1: [12, 14, 4, 7], 5: [42, 22, 4, 11], 10: [82, 32, 4, 16], 15: [117, 42, 4, 21], 20: [157, 52, 4, 26] };
   const names = { sewer_keeper: "触灵维护员", sewer_cleaner: "触灵清扫员" };
   ELITES.forEach(kit => Object.keys(TABLE).forEach(lvs => {
     const lv = Number(lvs), [sh, sp, def, atk] = TABLE[lvs];
@@ -81,7 +81,7 @@ test("数值：照警卫队队长（蜥蜴）换算——护盾同蜥蜴、肉�
       assert.equal(u.layers[0].max, c.scaleHp(12 + 5 * (lv - 1) + 5 * Math.floor(lv / 2), p), tag);
       assert.equal(u.layers[1].max, c.scaleHp(14 + 2 * (lv - 1), p), tag);
       assert.deepEqual([u.defMax, u.atk], [liz.defMax, liz.atk], `${kit} ${tag}：架势 / ATK 同蜥蜴`);
-      assert.equal(u.atk, 7 + Math.floor(lv / 2) + Math.floor(lv / 5), tag);
+      assert.equal(u.atk, 7 + (lv - 1), tag);
       assert.equal(u.range, "ranged");
     });
   }

@@ -454,6 +454,8 @@ function statusLine(u) {
     if (sinkOf(u) && inQuicksand(u)) s.push("下陷 " + sinkOf(u) + (sinkOf(u) >= QUICKSAND.lockAt ? "（没顶）" : ""));
     if (u.statuses.advantage) s.push("优势");
     if (u.statuses.chase) s.push("紧追");
+    const blindN = typeof blindStacks === "function" ? blindStacks(u) : 0;   // 目盲按层数写（effects.js）
+    if (blindN) s.push("目盲×" + blindN);
   }
   (u.focuses || []).forEach(f => {
     const names = (f.seq || []).map((el, i) => (i === f.step ? "[" + (ELE[el] || el) + "]" : (ELE[el] || el)));
@@ -1146,6 +1148,7 @@ function renderEditor() {
       <label><input id="stInsp" type="checkbox" ${u.statuses.inspire?"checked":""}> 振奋</label>
       <label><input id="stHide" type="checkbox" ${u.statuses.hide?"checked":""}> 躲藏</label>
       <label><input id="stAdv" type="checkbox" ${u.statuses.advantage?"checked":""}> 优势</label>
+      <label>目盲层 <input id="stBlind" type="number" min="0" max="${typeof blindMaxStacks === "function" ? blindMaxStacks() : 3}" value="${typeof blindStacks === "function" ? blindStacks(u) : 0}" style="width:52px"></label>
     </div>
     <div class="section-title">即时效果</div>
     <div class="chk">
@@ -1218,6 +1221,7 @@ function renderEditor() {
   bind("edFly", () => editField("flying", uiEl("edFly").checked));
   bind("edStun", () => editField("stunned", uiEl("edStun").checked));
   bind("stBurn", () => calcCommand("status", { actor: u.id, key: "burn", value: Number(uiEl("stBurn").value) || 0 }));
+  bind("stBlind", () => calcCommand("status", { actor: u.id, key: "blind", value: Number(uiEl("stBlind").value) || 0 }));   // 目盲层数（CalcCommands 折成 0–3）
   const statuses = { Shock: "shock", Corr: "corr", Frost: "frostbite", Wave: "shockwave", High: "high", Reso: "reso", Un: "unstable", Weak: "weak", Insp: "inspire", Hide: "hide", Adv: "advantage" };
   Object.entries(statuses).forEach(([key, status]) => bind("st" + key, () => calcCommand("status", { actor: u.id, key: status, value: uiEl("st" + key).checked })));
   const imap = { inMelt: "melt", inSting: "sting", inOver: "overload", inShift: "shift", inSpread: "spread", inRef: "refract" };
@@ -1658,7 +1662,7 @@ function startCombat() {
   }
   // 决斗（enemies.js · pvpDuelToss，#472）：抛硬币定先手——先手的队在我方回合行动、后手的在敌人回合行动，要在补行动点之前定
   if (typeof pvpDuelToss === "function") pvpDuelToss();
-  beginRound([]);
+  beginRound([], { opening: true });   // 开局就存在的火场开战这一下层数不涨（#385）
   startPlayerPhase();
   // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）：开战时还没轮到它们，行动点 / 附赠从 0 开始，到第一个敌人回合开始时才补
   (state.units || []).forEach(u => { if (u && u.isPlayer && typeof unitTurnPhase === "function" && unitTurnPhase(u) === "enemy") { u.ap = 0; u.bonus = 0; } });
@@ -1768,8 +1772,10 @@ function refreshEnemyEconomy(u, notes) {
   if (typeof vehicleEconomy === "function") vehicleEconomy(u);   // 载具驾驶员：附赠上限对齐（最少 1 已在扣之前托底）
 }
 
-function beginRound(notes) {
+/** 回合开始。opt.opening：开战时（startCombat）结算的第 1 回合 */
+function beginRound(notes, opt) {
   notes = notes || [];
+  opt = opt || {};
   startLogTurn();
   // 易怒蛮牛（enemies.js · raceAfterHurt）：每回合最多发作一次，新回合重新可以触发
   state.units.forEach(u => { if (u && u.raceRageUsed) u.raceRageUsed = false; });
@@ -1799,6 +1805,8 @@ function beginRound(notes) {
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
     const own = !lateTurn(u);
+    // 夕夏的引擎：先看上一回合攻击过没有、清零，再自动碾压——回合开始的自动碾压算新一回合的攻击（#386）
+    if (own) xiaEngineCheck(u, notes);
     if (own) xiaAutoCrush(u, notes);
     if (own) noraRoundStart(u, notes);
     // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合（敌人回合里施加的到敌人回合开始才算，#476 / #482）
@@ -1814,7 +1822,6 @@ function beginRound(notes) {
       u.resources.giantTurns = (u.resources.giantTurns || 0) + 1;
     }
     if (u.resources) u.resources.blockUsedThisTurn = false;
-    if (own) xiaEngineCheck(u, notes);
   });
   state.units.forEach(u => {
     if (u.kit === "watchcrow" && !u.dead && !u.hidden) {
@@ -1861,7 +1868,7 @@ function beginRound(notes) {
       }
     }
   });
-  Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes));
+  Object.keys(state.fields || {}).forEach(z => tickFireField(z, notes, !!opt.opening));
   tickRuinGround(notes);
   // 集结施放者倒下兜底：死掉的单位会被下面 offField 跳过，先对全体（含 dead）跑一遍
   if (typeof endRallyIfCasterDown === "function") {
@@ -1953,7 +1960,10 @@ function ecmoProbeScan(u, notes) {
 function xiaAutoCrush(u, notes) {
   if (u.kit === "xia" && isCrushing(u) && !u.dead && !u.dying && !u.stunned) {
     const ct = crushingTarget(u);
+    const from = Number(u.zone);
     u.zone = Number(ct.zone);
+    // 休眠的敌人：抓着的敌人走进它那一区，夕夏跟过去也会叫醒它（#379，以前不叫醒）
+    if (Number(u.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(u, notes);
     notes.push(...crushOnce(u, ct, true));
   }
 }
@@ -2094,7 +2104,8 @@ function releaseAcidCharges(notes, late) {
 }
 
 /* ---------- 场地的回合开始效果（回合开始和 Helumica「环境扫描」共用） ---------- */
-function tickFireField(z, notes) {
+/** opening：开战时结算的第 1 回合（beginRound 的 opt.opening） */
+function tickFireField(z, notes, opening) {
   const f = state.fields[z];
   if (!fieldFireOn(f)) return;
   f.fireOn = true;
@@ -2116,6 +2127,12 @@ function tickFireField(z, notes) {
     if (cut <= 0 && dmg * x > 0) { notes.push(`${u.name} 火场${stacks}层：环境适应，免疫这次场地伤害。`); return; }
     applyTypedDot(u, cut, "fire", notes, `${u.name} 火场${stacks}层 ${parts.join(" + ")} = ${dmg}${x > 1 ? ` ×${x}（场地效果${x > 2 ? "×4" : "翻倍"}）= ${dmg * x}` : ""}`);
   }));
+  // 开局就存在的火场（#385）：开战这一下照常按层数烧，层数不涨（酷暑那 +1 也不加），整个第 1 回合都是开战前的层数，
+  // 第 2 回合开始才照常 +1。以前开战这一下就 +1，开战前布置的 1 层火场，我方第一次行动时已经是 2 层
+  if (opening) {
+    notes.push(`${z} 区火场先结算伤害；开局就存在的火场，开战这一下层数不涨 → ${f.fire}`);
+    return;
+  }
   // 酷暑让火场层数再 +1：看的是这一区的天气（隔离区不受天气影响）；末日把这 +1 也翻倍
   const heat = zoneWeather(z) === "heat";
   const add = 1 + (heat ? (state.apocalypse ? 2 : 1) : 0);
@@ -2467,12 +2484,13 @@ function lateRoundStart(notes) {
   });
   late.forEach(u => { if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); } });
   if (typeof featHook === "function") late.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
-  // 每个单位和 beginRound 同一个先后：碾压、诺拉 → C：敌人回合里施加的即时效果（放在谁身上、谁施加的都一样）→ 霜结的免疫、引擎；
+  // 每个单位和 beginRound 同一个先后：引擎、碾压、诺拉（#386：引擎先判）→ C：敌人回合里施加的即时效果（放在谁身上、谁施加的都一样）→ 霜结的免疫；
   // D 要等过载清零护盾之后再判
   const noRefill = new Set();
   (state.units || []).forEach(u => {
     if (!u) return;
     const own = late.indexOf(u) >= 0;
+    if (own) xiaEngineCheck(u, notes);   // 先判引擎、再自动碾压（#386）
     if (own) xiaAutoCrush(u, notes);
     if (own) noraRoundStart(u, notes);
     if (u.lateFx) {
@@ -2481,7 +2499,6 @@ function lateRoundStart(notes) {
       instantTurnStartB(u, notes, held, true);
     }
     if (own && u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
-    if (own) xiaEngineCheck(u, notes);
   });
   late.forEach(u => {
     if (offField(u)) return;   // 和整轮开始一样：不在场上的不吃自我效果、不回护盾
@@ -3473,7 +3490,6 @@ function resetBattleRecords() {
   state.scoreSeen = {};
   state.scoreActLv = 0;
   state.battleGains = { xp: 0, kuizhi: 0 };
-  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
   state.ffHurt = {};              // 友伤打掉、还没补回来的血（ffHurtOf，#428）
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
@@ -4800,9 +4816,11 @@ function flushAoePulse() {
     if (!zones.length) break;
     state.aoePulse = {};
     zones.forEach(z => {
-      // 危墙 / 关着的门：倒塌 / 打开之前，范围攻击影响不到墙对面的按钮、拉杆和配置物
+      // 危墙 / 关着的门：倒塌 / 打开之前，范围攻击影响不到墙对面的按钮、拉杆和配置物；
+      // 目盲落空的攻击整次没打出去（effects.js · blindMissedThisAction），也不算波及
       const all = (map[z] && map[z].hits) || [];
-      const hits = all.filter(h => h.from == null || !lineBlocked(h.from, z));
+      const missed = h => !h.env && typeof blindMissedThisAction === "function" && blindMissedThisAction(h.attacker);
+      const hits = all.filter(h => (h.from == null || !lineBlocked(h.from, z)) && !missed(h));
       if (all.length && !hits.length && !(map[z] && map[z].bare)) return;
       if (!map[z].devicesDone) pulseDevicesInZone(Number(z), "受到范围伤害，视作被操作一次");
       if (!hits.length || map[z].propsDone) return;
@@ -5334,7 +5352,8 @@ function doMove(unit, dest, moveOpt) {
   try {
     lines = withLogSink(() => {
       const waveOwn = waveLedgerOpen();   // 驻波墙：走路引起的别的移动（借机攻击击退、紧追……）也补算穿墙
-      try { doMoveInner(unit, dest, moveOpt); } finally { waveLedgerClose(waveOwn); }
+      const sleepOwn = typeof dormantLedgerOpen === "function" && dormantLedgerOpen(unit);   // 休眠的敌人：同上，走路引起的别的移动也补算进区
+      try { doMoveInner(unit, dest, moveOpt); } finally { waveLedgerClose(waveOwn); if (sleepOwn) dormantLedgerClose(sleepOwn); }
     });
   } finally { LOG_ACTOR_ID = prevActor; }
   if (typeof vehicleSync === "function") vehicleSync();   // 驾驶员带着整辆车走（炮手和车跟着驾驶员的区）
@@ -5554,6 +5573,7 @@ function chaseFollow(unit, notes) {
       enterFrozenGround(c, notes);
       applyAbyssFall(c, from, notes);
       if (typeof afterMove === "function") afterMove(c, notes);
+      if (Number(c.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(c, notes);   // 休眠的敌人：紧追跟进它的区也会醒（掉进深渊爬回原区不算）
     } else {
       notes.push(...crossing);
       notes.push(`${c.name} 紧追 ${unit.name}，但间隔挡住，没跟上。`);
@@ -6004,7 +6024,14 @@ function settleEnemyKill(target, notes) {
   if (target.kit === "outlaw_king" && target.resources && target.resources.hostage) {
     const boss = findKit("bandit_boss", state.units);
     if (boss && boss.resources && boss.resources.mutinied && !boss.dead) {
+      // 出手走 effectiveAtk → personalAtk（party.js · baseEffectiveAtk），只翻 atk 卡面涨了伤害仍是继位前的底值
+      // 各自 ×2，不要用已翻倍的 atk 回写 personalAtk（避免和已有差值叠算）
       boss.atk = (Number(boss.atk) || 0) * 2;
+      if (boss.personalAtk != null) boss.personalAtk = (Number(boss.personalAtk) || 0) * 2;
+      if (boss.ivBase) {
+        boss.ivBase.atk = (Number(boss.ivBase.atk) || 0) * 2;
+        if (boss.ivBase.personalAtk != null) boss.ivBase.personalAtk = (Number(boss.ivBase.personalAtk) || 0) * 2;
+      }
       boss.def = (Number(boss.def) || 0) * 2;
       boss.defMax = (Number(boss.defMax) || boss.def) * 2;
       boss.resources.promoted = true;
@@ -6365,6 +6392,7 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
   if (attacker && Number(attacker.blockMalus) > 0) c -= Number(attacker.blockMalus);   // 赤牙霰弹枪：对这一枪的协助格挡 −40%
   if (attacker && Number(attacker.rushBlock) > 0) c += Number(attacker.rushBlock);       // 沙灵聚合体狂暴连打：每一击的协助格挡 +10%（AGG_RUSH）
   if (attacker && Number(attacker.ratExecBlock) > 0) c += Number(attacker.ratExecBlock); // 暴虐猎手斩杀：这一击的协助格挡 +5%（enemies.js · RAT_CFG.tyrant）
+  if (typeof blindBlockBonus === "function") c += blindBlockBonus(attacker);              // 攻击者目盲：被格挡下来的概率 1 / 2 / 3 层 +25% / 50% / 100%（engine.js · BLIND）
   if (helper.self === "anchor") c += 10;   // 千钧：格挡成功率 +10%
   if (helper.kit === "xiaoxiao" && protectedUnit && protectedUnit.kit === "longge") c += 15;   // 小朋友守护龙哥：60% → 75%
   if (helper.rallyBlock) c += helper.rallyBlock;
@@ -6922,7 +6950,7 @@ function stripFocusLayer(target, layerType, lines) {
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
   // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
-  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };
+  koltScrapAdd(layerType, layerMax);   // 被抹去的层也算被摧毁：累积成柯尔特的废料
   noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
@@ -7015,8 +7043,9 @@ function koltPrideCut(u) {
   return typeof passivePlus === "function" && passivePlus(u, 2) ? KOLT_PRIDE.plusCut : KOLT_PRIDE.cut;
 }
 
-/* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
- *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
+/* 柯尔特的废料（koltScrapCap / koltScrapAdd / koltScrapTotal / koltScrapSpend）：
+ *   capPct     废料上限 = 柯尔特生命上限 × capPct。废物利用每次从敌人血量层累积的废料里最多领这么多；
+ *              废料合计里敌人血量层那部分也按它封顶（仪表、碎渣重炮装填）；
  *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
  *   modAp      「非法」改装消耗废料给目标的行动点（可以超过行动点上限）
  *   spendOrder 「非法」改装扣废料的顺序：layer 敌人血量层（按封顶后的数）→ rot 腐坏抛射 → divert 扭矩转移注意 → strip 扭矩拆卸模式 */
@@ -7025,19 +7054,28 @@ const KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert
 function koltScrapCap(k) {
   return k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * KOLT_SCRAP.capPct) : Infinity;
 }
-/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
+/** 敌人血量层被摧毁：按那一层的种类，把等于这一层上限的废料累积到柯尔特身上（resources.scrapStore，按记录的先后）。
+ *  每个被摧毁的层都记，不再只留最近的一层；每场开战清空（resetBattleFlags） */
+function koltScrapAdd(type, amount) {
+  const k = findKit("kolt", state.units || []);
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!k || !type || !amt) return;
+  k.resources = k.resources || {};
+  const store = k.resources.scrapStore = k.resources.scrapStore || {};
+  store[type] = (Number(store[type]) || 0) + amt;
+}
+/** 柯尔特的废料：累积的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
  *  废物利用领走它们；碎渣重炮把它们全部装填打出去；「非法」改装达到上限时扣掉一部分（koltScrapSpend） */
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  // 敌人失去血量层得来的废料：不超过废料上限（和废物利用的封顶一样）；其余几种单独计算，不受上限
-  const last = state.lastBrokenLayer ? Math.min(koltScrapCap(k), Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
   const sum = store => Object.keys(store || {}).reduce((s, t) => s + Math.floor(Number(store[t]) || 0), 0);
-  return Math.max(0, last + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
+  // 敌人血量层累积的废料：算进合计时不超过废料上限（和废物利用一次最多领的一样）；其余几种单独计算，不受上限
+  const layer = Math.min(koltScrapCap(k), sum(r.scrapStore));
+  return Math.max(0, layer + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
 }
 function koltScrapClear(k) {
-  state.lastBrokenLayer = null;
-  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
+  if (k && k.resources) { k.resources.scrapStore = {}; k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
 }
 /** 「非法」改装：废料（所有来源合计）达到上限了没有 */
 function koltScrapFull(k) {
@@ -7045,28 +7083,25 @@ function koltScrapFull(k) {
   return cap > 0 && cap !== Infinity && koltScrapTotal(k) >= cap;
 }
 /** 「非法」改装：从柯尔特的废料里扣掉 n 点，按 KOLT_SCRAP.spendOrder 的顺序扣；扣完的来源清零，没扣完的留着。
- *  腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
+ *  敌人血量层、腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
 function koltScrapSpend(k, n) {
   const r = (k && k.resources) || {};
   const want = Math.max(0, Math.floor(Number(n) || 0));
   let left = want;
-  const fromStore = store => Object.keys(store || {}).forEach(t => {
-    if (left <= 0) return;
-    const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(left, have);
-    left -= use;
-    if (use >= have) delete store[t];
-    else store[t] = have - use;
-  });
+  // 从按种类记的废料里依次扣，这一个来源最多扣 most 点
+  const fromStore = (store, most) => {
+    let room = Math.min(left, most == null ? Infinity : most);
+    Object.keys(store || {}).forEach(t => {
+      if (room <= 0) return;
+      const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(room, have);
+      room -= use; left -= use;
+      if (use >= have) delete store[t];
+      else store[t] = have - use;
+    });
+  };
   const take = {
-    // 敌人血量层：按封顶后的数算；扣不完的记回那一层，下次废物利用照样能领剩下的
-    layer: () => {
-      const rec = state.lastBrokenLayer;
-      if (!rec) return;
-      const have = Math.min(koltScrapCap(k), Math.max(0, Math.floor(Number(rec.lost) || 0))), use = Math.min(left, have);
-      left -= use;
-      if (use >= have) state.lastBrokenLayer = null;
-      else rec.lost = have - use;
-    },
+    // 敌人血量层：按封顶后的数算（最多扣上限那么多）；没扣到的照样留着，下次废物利用能领
+    layer: () => fromStore(r.scrapStore, koltScrapCap(k)),
     rot: () => fromStore(r.rotStore),
     divert: () => {
       const have = Math.max(0, Math.floor(Number(r.divertArmor) || 0)), use = Math.min(left, have);
@@ -7972,6 +8007,7 @@ function tryOxAutoBlock(attacker, target, atkRange) {
     const selfBreak = ox.kit === "captain_ox";
     appendLog(selfBreak ? `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。成功后反击 1 击破。`
       : `成功：目标免伤，击破由 ${ox.name} 承担（架势最少留 1）。`);
+    if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：被格挡下来一次卸一层
     if (attacker && selfBreak) {
       // 反击走 dealBreak：坚挺、塌陷计数、失衡后的协助攻击都照常（以前直接改架势）
       const notes = [];
@@ -8041,6 +8077,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
     if (ok) {
       notes.push("空手格挡成功：目标仍受一半伤害，架势照常扣（可能被打进失衡）。格挡者下回合附赠行动 −1。");
       helper.loseBonusNext = true;
+      if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：空手挡住也算被格挡下来，卸一层
     } else notes.push("空手格挡失败：目标照常受伤。");
     return { ok, notes, bare: true };
   }
@@ -8071,6 +8108,7 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
   }
   if (ok) {
     notes.push("成功：目标免伤，击破改由格挡者承担。");
+    if (typeof blindOnBlocked === "function") blindOnBlocked(attacker, notes);   // 目盲：被格挡下来一次卸一层
     if (typeof bpAfterBlock === "function") bpAfterBlock(helper, target, notes);   // 单局图纸
     // 雷鸣：成功的协助格挡可以额外造成 等级 × 1d4 闪电伤害的反伤
     if (attacker && !attacker.dead && currentWeatherFor(helper) === "thunder") {
@@ -8148,8 +8186,10 @@ function performAssistBlock(helper, target, attacker, forced, atkRange) {
       }
     }
     if (helper.kit === "tou") {
+      const from = Number(helper.zone);
       helper.zone = attacker ? attacker.zone : helper.zone;
       notes.push(`灯移动到进攻者所在 ${helper.zone} 区。`);
+      if (Number(helper.zone) !== from && typeof dormantAfterMove === "function") dormantAfterMove(helper, notes);   // 休眠的敌人：灯跟到它那一区也会醒
     }
     if (helper.kit === "mochi" && attacker && (!attacker.isPlayer || (typeof friendlyFireHit === "function" && friendlyFireHit(attacker, target)))) {   // 挡下队友的友伤也咬住他（#428）
       attacker.noMove = true;
@@ -8297,6 +8337,7 @@ function finishBlockInner(helperId, forced) {
     if (wall && typeof featIronwallDeclarers === "function" && featIronwallDeclarers(target, attacker).indexOf(wall) >= 0) {
       featUseOnce(wall, "ironwall");
       appendLog(`${wall.name} 以身作盾：这一击视为协助格挡成功。`);
+      if (typeof blindOnBlocked === "function") { const bn = []; blindOnBlocked(attacker, bn); bn.forEach(s => appendLog(s)); }   // 目盲：算被格挡下来，卸一层
       block = "assistOk";
       blockHelperId = wall.id;
       if (!ffJob) addScore("block", SCORE_RULES.block, wall);   // 评分：和协助格挡成功一样（#52）
@@ -8397,7 +8438,7 @@ function resetBattleFlags(u) {
   u.statuses = {
     burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
     high: false, reso: false, unstable: false, weak: false, inspire: false,
-    sturdy: false, hide: false, advantage: false, chase: false, latestElement: null
+    sturdy: false, hide: false, advantage: false, chase: false, blind: 0, latestElement: null
   };
   u.instant = {};
   const r = u.resources = u.resources || {};
@@ -8438,7 +8479,8 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
+  // 废料每场重新记：上一场累积的敌人血量层（scrapStore）、腐坏抛射、转移注意、拆卸模式都不带到这一场
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.scrapStore = {}; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
@@ -8625,7 +8667,7 @@ function goldKeys(u) {
 /** 加倍计量能翻倍的状态：属性状态 + 通用状态（有任何一种就行） */
 function hasAnyStatus(u) {
   const st = (u && u.statuses) || {};
-  return spreadKeys(u).length > 0 || ["unstable", "weak", "inspire", "sturdy", "hide", "advantage", "chase"].some(k => !!st[k]);
+  return spreadKeys(u).length > 0 || ["unstable", "weak", "inspire", "sturdy", "hide", "advantage", "chase", "blind"].some(k => !!st[k]);
 }
 /** 保释分步里依次选的几名友方（联机只转发 online-view.js 白名单里的分步名，所以用现成的这几个） */
 const SHELTER_PICKS = ["target", "target2", "ally"];
@@ -9241,6 +9283,8 @@ function dealToInner(attacker, target, opt) {
   if (typeof vehicleSync === "function") vehicleSync();   // 被推 / 拉走的驾驶员：车和炮手先跟到他所在的区（vehicle.js）
   // 驻波墙：这次行动里技能直接换过区的单位，出手之前先把穿墙补算上（借机攻击是走的人离开那一下打的，不在这里补）
   if (state._waveLedger && !opt.flags.opportunity) waveLedgerSync();
+  // 休眠的敌人：同上，出手之前先补算技能里直接换区的进区（enemies.js · dormantLedgerSync）
+  if (state._dormantLedger && !opt.flags.opportunity) dormantLedgerSync();
   if (target && target.isStructure) return dealToStructure(attacker, target, opt);   // 打配置物 / 危墙的替身（#52）
   // 战场数据：击杀在伤害结算里就会发生，所以先记下「最后一击是谁」
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
@@ -9293,6 +9337,7 @@ function dealToInner(attacker, target, opt) {
     surfaceUnit(attacker, n, false, "发动攻击");
     n.forEach(t => appendLog(t));
   }
+  let blindSurface = null;   // 目盲的攻击者用谐波打下潜的目标：等落空判定完、没落空才把它打出沙层（落空就没打到）
   if (target && target.submerged && attacker && !opt.flags.environment) {
     // 沙鱼的声呐找得到沙下的尘虫 / 管虫（捕食），不算把它打出来
     const fishPrey = typeof isSandFish === "function" && isSandFish(attacker) && isDesertPrey(target);
@@ -9301,7 +9346,8 @@ function dealToInner(attacker, target, opt) {
       if (!opt.flags.aoe) appendLog(msg);
       return { res: { ok: false, total: 0, breakDealt: 0, log: [msg], perHit: [] }, extra: opt.flags.aoe ? [] : [msg] };
     }
-    if (!fishPrey) {
+    if (!fishPrey && typeof blindRollApplies === "function" && blindRollApplies(attacker, target, opt.flags)) blindSurface = target;
+    else if (!fishPrey) {
       const n = [];
       surfaceUnit(target, n, true, "谐波震", "harmonic");
       n.forEach(t => appendLog(t));
@@ -9408,6 +9454,28 @@ function dealToInner(attacker, target, opt) {
     if (ww.length) opt.flags.waveWalls = ww.map(w => ({ el: w.el, mode: w.mode }));
   }
   if (typeof featArmAttack === "function" && target && (!target.isPlayer || opt.flags.friendlyFire)) featArmAttack(attacker, target, opt);   // 无可阻挡（feats.js）：不能被格挡（打队友也一样，#428）
+  // 目盲（effects.js · blindRollApplies / blindRoll）：这一击确定打得出去了（射程、躲藏、飞行、危墙都过了，代挡也换好了人），做落空判定。
+  // 一次攻击只掷一次（范围攻击、一个技能里分几下打的都算一次）：这次攻击前面已经掷过就照那次的结果。
+  // 落空就到此为止：不进协助格挡、碰不到屏障，没有伤害、击破和任何命中效果；落空也算发动过攻击，躲藏照样解除（反应不算，和 afterAttackDealt 一样）
+  const blindChecked = typeof blindRollApplies === "function" && blindRollApplies(attacker, target, opt.flags);
+  if (blindChecked) {
+    const b = blindRoll(attacker, target, opt.flags);
+    if (b.miss) {
+      if (!isReaction && attacker.statuses && attacker.statuses.hide) {
+        attacker.statuses.hide = false;
+        b.notes.push(`${attacker.name} 发动攻击，躲藏解除。`);
+      }
+      b.notes.forEach(s => appendLog(s));
+      spawnPopup(target, { kind: "status", text: "落空", element: "physical" });
+      return { res: { ok: false, missed: true, total: 0, breakDealt: 0, log: b.notes, perHit: [] }, extra: b.notes };
+    }
+    b.notes.forEach(s => appendLog(s));
+  }
+  if (blindSurface && blindSurface.submerged) {
+    const n = [];
+    surfaceUnit(blindSurface, n, true, "谐波震", "harmonic");
+    n.forEach(t => appendLog(t));
+  }
   if (attacker && attacker.isPlayer && target && !target.isPlayer && opt.flags.action && !assisting && !opt.flags.aoe && opt.flags.block !== "assistOk" && !opt.flags.blockResolved) {
     const auto = tryOxAutoBlock(attacker, target, opt.atkRange);
     if (auto && auto.ok) {
@@ -9461,7 +9529,8 @@ function dealToInner(attacker, target, opt) {
         bleed: opt.bleed,   // 出血（engine.js · BLEED）：等格挡结果的这一击落下时照样带着
         smash: opt.smash, _bare: opt._bare,   // 玩家的攻击（友伤打队友，#428）带的猛击、空手：落下时照样带着
         baseBreak: opt.baseBreak, diceN: opt.diceN, diceS: opt.diceS, diceB: opt.diceB, diceValue: opt.diceValue,
-        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false })
+        // blindChecked：目盲的落空判定出手时已经做过（没落空），这一击落下时不再掷
+        usePrep: opt.usePrep, atkRange: opt.atkRange, wallZone: opt.wallZone, flags: Object.assign({}, opt.flags, { blockResolved: false }, blindChecked ? { blindChecked: true } : {})
       }))
       });
       presentBlockModal();
@@ -9678,8 +9747,8 @@ function dealToInner(attacker, target, opt) {
       const l = now.find((x, j) => x.type === p0.type && j >= i - 1 && j <= i);   // 外层被移除时会往前挪一位
       return !l || (Number(l.current) || 0) <= 0;
     });
-    const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
-    if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
+    // 每个被摧毁的层都按种类累积成柯尔特的废料（一击打穿多层时每层都算，从外到内记）
+    broken.forEach(p0 => koltScrapAdd(p0.type, p0.max));
   }
   advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);   // 聚焦不看来源，任何伤害都算
   rasUnstableHit(target, res, extra);
@@ -10002,7 +10071,9 @@ function setHiakiStance(u, stance) {
   if (stance !== "draw" && typeof passiveOn === "function" && !passiveOn(u)) { u.resources.stance = "draw"; return; }
   const prev = u.resources.stance || "draw";
   u.resources.stance = stance;
-  // 特盛乱打：之后进入居合时，被乱打过的敌人各被瞬间砍一刀（0.5atk 当前刀的属性，无视距离和障碍），标记去掉
+  // 特盛乱打：之后进入居合时，被乱打过的敌人各被瞬间砍一刀（0.5atk 当前刀的属性，无视距离和障碍），标记去掉。
+  // 砍同区飞行的敌人也不用额外付附赠动作（flyFree，#402）：以前当成近程打飞行，协助格挡刚花掉附赠动作进入居合时付不起，
+  // 被标记的穴鸦一刀都没挨、标记却清掉了；还有附赠动作时每只飞行的敌人各扣 1 个
   if (stance === "iai" && prev !== "iai" && u.kit === "hiaki") {
     // 开着友伤（#428）时乱打过的队友也有标记：砍的时候按现在的开关，关掉了就只去掉标记、不砍
     (state.units || []).forEach(x => { if (x && x.isPlayer && x.barrageBy === u.id && !(typeof attackFoe === "function" && attackFoe(u, x))) x.barrageBy = null; });
@@ -10012,7 +10083,7 @@ function setHiakiStance(u, stance) {
       const el = u.resources.blade === "naruto" ? "ice" : "fire";
       marked.forEach(x => {
         x.barrageBy = null;
-        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
+        hitOne2(u, x, { element: el, mult: 0.5, baseBreak: 0, atk: effectiveAtk(u, state.units), atkRange: "any", usePrep: false, flags: { action: true, lob: true, skillRange: true, flyFree: true } }, notes);   // skillRange：无视距离（距离 2 也砍得到）
       });
       notes.unshift(`特盛乱打：进入居合，被乱打过的 ${marked.length} 个敌人各被瞬间砍一刀。`);
       appendLog(notes.join("\n"));
@@ -10638,13 +10709,17 @@ function resolveLonggeSafety(front) {
   } else appendLog(`${a.name} 让${LONGGE_AMMO[c].name}留在最后。`);
   if (typeof renderAll === "function") renderAll();
 }
-/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区 */
+/** 结算队首的协助扫描。picks 为 null 表示放弃；区域固定为排队时的那一区。
+ *  扫了就算扫描过当前战场（resources.scanned，和主动「环境扫描」一样）：频域造物、驻波推进相位、大气干扰调转风向、
+ *  规则干涉的附赠动作都认（#397，以前只有主动扫描才算）；放弃的不算 */
 function resolveHeluScan(picks) {
   const job = (state.heluScanQueue || []).shift();
   if (!job) return;
   const a = unitById(job.actorId);
   if (!a || !picks) { if (a) appendLog(`${a.name} 放弃了这次环境扫描。`); return; }
   const lines = [];
+  a.resources = a.resources || {};
+  a.resources.scanned = true;
   heluScanAct(a, Object.assign({}, picks, { dest: job.zone }), lines);
   appendLog(lines.join("\n"));
   if (typeof renderAll === "function") renderAll();
@@ -11785,6 +11860,7 @@ const STATUS_POP = {
   high: { name: "高能", element: "energy" },
   reso: { name: "共振", element: "harmonic" },
   unstable: { name: "不稳", element: "harmonic" },
+  blind: { name: "目盲", element: "physical" },
   melt: { name: "熔融", element: "fire" },
   shift: { name: "错位", element: "harmonic" },
   reflect: { name: "折射", element: "harmonic" },
@@ -12210,6 +12286,9 @@ function takeFuel() {
 function crushOnce(a, t, auto) {
   const lines = [];
   if (!a || !t) return lines;
+  // 用了狂怒碾压就算夕夏攻击过（引擎不熄火）：被废铁墙挡下也算（#386）。
+  // 以前回合开始的自动碾压只靠 dealTo 里记，被屏障挡下时 dealTo 先返回、没记上；手动用的 runSkill 里本来就记
+  markXiaAttack(a);
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
@@ -12739,9 +12818,9 @@ const SKILL_REQUIREMENT = {
   helu_forge:     (a) => !res(a).scanned ? "只有扫描过当前战场（用过环境扫描）才能使用"
     : !boardGapKeys().length ? "这块战场没有间隙" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
-  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
-    [res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
+  // 废物利用：要有还没领完的废料才能用——累积的敌人血量层，或腐坏抛射 / 转移注意 / 拆卸模式攒下的（领过的部分不能再领）
+  kolt_scrap:     (a) => (Number(res(a).divertArmor) || 0) > 0 ||
+    [res(a).scrapStore, res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -13322,11 +13401,14 @@ function runSkill(id, optRun) {
       state._highDefer = (Number(state._highDefer) || 0) + 1;
       // 驻波墙：这次行动开始时记下各单位在哪一区，技能里直接换区的移动出手前 / 行动结束时补算穿墙（最外层这一次记）
       const waveOwn = waveLedgerOpen();
+      // 休眠的敌人：同样记一份，技能里直接换区走进它那一区的也叫醒它（enemies.js · dormantLedgerOpen）
+      const sleepOwn = typeof dormantLedgerOpen === "function" && dormantLedgerOpen(a0);
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
       finally {
         state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
         if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
         waveLedgerClose(waveOwn);
+        if (sleepOwn) dormantLedgerClose(sleepOwn);
       }
       // 跃迁（feats.js）：这次花了行动点、真的打出了攻击
       if (a0 && typeof featAfterAction === "function") featAfterAction(a0, (Number(a0.ap) || 0) < apBefore);
@@ -13610,6 +13692,8 @@ function runSkillInner(id, optRun) {
     let out;
     // 驻波墙：技能里直接换过区（突进、逃离……）还没补算的穿墙，先结算、先写（不然写在这一击的结果后面）
     if (state._waveLedger) waveLedgerSync(lines);
+    // 休眠的敌人：技能里直接换区走进它那一区的，出手之前先叫醒（吵醒它的是走进来这一下，不是这一击）
+    if (state._dormantLedger) dormantLedgerSync(lines);
     // 攻击者不是这次行动的发起人（比如召唤物、残骸）时写明是谁打的；这一击之前攒下的话先写出去
     if (actor && actor.id !== a.id) lines.push(`  ${actor.name} 出手：`);
     appendLog(lines.splice(0).join("\n"));
@@ -14594,6 +14678,7 @@ function runSkillInner(id, optRun) {
       lines.push(`${t.name} 陷入折射。`);
     } else if (id === "mochi_boom") {
       const boom = () => {
+        if (typeof blindNewAttack === "function") blindNewAttack(a);   // 目盲：每次音爆各是一次范围攻击，各掷一次落空骰（effects.js）
         visibleEnemies(a.zone, a).forEach(u => hitOne(a, u, { element: "harmonic", mult: 0.5, baseBreak: 1, atk, flags: { action: true, aoe: true } }));
         markAoeZone(a.zone, { element: "harmonic", dmg: Math.floor(atk * 0.5), attacker: a });
         flushAoePulse();   // 再耗圣盾炸第二次算另一次范围攻击，按钮再触发一次
@@ -15100,7 +15185,6 @@ function runSkillInner(id, optRun) {
       popStatus(t, "chase");
       lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
-      const rec = state.lastBrokenLayer;
       const hp0 = totalHp(a);
       const grant = (type, amt, from) => {
         if (amt <= 0) return;
@@ -15112,14 +15196,22 @@ function runSkillInner(id, optRun) {
           lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
       };
-      // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
-      if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
+      // 累积的废料（被摧毁的敌人血量层）：按记录的先后、按种类领取，这一次合计最多柯尔特生命上限的一半（koltScrapCap）；
+      // 没领完的留着，下次废物利用接着领（腐坏抛射等其他来源不算在这个上限里）
+      const store = (a.resources && a.resources.scrapStore) || {};
+      if (!Object.keys(store).some(type => (Number(store[type]) || 0) > 0)) lines.push("还没有累积的敌人血量层废料。");
       else {
         const cap = koltScrapCap(a);
-        const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
-        grant(rec.type, amt, "废物利用");
-        if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
-        state.lastBrokenLayer = null;   // 这一层已经利用过了：要等下一个被摧毁的层
+        let room = cap;
+        Object.keys(store).forEach(type => {
+          const have = Math.max(0, Math.floor(Number(store[type]) || 0)), take = Math.min(room, have);
+          grant(type, take, "废物利用");
+          room -= take;
+          if (take >= have) delete store[type];
+          else store[type] = have - take;
+        });
+        const kept = Object.keys(store).reduce((s, type) => s + Math.floor(Number(store[type]) || 0), 0);
+        if (kept > 0) lines.push(`（这一次最多领生命上限的一半 ${cap}；还剩 ${kept} 点废料留着，下次废物利用再领）`);
       }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};
@@ -15394,7 +15486,7 @@ function runSkillInner(id, optRun) {
         const layer = ((t.layers || []).find(l => (l.current || 0) > 0) || {}).type;
         applyFocus(t, layer, lines, { by: a });
       }
-      // 再对这个敌人所在的区做一次环境扫描（不耗行动，也不算本场那次主动扫描）
+      // 再对这个敌人所在的区做一次环境扫描（不耗行动；扫了也算扫描过当前战场，见 resolveHeluScan）
       queueHeluScan(a, t.zone, lines);
     } else if (id === "ecmo_bite") {
       if (!needT()) return paintSkillLog(lines.join("\n"));

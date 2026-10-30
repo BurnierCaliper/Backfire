@@ -211,19 +211,37 @@ const ENCOUNTERS = [
 ];
 
 /* ===== 2b. 随机遭遇（代币制） ===================================
- * 每场战斗有 4 枚代币：杂兵 1 枚，精英 2 枚。
+ * 每场战斗默认 4 枚代币：杂兵 1 枚，精英 2 枚。
  * 所以一场可能是 4 杂兵 / 2 精英 / 1 精英 + 2 杂兵。
  * 空投蜂群三只算一组，整组记 1 枚。
- *   5% 概率这场变成 5 枚代币。
+ *   4 人队且遭遇敌人等级 ≥ 10 时基线改 5 枚（encounterTokenBudget）。
+ *   5% 概率在基线上再 +1（4→5，4 人 L10+ 的 5→6）。
  *   5% 概率不受阵营限制，变成混战。
  * 上场单位数有上限 ENCOUNTER_UNIT_CAP（= 4 枚 × group:3 = 12）：
- * 五代币若全抽成组杂兵会到 15 只，抽的时候装不下就改抽装得下的。
+ * 多枚代币若全抽成组杂兵会超 12 只，抽的时候装不下就改抽装得下的。
  * ============================================================== */
 
 const ENCOUNTER_TOKENS = 4;
+/** 普通战代币基线例外表（主人 10/27 定）：恰好 partySize 人且敌人等级 ≥ minLevel → tokens。
+ *  查不到用 ENCOUNTER_TOKENS。显式 opt.tokens 不走 encounterTokenBudget。 */
+const ENCOUNTER_TOKEN_RULES = [
+  { partySize: 4, minLevel: 10, tokens: 5 }
+];
 const ENCOUNTER_UNIT_CAP = 12;     // 上场敌人数上限（对齐 4 枚代币 × 每组 3 只）
-const CHANCE_EXTRA_TOKEN = 0.05;   // 变 5 代币
+const CHANCE_EXTRA_TOKEN = 0.05;   // 基线上再 +1（4→5 / 5→6）
 const CHANCE_MIXED = 0.05;         // 混战：无视阵营
+
+/** 普通战代币基线（不含 5% 上滚）。查 ENCOUNTER_TOKEN_RULES，否则 ENCOUNTER_TOKENS。
+ *  partySize / level 缺省或非法时按默认。显式 opt.tokens 不走这里。 */
+function encounterTokenBudget(partySize, level) {
+  const n = Number(partySize);
+  const lv = Number(level);
+  for (let i = 0; i < ENCOUNTER_TOKEN_RULES.length; i++) {
+    const r = ENCOUNTER_TOKEN_RULES[i];
+    if (n === r.partySize && lv >= r.minLevel) return r.tokens;
+  }
+  return ENCOUNTER_TOKENS;
+}
 
 /** 随机种族的权重表（写进 ENEMY_INFO.races；有哪些种族、小分支见 enemies.js · ENEMY_RACES）。
  *  race 可以写大支（"猫类人"，小分支再平分）、"类人"（四个大支平分）或带小分支的 "兽人·猫"；w 是权重，不必加到 100 */
@@ -265,9 +283,9 @@ const ENEMY_INFO = {
   // 第三采矿场：用能量的安保部队（还会有异星生物）
   alarm_bot:     { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
   meteor_miner:  { faction: "安保", regions: ["第三采矿场"], tokens: 1 },
-  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币
+  // 第三采矿场：异星生物（星灵；和安保不是一伙的）。衍蛛两只一组记 1 枚代币；弦蚣是精英，2 枚（#381）
   meteor_spider:    { faction: "异星生物", regions: ["第三采矿场"], tokens: 1, group: 2 },
-  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 1 },
+  meteor_centipede: { faction: "异星生物", regions: ["第三采矿场"], tokens: 2 },
   // —— 警卫队（有机体，可与安保混编）——
   captain_wolf:   { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·狼" },
   captain_ox:     { faction: "警卫队", regions: ["巨人城", "外城区"], tokens: 2, race: "兽人·牛" },
@@ -492,7 +510,8 @@ function rollThreeWay(region, opt) {
   return finishEncounter(spec, Object.assign({}, opt, { zoneMode: 3 }));
 }
 
-/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level, threeWay } */
+/** 随机遭遇。opt: { region, tokens, mixed, faction, zoneMode, weather, level, partySize, threeWay }
+ *  tokens 显式给定时不走人数 / 等级基线，也不掷 5% 上滚；否则基线 = encounterTokenBudget(partySize, level)，再 5% +1。 */
 function rollEncounter(opt) {
   opt = opt || {};
   const region = opt.region || "外城区";
@@ -506,9 +525,10 @@ function rollEncounter(opt) {
     opt = Object.assign({}, opt, { zoneMode: zm });
   }
 
-  // 代币：5% 变 5 枚
+  // 代币基线：4；4 人队且敌人等级 ≥ 10 → 5。5% 在基线上再 +1（可到 6）。单位数仍受 ENCOUNTER_UNIT_CAP 约束。
+  const base = opt.tokens != null ? Number(opt.tokens) : encounterTokenBudget(opt.partySize, opt.level);
   const extra = opt.tokens == null && Math.random() < CHANCE_EXTRA_TOKEN;
-  let tokens = opt.tokens != null ? Number(opt.tokens) : (ENCOUNTER_TOKENS + (extra ? 1 : 0));
+  let tokens = base + (extra ? 1 : 0);
 
   // 5% 混战：不受阵营限制
   const mixed = opt.mixed != null ? !!opt.mixed : (Math.random() < CHANCE_MIXED);
@@ -564,7 +584,7 @@ function rollBountyEncounter(preset, opt) {
 /** 悬赏目标的资格：至少占几枚代币（本区域没有这么大的敌人时，退而取本区域里代币最多的） */
 const BOUNTY_TARGET = { minTokens: 2 };
 /** 本区域可以当悬赏目标的精英（不是首领、不是成群的；优先 minTokens 枚代币及以上）。
- *  只从本区域的敌人表里抽：第三采矿场的敌人都只占 1 枚代币，以前因此落到全部区域去抽，
+ *  只从本区域的敌人表里抽：以前第三采矿场的敌人都只占 1 枚代币（#381 陨体弦蚣改成精英以前），因此落到全部区域去抽，
  *  抽到别的区域的目标，随从又和目标不是一个阵营 */
 function bountyCandidates(region) {
   const base = (k) => { const i = ENEMY_INFO[k]; return i && !i.boss && !i.pack; };

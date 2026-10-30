@@ -962,7 +962,7 @@ function skillList(unit) {
     add({ id: "kolt_aa", name: "普通攻击", hint: bit === "acid" ? "距离1 · 1atk 酸 +1击破" : "同区 · 0.3/0.3/0.4atk 三次电 · 共2击破" });
     add({ id: "kolt_short", name: "直流短接", hint: "需电钻 · 可先移≤1，再对同区铺高压场地" });
     add({ id: "kolt_chase", name: "紧追", hint: "附赠 · 对一个敌人施加紧追：它移动时柯尔特自动跟上", bare: true });
-    add({ id: "kolt_scrap", name: "废物利用", hint: "获得上一个被摧毁的敌人血量层等量的对应血量（最多生命上限50%）· 另领腐坏抛射的记录", minLv: 2 });
+    add({ id: "kolt_scrap", name: "废物利用", hint: "领取被摧毁的敌人血量层累积的废料，获得对应血量（每次最多生命上限50%，没领完的留着）· 另领腐坏抛射的记录", minLv: 2 });
     add({ id: "kolt_rot", name: "腐坏抛射", hint: "需酸液炮 · 距离1 · 施加腐蚀（不造成伤害，仍会嘲讽）· 腐蚀伤害记给下一次废物利用", minLv: 3 });
     add({ id: "kolt_mod", name: "「非法」改装", hint: "需电钻 · 1距离以内任意单位施加过载 · 废料达到上限时，可再耗等量废料让我方目标 +1 行动点（可超上限）", minLv: 6 });
     add({ id: "kolt_cannon", name: "碎渣重炮", hint: bit === "acid"

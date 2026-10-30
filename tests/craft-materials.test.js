@@ -169,14 +169,17 @@ test("召唤物和铁壁不掉落", () => {
   assert.equal(matTotal(t), 0);
 });
 
-test("第三采矿场：4 个杂兵一场期望约 2 份；按代币算（衍蛛两只一组）也在 1–3", () => {
+test("第三采矿场：4 个杂兵一场期望约 2 份；按代币算（衍蛛两只一组）也在 1–3；陨体弦蚣是精英（#381），合计 1.5–2.5 份", () => {
   const c = H.load();
   const E = k => Object.values(c.enemyDropExpected([k])).reduce((a, b) => a + b, 0);
-  const kits = ["alarm_bot", "meteor_miner", "meteor_spider", "meteor_centipede"];
-  const avg4 = kits.reduce((a, k) => a + E(k), 0);   // 4 个杂兵随机抽 = 4 × 每种平均
+  const kits = ["alarm_bot", "meteor_miner", "meteor_spider"];   // 陨体弦蚣是精英，不算在杂兵里
+  const avg4 = 4 * kits.reduce((a, k) => a + E(k), 0) / kits.length;   // 4 个杂兵随机抽 = 4 × 每种平均
   assert.ok(avg4 >= 1.9 && avg4 <= 2.1, "第三采矿场 4 杂兵期望 " + avg4.toFixed(2));
-  const perToken = [E("alarm_bot"), E("meteor_miner"), 2 * E("meteor_spider"), E("meteor_centipede")];
+  const perToken = [E("alarm_bot"), E("meteor_miner"), 2 * E("meteor_spider")];
   perToken.forEach(v => assert.ok(v * 4 >= 1 && v * 4 <= 3, String(v)));
+  // 掉落表注释：精英明显更高（合计 1.5–2.5 份）
+  const centi = E("meteor_centipede");
+  assert.ok(centi >= 1.5 && centi <= 2.5, "陨体弦蚣 " + centi.toFixed(2));
 });
 
 test("穴鸦是食腐鸟：不掉沙鱼鳞，掉废料一类；一群 4 只约 1 份；材料说明对得上", () => {

@@ -427,22 +427,23 @@ test("庄家 AI 会用新选项（#502）：场上有天气时保留以后接着
   assert.ok(LEVELS.every(l => n[l].deep > 0), "按顺序往下看：看过第 2 张以后的 " + JSON.stringify(n));
 });
 
-test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还是压到牌堆底，按「没看过的牌」比——同样的公开局面、第 2 轮偷看到同一张酷暑，第 1 轮压到牌堆底的是微光就把酷暑也压下去，是相位就放回原位（看过的知道在哪儿，不会换上来）；简单随手放", () => {
+test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还是压到牌堆底，按「没看过的牌」比——同样的公开局面、第 2 轮偷看到同一张酸雨，第 1 轮压到牌堆底的是微光就把酸雨也压下去，是相位就放回原位（看过的知道在哪儿，不会换上来）；简单随手放", () => {
   const mk = (buried, other) => {
-    const g = CC.newGame({ seed: "放哪儿", deck: [buried, "heat", "snow", "acid", other, "thunder", "sand"] });
+    // #497（酸雨也豁免谐波）以后，原来那手「偷看到酷暑」两种情况都放回原位，换成偷看到酸雨
+    const g = CC.newGame({ seed: "放哪儿", deck: [buried, "acid", "heat", "snow", other, "thunder", "sand"] });
     // 第 1 轮：偷看堆顶、压到牌堆底；玩家暗弃常态跳过（没翻天气，公开的局面两局一样）
     A(g, "dealer", "weather", { op: "peek" }); A(g, "dealer", "place", { where: "bottom" });
     A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
     A(g, "player", "check"); A(g, "dealer", "check");
     A(g, "player", "skip", { card: "normal" });
     A(g, "dealer", "check"); A(g, "player", "check");
-    A(g, "dealer", "weather", { op: "peek" });   // 第 2 轮：偷看到酷暑
+    A(g, "dealer", "weather", { op: "peek" });   // 第 2 轮：偷看到酸雨
     return g;
   };
   const g1 = mk("glow", "phase"), g2 = mk("phase", "glow");
   assert.equal(JSON.stringify(CC.view(g1, "player")), JSON.stringify(CC.view(g2, "player")), "玩家看到的一模一样");
   const v1 = CC.view(g1, "dealer"), v2 = CC.view(g2, "dealer");
-  assert.deepEqual([v1.peek.card, v2.peek.card], ["heat", "heat"]);
+  assert.deepEqual([v1.peek.card, v2.peek.card], ["acid", "acid"]);
   assert.deepEqual([J(v1.deckSeen.bottom), J(v2.deckSeen.bottom)], [["glow"], ["phase"]]);
   for (const level of ["normal", "hard"]) {
     const a1 = AI.decide(v1, level, CC.makeRng("x")), a2 = AI.decide(v2, level, CC.makeRng("x"));

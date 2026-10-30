@@ -97,6 +97,7 @@ const EnemyAI = (function () {
    *         most    血量最多者（不分远近；暴虐猎手）
    *         nearest 最近的
    *         topAtk  ATK 最高者
+   *         back    后排：优先 range === "ranged" 的角色；没有就在打得到的人里挑离自己最远的；同档血量最低
    *   near / far  同区、隔区分别用哪个技能。
    *   special     需要单独判断的（自爆、召唤、阶段、命令等）。
    * ------------------------------------------------------------------ */
@@ -130,7 +131,7 @@ const EnemyAI = (function () {
     bandit_boss:    { dist: 0,    aim: "lowest",  near: "en_boss_near",      far: "en_boss_far" },
     captain_wolf:   { dist: 0,    aim: "local",   near: "en_wolf" },
     captain_ox:     { dist: 0,    aim: "local",   near: "en_ox" },
-    captain_lizard: { dist: 1,    aim: "local",   near: "en_liz",            far: "en_liz" },
+    captain_lizard: { dist: 1,    aim: "back",    near: "en_liz",            far: "en_liz" },
     ant_guard:      { dist: 1,    aim: "local",   near: "en_ant_spray",      far: "en_ant_spray", special: "ant" },
     gas_collector:  { dist: 0,    aim: "local",   special: "gas" },
     // 外城区镇压部队（docs/suppression-force.md）：警棍盾、喷火兵近战主动贴近；步枪、投手远程主动远离；小队长远近皆可
@@ -348,6 +349,20 @@ const EnemyAI = (function () {
       const s = prey.slice().sort((a, b) =>
         (effectiveAtk(b, state.units) || 0) - (effectiveAtk(a, state.units) || 0));
       return { unit: s[0] };
+    }
+    // 后排：保持 dist（蜥蜴是 1）时先筛打得到的；优先远程角色，没有就挑离自己最远的；同档血量最低
+    if (aim === "back") {
+      let pool = prey;
+      if (spec.dist != null) {
+        const reach = prey.filter(p => zdist(u.zone, p.zone) === spec.dist);
+        if (reach.length) pool = reach;
+      }
+      const ranged = pool.filter(p => p.range === "ranged");
+      const cand = ranged.length ? ranged : pool;
+      let maxD = -1;
+      for (let i = 0; i < cand.length; i++) maxD = Math.max(maxD, zdist(u.zone, cand[i].zone));
+      const far = cand.filter(p => zdist(u.zone, p.zone) === maxD);
+      return { unit: lowest(far) };
     }
     // 远程单位（想保持距离 1）：先挑打得到的，也就是隔一区的人
     if (spec.dist === 1) {

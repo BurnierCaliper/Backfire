@@ -67,8 +67,8 @@ test("牌桌：庄家的三张牌都盖着（牌背，画面里没有牌面）�
   slots.forEach(s => { assert.ok(s.querySelector(".cc-back"), "盖着"); assert.ok(!s.querySelector("[data-face],[data-weather]"), "没有牌面"); });
   const board = p.$("#ccg-board").textContent;
   ["谐波", "微光", "星灵"].forEach(n => assert.ok(!board.includes(n), "桌上看不到没翻开的牌：" + n));
-  assert.deepEqual(oddsTexts(p), ["×8", "×3.5", "×2", "×4.5", "×18"]);
-  assert.deepEqual(p.$$("#ccg-board .ccg-k").map(x => x.textContent), ["27 / 245 种", "62 / 245 种", "95 / 245 种", "49 / 245 种", "12 / 245 种"]);
+  assert.deepEqual(oddsTexts(p), ["×8", "×3.5", "×2", "×4", "×18"]);
+  assert.deepEqual(p.$$("#ccg-board .ccg-k").map(x => x.textContent), ["25 / 245 种", "62 / 245 种", "96 / 245 种", "50 / 245 种", "12 / 245 种"]);
   assert.match(p.$("#ccg-board .cc-chips b").textContent, /^48$/);
   assert.match(p.$("#ccg-actions").textContent, /第 1 轮下注/);
   assert.match(p.$("#ccg-actions").textContent, /第一轮不押，这一手后面都不能再押/);

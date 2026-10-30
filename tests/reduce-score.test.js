@@ -69,11 +69,11 @@ test("柯尔特废物利用：给自己回的血 / 加的层也算治疗，计�
   kolt.level = 3; kolt.ap = 3;
   st.combatPhase = "player";
   kolt.layers = [{ type: "flesh", current: 100, max: 300 }];
-  st.lastBrokenLayer = { type: "flesh", lost: 10, dmg: 5 };
+  kolt.resources.scrapStore = { flesh: 10 };
   c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
   assert.equal(st.battleStats[kolt.id].heal, 10);
   assert.equal(st.battleScore.parts.heal, 15, "治疗每点 1.5 分");
-  st.lastBrokenLayer = { type: "armor", lost: 8, dmg: 4 };
+  kolt.resources.scrapStore = { armor: 8 };
   kolt.ap = 3;
   c.dispatch({ type: "skill", actor: kolt.id, skill: "kolt_scrap", target: null, picks: {} });
   assert.equal(st.battleStats[kolt.id].heal, 18);

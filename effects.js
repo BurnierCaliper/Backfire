@@ -2,12 +2,13 @@
  *
  * 手册第四章里有些效果之前只实现了一部分，这里集中补齐。app.js 在对应的时机调用这些函数：
  *   applyInstantEffect   施加即时效果（刺骨、过载、熔融……）时的即刻结算
- *   afterDamageTaken     一次伤害结算之后（刺骨遇火、熔融护盾、躲藏解除、过载反伤……）
+ *   afterDamageTaken     一次伤害结算之后（刺骨遇火、躲藏解除、过载反伤……；熔融护盾在分层结算时就判，见 engine.js · MELT_SHIELD）
  *   afterAttackDealt     攻击者打完一次攻击行动之后（霜结回架势、溅射、导体额外目标、躲藏解除）
  *   onBreakTaken         受到击破之后（多普勒）
  *   onBroken             被打进失衡的那一刻（刺骨再触发、过载爆炸）
  *   endSelfOnStun        晕眩后自我效果结束（蓄能累积的高能值不清零）
  *   selfImmunities       自我效果带来的免疫（自焚免疫灼烧、霜结免疫冻伤……）
+ *   blindRollApplies / blindRoll / blindBlockBonus / blindOnBlocked   目盲（#405，可叠加）：出手时的落空骰（一次攻击一颗）、被格挡的概率、挡下以后卸一层
  * 规则全部照手册原文，行内注释写了对应的句子。
  * 下水道狂鼠的通用机制（docs/ratfolk.md 第 2 节）也放在这里：狂暴（自我效果，enterFrenzy / FRENZY）、阵营被动「狂潮」（frenzyTide）；
  * 出血是攻击效果，在 engine.js · resolveAttack 里结算（BLEED）。
@@ -59,7 +60,8 @@ function applyInstantEffect(u, key, notes, source) {
     });
     if ((u.layers || []).some(l => l.type === "shield")) notes.push(`${u.name} 过载：护盾本回合翻倍。`);
   }
-  if (key === "melt") u._meltShieldTaken = 0;
+  // 熔融护盾的累计受伤从施加时算起（记在每一层护盾上，engine.js · MELT_SHIELD）
+  if (key === "melt") (u.layers || []).forEach(l => { delete l._meltTaken; });
   return notes;
 }
 
@@ -97,7 +99,7 @@ function overloadRoundStart(u, notes) {
 /**
  * 一次伤害结算完（dealTo 与持续 / 环境伤害都会调用）。
  *   dealt      实际扣掉的血量
- *   shieldHit  这次打在护盾层上的量
+ *   shieldHit  这次护盾层少了多少（熔融护盾不再用它：改在分层结算时判，engine.js · MELT_SHIELD）
  *   ctx        { attacker, action, melee, startLayerType }
  */
 function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
@@ -116,16 +118,8 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
     notes.push(`${u.name} 刺骨遇火解除。`);
     stingPulse(u, "fire", notes, "刺骨遇火");
   }
-  // 熔融（护盾）：一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复
-  if (u.instant && u.instant.melt && shieldHit > 0) {
-    u._meltShieldTaken = (Number(u._meltShieldTaken) || 0) + shieldHit;
-    const sh = (u.layers || []).find(l => l.type === "shield" && !l._meltBroken);
-    if (sh && u._meltShieldTaken >= (Number(sh.max) || 0) / 2 && sh.current > 0) {
-      sh.current = 0;
-      sh._meltBroken = true;
-      notes.push(`${u.name} 熔融：护盾累计受伤过半，立刻失效，下回合以一半恢复。`);
-    }
-  }
+  // 熔融（护盾）：一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复。
+  // 不在这里事后判（以前这样，一下打穿护盾时熔融不起作用）：分层结算时吃满一半就当场失效，剩下的伤害照常溢出（engine.js · distributePacket / MELT_SHIELD）
   // 过载：装甲血量受到近距离攻击时，反伤 50% 此次受到攻击伤害的闪电伤害
   // 过载者是玩家：反伤算过载者的伤害，打死算过载者的击杀（#203）；不是玩家照旧（不传 by，算行动中的人 / 不改最后一击）
   // 打的是开着友伤的队友（ctx.friendlyFire，#428）：反伤照打，同样不计分数
@@ -136,17 +130,17 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
   }
 }
 
-/** 回合开始：熔融打坏的护盾以一半恢复 */
+/** 回合开始：熔融打坏的护盾以一半恢复（engine.js · MELT_SHIELD.restore）；各层护盾的熔融累计清零 */
 function meltShieldRoundStart(u, notes) {
   let restored = false;
   (u.layers || []).forEach(l => {
+    delete l._meltTaken;
     if (!l._meltBroken) return;
     delete l._meltBroken;
-    l.current = Math.floor((Number(l.max) || 0) / 2);
+    l.current = Math.floor((Number(l.max) || 0) * MELT_SHIELD.restore + 1e-9);
     restored = true;
   });
-  u._meltShieldTaken = 0;
-  if (restored) notes.push(`${u.name} 护盾以一半恢复。`);
+  if (restored) notes.push(`${u.name} 护盾以${meltShieldShare(MELT_SHIELD.restore)}恢复。`);
   return restored;
 }
 
@@ -177,6 +171,95 @@ function surfaceUnit(u, notes, forced, why, element) {
   notes.push(`${u.name} ${forced ? `被${why || "打"}出沙层，下潜被迫解除` : `${why || "发动攻击"}，下潜解除`}。`);
   if (forced && typeof dealBreak === "function") dealBreak(u, 1, element || "physical", notes, "下潜被迫解除");
   return true;
+}
+
+/* ---------- 目盲（通用状态，statuses.blind 记层数，#405；数值在 engine.js · BLIND）----------
+ *   可以叠加，最多叠到表的长度（3 层）；挂着 n 层就用表里第 n 个数，每多一层效果翻倍（1 层 25%、2 层 50%、3 层 100%）。
+ *   攻击有这个概率落空：一次攻击只掷一次 d100（单体、范围、一个技能里分几下打的都算一次），app.js · dealToInner 在这次攻击
+ *   第一下确定打得出去（射程、躲藏、飞行、危墙都过了，代挡也换好了人）的时候掷。落空就整次攻击作废——这一下和这次攻击后面的每一下
+ *   都没有伤害、击破和任何命中效果，不进协助格挡、碰不到屏障，范围攻击也不算波及区里的配置物、按钮 / 拉杆（app.js · flushAoePulse）。
+ *   掷过的结果记在这次行动的记账上（state.actionAcc.blind，按攻击者分开）；借机攻击、格挡后的反击每次单独算一次攻击，
+ *   没有行动记账（直接结算的一击）时每一击各算一次。等格挡结果的那一击落下时不再掷（flags.blindChecked）。
+ *   被格挡下来的概率 +blockPct（app.js · finalBlockChance）。落空一次、或者攻击被格挡下来一次（拿武器挡住、空手挡住、以身作盾、
+ *   敌人的自动格挡都算）卸一层，剩下的继续挂着。 */
+/** 最多几层：表的长度 */
+function blindMaxStacks() {
+  return Math.max(1, (BLIND.missPct || []).length);
+}
+/** 一个目盲值折成层数：0 到最多层数的整数（主持人工具填的数照这个折；旧数据里的 true 算 1 层） */
+function blindStacksOf(v) {
+  const n = v === true ? 1 : Math.floor(Number(v) || 0);
+  return Math.max(0, Math.min(blindMaxStacks(), n));
+}
+/** 身上挂着几层目盲 */
+function blindStacks(u) {
+  return blindStacksOf(u && u.statuses ? u.statuses.blind : 0);
+}
+function isBlind(u) {
+  return blindStacks(u) > 0;
+}
+/** 挂着 n 层时表里对应的数（落空率 / 被格挡加成）；没目盲是 0 */
+function blindPct(list, n) {
+  return n > 0 ? Math.max(0, Number((list || [])[n - 1]) || 0) : 0;
+}
+/** 卸一层目盲，剩下的继续挂着；why：「攻击落空」「的攻击被格挡下来」 */
+function dropBlind(u, notes, why) {
+  const n = blindStacks(u);
+  if (!n) return false;
+  u.statuses.blind = n - 1;
+  if (notes) notes.push(`${u.name} ${why}，${n > 1 ? `目盲 −1 层（还剩 ${n - 1} 层）` : "目盲解除"}。`);
+  return true;
+}
+/** 这次行动里 a 掷过的落空骰记在哪（攻击者 id → 落空没有）。借机攻击、格挡后的反击（flags.opp / opportunity）是单独的一次攻击，
+ *  不沿用也不记；没有行动记账（直接结算的一击）时返回 null，每一击各算一次攻击 */
+function blindActionRolls(a, flags) {
+  const acc = state.actionAcc;
+  if (!acc || !a || a.id == null || (flags && (flags.opp || flags.opportunity))) return null;
+  return acc.blind || (acc.blind = {});
+}
+/** 这一击归不归目盲管（flags：dealTo 的 opt.flags）：攻击者目盲，或者这次攻击已经掷过落空骰（落空卸掉最后一层以后，这次攻击
+ *  剩下的几下照样作废）；是攻击行动，协助攻击、借机攻击这些反应也算。不归管的：出手时已经掷过（等格挡结果的那一击）；
+ *  环境 / 持续伤害；首领机制（锁定的机制伤害，不算攻击行动）；导体随机跳到的那一下；维塔斯借刺入的针尖出手（针就在目标身上）；
+ *  打濒死倒地的人（起身之前本来就不受伤害） */
+function blindRollApplies(a, t, flags) {
+  if (!a || !t || !flags) return false;
+  if (flags.blindChecked || !flags.action || flags.environment) return false;
+  if (flags.mechId || flags.locked || flags.conductorExtra || flags.viaPierce) return false;
+  if (typeof isDownProtected === "function" && isDownProtected(t)) return false;
+  const rolls = blindActionRolls(a, flags);
+  return isBlind(a) || !!(rolls && Object.prototype.hasOwnProperty.call(rolls, a.id));
+}
+/** 这一击的落空判定：这次攻击已经掷过就照那次的结果（again：不再写日志、不再卸层）；没掷过就掷 d100，
+ *  ≤ 现在层数的落空率就落空，卸一层。返回 { miss, roll, again, notes } */
+function blindRoll(a, t, flags) {
+  const rolls = blindActionRolls(a, flags);
+  if (rolls && Object.prototype.hasOwnProperty.call(rolls, a.id)) return { miss: rolls[a.id], again: true, notes: [] };
+  const n = blindStacks(a), pct = Math.min(100, blindPct(BLIND.missPct, n));
+  const roll = 1 + Math.floor(Math.random() * 100);
+  const miss = roll <= pct;
+  const what = flags && flags.aoe ? "这次范围攻击落空" : `对 ${t.name} 的攻击落空`;
+  const notes = [`${a.name} 目盲 ${n} 层：d100=${roll}（落空率 ${pct}%）→ ${miss ? what : "没有落空"}。`];
+  if (miss) dropBlind(a, notes, "攻击落空");
+  if (rolls) rolls[a.id] = miss;
+  return { miss, roll, again: false, notes };
+}
+/** a 在这次行动里接下来打的是另一次攻击（音爆再耗圣盾炸第二次）：落空骰重新掷 */
+function blindNewAttack(a) {
+  const acc = state.actionAcc;
+  if (acc && acc.blind && a) delete acc.blind[a.id];
+}
+/** 这次行动里 u 的攻击是不是因为目盲落空了（范围攻击波及配置物、按钮 / 拉杆时看：落空的攻击不算打到它们，app.js · flushAoePulse） */
+function blindMissedThisAction(u) {
+  const acc = state.actionAcc;
+  return !!(u && acc && acc.blind && acc.blind[u.id] === true);
+}
+/** 攻击者目盲：被格挡下来的概率 +现在层数的 BLIND.blockPct（app.js · finalBlockChance 和其他加成加算，加完再封顶） */
+function blindBlockBonus(a) {
+  return blindPct(BLIND.blockPct, blindStacks(a));
+}
+/** 攻击被格挡下来（协助格挡成功、空手格挡成功、以身作盾、敌人的自动格挡）：攻击者的目盲卸一层 */
+function blindOnBlocked(a, notes) {
+  return dropBlind(a, notes, "的攻击被格挡下来");
 }
 
 /** 攻击者打完一次攻击行动（dealTo，action 且不是反应） */

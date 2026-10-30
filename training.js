@@ -131,10 +131,10 @@
       u.dead = false; u.dying = false; u._removed = false; u.hidden = false;
     });
   }
-  /** 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾 */
+  /** 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾（和实战一样累积成废料） */
   function injectScrap(S) {
     const sc = S.dptScrap;
-    if (sc && Number(S.turnNo) % sc.every === 0) S.lastBrokenLayer = { type: sc.type, lost: sc.lost, dmg: sc.lost };
+    if (sc && Number(S.turnNo) % sc.every === 0 && typeof koltScrapAdd === "function") koltScrapAdd(sc.type, sc.lost);
   }
 
   /** 战斗画面每次结算后调用：补假人、记每回合伤害、回合开始注入废料（记录放在 state 里，撤销也跟着回去） */

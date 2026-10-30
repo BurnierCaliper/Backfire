@@ -106,7 +106,9 @@
     inspire: (c) => `<path d="M14 31l12-12-3-3L11 28z" fill="${c}"/><path d="M21 14l-4-4M23 17l3-3" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/><path d="M29 20V8m-4 4 4-4 4 4" stroke="${c}" stroke-width="2.2" fill="none" stroke-linecap="round"/>`,
     firm: (c) => `<circle cx="20" cy="11" r="3" fill="none" stroke="${c}" stroke-width="2.2"/><path d="M20 14v17M14 18h12M10 25c2 5 6 7 10 7s8-2 10-7" stroke="${c}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`,
     hide: (c) => `<path d="M7 20q13-12 26 0-13 12-26 0z" fill="none" stroke="${c}" stroke-width="2.2"/><circle cx="20" cy="20" r="3.6" fill="${c}"/><path d="M9 31 31 9" stroke="${c}" stroke-width="2.6" stroke-linecap="round"/>`,
-    adv: (c) => `<rect x="7" y="13" width="13" height="13" rx="2.5" fill="none" stroke="${c}" stroke-width="2" opacity=".55"/><rect x="18" y="9" width="15" height="15" rx="2.5" fill="${c}"/><circle cx="22" cy="13" r="1.5" fill="#15110d"/><circle cx="29" cy="20" r="1.5" fill="#15110d"/><circle cx="25.5" cy="16.5" r="1.5" fill="#15110d"/><path d="M25 33v-5m-3 2 3-3 3 3" stroke="${c}" stroke-width="2" fill="none"/>`
+    adv: (c) => `<rect x="7" y="13" width="13" height="13" rx="2.5" fill="none" stroke="${c}" stroke-width="2" opacity=".55"/><rect x="18" y="9" width="15" height="15" rx="2.5" fill="${c}"/><circle cx="22" cy="13" r="1.5" fill="#15110d"/><circle cx="29" cy="20" r="1.5" fill="#15110d"/><circle cx="25.5" cy="16.5" r="1.5" fill="#15110d"/><path d="M25 33v-5m-3 2 3-3 3 3" stroke="${c}" stroke-width="2" fill="none"/>`,
+    // 目盲：蒙眼布（横过来的布条 + 右边打结垂下的两根带子），布条上画两只闭着的眼
+    blind: (c) => `<path d="M6 14q13-4 26 0v8q-13-4-26 0z" fill="${c}"/><path d="M11 17.5q2.8 2.4 5.6 0M21.4 17.5q2.8 2.4 5.6 0" stroke="#15110d" stroke-width="1.8" fill="none" stroke-linecap="round"/><circle cx="30" cy="22" r="1.8" fill="${c}"/><path d="M30 22l1.5 9M30 22l4.5 7" stroke="${c}" stroke-width="2.2" stroke-linecap="round"/>`
   };
     /* ---- 即时 / 自我 / 攻击效果 ---- */
   const NEUTRAL = "#d8b25a";
@@ -150,7 +152,7 @@
   [["burn", "灼烧", "fire"], ["shock", "感电", "electric"], ["corr", "腐蚀", "acid"], ["frost", "冻伤", "ice"],
    ["quake", "震荡", "physical"], ["high", "高能", "energy"], ["reso", "共振", "harmonic"]].forEach(([k, n, e]) => add(k, n, "hex", EC[e], G[k]));
   [["unsteady", "不稳", false], ["stun", "晕眩", false], ["chase", "紧追", false], ["weak", "虚弱", false],
-   ["inspire", "振奋", true], ["firm", "坚挺", true], ["hide", "躲藏", true], ["adv", "优势", true]].forEach(([k, n, good]) => add(k, n, "sq", good ? "#7fe08f" : "#ff6a5a", G[k], good));
+   ["inspire", "振奋", true], ["firm", "坚挺", true], ["hide", "躲藏", true], ["adv", "优势", true], ["blind", "目盲", false]].forEach(([k, n, good]) => add(k, n, "sq", good ? "#7fe08f" : "#ff6a5a", G[k], good));
   [["melt", "熔融", "fire"], ["pierceIce", "刺骨", "ice"], ["neutral", "中和", "acid"], ["overload", "过载", "electric"],
    ["shift", "错位", "physical"], ["diffuse", "扩散", "energy"], ["refract", "折射", "harmonic"]].forEach(([k, n, e]) => add(k, n, "circ", EC[e], G2[k]));
   [["selfBurn", "自焚", "fire"], ["frostShell", "霜结", "ice"], ["splash", "溅射", "acid"], ["conductor", "导体", "electric"],
@@ -203,7 +205,7 @@
 
   /* ---------- 单位身上的徽章 ---------- */
   const STATUS_KEY = { burn: "burn", shock: "shock", corr: "corr", frostbite: "frost", shockwave: "quake", high: "high", reso: "reso",
-    unstable: "unsteady", chase: "chase", weak: "weak", inspire: "inspire", sturdy: "firm", hide: "hide", advantage: "adv" };
+    unstable: "unsteady", chase: "chase", weak: "weak", inspire: "inspire", sturdy: "firm", hide: "hide", advantage: "adv", blind: "blind" };
   const INSTANT_KEY = { melt: "melt", sting: "pierceIce", overload: "overload", shift: "shift", spread: "diffuse", refract: "refract" };
   const SELF_KEY = { burn: "selfBurn", frost: "frostShell", splash: "splash", conductor: "conductor", anchor: "heavy", store: "store", doppler: "doppler", frenzy: "frenzy" };
   const ATK_KEY = { combust: "blast", icebreak: "iceBreak", bolt: "strike", etch: "etch", backflow: "backflow", inertia: "inertia", diffract: "diffract" };
@@ -214,7 +216,7 @@
       // 高能只看高能状态；没有高能状态的高能值记在蓄能徽章上（#52）
       if (k === "high") { const he = Number(u.highEnergy) || 0; if (st.high) out.push({ key: "high", stack: he > 0 ? he : "" }); else if (he > 0 && u.self !== "store") out.push({ key: "store", stack: he }); return; }
       const v = st[k];
-      if (v) out.push({ key: STATUS_KEY[k], stack: k === "burn" && Number(v) > 0 ? Number(v) : "" });
+      if (v) out.push({ key: STATUS_KEY[k], stack: (k === "burn" || k === "blind") && Number(v) > 0 ? Number(v) : "" });   // 灼烧、目盲按层数
     });
     const ins = u.instant || {};
     Object.keys(INSTANT_KEY).forEach(k => { if (ins[k]) out.push({ key: INSTANT_KEY[k], stack: "" }); });

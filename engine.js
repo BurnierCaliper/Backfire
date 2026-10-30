@@ -607,7 +607,7 @@ function weatherDamagePct(weather, element) {
       return 0;
     case "acid":
       if (element === "acid" || element === "electric") return 0.25;
-      if (element !== "acid" && element !== "electric" && element !== "energy") return -0.25;
+      if (element !== "acid" && element !== "electric" && element !== "energy" && element !== "harmonic") return -0.25;
       return 0;
     case "thunder":
       if (element === "electric" || element === "energy") return 0.25;
@@ -630,6 +630,23 @@ const INTERFERE_CAP = 1;
  *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
  *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
 const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
+/** 熔融（护盾）：若一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复（玩家手册第四章）。
+ *  分层结算时当场判（distributePacket，#380）：带熔融的护盾从施加熔融起、这一回合累计吸收到「这一层上限 × breakAt」（向上取整）
+ *  就立刻失效，剩下的护盾归零；这一下没吸收完的伤害照常溢出到下一层，折射照常 ×1.5。
+ *  累计量记在这一层护盾上（_meltTaken），施加熔融、回合开始时清零；失效的护盾（_meltBroken）回合开始时恢复到「上限 × restore」（向下取整）
+ *  （effects.js · applyInstantEffect / meltShieldRoundStart） */
+const MELT_SHIELD = { breakAt: 0.5, restore: 0.5 };
+/** 带熔融的这一层护盾这一回合再吸收多少就失效；不是护盾、已经失效、上限为 0 的返回 null（照常吸收） */
+function meltShieldRoom(layer) {
+  if (!layer || layer.type !== "shield" || layer._meltBroken) return null;
+  const max = Number(layer.max) || 0;
+  if (!(max > 0)) return null;
+  return Math.max(0, Math.ceil(max * MELT_SHIELD.breakAt - (Number(layer._meltTaken) || 0) - 1e-9));
+}
+/** MELT_SHIELD 里的比例写成字：0.5 →「一半」，别的写百分比 */
+function meltShieldShare(k) {
+  return k === 0.5 ? "一半" : Math.round(k * 100) + "%";
+}
 /** 驻波墙（Helumica「频域造物」，作者 10/23 定；放墙、穿墙、消失在 app.js · placeWaveWall / wavePassUnit / expireWaveWalls）：
  *  dampenPct    降幅墙：穿过它的选定属性伤害 −50%，和其他百分比加算（作者 10/23：两道墙 −100% 直接归零，触发极少，保留这个免伤连招），并且不造成任何击破
  *  amplifyPct   增幅墙：穿过它的选定属性伤害 +25%，和其他百分比加算（两道墙 +50%），击破照常
@@ -641,6 +658,11 @@ const WAVE_WALL = {
   dampenStatus: ["unstable", "weak"], amplifyStatus: ["sturdy", "inspire"],
   elements: ["physical", "fire", "ice", "electric", "acid", "energy", "harmonic"]
 };
+/** 目盲（通用状态，statuses.blind 记层数，#405；规则在 effects.js · blindRollApplies / blindRoll，app.js · dealToInner 出手时掷、finalBlockChance 加格挡率）：
+ *  可以叠加，最多叠到表的长度（3 层）；挂着 n 层就用表里第 n 个数，每多一层效果翻倍（1 层 25%、2 层 50%、3 层 100%）。
+ *  missPct   攻击落空的概率：一次攻击（单体、范围都算）只掷一次 d100，≤ 这个数就落空——整次攻击没有伤害、击破和任何命中效果，卸一层目盲
+ *  blockPct  被格挡下来的概率 +N%（协助格挡、敌人的自动格挡都算，和其他格挡加成加算，加完再封顶）；被格挡下来一次卸一层目盲 */
+const BLIND = { missPct: [25, 50, 100], blockPct: [25, 50, 100] };
 function milestone(level, every = 5) {
   // 达到 5/10/15… 或 2/4/6… 的当级就加，不是下一级才加
   return Math.floor(Math.max(1, Number(level) || 1) / every);
@@ -824,6 +846,7 @@ function resolveAttack(ctx) {
   let totalBreak = 0;
   let preventSand = false;
   let meltEnded = false;
+  let meltShieldBroke = 0;   // 熔融护盾吃满上限一半、当场失效了几层（distributePacket）
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
@@ -1111,6 +1134,7 @@ function resolveAttack(ctx) {
         packet,
         element,
         refraction: !!(t.instant && t.instant.refract),
+        melt: meltLive,   // 熔融护盾吃满上限一半当场失效（MELT_SHIELD）；状态、场地伤害一样算
         sting: !!(t.instant && t.instant.sting),
         harmonicStun: element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
         phaseHarmonic: weather === "phase" && element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
@@ -1119,6 +1143,7 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
+      meltShieldBroke += Number(distribute.meltBroke) || 0;
       // 出血：这一段扣到了肉体 / 星灵层的血（直接打中，或者打穿外层溢进去都算）→ 对扣到的第一层肉体 / 星灵再扣「上限 × 比例」的真实伤害（不溢出）
       const bleedIdx = ctx.bleed ? layersWork.findIndex((l, i) => BLEED.layers.includes(l.type) && layersBefore[i] > (Number(l.current) || 0)) : -1;
       const bleedLayer = bleedIdx >= 0 ? layersWork[bleedIdx] : null;
@@ -1283,6 +1308,7 @@ function resolveAttack(ctx) {
     hits,
     preventSand,
     meltEnded,
+    meltShieldBroke,
     pierColdRetrig,
     knockdownHp,
     selfBreak,
@@ -1320,6 +1346,7 @@ function distributePacket(opt) {
   let remaining = opt.packet;
   let dealt = 0;
   let extraHarmonic = 0;
+  let meltBroke = 0;   // 这一下有几层熔融护盾吃满上限一半、当场失效
   const layers = opt.layers;
 
   const applyToIndex = (idx, amount, tag) => {
@@ -1327,11 +1354,24 @@ function distributePacket(opt) {
     if (idx < 0 || idx >= layers.length) return 0;
     const layer = layers[idx];
     const before = Math.max(0, Number(layer.current) || 0);
-    const take = Math.min(before, amount);
+    // 熔融护盾（MELT_SHIELD）：这一回合最多再吸收 room 就失效，没吸收完的照常往下溢（以前整层照吸收，结算完才清零，打穿时熔融不起作用）
+    const room = opt.melt ? meltShieldRoom(layer) : null;
+    const take = Math.min(before, amount, room != null ? room : Infinity);
     layer.current = Math.max(0, Math.floor((before - take) + 1e-9));
     let leftover = amount - take;
     dealt += take;
     notes.push(`${tag}${LAYER[layer.type]} ${before} → ${layer.current}（吸收 ${take}）`);
+    if (room != null) {
+      layer._meltTaken = (Number(layer._meltTaken) || 0) + take;
+      // 累计吸收到上限一半时护盾还没打空：立刻失效，剩下的护盾归零（打空的那一下本来就是击穿，不算熔融失效）
+      if (take >= room && layer.current > 0) {
+        notes.push(`熔融：护盾累计受伤 ${layer._meltTaken}，到上限 ${Number(layer.max) || 0} 的${meltShieldShare(MELT_SHIELD.breakAt)}，立刻失效（${layer.current} → 0）` +
+          (leftover > 0 ? `，剩下 ${leftover} 溢出` : ""));
+        layer.current = 0;
+        layer._meltBroken = true;
+        meltBroke++;
+      }
+    }
     if (leftover > 0 && before > 0 && leftover > 0 && opt.refraction) {
       leftover = Math.floor(leftover * 1.5 + 1e-9);
       notes.push(`折射：击穿 ${LAYER[layer.type]}，溢出 ×1.5 后向下取整 = ${leftover}`);
@@ -1353,7 +1393,7 @@ function distributePacket(opt) {
       }
     }
     // 额外的那几次（第一层之外）：画面另外跳一个数字
-    return { dealt, notes, extraHarmonic: remaining * Math.max(0, layersHit - 1) };
+    return { dealt, notes, extraHarmonic: remaining * Math.max(0, layersHit - 1), meltBroke };
   }
 
   // 谐波打晕眩：次外层 = 这一击之前从外往里第二层还有血的；单层目标没有次外层，不额外打
@@ -1395,7 +1435,7 @@ function distributePacket(opt) {
       notes.push("谐波打晕眩：只有一层血量，没有次外层，不额外结算。");
     }
   }
-  return { dealt, notes, extraHarmonic };
+  return { dealt, notes, extraHarmonic, meltBroke };
 }
 
 /** 濒死且还没选择起身：在玩家自己按下「起身」之前，不受任何伤害，
@@ -1444,6 +1484,10 @@ function applyResultToUnit(target, result, attacker) {
   const notes = [];
   if (!result.ok) return notes;
   target.layers = clone(result.layersAfter);
+  // 熔融护盾这一下吃满上限一半，当场失效（distributePacket · MELT_SHIELD），没吸收完的伤害已经溢出到下一层
+  if (result.meltShieldBroke) {
+    notes.push(`${target.name} 熔融：护盾累计受伤到上限${meltShieldShare(MELT_SHIELD.breakAt)}，立刻失效，没吸收完的伤害照常溢出到下一层；下回合以${meltShieldShare(MELT_SHIELD.restore)}恢复。`);
+  }
   let spent = result.breakDealt;
   if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     spent = 0;
@@ -1794,7 +1838,7 @@ function swarmStance(level) {
  *    dice：所有敌人都有共振时那一发远程谐波攻击的伤害骰（固定 1d4，不随等级升档）。招式的倍率、击破在 enemies.js · SEWER_CFG
  *  elite 触灵维护员 / 触灵清扫员（两个精英数值相同）：照警卫队队长（蜥蜴），肉体层换成星灵——外层护盾 shield = [1 级血量, 每级增量]、
  *    每 2 级再加 shieldPer2；内层星灵 spirit = [1 级血量, 每级增量]；架势 def（不随等级，10 级起照精英规则 ×0.6）；
- *    ATK atk + ⌊等级/2⌋ + ⌊等级/5⌋；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
+ *    ATK atk + (等级−1)（照蜥蜴队长每级 +1）；dice：维护员普通攻击的伤害骰（固定 1d4，不随等级升档；清扫员的范围谐波没有伤害骰） */
 const SEWER_STATS = {
   sweeper: { shield: [4, 2], armor: 1, atk: 4, dice: 4 },
   elite: { shield: [12, 5], shieldPer2: 5, spirit: [14, 2], def: 4, atk: 7, dice: 4 }
@@ -1805,7 +1849,7 @@ function sewerEliteOf(name, lv, p, extra) {
   return unitOf(name, lv, [
     { type: "shield", hp: scaleHp(S.shield[0] + (lv - 1) * S.shield[1] + milestone(lv, 2) * S.shieldPer2, p) },
     { type: "spirit", hp: scaleHp(S.spirit[0] + (lv - 1) * S.spirit[1], p) }
-  ], S.def, S.atk + milestone(lv, 2) + milestone(lv, 5), Object.assign({ range: "ranged" }, extra));
+  ], S.def, S.atk + (lv - 1), Object.assign({ range: "ranged" }, extra));
 }
 
 function enemyPresets() {
@@ -1927,7 +1971,7 @@ function enemyPresets() {
       return unitOf(this.name, lv, [
         { type: "shield", hp: scaleHp(12 + (lv - 1) * 5 + milestone(lv, 2) * 5, p) },
         { type: "flesh", hp: scaleHp(14 + (lv - 1) * 2, p) }
-      ], 4, 7 + milestone(lv, 2) + milestone(lv, 5), { kit: "captain_lizard", range: "ranged", dice: [1, 6], element: "acid", baseBreak: 2 });
+      ], 4, 7 + (lv - 1), { kit: "captain_lizard", range: "ranged", dice: [1 + milestone(lv, 5), 6], element: "acid", baseBreak: 2 });
     }},
     // —— 外城区镇压部队（docs/suppression-force.md）：外层护盾、内层肉体，武器全是火；atk 比参照模板低 1 ——
     // 警棍盾：总血量同狂徒（锤），atk 4 → 3
@@ -2260,7 +2304,7 @@ function unitOf(name, level, layers, def, atk, extra = {}) {
     statuses: {
       burn: 0, shock: false, corr: false, frostbite: false, shockwave: false,
       high: false, reso: false, unstable: false, weak: false, inspire: false,
-      sturdy: false, hide: false, advantage: false, chase: false, latestElement: null
+      sturdy: false, hide: false, advantage: false, chase: false, blind: 0, latestElement: null
     },
     instant: { melt: false, sting: false, overload: false, shift: false, spread: false, refract: false },
     self: "none",

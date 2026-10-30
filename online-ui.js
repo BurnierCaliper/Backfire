@@ -11,7 +11,7 @@
   const layerLabel = type => layerNames()[type] || layerNames().flesh || type;
   // 天气名（engine.js 里没有天气名，和 app.js · WEATHER_CN 同一套）。以前和层名挤在一张表里，沙暴的 sand 和沙尘层撞键，只好在用的地方另写「沙暴」
   const WEATHER_NAMES = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
-  const names = { nano: "纳米", nanoReserve: "储备", bean: "咖啡豆", liquid: "咖啡液", durability: "耐久", shield: "盾", charge: "充能", energyPct: "能量", light: "光", debrisCount: "碎块", burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振", weak: "虚弱", inspire: "振奋", hide: "躲藏", advantage: "优势", chase: "紧追", sturdy: "坚固" };
+  const names = { nano: "纳米", nanoReserve: "储备", bean: "咖啡豆", liquid: "咖啡液", durability: "耐久", shield: "盾", charge: "充能", energyPct: "能量", light: "光", debrisCount: "碎块", burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振", weak: "虚弱", inspire: "振奋", hide: "躲藏", advantage: "优势", chase: "紧追", sturdy: "坚固", blind: "目盲" };
   // 玩家右侧栏收起（#298）：电脑上把「战斗 / 小队」右侧栏收成一条窄边（只剩展开按钮，收起时来了新消息挂数字），战斗画面变宽；
   // 收起状态记在这台电脑上。手机竖屏的右侧栏在底部，照旧用自己的「展开 ▴ / 收起 ▾」
   const SIDE_COLLAPSE = { key: "backfire.online.sideCollapsed", collapse: "▸", expand: "◂", collapseTitle: "收起右侧栏（战斗画面变宽）", expandTitle: "展开右侧栏：战斗记录与小队聊天" };
@@ -246,7 +246,7 @@
     document.addEventListener("click", onPaperOutside, true);
     document.addEventListener("keydown", onPaperKey, true);
     // 悬停在单位 / 配置物上：图鉴描述 + 身上效果的文字说明（unit-tip.js）
-    const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追" };
+    const TIP_STATUS = { burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", reso: "共振", unstable: "不稳", weak: "虚弱", inspire: "振奋", sturdy: "坚挺", hide: "躲藏", advantage: "优势", chase: "紧追", blind: "目盲" };
     const TIP_INSTANT = { melt: "熔融", sting: "刺骨", overload: "过载", shift: "错位", spread: "扩散", refract: "折射", iceNext: "冰冻+50%" };
     const TIP_SELF = { burn: "自焚", frost: "霜结", splash: "溅射", conductor: "导体", anchor: "千钧", store: "蓄能", doppler: "多普勒", frenzy: "狂暴" };
     const TIP_ATK = { combust: "爆燃", icebreak: "破冰", bolt: "雷击", etch: "蚀刻", backflow: "倒流", inertia: "惯性", diffract: "衍射" };
@@ -289,7 +289,7 @@
       if (u.dying && !u.dead) tokens.push("濒死");
       if (u.stunned && !u.dead) tokens.push("失衡");
       if (u.flying) tokens.push("飞行");
-      Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push(k === "burn" && Number(st.burn) > 0 ? "灼烧×" + st.burn : TIP_STATUS[k]); });
+      Object.keys(TIP_STATUS).forEach(k => { if (st[k]) tokens.push((k === "burn" || k === "blind") && Number(st[k]) > 0 ? TIP_STATUS[k] + "×" + Number(st[k]) : TIP_STATUS[k]); });   // 灼烧、目盲按层数
       if (st.high) tokens.push("高能 " + (Number(u.highEnergy) || 0));
       else if (Number(u.highEnergy) > 0) tokens.push("蓄能 " + Number(u.highEnergy));   // 蓄能攒的高能值，不算高能（#52）
       Object.keys(TIP_INSTANT).forEach(k => { if ((u.instant || {})[k]) tokens.push(TIP_INSTANT[k]); });

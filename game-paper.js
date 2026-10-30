@@ -10,8 +10,8 @@
  *     一个人打的时候是我方每个人（行动中 / 待行动 / 已行动），点牌子 = 点队伍栏里同一个人
  *   · 「工具 ▾」= 旧顶栏（.g-top）原地变成的下拉：同一批按钮、同一个 id、同一个点击处理，按模式藏的（单局、跑团、热座）照旧藏——
  *     只是换了位置、分了组（GPAPER.tools），点完收起；顶栏上的字（回合、天气、时钟、遭遇）挪到上面那一条胶带上
- *   · 左上角队伍、底下技能栏：hd2d-shell.js 的外壳（和联机同一份样子，online-paper.css）
- *   · 右边战斗记录抽屉（#g-log）：平时收成右边缘一个竖标签；联机房主的小队聊天照旧在里面（有新消息时竖标签上挂数字）
+ *   · 左上角队伍、左下角技能栏（#384）：hd2d-shell.js 的外壳（和联机同一份样子，online-paper.css）
+ *   · 右边战斗记录抽屉（#g-log）：平时收成右边缘一个竖标签，窗口够宽时拉开一直到底（#384）；联机房主的小队聊天照旧在里面（有新消息时竖标签上挂数字）
  * 各块的收起状态记在本机（localStorage，读写都包 try/catch）。只换排版，规则、出手流程、快捷键都不碰；
  * 画的东西只用页面上已经写好的字和投影过的单位（OnlineView.projectUnit 的白名单），坚毅生命（shp / shpMax）一个字都不碰。
  *
@@ -518,7 +518,7 @@
     if (!env.on) return;
     P.dress(env.doc, null, env.theme);
     pushCover();
-    // 技能栏现在多高（--olp-dock-h）：右边的抽屉、悬停预演让开它（技能多了换行变高也跟着让）；手机上抽屉的竖标签挂在它上面。
+    // 技能栏现在多高（--olp-dock-h）：悬停预演、窗口窄时右边的抽屉让开它（技能多了换行变高也跟着让；窗口够宽时抽屉在技能栏右边、一直到底，#384）；手机上抽屉的竖标签挂在它上面。
     // 选中技能以后先收着的这一段照旧用收起之前的（paper-ui.js · dockHeight 给 null，#362）：挂在它上面的面板不跟着挪，取景也就不变
     const hud = app() && app().querySelector(":scope > .g-hud"), b = env.doc.body, dockH = UI.dockHeight(hud);
     if (dockH != null && b.style.getPropertyValue("--olp-dock-h") !== dockH) { if (dockH) b.style.setProperty("--olp-dock-h", dockH); else b.style.removeProperty("--olp-dock-h"); }
