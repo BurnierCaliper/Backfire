@@ -1,5 +1,5 @@
 // High Flux（#485）· AI counter-cards-ai.js：简单 / 普通 / 困难 × 庄家 / 玩家都能完整打完一局、只按自己能看到的东西做决定、
-// 推理（困难记住整局、普通只看单轮结果）、玩家方会决定翻天气还是暗弃跳过、借贷（每轮开始 / 下注时）、困难比简单强
+// 推理（困难记住整局、普通只看单轮结果）、玩家方会决定翻天气还是暗弃跳过、借贷（每轮开始 / 下注时 / 跟不起时，#496）、困难比简单强
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -241,6 +241,53 @@ test("AI 也会借（下注时）：筹码不够、牌又好到想加注才借�
     // 雷鸣里出谐波：只赢沙
     const weak = AI.decide(CC.view(mk("harmonic"), "player"), level, CC.makeRng("w"));
     assert.notEqual(weak.type, "borrow", level);
+  }
+});
+
+test("下注不封顶（#496）：对方押得比自己手上的还多、跟不起——牌好就借到补上缺口再跟 / 加注；牌一般困难按胜率算（利息也算进去），划得来只借够跟的；牌差就弃牌；简单随手借够跟或者弃牌；都不会掉进「随便挑一个合法的」保险", () => {
+  // 第 1 轮玩家押掉 4 枚（平局滚存）；第 2 轮雷鸣，玩家手上 2 枚，庄家下 bet 枚——比玩家手上的多，跟不起
+  const mk = (playerCard, bet) => {
+    const g = CC.newGame({ seed: "跟不起", deck: DECK, playerChips: 8 });
+    A(g, "dealer", "weather", { op: "pass" });
+    A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+    A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call");
+    A(g, "player", "reveal"); A(g, "player", "noNormal");
+    A(g, "dealer", "check"); A(g, "player", "check");
+    A(g, "dealer", "weather", { op: "keep" });
+    A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: playerCard });
+    A(g, "player", "check"); A(g, "dealer", "bet", { amount: bet });
+    assert.equal(g.sides.player.chips, 2);
+    assert.ok(!CC.legal(g, "player").some(o => o.type === "call"), "跟不起");
+    return g;
+  };
+  const fallback = (a) => "min" in a || "max" in a;   // 保险分支把可选项原样抄过来（带 min / max）
+  for (const level of ["normal", "hard"]) {
+    // 雷鸣里出能量：牌好——借到补上缺口（要跟的 10 + 最低下注 2 − 手上 2 = 10 → 12 枚），借完跟注或加注
+    const strong = mk("energy", 10);
+    assert.deepEqual(J(CC.legal(strong, "player")), [{ type: "fold" }, { type: "borrow", min: 3, max: 12, step: 3, need: 12 }]);
+    const a = AI.decide(CC.view(strong, "player"), level, CC.makeRng("s"));
+    assert.deepEqual(J(a), { type: "borrow", amount: 12 }, level);
+    CC.act(strong, "player", a);
+    assert.ok(["call", "raise"].includes(AI.decide(CC.view(strong, "player"), level, CC.makeRng("s")).type), level + "：借完接着跟 / 加注");
+    // 雷鸣里出谐波：牌差——不借，弃牌
+    assert.deepEqual(J(AI.decide(CC.view(mk("harmonic", 10), "player"), level, CC.makeRng("w"))), { type: "fold" }, level);
+  }
+  // 困难、牌一般（酸）：对方只多押一点（4 枚）——借来跟划得来，只借够跟的 3 枚（不借到 6 枚），借完跟注；押大了（10 枚）就弃牌
+  const mid = mk("acid", 4);
+  const b = AI.decide(CC.view(mid, "player"), "hard", CC.makeRng("m"));
+  assert.deepEqual(J(b), { type: "borrow", amount: 3 });
+  CC.act(mid, "player", b);
+  assert.deepEqual(J(AI.decide(CC.view(mid, "player"), "hard", CC.makeRng("m"))), { type: "call" });
+  assert.deepEqual(J(AI.decide(CC.view(mk("acid", 10), "player"), "hard", CC.makeRng("m"))), { type: "fold" });
+  // 简单：随手借够跟（缺口 8 枚 → 一次借 9 枚，不是一份一份地借）或者弃牌
+  const seen = new Set();
+  for (let i = 0; i < 30; i++) seen.add(JSON.stringify(AI.decide(CC.view(mk("fire", 10), "player"), "easy", CC.makeRng("e" + i))));
+  assert.deepEqual([...seen].sort(), [JSON.stringify({ type: "borrow", amount: 9 }), JSON.stringify({ type: "fold" })].sort());
+  // 三档 × 六张牌 × 几种押注：都不掉进保险；借了就够跟
+  for (const level of LEVELS) for (const pc of ["fire", "acid", "electric", "energy", "physical", "harmonic"]) for (const bet of [3, 4, 10, 20]) {
+    const x = AI.decide(CC.view(mk(pc, bet), "player"), level, CC.makeRng(level + pc + bet));
+    assert.ok(!fallback(x), `${level}/${pc}/${bet}：${JSON.stringify(x)}`);
+    if (x.type === "borrow") assert.ok(2 + x.amount >= bet, `${level}/${pc}/${bet}：借了就够跟`);
   }
 });
 

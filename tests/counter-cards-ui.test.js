@@ -392,6 +392,54 @@ test("借贷（下注时）：轮到人下注、筹码不够时下注栏里有�
   assert.ok(bar().querySelector('[data-cc="raise"]'), "借完能加注了");
 });
 
+test("下注不封顶（#496）：人能押过对方的全部筹码（「最大」是自己手上的）；对方押得比人手上的还多时，下注栏写清楚跟不起、要先借，只有借的按钮（从够跟的数目起）和弃牌，借够了才出现跟注；规则说明写了不封顶", () => {
+  const DECK = ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"];
+  // 1. 人当玩家 49 枚，庄家只有 9 枚：「最大」是自己手上的 49 枚（以前封顶在庄家的 9 枚）
+  const p = page();
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed: "不封顶栏", deck: DECK, dealerChips: 10 });
+  A(g, "dealer", "weather", { op: "pass" }); A(g, "dealer", "play", { card: "flesh" });
+  p.UI.start({ side: "player", level: "normal", game: g, fast: true });
+  click(p.$('#cc-board button.cc-can[data-card="fire"]'));
+  assert.equal(g.stage, "bet1");
+  click(p.$('#cc-actions [data-cc="amt"][data-set="max"]'));
+  assert.equal(Number(p.$("#cc-actions .cc-amt").textContent), 49);
+  click(p.$('#cc-actions [data-cc="bet"]'));
+  assert.ok(g.log.some(e => e.t === "bet" && e.by === "player" && e.op === "bet" && e.amount === 49), "押了 49 枚");
+  // 庄家（AI，马上走）跟不起：借了来跟，或者弃牌——不会卡住
+  const folded = g.results.length && g.results[0].outcome === "fold";
+  assert.ok(folded || (g.sides.dealer.loan >= 39 && g.sides.dealer.bet === 50), JSON.stringify(g.results) + " 庄家借了 " + g.sides.dealer.loan);
+  assert.match(p.$("#cc-side .cc-rules").textContent, /下注不封顶：想押多少押多少，只受自己手上的筹码（含借来的）限制/);
+  // 2. 人当玩家、手上 2 枚，庄家（测试替它走）押 10 枚：跟不起
+  const h = CC.newGame({ seed: "跟不起栏", deck: DECK, playerChips: 8 });
+  A(h, "dealer", "weather", { op: "pass" });
+  A(h, "dealer", "play", { card: "flesh" }); A(h, "player", "play", { card: "ice" });
+  A(h, "player", "bet", { amount: 4 }); A(h, "dealer", "call");
+  A(h, "player", "reveal"); A(h, "player", "noNormal");
+  A(h, "dealer", "check"); A(h, "player", "check");
+  A(h, "dealer", "weather", { op: "keep" });
+  A(h, "dealer", "play", { card: "sand" }); A(h, "player", "play", { card: "energy" });
+  A(h, "player", "check"); A(h, "dealer", "bet", { amount: 10 });
+  const q = page();
+  q.UI.start({ side: "player", level: "normal", game: h, fast: true });
+  const bar = () => q.$("#cc-actions");
+  assert.match(bar().textContent, /庄家下了注，要跟 10 枚/);
+  assert.match(bar().textContent, /你手上只有 2 枚，跟不起：要跟就先向主持方借（每借 3 枚，结束时还 4 枚），不借只能弃牌/);
+  assert.ok(!bar().querySelector('[data-cc="call"]'), "没有跟注");
+  assert.ok(!bar().querySelector('[data-cc="raise"]'), "没有加注");
+  assert.ok(bar().querySelector('[data-cc="fold"]'));
+  assert.deepEqual(Array.from(bar().querySelectorAll('[data-cc="borrow"]')).map(b => Number(b.dataset.amount)), [9, 12], "借的按钮从够跟的 9 枚起，到补上缺口（够跟 + 最低加注额）的 12 枚");
+  const nine = bar().querySelector('[data-cc="borrow"][data-amount="9"]');
+  assert.ok(nine.classList.contains("primary"));
+  assert.match(nine.textContent, /借 9 枚（还 12）/);
+  click(nine);
+  assert.deepEqual([h.sides.player.chips, h.sides.player.loan, h.sides.player.owe], [11, 9, 12]);
+  assert.equal(CC.toAct(h).join(), "player", "借完还是人下注");
+  assert.ok(bar().querySelector('[data-cc="call"]'), "借够了，可以跟注");
+  click(bar().querySelector('[data-cc="call"]'));
+  assert.equal(h.sides.player.bet, 11);
+});
+
 test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按扣还之后的筹码数", () => {
   const p = page();
   const CC = p.CC;

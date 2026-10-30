@@ -1,5 +1,5 @@
 // High Flux（#485）· 规则引擎 counter-cards.js：计分（克制表 + 天气，特别是微光、酸雨对装甲）、每轮流程、
-// 庄家天气行动 / 偷看、暗出、下注（最低额 = 轮数、最多加注 2 次、过牌 / 弃牌）、玩家翻天气 / 暗弃跳过 / 常态、
+// 庄家天气行动 / 偷看、暗出、下注（最低额 = 轮数、最多加注 2 次、过牌 / 弃牌、不封顶——跟不起要先借，#496）、玩家翻天气 / 暗弃跳过 / 常态、
 // 相位全押封顶、平局滚存、分档赔付、看不到对方的牌、赌场接口；克制表（得分）和手里元素牌的悬停预览
 "use strict";
 const test = require("node:test");
@@ -353,6 +353,51 @@ test("下注：每个下注回合最多加注 2 次；过牌只能在还没人�
   assert.equal(g.stage, "weather");
 });
 
+/* ---------- 下注不封顶（#496，主人 10/30 试玩后定） ---------- */
+
+test("下注不封顶（#496）：想押多少押多少，只受自己手上的筹码限制——玩家 49 枚对庄家 9 枚，能押到自己的 49 枚（以前封顶在庄家的 9 枚）；加注也一样", () => {
+  const g = CC.newGame({ seed: "不封顶", deck: DECK, dealerChips: 10 });
+  toBet1(g, "flesh", "fire");
+  assert.deepEqual(J(CC.legal(g, "player").find(o => o.type === "bet")), { type: "bet", min: 1, max: 49 });
+  A(g, "player", "bet", { amount: 30 });
+  assert.deepEqual([g.sides.player.bet, g.sides.player.chips], [31, 19]);
+  // 第 2 轮：庄家手上比玩家多，玩家下注后庄家能加注到自己手上的全部（以前封顶在玩家手上的）
+  const h = CC.newGame({ seed: "不封顶2", deck: DECK, playerChips: 10 });
+  toBet1(h, "flesh", "fire");
+  A(h, "player", "bet", { amount: 2 });
+  assert.deepEqual(J(CC.legal(h, "dealer").find(o => o.type === "raise")), { type: "raise", min: 1, max: 47 });   // 手上 49：跟 2，再加最多 47
+  A(h, "dealer", "raise", { amount: 20 });
+  assert.equal(h.sides.dealer.bet, 1 + 2 + 20);
+  assert.equal(h.sides.player.chips, 7, "玩家手上只剩 7 枚，比要跟的 20 枚少");
+});
+
+test("下注不封顶：对方押得比自己手上的还多，跟不起——不能直接跟、不能加注，只能弃牌或先向主持方借（借到补上「要跟的 + 最低下注额」的缺口为止）；借得不够还能接着借，借够了照常跟注", () => {
+  const g = CC.newGame({ seed: "借来跟", deck: DECK, dealerChips: 10 });
+  toBet1(g, "flesh", "fire");
+  A(g, "player", "bet", { amount: 30 });
+  // 庄家手上 9 枚，要跟 30 枚：缺口 30 + 1 − 9 = 22 → 最多借 24 枚
+  assert.deepEqual(J(CC.legal(g, "dealer")), [{ type: "fold" }, { type: "borrow", min: 3, max: 24, step: 3, need: 31 }]);
+  assert.throws(() => A(g, "dealer", "call"), /庄家现在不能这样做/);
+  assert.throws(() => A(g, "dealer", "raise", { amount: 1 }), /庄家现在不能这样做/);
+  assert.throws(() => A(g, "dealer", "borrow", { amount: 27 }), /3–24 枚/);
+  // 先借 3 枚：手上 12 枚，还是跟不起，接着借
+  A(g, "dealer", "borrow", { amount: 3 });
+  assert.deepEqual(J(CC.toAct(g)), ["dealer"], "借完还是庄家下注");
+  assert.deepEqual(J(CC.legal(g, "dealer")), [{ type: "fold" }, { type: "borrow", min: 3, max: 21, step: 3, need: 31 }]);
+  A(g, "dealer", "borrow", { amount: 18 });
+  assert.deepEqual([g.sides.dealer.chips, g.sides.dealer.loan, g.sides.dealer.owe], [30, 21, 28]);
+  const opts = CC.legal(g, "dealer");
+  assert.deepEqual(J(opts.find(o => o.type === "call")), { type: "call", amount: 30 });
+  assert.ok(!opts.some(o => o.type === "raise"), "跟完手上就没有了：不能加注");
+  assert.deepEqual(J(opts.find(o => o.type === "borrow")), { type: "borrow", min: 3, max: 3, step: 3, need: 31 }, "还差最低下注额 1 枚：想加注可以再借一份");
+  A(g, "dealer", "call");
+  assert.deepEqual([g.sides.dealer.bet, g.sides.dealer.chips, g.sides.player.bet, g.sides.player.chips], [31, 0, 31, 19]);
+  // 借了多少、要还多少照旧公开
+  const pv = CC.view(g, "player");
+  assert.deepEqual([pv.opp.loan, pv.opp.owe], [21, 28]);
+  assert.ok(pv.log.some(e => e.t === "loan" && e.by === "dealer" && e.amount === 18 && !e.to));
+});
+
 test("弃牌：立即判负，输掉自己已下的筹码，包括自己在滚存底池里的那一份", () => {
   const g = CC.newGame({ seed: "弃牌", deck: DECK });
   quietRound(g, "flesh", "ice");                      // 第 1 轮平局：双方各 1 枚滚存
@@ -389,11 +434,16 @@ test("平局底池滚存到下一轮；第 5 轮打平，各自拿回自己的�
   assert.equal(g.final.winner, null);
 });
 
-test("手上的筹码押光了、平局滚存里还有自己的一份：下一轮不下底注、不下注，押着底池接着打", () => {
+test("手上的筹码押光了、平局滚存里还有自己的一份：下一轮不下底注，押着底池接着打；下注不封顶（#496）以后押光的这一方照样要过下注这一关——能过牌，对方下注时要跟就得先借", () => {
   const g = CC.newGame({ seed: "押光", deck: DECK, playerChips: 12 });
   toBet1(g, "flesh", "ice");
   A(g, "player", "bet", { amount: 11 }); A(g, "dealer", "call");
-  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 雷鸣：冰打血肉 0；第二轮下注跳过（玩家手上没筹码了）
+  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 雷鸣：冰打血肉 0
+  // 玩家押光了：第二轮下注照常（以前按较少一方封顶在 0，整轮跳过），庄家先；押光的玩家能过牌（或借了再下注）
+  assert.equal(g.stage, "bet2"); assert.equal(g.sides.player.chips, 0);
+  A(g, "dealer", "check");
+  assert.deepEqual(J(CC.legal(g, "player")), [{ type: "check" }, { type: "fold" }, { type: "borrow", min: 3, max: 3, step: 3, need: 1 }]);
+  A(g, "player", "check");
   assert.equal(g.results[0].rollover, true);
   assert.equal(g.round, 2); assert.equal(g.over, false);
   assert.equal(g.sides.player.chips, 0); assert.equal(g.sides.player.pot, 12);
@@ -401,14 +451,22 @@ test("手上的筹码押光了、平局滚存里还有自己的一份：下一�
   assert.equal(g.stage, "loan"); assert.deepEqual(J(CC.toAct(g)), ["player"]);
   A(g, "player", "noLoan");
   assert.equal(g.sides.player.bet, 0); assert.equal(g.sides.dealer.bet, 0);   // 不下底注
-  // 第 2 轮：不下注，沙暴里能量打灵体 +1，玩家拿走底池
+  assert.ok(g.log.some(e => e.t === "round" && e.r === 2 && /不下底注/.test(e.text) && !/不下注/.test(e.text)));
   A(g, "dealer", "weather", { op: "keep" });
   A(g, "dealer", "play", { card: "spirit" }); A(g, "player", "play", { card: "energy" });
-  assert.equal(g.stage, "weather");
+  // 第 2 轮照样下注：玩家过牌，庄家下注 2 枚，玩家手上没有，跟不起——要跟就先借（缺口 2 + 2 = 4 → 最多借 6 枚）
+  assert.equal(g.stage, "bet1");
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 2 });
+  assert.deepEqual(J(CC.legal(g, "player")), [{ type: "fold" }, { type: "borrow", min: 3, max: 6, step: 3, need: 4 }]);
+  A(g, "player", "borrow", { amount: 3 });
+  A(g, "player", "call");
   A(g, "player", "reveal"); A(g, "player", "noNormal");
+  A(g, "dealer", "check"); A(g, "player", "check");
+  // 沙暴里能量打灵体 +1：玩家拿走底池（滚存 12 + 12，这一轮各 2）
   const r = g.results[1];
-  assert.equal(r.winner, "player"); assert.equal(r.pot, 24);
-  assert.equal(g.sides.player.chips, 24 - 1); assert.equal(g.sides.dealer.chips, 38 - 1);   // 第 3 轮照常下底注
+  assert.equal(r.winner, "player"); assert.equal(r.pot, 28);
+  assert.equal(g.sides.player.chips, 3 - 2 + 28 - 1); assert.equal(g.sides.dealer.chips, 38 - 2 - 1);   // 第 3 轮照常下底注
+  assert.deepEqual([g.sides.player.loan, g.sides.player.owe], [3, 4]);
 });
 
 /* ---------- 玩家的天气 ---------- */
@@ -686,7 +744,8 @@ test("借贷（下注时）：轮到自己下注、手上不够「要跟的 + �
   assert.deepEqual(J(opts.find(o => o.type === "raise")), { type: "raise", min: 2, max: 3 });
   assert.ok(!opts.some(o => o.type === "borrow"), "够了就不能再借");
   A(g, "player", "raise", { amount: 3 }); A(g, "dealer", "call");
-  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 沙暴：物理打沙 0；玩家押光了，第二轮下注跳过
+  A(g, "player", "reveal"); A(g, "player", "noNormal");   // 沙暴：物理打沙 0
+  checks(g);                                          // 玩家押光了，第二轮下注照常（下注不封顶，#496）：都过牌
   const r = g.results[1];
   assert.equal(r.outcome, "tie");
   assert.deepEqual(J(r.delta), { dealer: -6, player: -6 });   // 双方各押 6 枚进滚存；借来的 3 枚不算玩家的进账
@@ -746,6 +805,7 @@ test("还不上的借款记成负数：输光后借 6 枚又输光、不再借 �
   A(g, "dealer", "play", { card: "shield" }); A(g, "player", "play", { card: "physical" });
   A(g, "player", "bet", { amount: 5 }); A(g, "dealer", "call");
   A(g, "player", "reveal"); A(g, "player", "noNormal");   // 酷暑：物理打护盾 −1
+  checks(g);                                          // 玩家押光了，第二轮下注照常（下注不封顶，#496）：都过牌
   assert.equal(g.results[2].winner, "dealer");
   assert.deepEqual(J(CC.toAct(g)), ["player"]);       // 又输光了：再问一次
   A(g, "player", "noLoan");

@@ -5,9 +5,11 @@
  *         筹码不够时随手借（输光了多半会借）。
  *   普通：只看单轮结果——只用最近一轮的结算推理（推出对方那一轮出了什么），不跨轮记牌；下注看自己的牌好不好，偶尔诈唬。
  *         每轮开始筹码不够时，落后或打平就借（借到补上缺口），领先就不借；下注时筹码不够、牌又好到想下注 / 加注才借。
+ *         对方押得比自己手上的还多（下注不封顶，#496）、跟不起时：牌够好（胜率差到 loanCallEdge）才借到够跟，不然弃牌。
  *   困难：记住整局的结果，排除已经推出来的牌；按胜率下注；按对手的下注习惯调整诈唬（对手常弃牌就多诈唬，对手常诈唬就多跟注），
  *         还会把对手这一轮的加注当成信号；庄家偷看后放回原位，困难的玩家方会认为堆顶多半对庄家有利。
- *         借贷和普通一样，另外先估一下：借了以后剩下几轮全赢还追不追得上，追不上就不借，免得白欠。
+ *         借贷和普通一样，另外先估一下：借了以后剩下几轮全赢还追不追得上，追不上就不借，免得白欠；
+ *         跟不起时按胜率算借来跟划不划算（借的利息也算进去：每借 3 枚多还 1 枚）。
  * 玩家方 AI 会决定什么时候翻天气、什么时候暗弃跳过（弃哪张）、要不要用常态清掉天气。
  * 所有阈值都在 AI_CONFIG。
  *
@@ -47,7 +49,8 @@
       futureWeight: 0,       // 出牌时扣掉这张牌留到以后的价值
       normalKeep: 0.3,       // 留着常态的价值
       elementKeep: 0.15, elementFv: 0.5,  // 留着一张元素牌的价值：基础 + 它平时的期望 × 系数
-      loanEdge: 0.4          // 下注时筹码不够：胜率差（赢 − 输）到这里、而且想下注 / 加注才借
+      loanEdge: 0.4,         // 下注时筹码不够：胜率差（赢 − 输）到这里、而且想下注 / 加注才借
+      loanCallEdge: 0.1      // 对方押得比自己手上的还多（跟不起）：胜率差到这里才借来跟，不然弃牌
     },
     hard: {
       betEdge: 0.2, bigEdge: 0.5, raiseEdge: 0.4, callEdge: -0.1, cheapCall: 0.3,
@@ -334,9 +337,12 @@
     const has = (t) => opts.find(o => o.type === t);
     const toCall = v.betting ? v.betting.toCall : 0;
     const amount = (o, x) => ({ type: o.type, amount: clampN(Math.round(x), o.min, o.max) });
+    // 下注不封顶（#496）：对方押得比自己手上的还多，跟不起——要跟就得先向主持方借，不借只能弃牌
+    const short = toCall > 0 && !has("call");
+    const lo = has("borrow");
     if (ctx.level === "easy") {
       if (rng() < cfg.foldChance) return { type: "fold" };
-      const lo = has("borrow");
+      if (short) return lo && rng() < cfg.loanChance ? { type: "borrow", amount: loanToCall(v, lo) } : { type: "fold" };
       if (lo && rng() < cfg.loanChance) return { type: "borrow", amount: lo.min };
       if (toCall <= 0) {
         const b = has("bet");
@@ -352,8 +358,12 @@
     if (ctx.level === "hard") { st = oppStats(v); bel = readOpponent(ctx, bel, st); }
     const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
     const e = evaluate(ctx, v.me.card, Q, bel);
-    const lb = loanForBet(ctx, e);
+    // 跟不起时借来跟要多付的利息（借 n 枚还 repayOf(n) 枚）
+    const interest = short && lo ? CC().repayOf(loanToCall(v, lo)) - loanToCall(v, lo) : 0;
+    const callOk = toCall > 0 && worthCall(ctx, e, st, interest);
+    const lb = loanForBet(ctx, e, short, callOk);
     if (lb) return lb;
+    if (short) return { type: "fold" };                // 不值得借来跟
     const pot = v.pot;
     const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
     const size = (o) => (ctx.level === "hard" ? o.min + pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
@@ -365,16 +375,21 @@
     }
     const r = has("raise");
     if (r && e.edge >= cfg.raiseEdge) return amount(r, size(r));
-    let callEdge = cfg.callEdge;
-    if (ctx.level === "hard") callEdge -= cfg.callBluff * st.bluffRate;
-    const potOdds = toCall <= pot * cfg.cheapCall;
-    if (ctx.level === "hard") {
-      // 按胜率算跟注划不划算：赢了拿底池，输了丢掉跟注额（再加上分档的额外赔付，粗略算半个跟注额）
-      const evCall = e.win * pot - e.lose * toCall * 1.25;
-      if (evCall > 0 || e.edge >= callEdge) return { type: "call" };
-    } else if (e.edge >= callEdge || potOdds) return { type: "call" };
+    if (callOk) return { type: "call" };
     if (r && rng() < bluffP / 2) return amount(r, r.min);
     return { type: "fold" };
+  }
+  /** 面对下注值不值得跟：普通看牌好不好（跟注额不超过底池的 cheapCall 也照跟）；困难按胜率算划不划算，并按对手的诈唬率放宽。
+   *  cost：借来跟注要多付的利息（跟不起时，#496）——普通要胜率差到 loanCallEdge 才借来跟，困难把利息算进跟注的期望 */
+  function worthCall(ctx, e, st, cost) {
+    const v = ctx.v, cfg = ctx.cfg, toCall = v.betting ? v.betting.toCall : 0, pot = v.pot;
+    if (ctx.level === "hard") {
+      // 按胜率算跟注划不划算：赢了拿底池，输了丢掉跟注额（再加上分档的额外赔付，粗略算半个跟注额）
+      const evCall = e.win * pot - e.lose * toCall * 1.25 - cost;
+      return evCall > 0 || (!cost && e.edge >= cfg.callEdge - cfg.callBluff * st.bluffRate);
+    }
+    if (cost) return e.edge >= cfg.loanCallEdge;
+    return e.edge >= cfg.callEdge || toCall <= pot * cfg.cheapCall;
   }
   /** 玩家（第一轮下注时）：天气按自己等会儿会怎么选来算 */
   function playerPlannedWeather(ctx) {
@@ -469,14 +484,21 @@
     const top = Math.min(best, table);
     return top - owe >= table - top - v.opp.owe;
   }
-  /** 下注时筹码不够（普通 / 困难）：牌好到想下注 / 加注，而且是自己的筹码在封顶（借了才押得上去）才借，借到补上缺口 */
-  function loanForBet(ctx, e) {
+  /** 下注时筹码不够（普通 / 困难）。下注不封顶（#496）以后押多少只受自己手上的筹码限制，借了就押得上去：
+   *  牌好到想下注 / 加注才借，借到补上缺口（够跟 + 最低加注额）；
+   *  对方押得比自己手上的还多、跟不起（short）：值得跟（callOk）就借到够跟（想加注就借到补上缺口），不值得就不借（弃牌） */
+  function loanForBet(ctx, e, short, callOk) {
     const v = ctx.v, cfg = ctx.cfg, o = ctx.opts.find(x => x.type === "borrow");
     if (!o) return null;
     const toCall = v.betting ? v.betting.toCall : 0;
     const want = e.edge >= Math.max(cfg.loanEdge, toCall > 0 ? cfg.raiseEdge : cfg.betEdge);
-    const capped = v.opp.infinite || v.me.chips + v.me.bet < v.opp.chips + v.opp.bet;
-    return want && capped ? { type: "borrow", amount: o.max } : null;
+    if (want) return { type: "borrow", amount: o.max };
+    return short && callOk ? { type: "borrow", amount: loanToCall(v, o) } : null;
+  }
+  /** 借多少才够跟注：缺口（要跟的 − 手上的）向上取整到一份，夹在这次能借的范围里 */
+  function loanToCall(v, o) {
+    const gap = Math.max(0, (v.betting ? v.betting.toCall : 0) - v.me.chips);
+    return clampN(Math.ceil(gap / o.step) * o.step, o.min, o.max);
   }
 
   /* ---------- 入口 ---------- */

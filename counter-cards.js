@@ -14,6 +14,8 @@
  *      之后场上有天气（不是相位）时，玩家还可以用常态清除它，代价是暗弃一张元素牌；
  *   6. 第二轮下注，庄家先；本轮翻到相位就不下注，双方直接全押（上限 = 筹码较少一方的全部筹码）；
  *   7. 不亮牌，系统直接判胜负、结算，双方都看不到对方出了什么，只公开胜负、分档和筹码变动。
+ * 下注不封顶（#496，主人 10/30）：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比自己手上的还多时跟不起，
+ *   要跟就得先借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方的全部筹码封顶。
  * 借贷：轮到自己下注、手上的筹码不够「要跟的 + 最低下注额」时也可以借。3 枚一份，最少借 3 枚，最多借到补上缺口；
  *   每借 3 枚，对局结束时还 4 枚（3→4、6→8），结算时从筹码里扣。借了多少、要还多少是公开的。
  * 对局结束按最终筹码数（扣还借款之后）比胜负，不按相对开局的变化量。
@@ -43,6 +45,8 @@
     ante: 1,                           // 每轮开始双方各下的底注
     minBet: [1, 2, 3, 4, 5],           // 第 1–5 轮的最低下注额（= 轮数）；加注每次也至少加这么多（筹码不够时可以押上剩下的全部）
     maxRaises: 2,                      // 每个下注回合最多加注 2 次
+    // 下注不封顶（#496，主人 10/30）：下注 / 加注只受自己手上的筹码（含借来的）限制，不再按较少一方的筹码封顶；
+    // 对方押得比自己手上的还多时要跟就得先借（loan）。相位全押照旧按较少一方的全部筹码封顶（allInWeather）
     pctStep: 0.25,                     // 天气修正每 25% 记 ±1
     // 分档赔付（下标 = 分差）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5。只有这两档：
     // 主人 10/30 删掉了「差 3 及以上 × 1」（单轮分差最多 ±2，打不出来）；万一分差超过 2，按差 2 算
@@ -263,12 +267,18 @@
     s.chips -= n; s.bet += n;
     return n;
   }
-  /** 这一轮每一方最多能押到多少（下注额合计，含底注）：筹码较少一方的全部筹码 */
+  /** 相位全押的上限（这一轮每一方押到多少，含底注）：筹码较少一方的全部筹码。下注不封顶（#496）以后只有相位全押还按它封顶 */
   function cap(g) {
     const d = g.sides.dealer, p = g.sides.player;
     return Math.min(d.bet + behind(d), p.bet + behind(p));
   }
-  const room = (g, side) => cap(g) - g.sides[side].bet;
+  /** 这一方现在最多还能押多少：自己手上的筹码（含借来的），不再按较少一方的筹码封顶（#496）。
+   *  赌场的庄家筹码无限：押到对方这一轮已下的 + 手上的为止（对方不借就跟得上的数目，同以前的封顶） */
+  function room(g, side) {
+    const me = g.sides[side], op = g.sides[other(side)];
+    if (!me.infinite) return me.chips;
+    return op.infinite ? 0 : Math.max(0, op.bet + op.chips - me.bet);
+  }
   /** 输光了：手上和滚存底池里都没有筹码（手上没了、底池里还有自己的一份，就押着那一份接着打） */
   const busted = (s) => !s.infinite && s.chips <= 0 && s.pot <= 0;
 
@@ -320,11 +330,12 @@
     const d = g.sides.dealer, p = g.sides.player;
     g.loanAsk = null;
     if (busted(d) || busted(p)) { finish(g); return; }
-    // 有一方手上已经没有筹码（只剩滚存底池里的那一份）：双方都不下底注，这一轮只争底池
+    // 有一方手上已经没有筹码（只剩滚存底池里的那一份）：双方都不下底注。
+    // 下注照常（下注不封顶，#496；以前封顶在 0，这一轮不下注、只争底池）：对方下注时，没筹码的一方要跟就得先借
     const ante = Math.max(0, Math.min(CC_CONFIG.ante, behind(d), behind(p)));
     SIDES.forEach(k => pay(g.sides[k], ante));
     note(g, { t: "round", text: ante > 0 ? `第 ${g.round} 轮：双方各下 ${ante} 枚底注（本轮最低下注 ${minBetOf(g.round)} 枚）。`
-      : `第 ${g.round} 轮：有一方手上已经没有筹码，这一轮不下底注、不下注，只争滚存的底池。` });
+      : `第 ${g.round} 轮：有一方手上已经没有筹码，这一轮双方都不下底注（本轮最低下注 ${minBetOf(g.round)} 枚，要跟就得借）。` });
     g.stage = "dealerWeather";
     advance(g);
   }
@@ -380,7 +391,8 @@
           out.push({ type: "check" });
           if (rm > 0) out.push({ type: "bet", min: Math.min(mb, rm), max: rm });
         } else {
-          out.push({ type: "call", amount: toCall });
+          // 下注不封顶（#496）：对方押得比自己手上的还多，跟不起——要跟就先借（下面的 borrow），不借只能弃牌
+          if (rm >= toCall) out.push({ type: "call", amount: toCall });
           if (b.raises < CC_CONFIG.maxRaises && rm > toCall) out.push({ type: "raise", min: Math.min(mb, rm - toCall), max: rm - toCall });
         }
         out.push({ type: "fold" });
@@ -518,16 +530,12 @@
     openStreet(g, 1);
   }
 
-  /* 4 / 6. 下注 */
+  /* 4 / 6. 下注。下注不封顶（#496）：有一方手上押光了也照常下注（以前封顶在 0，整轮跳过）——押光的一方能过牌，对方下注时要跟就得先借 */
   function openStreet(g, street) {
     const first = street === 1 ? "player" : "dealer";
     g.betting = { street, toAct: first, raises: 0, acted: { dealer: false, player: false }, opened: false };
     SIDES.forEach(k => { g.sides[k].st = 0; });
     g.stage = street === 1 ? "bet1" : "bet2";
-    if (room(g, first) <= 0) {
-      note(g, { t: "noBet", text: `有一方已经押上了全部筹码，跳过${street === 1 ? "第一" : "第二"}轮下注。` });
-      closeStreet(g);
-    }
   }
   function betAction(g, side, a, opt) {
     const me = g.sides[side], op = g.sides[other(side)], b = g.betting;

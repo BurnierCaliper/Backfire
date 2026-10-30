@@ -6,6 +6,7 @@
  *       天气堆放在桌边，翻开天气时有闪光和对应的天气特效（weather-fx.js，和战场同一套）。
  * 暗出的牌一律显示牌背（自己的那张在角上标一下是什么）；结算只显示胜负、分档和筹码变动，不亮牌。
  * 筹码不够时（每轮开始 / 轮到自己下注）操作栏里有「借 3 枚（还 4）」这样的按钮；借了多少、要还多少写在两边的座位上；
+ * 下注不封顶（#496）：「最大」是自己手上的筹码；对方押得比自己手上的还多时没有「跟注」，只有借的按钮（从够跟的数目起）和「弃牌」；
  * 总结算按最终筹码数（扣还借款之后）定胜负。
  * 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论）——和平时一样，顶栏最前面的「菜单」（Esc 也行）→「克制表」；
  *   侧栏、结算横幅上也有直接打开的按钮。用平时的克制表浮层（matchup-ui.js），格子是按场上天气算好的得分（counter-cards.js · chart）；
@@ -407,6 +408,7 @@
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
       <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：弃掉场上的天气，或者场上没天气时偷看堆顶一张、放回原位或牌堆底（玩家看得到做了哪种）③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
+      <li><b>下注不封顶</b>：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比你手上的还多时，要跟就先向主持方借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方封顶。</li>
       <li><b>分档赔付</b>：差 1 赢家拿走底池；差 2 赢家拿走底池，输家再赔自己这一轮下注额的 0.5 倍（半枚向下取整）。</li>
       <li><b>相位</b>：翻到相位，本轮双方全押，上限是筹码较少一方的全部筹码；打平各自退回。</li>
       <li><b>借贷</b>：筹码不够时可以向主持方借——每轮开始时手上不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。${C.loan.unit} 枚一份，最少借 ${C.loan.unit} 枚，最多借到补上缺口；每借 ${C.loan.unit} 枚，对局结束时还 ${C.loan.repay} 枚（${C.loan.unit}→${C.loan.repay}、${C.loan.unit * 2}→${C.loan.repay * 2}），结算时从筹码里扣，还不上的记成负数。输光了不借，这一局就结束。</li>
@@ -498,12 +500,14 @@
   function loanTag(s, who) {
     return s.loan ? `<small class="cc-loan" title="${esc(who)}向主持方借了 ${s.loan} 枚，对局结束时还 ${s.owe} 枚">借 ${s.loan} 枚 · 结束时还 ${s.owe} 枚</small>` : "";
   }
-  /** 借贷按钮：一份一个（借 3 / 借 6 ……），写上结束时要还多少 */
-  function loanBtns(o, primary) {
+  /** 借贷按钮：一份一个（借 3 / 借 6 ……），写上结束时要还多少。from：从多少枚起（跟不起时从够跟的数目起，
+   *  下注不封顶以后要跟的可能很多，借得比这少也跟不了，不画；最多到补上缺口，所以最多三个按钮）；primary：第一个是主按钮 */
+  function loanBtns(o, primary, from) {
     let out = "";
-    for (let n = o.min; n <= o.max; n += o.step) {
+    const first = Math.max(o.min, from || 0);
+    for (let n = first; n <= o.max; n += o.step) {
       const back = CC().repayOf(n);
-      out += btn("borrow", `借 ${n} 枚（还 ${back}）`, { data: { amount: n }, cls: "cc-loanbtn", primary: primary && n === o.min, title: `向主持方借 ${n} 枚，对局结束时还 ${back} 枚` });
+      out += btn("borrow", `借 ${n} 枚（还 ${back}）`, { data: { amount: n }, cls: "cc-loanbtn", primary: primary && n === first, title: `向主持方借 ${n} 枚，对局结束时还 ${back} 枚` });
     }
     return out;
   }
@@ -602,11 +606,14 @@
     const first = v.stage === "bet1" ? "第一轮下注（玩家先）" : "第二轮下注（庄家先）";
     const opp = sideName(v.opponent);
     const bet = has("bet"), raise = has("raise"), call = has("call");
+    const toCall = v.betting ? v.betting.toCall : 0;
+    // 下注不封顶（#496）：对方押得比你手上的还多，跟不起——没有「跟注」，要跟就先借，不借只能弃牌
+    const short = toCall > 0 && !call;
     const o = bet || raise;
     if (o) {
       if (S.amount == null || S.amount < o.min || S.amount > o.max) S.amount = o.min;
     }
-    let p = call ? `${first}：${opp}下了注，要跟 ${call.amount} 枚。` : `${first}：还没人下注。`;
+    let p = toCall > 0 ? `${first}：${opp}下了注，要跟 ${toCall} 枚。` : `${first}：还没人下注。`;
     let b = "";
     if (has("check")) b += btn("check", "过牌", { primary: !o });
     if (call) b += btn("call", `跟注 ${call.amount}`, { primary: true });
@@ -622,7 +629,11 @@
     }
     b += btn("fold", "弃牌", { cls: "cc-danger", title: "立即判负：输掉自己已下的筹码（包括自己在滚存底池里的那一份）" });
     const lo = has("borrow");
-    if (lo) {
+    if (lo && short) {
+      // 借的按钮从够跟的数目起（缺口向上取整到一份），够跟的那个是主按钮
+      p += ` 你手上只有 ${v.me.chips} 枚，跟不起：要跟就先向主持方借（每借 ${v.loan.unit} 枚，结束时还 ${v.loan.repay} 枚），不借只能弃牌。借完还是你下注。`;
+      b += loanBtns(lo, true, Math.ceil((toCall - v.me.chips) / lo.step) * lo.step);
+    } else if (lo) {
       p += ` 手上的筹码不够（这一步要 ${lo.need} 枚，你只有 ${v.me.chips} 枚），可以先向主持方借（每借 ${v.loan.unit} 枚，结束时还 ${v.loan.repay} 枚），借完还是你下注。`;
       b += loanBtns(lo, false);
     }
