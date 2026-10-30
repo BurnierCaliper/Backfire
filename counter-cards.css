@@ -168,8 +168,21 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-gone { display: flex; flex-direction: column; gap: 3px; max-width: 120px; }
 .cc-mini { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; font-size: 11px; color: #d9e2d8; background: rgba(0, 0, 0, .35); border-left: 3px solid var(--c); opacity: .8; }
 .cc-mini .wicon { width: 14px; height: 14px; margin: 0; }
-.cc-peekcard { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px; background: rgba(0, 0, 0, .55); border: 2px dashed var(--sk-hazard, #f2c230); animation: ccDeal .3s ease-out both; }
-.cc-peekcard small { color: var(--sk-hazard, #f2c230); font-size: 11px; }
+.cc-peekcard { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px; background: rgba(0, 0, 0, .55); border: 2px dashed var(--sk-hazard, #f2c230); animation: ccDeal .3s ease-out both; }
+/* 只管标签（#499 第 4 项）：以前写 .cc-peekcard small，牌里的效果文字（<small class="cc-mods">）也被染成黄色、放大到 11px，压在米色牌面上 */
+.cc-peekcard > .cc-peeklabel { color: var(--sk-hazard, #f2c230); font-size: 11px; line-height: 1.2; white-space: nowrap; }
+/* 排得下的天气牌（counter-cards-ui.js · weatherCardHtml({ fit })，主人 10/30，#499 第 4 项）：庄家偷看出来的那张。
+ * 以前和场上那张一样「图标 / 名字 / 修正一条一行」上下居中：酸雨 7 条修正比牌还高，往上下两头溢出——图标顶出牌顶、盖住上面的「只有你看得到」，修正掉出牌底。
+ * 现在从顶上往下排：图标和名字并排；元素修正排两列，先排满左边一列（一个字的在左边、两个字的在右边，手机上也放得下）；附加说明单独一行，最多两行。
+ * 字号同场上那张（电脑 10px、手机 9px），七种天气都排得下。万一字体特别宽还是放不下：格子末尾、附加说明第二行末尾省略号，牌外不露出任何东西；完整说明在牌的悬停提示（title）里 */
+.cc-wx-fit { justify-content: flex-start; gap: 4px; padding: 7px 6px; overflow: hidden; }
+.cc-wx-head { display: flex; align-items: center; justify-content: center; gap: 4px; max-width: 100%; }
+.cc-wx-fit .cc-ico { display: flex; font-size: 26px; }   /* flex：图标底下不留行高的空 */
+.cc-wx-fit .cc-name { white-space: nowrap; }
+.cc-wx-fit .cc-mods { display: flex; flex-direction: column; gap: 2px; width: 100%; min-height: 0; overflow: hidden; line-height: 12px; }
+.cc-mods-el { display: grid; grid-template-rows: repeat(var(--rows, 1), auto); grid-auto-flow: column; justify-content: center; column-gap: 8px; }
+.cc-mods-el i { font-style: normal; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-mods-note { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; text-wrap: balance; }
 .cc-pot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .cc-pot.allin .cc-potstack b { color: #3fe0ff; }
 .cc-roll { color: #ffe08a; font-size: 12px; }
@@ -331,6 +344,10 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
   .cc-wx { width: 74px; height: 96px; }
   .cc-wx .cc-ico { font-size: 26px; }
   .cc-mods { font-size: 9px; }
+  .cc-wx-fit { padding: 6px 5px; gap: 3px; }   /* 偷看出来的那张（#499 第 4 项）：酸雨 3 行元素修正 + 2 行附加说明也排得下 */
+  .cc-wx-fit .cc-ico { font-size: 18px; }
+  .cc-wx-fit .cc-mods { line-height: 10.5px; }
+  .cc-mods-el { column-gap: 5px; }
   .cc-hand { gap: 4px; }
   .cc-hand-back .cc-card + .cc-card { margin-left: -26px; }
   .cc-deckstack, .cc-deckstack i { width: 44px; height: 62px; }

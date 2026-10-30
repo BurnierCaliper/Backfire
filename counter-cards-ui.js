@@ -18,6 +18,7 @@
  *   预览不接鼠标、摆在手牌上面，不挡出牌；长按松手不算点击（不会把牌出掉）。
  * 庄家天气行动（#502）：场上有天气时「弃掉天气」「保留天气」，点了保留接着出现「偷看下一张」「不看」（天气堆里还有没看过的牌才有）；
  *   偷看按顺序往下看，人当庄家时天气堆旁边列出看过的那几张（堆顶往下 / 堆底往上，只有庄家看得到）。
+ *   偷看出来的那张用排得下的天气牌（weatherCardHtml 的 fit，#499 第 4 项）：「只有你看得到」不被图标挡住，修正都排在牌里，完整说明在悬停提示里。
  * 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步（谁跟注 / 过牌 / 弃牌，AI 走的也停一下）→ 判定中（两张牌背轻轻抖、底池发光，不亮牌）→ 结算横幅；
  *   点一下桌面直接看结算，时长在 UI_CONFIG.settle。规则层那一步已经结算完、开了下一轮，过渡中桌上停在结算之前（settleView）。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
@@ -38,6 +39,7 @@
     chipsPerDisc: 5,       // 每枚圆片代表几枚筹码
     logLines: 14,          // 侧栏记录显示最近几条
     logStick: 24,          // 侧栏记录离底部不到这么多像素算「在底部」：有新记录时接着贴底；往上翻得更多就停在原处（像素）
+    fitCols: 2,            // 排得下的天气牌（weatherCardHtml 的 fit：庄家偷看出来的那张，#499 第 4 项）元素修正排几列，先排满左边一列（手机上两列刚好放得下）
     // 克制表（得分）：入口按钮、暂停菜单那一项的说明
     chart: {
       label: "克制表",
@@ -129,26 +131,38 @@
     const peek = o.mine ? `<span class="cc-peek" style="--c:${cardColor(o.mine)}" title="你暗出的：${esc(CC().cardName(o.mine))}">${cardIcon(o.mine)}<b>${esc(CC().cardName(o.mine))}</b></span>` : "";
     return `<span class="cc-card cc-back${o.cls ? " " + o.cls : ""}"${o.delay != null ? ` style="--d:${o.delay}"` : ""} aria-label="${o.mine ? "你暗出的牌（牌背朝上）" : "牌背"}"><span class="cc-crest">${BACK_EMBLEM}</span>${peek}</span>`;
   }
-  /** 天气这张牌的修正（规则文字）：火 +1 / 冰 −1……，微光、酸雨、相位的附加说明 */
-  function weatherMods(w) {
-    const C = CC().CC_CONFIG, out = [];
+  /** 天气这张牌的修正（规则文字），分两种：els 元素修正（火 +1 / 冰 −1……），notes 微光、酸雨、相位的附加说明 */
+  function weatherModParts(w) {
+    const C = CC().CC_CONFIG, els = [], notes = [];
     C.elements.forEach(el => {
       const n = CC().weatherScore(el, "flesh", w);
-      if (n) out.push(`${CC().cardName(el)} ${signed(n)}`);
+      if (n) els.push(`${CC().cardName(el)} ${signed(n)}`);
     });
-    if (w === "glow") out.push("能量以外克制反转");
-    if (w === "acid") out.push("酸、冰以外打装甲 +1");
-    if (w === C.allInWeather) out.push("翻到时双方全押");
-    return out;
+    if (w === "glow") notes.push("能量以外克制反转");
+    if (w === "acid") notes.push("酸、冰以外打装甲 +1");
+    if (w === C.allInWeather) notes.push("翻到时双方全押");
+    return { els, notes };
   }
+  /** 天气这张牌的修正（规则文字）：火 +1 / 冰 −1……，后面是微光、酸雨、相位的附加说明 */
+  function weatherMods(w) { const p = weatherModParts(w); return p.els.concat(p.notes); }
   function weatherColor(w) { return (root.Icons && root.Icons.WEATHER && root.Icons.WEATHER[w] && root.Icons.WEATHER[w].c) || "#c9bfae"; }
+  /** 一张天气牌（title 是完整说明：名字和每一条修正）。场上那张：左上角写名字，图标 / 名字 / 修正一条一行。
+   *  o.fit：排得下的牌（庄家偷看出来的那张，#499 第 4 项）——图标和名字并排在顶上，元素修正排 UI_CONFIG.fitCols 列（先排满左边一列，--rows 行）、附加说明单独一行，
+   *  修正多的酸雨也排在牌里（以前上下居中，图标顶出牌顶、盖住上面的标签，修正掉出牌底）；万一放不下就省略，完整说明在 title（悬停提示）里 */
   function weatherCardHtml(w, o) {
     o = o || {};
     if (!w) return `<span class="cc-card cc-wx cc-wx-none${o.cls ? " " + o.cls : ""}" title="没有天气"><i class="cc-corner">常态</i><span class="cc-ico">${glyphSvg(NORMAL_GLYPH, "常态")}</span><b class="cc-name">没有天气</b></span>`;
     const name = CC().weatherName(w);
     const mods = weatherMods(w);
-    return `<span class="cc-card cc-wx${o.cls ? " " + o.cls : ""}" style="--c:${weatherColor(w)}" data-weather="${w}" title="${esc(name + "：" + (mods.join("，") || "没有修正"))}">`
-      + `<i class="cc-corner">${esc(name)}</i><span class="cc-ico">${root.Icons ? root.Icons.weather(w) : ""}</span><b class="cc-name">${esc(name)}</b>`
+    const head = `<span class="cc-card cc-wx${o.fit ? " cc-wx-fit" : ""}${o.cls ? " " + o.cls : ""}" style="--c:${weatherColor(w)}" data-weather="${w}" title="${esc(name + "：" + (mods.join("，") || "没有修正"))}">`;
+    const icon = `<span class="cc-ico">${root.Icons ? root.Icons.weather(w) : ""}</span>`;
+    if (o.fit) {
+      const p = weatherModParts(w);
+      const els = p.els.length ? `<span class="cc-mods-el" style="--rows:${Math.ceil(p.els.length / UI_CONFIG.fitCols)}">${p.els.map(t => `<i>${esc(t)}</i>`).join("")}</span>` : "";
+      const body = els + p.notes.map(t => `<span class="cc-mods-note">${esc(t)}</span>`).join("");
+      return head + `<span class="cc-wx-head">${icon}<b class="cc-name">${esc(name)}</b></span><small class="cc-mods">${body || "没有修正"}</small></span>`;
+    }
+    return head + `<i class="cc-corner">${esc(name)}</i>${icon}<b class="cc-name">${esc(name)}</b>`
       + `<small class="cc-mods">${mods.map(esc).join("<br>") || "没有修正"}</small></span>`;
   }
   /** 筹码堆：n = null 是无限（赌场的庄家）。o.anim：数目变了，筹码落下来的动画放一次 */
@@ -674,7 +688,8 @@
     const reveal = S.anim.reveal;
     const potShare = me.pot + opp.pot;
     const flash = reveal ? `<div class="cc-flash" style="--c:${weatherColor(reveal)}" aria-hidden="true"></div>` : "";
-    const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small>只有你看得到</small>${weatherCardHtml(v.peek.card)}</div>` : "";
+    // 庄家偷看出来的那张（#502）：用排得下的牌（#499 第 4 项），标签不会被牌里的东西挡住
+    const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small class="cc-peeklabel">只有你看得到</small>${weatherCardHtml(v.peek.card, { fit: true })}</div>` : "";
     return `${flash}<div class="cc-seat cc-opp">
         <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${acted(v.opponent)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
