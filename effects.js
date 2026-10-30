@@ -2,7 +2,7 @@
  *
  * 手册第四章里有些效果之前只实现了一部分，这里集中补齐。app.js 在对应的时机调用这些函数：
  *   applyInstantEffect   施加即时效果（刺骨、过载、熔融……）时的即刻结算
- *   afterDamageTaken     一次伤害结算之后（刺骨遇火、熔融护盾、躲藏解除、过载反伤……）
+ *   afterDamageTaken     一次伤害结算之后（刺骨遇火、躲藏解除、过载反伤……；熔融护盾在分层结算时就判，见 engine.js · MELT_SHIELD）
  *   afterAttackDealt     攻击者打完一次攻击行动之后（霜结回架势、溅射、导体额外目标、躲藏解除）
  *   onBreakTaken         受到击破之后（多普勒）
  *   onBroken             被打进失衡的那一刻（刺骨再触发、过载爆炸）
@@ -59,7 +59,8 @@ function applyInstantEffect(u, key, notes, source) {
     });
     if ((u.layers || []).some(l => l.type === "shield")) notes.push(`${u.name} 过载：护盾本回合翻倍。`);
   }
-  if (key === "melt") u._meltShieldTaken = 0;
+  // 熔融护盾的累计受伤从施加时算起（记在每一层护盾上，engine.js · MELT_SHIELD）
+  if (key === "melt") (u.layers || []).forEach(l => { delete l._meltTaken; });
   return notes;
 }
 
@@ -97,7 +98,7 @@ function overloadRoundStart(u, notes) {
 /**
  * 一次伤害结算完（dealTo 与持续 / 环境伤害都会调用）。
  *   dealt      实际扣掉的血量
- *   shieldHit  这次打在护盾层上的量
+ *   shieldHit  这次护盾层少了多少（熔融护盾不再用它：改在分层结算时判，engine.js · MELT_SHIELD）
  *   ctx        { attacker, action, melee, startLayerType }
  */
 function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
@@ -116,16 +117,8 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
     notes.push(`${u.name} 刺骨遇火解除。`);
     stingPulse(u, "fire", notes, "刺骨遇火");
   }
-  // 熔融（护盾）：一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复
-  if (u.instant && u.instant.melt && shieldHit > 0) {
-    u._meltShieldTaken = (Number(u._meltShieldTaken) || 0) + shieldHit;
-    const sh = (u.layers || []).find(l => l.type === "shield" && !l._meltBroken);
-    if (sh && u._meltShieldTaken >= (Number(sh.max) || 0) / 2 && sh.current > 0) {
-      sh.current = 0;
-      sh._meltBroken = true;
-      notes.push(`${u.name} 熔融：护盾累计受伤过半，立刻失效，下回合以一半恢复。`);
-    }
-  }
+  // 熔融（护盾）：一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复。
+  // 不在这里事后判（以前这样，一下打穿护盾时熔融不起作用）：分层结算时吃满一半就当场失效，剩下的伤害照常溢出（engine.js · distributePacket / MELT_SHIELD）
   // 过载：装甲血量受到近距离攻击时，反伤 50% 此次受到攻击伤害的闪电伤害
   // 过载者是玩家：反伤算过载者的伤害，打死算过载者的击杀（#203）；不是玩家照旧（不传 by，算行动中的人 / 不改最后一击）
   // 打的是开着友伤的队友（ctx.friendlyFire，#428）：反伤照打，同样不计分数
@@ -136,17 +129,17 @@ function afterDamageTaken(u, element, dealt, shieldHit, notes, ctx) {
   }
 }
 
-/** 回合开始：熔融打坏的护盾以一半恢复 */
+/** 回合开始：熔融打坏的护盾以一半恢复（engine.js · MELT_SHIELD.restore）；各层护盾的熔融累计清零 */
 function meltShieldRoundStart(u, notes) {
   let restored = false;
   (u.layers || []).forEach(l => {
+    delete l._meltTaken;
     if (!l._meltBroken) return;
     delete l._meltBroken;
-    l.current = Math.floor((Number(l.max) || 0) / 2);
+    l.current = Math.floor((Number(l.max) || 0) * MELT_SHIELD.restore + 1e-9);
     restored = true;
   });
-  u._meltShieldTaken = 0;
-  if (restored) notes.push(`${u.name} 护盾以一半恢复。`);
+  if (restored) notes.push(`${u.name} 护盾以${meltShieldShare(MELT_SHIELD.restore)}恢复。`);
   return restored;
 }
 

@@ -87,6 +87,52 @@ test("熔融：护盾一回合内累计受到上限一半的伤害就失效，�
   assert.equal(cur(foe, "shield"), 10);
 });
 
+/** 护盾 20 + 肉体 40 的狂徒挨柯尔特一下火属性攻击（火打护盾 0%，溢出不重算克制，天气关掉：伤害就是 atk） */
+function meltHit(atk, opt) {
+  opt = opt || {};
+  const f = field();
+  f.st.weather = "none";
+  layers(f.foe, [["shield", 20], ["flesh", 40]]);
+  if (opt.melt !== false) f.c.applyInstantEffect(f.foe, "melt", []);
+  if (opt.refract) f.foe.instant.refract = true;
+  f.out = f.hit(f.kolt, f.foe, "fire", Object.assign({ atk }, opt.extra || {}));
+  f.layersNow = () => [cur(f.foe, "shield"), cur(f.foe, "flesh")];
+  return f;
+}
+
+test("熔融：一下打到护盾一半以上，护盾在一半处当场失效，没吸收完的伤害溢出到下一层；带折射时溢出 ×1.5（#380）", () => {
+  // 没有熔融：护盾整层吸收 20，溢出 10
+  assert.deepEqual(meltHit(30, { melt: false }).layersNow(), [0, 30]);
+  // 熔融：护盾吸收到 10（上限一半）就失效，剩下 20 落到肉体（以前护盾照样整层吸收 20、只溢出 10，熔融不起作用）
+  let f = meltHit(30);
+  assert.deepEqual(f.layersNow(), [0, 20]);
+  assert.equal(f.out.res.total, 30);
+  assert.ok(f.out.res.log.some(s => /熔融：护盾累计受伤 10，到上限 20 的一半，立刻失效（10 → 0），剩下 20 溢出/.test(s)), f.out.res.log.join("\n"));
+  assert.ok(f.out.extra.some(s => /熔融：护盾累计受伤到上限一半，立刻失效/.test(s)), f.out.extra.join("\n"));
+  f.c.endPlayerTurn(); f.c.endEnemyTurn();
+  assert.equal(cur(f.foe, "shield"), 10, "熔融打坏的护盾下回合以一半恢复");
+  // 熔融 + 折射：击穿护盾的溢出 20 × 1.5 = 30（以前 10 × 1.5 = 15）
+  f = meltHit(30, { refract: true });
+  assert.deepEqual(f.layersNow(), [0, 10]);
+  assert.ok(f.out.res.log.some(s => /折射：击穿 护盾，溢出 ×1.5 后向下取整 = 30/.test(s)), f.out.res.log.join("\n"));
+  // 只比一半多一点：12 点里多出来的 2 点也溢出（以前护盾吸收 12、结算完才清零，肉体不掉血）；带折射 2 × 1.5 → 3
+  assert.deepEqual(meltHit(12).layersNow(), [0, 38]);
+  assert.deepEqual(meltHit(12, { refract: true }).layersNow(), [0, 37]);
+  // 正好一半：护盾失效，没有溢出；不到一半：照常吸收，不失效
+  assert.deepEqual(meltHit(10, { refract: true }).layersNow(), [0, 40]);
+  assert.deepEqual(meltHit(9, { refract: true }).layersNow(), [11, 40]);
+});
+
+test("熔融：一回合里分几下累计（多段攻击的每一段、持续伤害也算），到一半的那一下当场失效、多出来的溢出", () => {
+  // 多段攻击 8 + 8：第一段护盾 20 → 12，第二段再吸收 2 就失效，剩下 6 溢出
+  assert.deepEqual(meltHit(8, { extra: { hits: 2 } }).layersNow(), [0, 34]);
+  // 先挨一下 6（累计 6，不到一半），再挨 7 点持续伤害：吸收 4 就失效，剩下 3 × 1.5（折射）→ 4
+  const f = meltHit(6, { refract: true });
+  assert.deepEqual(f.layersNow(), [14, 40]);
+  f.c.applyTypedDot(f.foe, 7, "fire", [], "测试持续伤害");
+  assert.deepEqual(f.layersNow(), [0, 36]);
+});
+
 test("霜结：冰属性攻击恢复 1 架势；免疫冻伤；再次霜结到下回合前完全免疫", () => {
   const { c, helu, foe, hit } = field();
   helu.self = "frost"; helu.def = 2;

@@ -630,6 +630,23 @@ const INTERFERE_CAP = 1;
  *  不吃克制、减伤、护盾、狂暴减伤等任何修正；向下取整，最少 1 点；只打这一层，打空了也不溢出到下一层。
  *  同一次攻击（一次 resolveAttack）里每多触发一次，比例再 × decay：10% → 5% → 2.5% …… */
 const BLEED = { pct: 0.10, decay: 0.5, layers: ["flesh", "spirit"] };
+/** 熔融（护盾）：若一回合内累计受到护盾最大值一半的伤害则立刻失效，下回合以一半护盾值恢复（玩家手册第四章）。
+ *  分层结算时当场判（distributePacket，#380）：带熔融的护盾从施加熔融起、这一回合累计吸收到「这一层上限 × breakAt」（向上取整）
+ *  就立刻失效，剩下的护盾归零；这一下没吸收完的伤害照常溢出到下一层，折射照常 ×1.5。
+ *  累计量记在这一层护盾上（_meltTaken），施加熔融、回合开始时清零；失效的护盾（_meltBroken）回合开始时恢复到「上限 × restore」（向下取整）
+ *  （effects.js · applyInstantEffect / meltShieldRoundStart） */
+const MELT_SHIELD = { breakAt: 0.5, restore: 0.5 };
+/** 带熔融的这一层护盾这一回合再吸收多少就失效；不是护盾、已经失效、上限为 0 的返回 null（照常吸收） */
+function meltShieldRoom(layer) {
+  if (!layer || layer.type !== "shield" || layer._meltBroken) return null;
+  const max = Number(layer.max) || 0;
+  if (!(max > 0)) return null;
+  return Math.max(0, Math.ceil(max * MELT_SHIELD.breakAt - (Number(layer._meltTaken) || 0) - 1e-9));
+}
+/** MELT_SHIELD 里的比例写成字：0.5 →「一半」，别的写百分比 */
+function meltShieldShare(k) {
+  return k === 0.5 ? "一半" : Math.round(k * 100) + "%";
+}
 /** 驻波墙（Helumica「频域造物」，作者 10/23 定；放墙、穿墙、消失在 app.js · placeWaveWall / wavePassUnit / expireWaveWalls）：
  *  dampenPct    降幅墙：穿过它的选定属性伤害 −50%，和其他百分比加算（作者 10/23：两道墙 −100% 直接归零，触发极少，保留这个免伤连招），并且不造成任何击破
  *  amplifyPct   增幅墙：穿过它的选定属性伤害 +25%，和其他百分比加算（两道墙 +50%），击破照常
@@ -824,6 +841,7 @@ function resolveAttack(ctx) {
   let totalBreak = 0;
   let preventSand = false;
   let meltEnded = false;
+  let meltShieldBroke = 0;   // 熔融护盾吃满上限一半、当场失效了几层（distributePacket）
   let pierColdRetrig = false;
   let knockdownHp = 0;
   let selfBreak = 0;
@@ -1111,6 +1129,7 @@ function resolveAttack(ctx) {
         packet,
         element,
         refraction: !!(t.instant && t.instant.refract),
+        melt: meltLive,   // 熔融护盾吃满上限一半当场失效（MELT_SHIELD）；状态、场地伤害一样算
         sting: !!(t.instant && t.instant.sting),
         harmonicStun: element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
         phaseHarmonic: weather === "phase" && element === "harmonic" && (typeof isEffectivelyStunned === "function" ? isEffectivelyStunned(t) : !!t.stunned),
@@ -1119,6 +1138,7 @@ function resolveAttack(ctx) {
       distribute.notes.forEach(hAdd);
       hitDealt = distribute.dealt;
       extraHarmonic += Number(distribute.extraHarmonic) || 0;
+      meltShieldBroke += Number(distribute.meltBroke) || 0;
       // 出血：这一段扣到了肉体 / 星灵层的血（直接打中，或者打穿外层溢进去都算）→ 对扣到的第一层肉体 / 星灵再扣「上限 × 比例」的真实伤害（不溢出）
       const bleedIdx = ctx.bleed ? layersWork.findIndex((l, i) => BLEED.layers.includes(l.type) && layersBefore[i] > (Number(l.current) || 0)) : -1;
       const bleedLayer = bleedIdx >= 0 ? layersWork[bleedIdx] : null;
@@ -1283,6 +1303,7 @@ function resolveAttack(ctx) {
     hits,
     preventSand,
     meltEnded,
+    meltShieldBroke,
     pierColdRetrig,
     knockdownHp,
     selfBreak,
@@ -1320,6 +1341,7 @@ function distributePacket(opt) {
   let remaining = opt.packet;
   let dealt = 0;
   let extraHarmonic = 0;
+  let meltBroke = 0;   // 这一下有几层熔融护盾吃满上限一半、当场失效
   const layers = opt.layers;
 
   const applyToIndex = (idx, amount, tag) => {
@@ -1327,11 +1349,24 @@ function distributePacket(opt) {
     if (idx < 0 || idx >= layers.length) return 0;
     const layer = layers[idx];
     const before = Math.max(0, Number(layer.current) || 0);
-    const take = Math.min(before, amount);
+    // 熔融护盾（MELT_SHIELD）：这一回合最多再吸收 room 就失效，没吸收完的照常往下溢（以前整层照吸收，结算完才清零，打穿时熔融不起作用）
+    const room = opt.melt ? meltShieldRoom(layer) : null;
+    const take = Math.min(before, amount, room != null ? room : Infinity);
     layer.current = Math.max(0, Math.floor((before - take) + 1e-9));
     let leftover = amount - take;
     dealt += take;
     notes.push(`${tag}${LAYER[layer.type]} ${before} → ${layer.current}（吸收 ${take}）`);
+    if (room != null) {
+      layer._meltTaken = (Number(layer._meltTaken) || 0) + take;
+      // 累计吸收到上限一半时护盾还没打空：立刻失效，剩下的护盾归零（打空的那一下本来就是击穿，不算熔融失效）
+      if (take >= room && layer.current > 0) {
+        notes.push(`熔融：护盾累计受伤 ${layer._meltTaken}，到上限 ${Number(layer.max) || 0} 的${meltShieldShare(MELT_SHIELD.breakAt)}，立刻失效（${layer.current} → 0）` +
+          (leftover > 0 ? `，剩下 ${leftover} 溢出` : ""));
+        layer.current = 0;
+        layer._meltBroken = true;
+        meltBroke++;
+      }
+    }
     if (leftover > 0 && before > 0 && leftover > 0 && opt.refraction) {
       leftover = Math.floor(leftover * 1.5 + 1e-9);
       notes.push(`折射：击穿 ${LAYER[layer.type]}，溢出 ×1.5 后向下取整 = ${leftover}`);
@@ -1353,7 +1388,7 @@ function distributePacket(opt) {
       }
     }
     // 额外的那几次（第一层之外）：画面另外跳一个数字
-    return { dealt, notes, extraHarmonic: remaining * Math.max(0, layersHit - 1) };
+    return { dealt, notes, extraHarmonic: remaining * Math.max(0, layersHit - 1), meltBroke };
   }
 
   // 谐波打晕眩：次外层 = 这一击之前从外往里第二层还有血的；单层目标没有次外层，不额外打
@@ -1395,7 +1430,7 @@ function distributePacket(opt) {
       notes.push("谐波打晕眩：只有一层血量，没有次外层，不额外结算。");
     }
   }
-  return { dealt, notes, extraHarmonic };
+  return { dealt, notes, extraHarmonic, meltBroke };
 }
 
 /** 濒死且还没选择起身：在玩家自己按下「起身」之前，不受任何伤害，
@@ -1444,6 +1479,10 @@ function applyResultToUnit(target, result, attacker) {
   const notes = [];
   if (!result.ok) return notes;
   target.layers = clone(result.layersAfter);
+  // 熔融护盾这一下吃满上限一半，当场失效（distributePacket · MELT_SHIELD），没吸收完的伤害已经溢出到下一层
+  if (result.meltShieldBroke) {
+    notes.push(`${target.name} 熔融：护盾累计受伤到上限${meltShieldShare(MELT_SHIELD.breakAt)}，立刻失效，没吸收完的伤害照常溢出到下一层；下回合以${meltShieldShare(MELT_SHIELD.restore)}恢复。`);
+  }
   let spent = result.breakDealt;
   if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
     spent = 0;
