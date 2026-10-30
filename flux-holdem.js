@@ -618,7 +618,7 @@
     const shown = Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，");
     const allIn = res.allIn ? `相位全押（各押到 ${res.cap} 枚）。` : "";
     const pots = res.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
-      + (p.carried ? `${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
+      + (p.carried ? `：${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
         : p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分${res.allIn ? "（相位全押，最后一轮不再滚存）" : ""}` : `归${n(p.winners[0])}`)
       + (i === 0 ? carryIn : "")).join("；");
     return `第 ${res.r} 轮亮牌：${shown}。${allIn}${pots}${chips}。`;

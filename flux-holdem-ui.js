@@ -5,7 +5,8 @@
  * 桌上：上面一排是对手（名字、AI 难度、庄 / 小盲 / 大盲、筹码、这一轮押了多少、弃牌 / 全押 / 出局、手牌张数、盖了没有）；
  *   中间是 2 张公共层牌、2 张天气（翻开一张亮一张，没翻的是牌背）、天气堆和弃掉的天气、底池；下面是自己的筹码和手牌（盖牌时点一张）。
  *   自己坐庄时操作栏里能看到偷看的那张（只有自己看得到），选「留在顶上」或「压到堆底」。
- * 结算横幅：亮牌——每人出的牌和得分、主池 / 边池归谁（平分写清楚）、自己的筹码变动。
+ * 结算横幅：亮牌——每人出的牌和得分、主池 / 边池归谁（平分写清楚）、自己的筹码变动；翻到相位写没弃牌的人全押、押到多少，
+ *   全押后同分写底池滚到下一轮（主人 10/30：相位 = 全押）。下一轮底池旁边写「含滚存 N 枚」，提示行也写。
  * 克制表（侧栏、横幅上的按钮）和手里元素牌的悬停预览都按场上的天气（两张都翻开时叠加）算实际得分；预览另写对已翻开的公共层牌的得分合计。
  *
  *   FluxHoldemUI.open()                                         打开设置页
@@ -77,7 +78,7 @@
       <li><b>每轮</b>：（筹码不够的先决定借不借）① 庄家偷看天气堆顶，留在顶上或压到堆底（放哪公开）② 翻开第 1 张公共层牌，庄家左边两位下小盲 ${H.blinds[0]} × 轮数、大盲 ${H.blinds[1]} × 轮数（两人局庄家下小盲）③ 每人盖下 1 张元素牌 ④ 第一轮下注 ⑤ 翻开第 1 张天气 ⑥ 第二轮下注 ⑦ 同时翻开第 2 张层牌和第 2 张天气，亮牌比分。两轮下注都从庄家左边开始；庄家每轮顺时针轮换。</li>
       <li><b>计分</b>：你的元素牌对 2 张公共层牌分别计分求和（克制 +1 / 劣势 −1 / 其余 0，加两张天气的修正，修正直接相加不设上限）；最高分拿走底池，同分平分。微光反转克制表（能量除外），也反转另一张天气的修正（含给能量的、酸雨打装甲那一项），微光自己给能量的 +1 保留。</li>
       <li><b>下注</b>：过牌 / 跟注 / 加注 / 弃牌；加注至少等于上一次加注额，每个下注回合最多加注 ${H.maxRaises} 次；想押多少押多少，跟不起可以先借、全押（多押的部分开边池），或者弃牌；跟注后有 ${C.callWindowSec} 秒追加窗口，还可以加注或弃牌。弃牌的不参与比分。只按底池结算，不用分档赔付。</li>
-      <li><b>相位</b>：在场上时这一轮的最低下注额翻倍。</li>
+      <li><b>${esc(wn(C.allInWeather))}</b>：翻开时没弃牌的人全押（上限 = 没弃牌的人里筹码最少那位的全部筹码，这一轮已下的 + 手上的），不再下注，直接比分；第 2 张天气（亮牌时翻开）是${esc(wn(C.allInWeather))}：比分之前补押到这个数。全押后同分，底池留在桌上滚到下一轮；最后一轮同分的人平分。</li>
       <li><b>借贷</b>：${C.loan.unit} 枚一份，每借 ${C.loan.unit} 枚对局结束时还 ${C.loan.repay} 枚，借几次都行；输光了不借就出局。</li>
       <li><b>胜负</b>：${H.rounds} 轮后按最终筹码数（扣还借款之后）比，最多的赢。</li>
     </ul></details>`;
@@ -127,8 +128,9 @@
           <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small></div>
           ${v.discards.length ? `<div class="cc-gone" title="弃掉的天气（天气堆抽完时洗回去）">${v.discards.map(T.miniWeather).join("")}</div>` : ""}
         </div>
-        <div class="cc-pot${v.weathers.indexOf(CC().CC_CONFIG.allInWeather) >= 0 ? " allin" : ""}">
+        <div class="cc-pot">
           ${T.chips(v.pot, { cls: "cc-potstack", title: "底池", label: "底池", anim: anim.pot })}
+          ${v.carry ? `<small class="cc-roll">含滚存 ${v.carry.amount} 枚</small>` : ""}
           <span class="cc-bets"><span>你本轮 ${me.bet}</span>${v.betting && v.betting.toCall ? `<span>要跟 ${v.betting.toCall}</span>` : ""}</span>
         </div>
       </div>
@@ -158,7 +160,8 @@
     const parts = [`本轮最低下注 ${v.minBet} 枚`, `小盲 ${v.blinds[0]} / 大盲 ${v.blinds[1]}`];
     if (v.betting) parts.push(`加注 ${v.betting.raises}/${v.maxRaises}`);
     if (v.betting && v.betting.toCall) parts.push(`待跟 ${v.betting.toCall} 枚`);
-    if (v.weathers.indexOf(CC().CC_CONFIG.allInWeather) >= 0) parts.push("相位：最低注翻倍");
+    if (v.carry) parts.push(`底池含上一轮滚存 ${v.carry.amount} 枚`);
+    if (v.betting) parts.push(`翻到${wn(CC().CC_CONFIG.allInWeather)}：没弃牌的人全押`);
     return `<p class="cc-info">${parts.join(" · ")}</p>`;
   }
   const seatName = (T, k) => { const v = T.view(); return v ? nameIn(v, k) : k; };
@@ -170,8 +173,19 @@
     if (!(r.shown && side in r.shown) && r.winners.indexOf(side) < 0 && r.outcome === "showdown") return { cls: "lose", text: "没参加（出局了）" };
     if (r.outcome === "fold") return r.winners[0] === side ? { cls: "win", text: "其他人都弃牌，底池归你" } : { cls: "lose", text: "别人拿走底池" };
     const main = r.pots[0] || { winners: [] };
+    // 相位全押后同分：主池不分，滚到下一轮
+    if (main.carried && (main.tied || []).indexOf(side) >= 0) return { cls: "tie", text: "同分，底池滚到下一轮", carry: true };
     if (main.winners.indexOf(side) >= 0) return main.winners.length > 1 ? { cls: "tie", text: `你和别人平分主池（${main.winners.length} 人）` } : { cls: "win", text: "你拿走主池" };
-    return r.pots.some(p => p.winners.indexOf(side) >= 0) ? { cls: "tie", text: "你只分到边池" } : { cls: "lose", text: "你没赢到" };
+    return r.pots.some(p => p.winners.indexOf(side) >= 0) ? { cls: "tie", text: "你只分到边池" } : { cls: "lose", text: main.carried ? "你没赢到（底池滚到下一轮）" : "你没赢到" };
+  }
+  /** 一轮的主池 / 边池归谁（横幅、和规则层的结算记录同一种说法） */
+  function potsText(r, n) {
+    const carryIn = r.carryIn ? `（含上一轮滚存的 ${r.carryIn} 枚）` : "";
+    if (r.outcome === "fold") return `其他人都弃牌，${n(r.winners[0])}拿走底池 ${r.pot} 枚${carryIn}（不亮牌）`;
+    return r.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
+      + (p.carried ? `：${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
+        : p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分${r.allIn ? "（相位全押，最后一轮不再滚存）" : ""}` : `归${n(p.winners[0])}`)
+      + (i === 0 ? carryIn : "")).join("；");
   }
   function sideHtml(T, v) {
     const rows = v.results.map(r => {
@@ -184,16 +198,17 @@
   }
   function bannerHtml(T, r, v) {
     const o = outcomeOf(r, v.side);
-    const big = { win: "你赢了", lose: o.text === "你弃牌" ? "你弃牌了" : "你输了", tie: "平分" }[o.cls];
+    const big = o.carry ? o.text : { win: "你赢了", lose: o.text === "你弃牌" ? "你弃牌了" : "你输了", tie: "平分" }[o.cls];
     const n = (id) => nameIn(v, id);
-    const shown = r.shown ? `<ul class="fh-shown">${Object.keys(r.shown).map(id => `<li class="${(r.pots[0] || { winners: [] }).winners.indexOf(id) >= 0 ? "win" : ""}">${esc(n(id))}〔${esc(cn(r.shown[id].card))}〕得 ${signed(r.shown[id].score)}</li>`).join("")}</ul>` : "";
-    const pots = r.outcome === "fold" ? `其他人都弃牌，${n(r.winners[0])}拿走底池 ${r.pot} 枚（不亮牌）`
-      : r.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚${p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分` : `归${n(p.winners[0])}`}`).join("；");
+    const main = r.pots[0] || { winners: [] };
+    const shown = r.shown ? `<ul class="fh-shown">${Object.keys(r.shown).map(id => `<li class="${main.winners.indexOf(id) >= 0 ? "win" : (main.tied || []).indexOf(id) >= 0 ? "tie" : ""}">${esc(n(id))}〔${esc(cn(r.shown[id].card))}〕得 ${signed(r.shown[id].score)}</li>`).join("")}</ul>` : "";
+    const phase = r.allIn ? `<p class="cc-tier">翻到${esc(wn(CC().CC_CONFIG.allInWeather))}（第 ${r.phaseAt} 张天气）：没弃牌的人全押，各押到 ${r.cap} 枚</p>` : "";
     return `<div class="cc-banner-card ${o.cls}" role="dialog" aria-label="第 ${r.r} 轮结算">
       <small>第 ${r.r} 轮结算 · 层牌 ${esc(r.layers.map(x => `〔${cn(x)}〕`).join(""))} · 天气 ${esc(ws(r.weathers))}</small>
       <h3>${big}</h3>
       ${shown}
-      <p class="cc-tier">${esc(pots)}</p>
+      ${phase}
+      <p class="cc-tier">${esc(potsText(r, n))}</p>
       <p class="cc-deltas"><span class="${(r.delta[v.side] || 0) >= 0 ? "up" : "down"}">你 ${T.signed(r.delta[v.side] || 0)} 枚</span></p>
       <div class="cc-btns">${T.btn("dismiss", v.over ? "看总结算" : "继续", { primary: true })}${T.bannerChartBtn()}</div>
     </div>`;

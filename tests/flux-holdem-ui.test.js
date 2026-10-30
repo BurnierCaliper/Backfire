@@ -73,6 +73,12 @@ test("标题「本地玩法」里 Flux Hold'em 排在 Flux Duel 后面（High Fl
   assert.match(setup, /2 人[\s\S]*3 人[\s\S]*4 人/);
   assert.match(p.$("#fh-setup .cc-rules").textContent, /同分平分/);
   assert.match(p.$("#fh-setup .cc-rules").textContent, /微光反转克制表（能量除外），也反转另一张天气的修正/);
+  // 相位 = 全押（主人 10/30），不再是最低注翻倍
+  const rules = p.$("#fh-setup .cc-rules").textContent;
+  assert.match(rules, /相位：翻开时没弃牌的人全押（上限 = 没弃牌的人里筹码最少那位的全部筹码，这一轮已下的 \+ 手上的），不再下注，直接比分/);
+  assert.match(rules, /第 2 张天气（亮牌时翻开）是相位：比分之前补押到这个数/);
+  assert.match(rules, /全押后同分，底池留在桌上滚到下一轮；最后一轮同分的人平分/);
+  assert.ok(!/最低下注额翻倍|最低注翻倍/.test(rules));
   click(p.$('[data-fh="set"][data-key="players"][data-val="4"]'));
   click(p.$('[data-fh="set"][data-key="level"][data-val="hard"]'));
   click(p.$('[data-fh="start"]'));
@@ -206,6 +212,62 @@ test("跟不起时下注栏有「全押」和借的按钮；全押后押得多�
   // 你全押 6 枚：主池 6 × 3 = 18（三个人都能分）；乙、丙多押的 6 × 2 = 12 是边池（你分不到）
   assert.match(text, /主池 18 枚/);
   assert.match(text, /边池 1 12 枚/);
+  p.UI.stop();
+});
+
+test("翻到相位：横幅写没弃牌的人全押、押到多少；全押后同分写底池滚到下一轮；下一轮的底池、提示行写着滚存的，亮牌后写含上一轮滚存的", () => {
+  const p = page();
+  const game = p.X.newGame({ seed: "相位", players: [{ id: "p1", name: "你" }, { id: "p2", name: "乙", chips: 30 }], layers: LAYERS.slice(),
+    weathers: ["phase", "heat", "snow", "acid", "thunder", "glow", "sand"], hands: { p1: ["acid", "fire", "ice"], p2: ["acid", "ice", "physical"] }, elements: ["ice", "fire"] });
+  p.UI.start({ game, human: "p1", levels: { p2: "easy" }, seed: "相位" });
+  p.UI.stop();
+  click(p.$('#fh-actions [data-fh="place"][data-where="top"]'));
+  p.UI.stop();
+  p.X.act(game, "p2", { type: "play", card: "acid" });
+  p.UI.render();
+  click(mine(p, "acid"));
+  p.UI.stop();
+  assert.match(p.$("#fh-actions .cc-info").textContent, /翻到相位：没弃牌的人全押/, "下注时提示翻到相位就全押");
+  p.X.act(game, "p2", { type: "check" });
+  p.UI.render();
+  click(p.$('#fh-actions [data-fh="call"]'));
+  p.UI.stop();
+  p.X.act(game, "p2", { type: "pass" });
+  p.UI.render();
+  click(p.$('#fh-actions [data-fh="pass"]'));
+  p.UI.stop();
+  // 第 1 张天气是相位：不进第二轮下注，直接亮牌；两边都是酸 +3，同分滚存
+  assert.equal(game.results.length, 1);
+  const banner = p.$("#fh-banner");
+  assert.ok(visible(banner));
+  const text = banner.textContent;
+  assert.match(text, /翻到相位（第 1 张天气）：没弃牌的人全押，各押到 30 枚/);
+  assert.match(text, /同分，底池滚到下一轮/);
+  assert.match(text, /主池 60 枚：你、乙同分（相位全押），滚到下一轮/);
+  assert.match(text, /你 −30 枚/);
+  assert.match(p.$("#fh-side .cc-results").textContent, /同分，底池滚到下一轮/);
+  click(banner.querySelector('[data-fh="dismiss"]'));
+  p.UI.stop();
+  // 第 2 轮：乙输光了先借，庄家（乙）偷看后放好；底池里先放着滚存的 60 枚
+  p.X.act(game, "p2", { type: "borrow", amount: 6 });
+  p.X.act(game, "p2", { type: "place", where: "top" });
+  p.UI.render();
+  assert.equal(game.stage, "play");
+  assert.match(p.$("#fh-board .cc-pot").textContent, /含滚存 60/);
+  assert.match(p.$("#fh-actions .cc-info").textContent, /底池含上一轮滚存 60 枚/);
+  // 打完第 2 轮：横幅写主池含上一轮滚存的
+  p.X.act(game, "p2", { type: "play", card: "ice" });
+  p.UI.render();
+  click(mine(p, "fire"));
+  p.UI.stop();
+  for (let i = 0; i < 12 && game.results.length < 2; i++) {
+    const id = p.X.toAct(game)[0], L = p.X.legal(game, id);
+    p.X.act(game, id, { type: L.some(o => o.type === "pass") ? "pass" : L.some(o => o.type === "check") ? "check" : "call" });
+  }
+  assert.equal(game.results[1].carryIn, 60);
+  p.UI.state().banner = game.results[1];
+  p.UI.render();
+  assert.match(p.$("#fh-banner").textContent, /主池 \d+ 枚(归你|归乙|由你、乙平分)（含上一轮滚存的 60 枚）/);
   p.UI.stop();
 });
 

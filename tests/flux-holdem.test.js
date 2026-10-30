@@ -490,7 +490,7 @@ test("相位全押后同分：底池不分，留在桌上滚到下一轮——�
   assert.deepEqual(J(r.pots[0].shares), {});
   assert.deepEqual(J(r.delta), { p1: -20, p2: -20, p3: -20 }, "谁都没拿回");
   assert.deepEqual(J(g.carry), { amount: 60, from: ["p1", "p2"], r: 1 });
-  assert.match(g.log.find(e => e.t === "result").text, /主池 60 枚甲、乙同分（相位全押），滚到下一轮/);
+  assert.match(g.log.find(e => e.t === "result").text, /主池 60 枚：甲、乙同分（相位全押），滚到下一轮/);
   assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 0, anySplit: 0, allIns: 1, carried: 1 });
   // 第 2 轮：丙输光了，借 6 枚接着打；滚存的 60 枚先放在底池里（大家都看得到）
   assert.deepEqual(J(X.toAct(g)), ["p3"]);
