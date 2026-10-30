@@ -15,6 +15,9 @@
  *   普通 / 困难按期望加权抽签（softOdds，温度 playTemp：普通高、困难低但不是 0）——期望越高越容易出，但不是 100%；
  *   困难再「别被摸透」（readBack）：假设对手看穿了自己出牌的概率、拿克制的牌来打，把这个可能掺进推理里重新算一遍，和原来的取平均，
  *   最容易被猜到的那张（多半是平时最强的）被压一压，同一局里不会按「先强后弱」的固定顺序出。
+ *   困难还「猜对手的出牌习惯」（habit）：对手多半出它眼里期望高的牌（按出牌时的天气、对上我这一轮出得了的牌算），不是在剩下的牌里平均抽——
+ *   这个可能按分量掺进推理，出牌、下注、天气行动都用。以前对手出牌是固定的（普通玩家第 1 轮次次出能量），困难庄家固定出装甲正好次次克它；
+ *   对手也改成混合策略以后这一下没了，困难庄家对普通玩家从 +22 掉到 ±0，靠这条推理找回来（改动前后的自对局表见 README #521 那一条）。
  *   其他照好处选的两选一（庄家弃掉 / 留着天气、偷看后放回原位 / 压到牌堆底，玩家翻天气 / 暗弃跳过）和下注额也一样带随机性：
  *   好处差得多几乎总选好的那边，差不多时两边都会选（choiceTemp）；下注额普通在双倍的门槛附近两种都下（sizeTemp），困难上下浮动（sizeJitter）。
  *   随机数只用传进来的 rng：同一个种子打出同样的一局。
@@ -23,6 +26,7 @@
  *   CounterCardsAI.decide(view, "hard", rng)          → 一个操作（交给 CounterCards.act）
  *   CounterCardsAI.step(对局, "dealer", "hard", rng)    → 让这一方做一步（不是它的回合返回 null）
  *   CounterCardsAI.belief(view, "hard")                → 推理出的「对方这一轮出的是哪张」的概率
+ *   CounterCardsAI.guess(view, "hard")                 → 做决定时用的推理：困难在 belief 上再掺对手的出牌习惯（#521）；普通、简单就是 belief
  *   CounterCardsAI.decideBet(view, "hard", rng, edge)  → 借贷 / 下注 / 追加窗口的决定，胜率由 edge 给（Flux Duel 借用，#488）
  *   CounterCardsAI.dealerKnownTop(view)                → 从公开记录推出庄家知道堆顶往下几张（偷看按顺序往下看，#502）
  *   CounterCardsAI.cardOdds(view, "hard")              → 出牌那一步每张牌会被抽中的概率 { 牌: 概率 }（decide 就按它抽，#521）
@@ -81,7 +85,9 @@
       loanEdge: 0.3,         // 同普通
       loanGrowth: 2.5,       // 借贷：一轮最多能把筹码翻几倍（全押赢差 2 = 2.5 倍），估算借了还追不追得上
       playTemp: 0.15,        // 出牌的温度（#521）：比普通低（更常出期望高的），但不是 0
-      readBack: 0.5,         // 别被摸透（#521）：假设对手看穿了自己出牌的概率、拿克制的牌来打，这个可能掺进推理的分量（再和没掺的取平均）
+      readBack: 0.3,         // 别被摸透（#521）：假设对手看穿了自己出牌的概率、拿克制的牌来打，这个可能掺进推理的分量（再和没掺的取平均）
+      habit: 0.5,            // 猜对手的出牌习惯（#521）：对手多半出它眼里期望高的牌，这个可能掺进推理的分量（0 = 当它在剩下的牌里平均抽）
+      habitTemp: 0.35,       // 猜对手出牌习惯时，对手按期望加权抽签的温度
       choiceTemp: 0.05,      // 两选一的温度（#521）：比普通低
       sizeJitter: 0.25       // 下注额（#521）：按底池算出来的、比最低额多出来的那部分上下浮动 25%
     }
@@ -189,6 +195,35 @@
     if (level === "hard") return beliefHard(v);
     if (level === "normal") return beliefNormal(v);
     return uniform(oppUniverse(v));
+  }
+  /** 这一轮暗出牌时场上的天气（从公开记录推）：庄家这一轮保留了天气就是它，不然没有（弃掉了 / 本来就没有）；
+   *  庄家还没做天气行动时就是现在场上的 */
+  function playWeather(v) {
+    if (v.stage === "loan" || v.stage === "dealerWeather" || v.stage === "dealerPeek") return v.weather;
+    const k = (v.log || []).find(e => e.r === v.round && e.t === "dw" && e.op === "keep");
+    return k ? k.weather : null;
+  }
+  /** 困难「猜对手的出牌习惯」（#521）：对手出牌多半挑它眼里期望高的，不是在剩下的牌里平均抽——
+   *  对手的每张牌按「它出这张、对上我这一轮出得了的牌（平均），按出牌时的天气」的期望加权（温度 habitTemp），按 habit 的分量掺进推理 */
+  function habitBelief(v, cfg, bel) {
+    const lam = cfg.habit;
+    if (!(lam > 0)) return bel;
+    const w = playWeather(v);
+    const mine = v.me.hand.concat(v.me.card ? [v.me.card] : []).filter(c => v.side === "dealer" || conf().elements.indexOf(c) >= 0);
+    const opp = Object.keys(bel).filter(o => bel[o] > 0);
+    if (!opp.length || !mine.length) return bel;
+    const ev = opp.map(o => -mine.reduce((s, m) => s + util(myScore(v, m, o, w)), 0) / mine.length);
+    const q = softOdds(ev, cfg.habitTemp).map((x, i) => x * bel[opp[i]]);
+    const qs = q.reduce((a, b) => a + b, 0);
+    const out = {};
+    Object.keys(bel).forEach(o => { out[o] = (1 - lam) * bel[o]; });
+    if (qs > 0) opp.forEach((o, i) => { out[o] += lam * q[i] / qs; });
+    return out;
+  }
+  /** 做决定时用的推理（#521）：困难在 belief 上再掺对手的出牌习惯（habit）；普通、简单就是 belief */
+  function guess(v, level) {
+    level = LEVELS.indexOf(level) >= 0 ? level : "normal";
+    return level === "hard" ? habitBelief(v, AI_CONFIG.hard, beliefHard(v)) : belief(v, level);
   }
 
   /* ---------- 对手的习惯（困难，只看公开记录） ---------- */
@@ -640,7 +675,7 @@
     if (!view || !view.legal || !view.legal.length) return null;
     level = LEVELS.indexOf(level) >= 0 ? level : "normal";
     rng = rng || Math.random;
-    const ctx = { v: view, level, rng, cfg: AI_CONFIG[level], opts: view.legal, belief: belief(view, level) };
+    const ctx = { v: view, level, rng, cfg: AI_CONFIG[level], opts: view.legal, belief: guess(view, level) };
     let a = null;
     switch (view.stage) {
       case "loan": a = loanAtStart(ctx); break;
@@ -684,7 +719,7 @@
   function cardOdds(view, level) {
     if (!view || view.stage !== "play" || !view.legal || !view.legal.length) return null;
     level = LEVELS.indexOf(level) >= 0 ? level : "normal";
-    const ctx = { v: view, level, rng: Math.random, cfg: AI_CONFIG[level], opts: view.legal, belief: belief(view, level) };
+    const ctx = { v: view, level, rng: Math.random, cfg: AI_CONFIG[level], opts: view.legal, belief: guess(view, level) };
     const cards = ctx.opts.map(o => o.card);
     const p = level === "easy" ? cards.map(() => 1 / cards.length) : playOdds(ctx, cards);
     const out = {};
@@ -710,7 +745,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates, dealerKnownTop, cardOdds, softOdds, softPick, softChoose, draw, betSize };
+  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, guess, candidates, dealerKnownTop, cardOdds, softOdds, softPick, softChoose, draw, betSize };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCardsAI = api;
 })(typeof window !== "undefined" ? window : globalThis);

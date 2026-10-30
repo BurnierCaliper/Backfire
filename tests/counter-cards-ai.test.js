@@ -275,13 +275,14 @@ test("下注不封顶（#496）：对方押得比自己手上的还多、跟不�
     // 雷鸣里出谐波：牌差——不借，弃牌
     assert.deepEqual(J(AI.decide(CC.view(mk("harmonic", 10), "player"), level, CC.makeRng("w"))), { type: "fold" }, level);
   }
-  // 困难、牌一般（酸）：对方只多押一点（4 枚）——借来跟划得来，只借够跟的 3 枚（不借到 6 枚），借完跟注；押大了（10 枚）就弃牌
+  // 困难、牌一般（酸）：对方只多押一点（4 枚）——借来跟划得来，只借够跟的 3 枚（不借到 6 枚），借完跟注；押大了（20 枚）就弃牌
+  // （#521 起困难猜对手的出牌习惯：庄家多半出装甲、酸正好克它，押 10 枚还借来跟，押大到 20 枚才弃——以前 10 枚就弃）
   const mid = mk("acid", 4);
   const b = AI.decide(CC.view(mid, "player"), "hard", CC.makeRng("m"));
   assert.deepEqual(J(b), { type: "borrow", amount: 3 });
   CC.act(mid, "player", b);
   assert.deepEqual(J(AI.decide(CC.view(mid, "player"), "hard", CC.makeRng("m"))), { type: "call" });
-  assert.deepEqual(J(AI.decide(CC.view(mk("acid", 10), "player"), "hard", CC.makeRng("m"))), { type: "fold" });
+  assert.deepEqual(J(AI.decide(CC.view(mk("acid", 20), "player"), "hard", CC.makeRng("m"))), { type: "fold" });
   // 简单：随手借够跟（缺口 8 枚 → 一次借 9 枚，不是一份一份地借）或者弃牌
   const seen = new Set();
   for (let i = 0; i < 30; i++) seen.add(JSON.stringify(AI.decide(CC.view(mk("fire", 10), "player"), "easy", CC.makeRng("e" + i))));
@@ -605,6 +606,63 @@ test("下注额（#521，CounterCardsAI.betSize）：普通胜率差远高于 / 
   assert.ok(hard.every(x => x >= 3 + base * (1 - Hd.sizeJitter) - 1e-9 && x <= 3 + base * (1 + Hd.sizeJitter) + 1e-9));
   assert.ok(new Set(hard.map(Math.round)).size >= 3, "困难的下注额会浮动");
   assert.ok(sizes(-0.2, "hard", Hd, 20).every(x => x === 3), "胜率差不到 0：最低额");
+});
+
+/* ---------- 困难不弱于普通（#521：普通也改成混合策略以后，困难庄家对普通玩家从 +22 掉到 ±0） ---------- */
+
+test("困难猜对手的出牌习惯（#521，CounterCardsAI.guess）：对手多半出它眼里期望高的牌——第 1 轮没有天气，庄家猜玩家多半出能量、少出谐振，玩家猜庄家多半出装甲；按出牌时的天气算（玩家后来翻开了新天气，庄家猜的不变）；普通、简单就是 belief", () => {
+  const g = CC.newGame({ seed: "习惯", deck: DECK });
+  A(g, "dealer", "weather", { op: "pass" });
+  const dv = CC.view(g, "dealer"), pv = CC.view(g, "player");
+  const sum = (m) => Object.values(m).reduce((a, b) => a + b, 0);
+  // 第 1 轮什么都推不出来：belief 是平均的；掺上习惯以后，平时强的（能量 0）> 火（−0.2）> 谐振（−0.4）
+  assert.ok(Object.values(AI.belief(dv, "hard")).every(p => Math.abs(p - 1 / 7) < 1e-12));
+  const gd = AI.guess(dv, "hard"), gp = AI.guess(pv, "hard");
+  assert.ok(gd.energy > gd.fire && gd.fire > gd.harmonic, JSON.stringify(gd));
+  assert.equal(Object.keys(gp).sort((x, y) => gp[y] - gp[x])[0], "armor", JSON.stringify(gp));
+  assert.ok(Math.abs(sum(gd) - 1) < 1e-9 && Math.abs(sum(gp) - 1) < 1e-9);
+  for (const level of ["easy", "normal"]) assert.deepEqual(J(AI.guess(dv, level)), J(AI.belief(dv, level)), level);
+  const keep = AI.AI_CONFIG.hard.habit;
+  AI.AI_CONFIG.hard.habit = 0;
+  try { assert.deepEqual(J(AI.guess(dv, "hard")), J(AI.belief(dv, "hard")), "habit = 0：不掺"); } finally { AI.AI_CONFIG.hard.habit = keep; }
+  // 推出来是 0 的牌照样是 0（第 1 轮没有天气，火打肉体、玩家赢差 1 → 庄家推得出玩家出的是火）
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "fire" });
+  A(g, "player", "check"); A(g, "dealer", "check");
+  A(g, "player", "skip", { card: "normal" });
+  A(g, "dealer", "check"); A(g, "player", "check");
+  assert.equal(AI.guess(CC.view(g, "dealer"), "hard").fire, 0);
+  // 按出牌时的天气算：玩家出完牌以后翻开新天气，庄家猜玩家这一轮出的哪张和翻开前一样
+  //   第 2 轮出牌时没有天气、后来翻开雷鸣；第 3 轮庄家保留雷鸣、出牌以后翻开沙暴
+  const same = (dealerCard, playerCard, weather, newWeather) => {
+    A(g, "dealer", "weather", { op: weather ? "keep" : "pass" });
+    A(g, "dealer", "play", { card: dealerCard }); A(g, "player", "play", { card: playerCard });
+    A(g, "player", "check"); A(g, "dealer", "check");
+    assert.equal(g.weather, weather);
+    const before = AI.guess(CC.view(g, "dealer"), "hard");
+    A(g, "player", "reveal");
+    assert.deepEqual([g.weather, g.stage], [newWeather, "bet2"]);
+    assert.deepEqual(J(AI.guess(CC.view(g, "dealer"), "hard")), J(before), `出牌时 ${weather}，翻开 ${newWeather}`);
+    A(g, "dealer", "check"); A(g, "player", "check");
+  };
+  same("shield", "electric", null, "thunder");
+  same("armor", "ice", "thunder", "sand");
+});
+
+test("困难不弱于普通（#521）：同样的种子各打 300 局，困难当庄家、当玩家对普通都平均净赢 ≥ 0；困难庄家靠「猜对手的出牌习惯」——同样的 300 局把它关掉（habit = 0）要少赢 4 枚以上（普通也改成混合策略以后，没有它困难庄家对普通玩家只在 0 上下）", () => {
+  const net = (levels, side) => {
+    let s = 0;
+    for (let i = 0; i < 300; i++) { const g = CC.newGame({ seed: "强弱" + i }); AI.playOut(g, levels); s += g.final.net[side]; }
+    return s / 300;
+  };
+  const dealerHard = net({ dealer: "hard", player: "normal" }, "dealer");
+  const playerHard = net({ dealer: "normal", player: "hard" }, "player");
+  assert.ok(dealerHard >= 0, "困难庄家 vs 普通玩家：庄家平均 " + dealerHard.toFixed(2));
+  assert.ok(playerHard >= 0, "困难玩家 vs 普通庄家：玩家平均 " + playerHard.toFixed(2));
+  const keep = AI.AI_CONFIG.hard.habit;
+  AI.AI_CONFIG.hard.habit = 0;
+  let off;
+  try { off = net({ dealer: "hard", player: "normal" }, "dealer"); } finally { AI.AI_CONFIG.hard.habit = keep; }
+  assert.ok(dealerHard - off >= 4, `困难庄家 vs 普通玩家：猜对手的出牌习惯开着平均 ${dealerHard.toFixed(2)}，关掉 ${off.toFixed(2)}`);
 });
 
 test("玩家方从公开记录推出庄家知道堆顶往下几张（#502）：偷看后放回原位 +1、压到牌堆底不变、翻开一张 −1——庄家第 3 轮往下看了第 2 张、压到牌堆底，堆顶还是庄家看过、留着的那张（困难的玩家方照样认为它多半对庄家有利）", () => {
