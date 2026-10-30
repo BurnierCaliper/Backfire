@@ -1,9 +1,10 @@
 // High Flux（#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、游戏名、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
 // 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌；
 // 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）；
-// 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）。
+// 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）；
+// 结算前的过渡（最后一步 → 判定中 → 结算横幅，点一下桌面跳过）、侧栏的记录按时间顺序（#499）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
-// 克制表、悬停预览的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
+// 克制表、悬停预览、结算前的过渡的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -233,6 +234,229 @@ test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排
   assert.match(texts()[texts().length - 1], /^对局结束/, "最后一条是对局结束");
   assert.ok(atBottom());
   assert.match(read("counter-cards.css"), /\.cc-log\s*\{[^}]*overflow-y:\s*auto/, "记录自己带滚动条");
+});
+
+/* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步 → 判定中 → 结算横幅；用假时钟（t.mock.timers）一段段往前拨 ---------- */
+/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出血肉，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；庄家先过牌 */
+function bet2Game(p, seed, card, deck) {
+  const g = p.CC.newGame({ seed, deck: deck || ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+  const A = (side, type, extra) => p.CC.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card });
+  A("player", "check"); A("dealer", "check");
+  A("player", "reveal"); if (g.stage === "normal") A("player", "noNormal");
+  A("dealer", "check");
+  return g;
+}
+/** 桌上某一摞筹码写着几枚（seat：.cc-me / .cc-opp / .cc-pot） */
+const chipsOn = (p, seat) => Number(p.$(`#cc-board ${seat} .cc-chips > b`).textContent);
+
+test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后一步（过牌），横幅不马上出来——先停在最后一步，再「判定中」，按 UI_CONFIG.settle 的时长依次过去才弹结算横幅；过渡中桌上停在结算之前、不亮牌，记录和每轮结算里还没有这一轮的结果", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();   // 页面开着「减少动态效果」：判定中停 reducedJudgeMs
+  const T = p.UI.UI_CONFIG.settle;
+  assert.ok(T && T.lastMs > 0 && T.judgeMs > 0 && T.reducedJudgeMs > 0 && T.reducedJudgeMs <= T.judgeMs, "时长放在 UI_CONFIG.settle");
+  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打血肉 +2：玩家赢
+  p.UI.start({ side: "player", level: "normal", game: g });   // 不是 fast
+  const banner = p.$("#cc-banner"), bar = () => p.$("#cc-actions"), board = () => p.$("#cc-board");
+  const before = { me: chipsOn(p, ".cc-me"), pot: chipsOn(p, ".cc-pot") };
+  click(bar().querySelector('[data-cc="check"]'));
+  assert.equal(g.results.length, 1, "规则层已经结算完");
+  assert.equal(g.round, 2, "也开了下一轮");
+  const st = p.UI.state();
+  // ① 最后一步
+  assert.ok(!visible(banner), "横幅不马上出来");
+  assert.equal(st.settle.phase, "last");
+  assert.equal(bar().querySelector(".cc-prompt").textContent, "你过牌。", "操作栏写最后一步做了什么");
+  assert.deepEqual(Array.from(bar().querySelectorAll("button[data-cc]"), b => b.dataset.cc), ["skipSettle"], "过渡中只有「直接看结算」");
+  assert.equal(board().querySelector(".cc-me .cc-acted").textContent, "过牌", "座位上标着刚走的这一步");
+  assert.ok(!board().querySelector(".cc-opp .cc-acted"));
+  assert.ok(!board().querySelector("button.cc-can"), "过渡中点不了出牌");
+  assert.match(p.$("#cc-top .cc-round").textContent, /第 1 \/ 5 轮/, "顶栏还是这一轮");
+  const slots = board().querySelectorAll(".cc-slot");
+  assert.ok(slots[0].querySelector(".cc-back") && slots[1].querySelector(".cc-back"), "桌上两张暗牌（牌背）");
+  assert.match(slots[1].querySelector(".cc-peek").textContent, /火/, "自己那张照旧在角上标一下");
+  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("血肉"), "不亮牌");
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-pot")], [before.me, before.pot], "过牌：筹码不动，底池还是结算之前的");
+  assert.match(board().querySelector(".cc-wnow").textContent, /酷暑/, "场上天气");
+  assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 0, "每轮结算里还没有这一轮");
+  assert.ok(!p.$("#cc-side .cc-log").textContent.includes("第 1 轮：玩家赢"), "记录里还没有这一轮的结果");
+  assert.equal(p.$("#cc-side .cc-log").lastElementChild.textContent, "玩家过牌。", "记录停在最后一步");
+  t.mock.timers.tick(T.lastMs - 1);
+  assert.equal(st.settle.phase, "last", "最后一步停 lastMs");
+  t.mock.timers.tick(1);
+  // ② 判定中
+  assert.equal(st.settle.phase, "judge");
+  assert.ok(!visible(banner));
+  assert.match(bar().querySelector(".cc-prompt").textContent, /^判定中/);
+  assert.match(bar().textContent, /你过牌。/, "最后一步还写着");
+  assert.ok(board().querySelector(".cc-slots.cc-judging .cc-back") && board().querySelector(".cc-pot.cc-judging"), "两张牌背轻轻抖、底池发光");
+  assert.match(board().querySelector(".cc-judge").textContent, /判定中/);
+  assert.ok(!board().querySelector('[data-face="flesh"]'), "判定中也不亮牌");
+  t.mock.timers.tick(T.reducedJudgeMs - 1);
+  assert.ok(!visible(banner), "开着减少动态效果：判定中停 reducedJudgeMs");
+  t.mock.timers.tick(1);
+  // ③ 结算横幅
+  assert.ok(visible(banner) && banner.querySelector('[data-cc="dismiss"]'), "最后才弹出结算横幅");
+  assert.equal(st.settle, null);
+  assert.match(banner.textContent, /你赢了/);
+  assert.ok(board().querySelector(".cc-me .cc-chips.cc-collect") && !board().querySelector(".cc-opp .cc-chips.cc-collect"), "赢家那边的筹码堆收进来");
+  assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 1);
+  assert.ok(p.$("#cc-side .cc-log").textContent.includes("第 1 轮：玩家赢"));
+  click(banner.querySelector('[data-cc="dismiss"]'));
+  assert.ok(st.timer, "点「继续」：庄家（AI）接着走");
+  // 减少动态效果：过渡里的动画都去掉（最后一步的文字照样停，上面查过）
+  const motion = read("counter-cards.css").match(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/)[1];
+  [".cc-who .cc-acted", ".cc-slots.cc-judging .cc-back", ".cc-pot.cc-judging .cc-potstack", ".cc-chips.cc-collect b"].forEach(s => assert.ok(motion.includes(s), "减少动态效果：" + s + " 不动"));
+});
+
+test("结算前的过渡：AI 走的最后一步（庄家跟注）也停一下——标在庄家的座位上、跟注的筹码推进底池，操作栏写「庄家跟注 1 枚。」；没开减少动态效果时判定中停 judgeMs；过渡中、横幅开着 AI 都不接着走", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();
+  p.w.matchMedia = () => ({ matches: false });   // 没开「减少动态效果」
+  const T = p.UI.UI_CONFIG.settle, U = p.UI.UI_CONFIG;
+  const g = bet2Game(p, "AI跟注", "fire");
+  const step = p.w.CounterCardsAI.step;
+  p.w.CounterCardsAI.step = (game, side, level, rng) => (game.stage === "bet2" ? !!p.CC.act(game, side, { type: "call" }) : step(game, side, level, rng));   // 庄家（AI）这一步一定跟注
+  p.UI.start({ side: "player", level: "normal", game: g });
+  click(p.$('#cc-actions [data-cc="bet"]'));   // 人下注 1 枚（最低）
+  const before = { opp: chipsOn(p, ".cc-opp"), pot: chipsOn(p, ".cc-pot") };
+  assert.match(p.$("#cc-actions").textContent, /庄家正在想/);
+  t.mock.timers.tick(U.dealMs);   // 开局 AI 等发牌动画放完才走
+  assert.equal(g.results.length, 1, "庄家跟注，结算了");
+  const st = p.UI.state();
+  assert.equal(st.settle.phase, "last");
+  assert.ok(!visible(p.$("#cc-banner")));
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "庄家跟注 1 枚。");
+  assert.equal(p.$("#cc-board .cc-opp .cc-acted").textContent, "跟注 1 枚", "桌上：标在庄家的座位上");
+  assert.deepEqual([chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [before.opp - 1, before.pot + 1], "跟注的筹码推进底池");
+  assert.ok(p.$("#cc-board .cc-opp .cc-chips.cc-anim") && p.$("#cc-board .cc-pot .cc-chips.cc-anim"), "筹码推进底池的动画");
+  const before2 = JSON.stringify(g);
+  t.mock.timers.tick(T.lastMs);
+  assert.equal(st.settle.phase, "judge");
+  t.mock.timers.tick(T.judgeMs - 1);
+  assert.ok(!visible(p.$("#cc-banner")), "没开减少动态效果：判定中停 judgeMs");
+  t.mock.timers.tick(1);
+  assert.ok(visible(p.$("#cc-banner")));
+  t.mock.timers.tick(5000);
+  assert.equal(JSON.stringify(g), before2, "过渡中、横幅开着 AI 都不接着走");
+  click(p.$('#cc-banner [data-cc="dismiss"]'));
+  t.mock.timers.tick(U.aiDelay);
+  assert.notEqual(JSON.stringify(g), before2, "点「继续」以后 AI 接着走");
+});
+
+test("结算前的过渡：翻到相位直接全押结算——最后一步是翻开相位：桌上翻牌、闪一下（以前一结算就看不到了），全押的筹码推进底池，操作栏写翻开了什么、双方全押", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page();
+  const g = p.CC.newGame({ seed: "相位过渡", deck: ["phase", "heat", "glow", "acid", "thunder", "snow", "sand"] });
+  const A = (side, type, extra) => p.CC.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card: "fire" });
+  A("player", "check"); A("dealer", "check");
+  p.UI.start({ side: "player", level: "normal", game: g });
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [49, 49, 2]);
+  click(p.$('#cc-actions [data-cc="reveal"]'));
+  assert.ok(g.results.length === 1 && g.results[0].allIn, "翻到相位：全押、结算了");
+  assert.equal(p.UI.state().settle.phase, "last");
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "你翻开了新天气〔相位〕。 翻到相位：本轮双方全押，各押 50 枚（筹码较少一方的全部筹码）。");
+  assert.ok(p.$("#cc-board .cc-flash") && p.$("#cc-board .cc-wnow .cc-flip"), "翻牌、闪一下");
+  assert.match(p.$("#cc-board .cc-wnow").textContent, /相位/);
+  assert.equal(p.$("#cc-board .cc-me .cc-acted").textContent, "翻开相位");
+  assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-opp"), chipsOn(p, ".cc-pot")], [0, 0, 100], "全押：手上的都推进底池");
+  assert.ok(p.$("#cc-board .cc-pot.allin"));
+  assert.ok(!visible(p.$("#cc-banner")));
+});
+
+test("结算前的过渡：点一下桌面直接看结算（最后一步、判定中都行；操作栏的「直接看结算」也行），点侧栏不算；弃牌不用判定，最后一步之后直接弹横幅；fast（测试用）不停", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const T = page().UI.UI_CONFIG.settle;
+  const open = (seed, fast) => { const p = page(); const g = bet2Game(p, seed, "fire"); p.UI.start({ side: "player", level: "normal", game: g, fast }); return p; };
+  // 最后一步的时候点牌桌
+  let p = open("跳过1");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  assert.equal(p.UI.state().settle.phase, "last");
+  click(p.$("#cc-side h3"));
+  assert.ok(p.UI.state().settle && !visible(p.$("#cc-banner")), "点侧栏不算");
+  click(p.$("#cc-board .cc-deck"));
+  assert.equal(p.UI.state().settle, null);
+  assert.ok(visible(p.$("#cc-banner")), "点一下桌面：直接看结算");
+  t.mock.timers.tick(5000);
+  assert.ok(visible(p.$("#cc-banner")), "跳过以后计时也停了，横幅留着");
+  // 判定中点操作栏的「直接看结算」
+  p = open("跳过2");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  t.mock.timers.tick(T.lastMs);
+  assert.equal(p.UI.state().settle.phase, "judge");
+  const skip = p.$('#cc-actions [data-cc="skipSettle"]');
+  assert.equal(skip.textContent, T.skip);
+  click(skip);
+  assert.ok(visible(p.$("#cc-banner")) && !p.UI.state().settle);
+  // 判定中点桌上的牌背
+  p = open("跳过3");
+  click(p.$('#cc-actions [data-cc="check"]'));
+  t.mock.timers.tick(T.lastMs);
+  click(p.$("#cc-board .cc-slot .cc-back"));
+  assert.ok(visible(p.$("#cc-banner")), "判定中点一下桌面也行");
+  // 弃牌：不用判定
+  p = open("弃牌");
+  click(p.$('#cc-actions [data-cc="fold"]'));
+  assert.equal(p.UI.state().settle.phase, "last");
+  assert.equal(p.$("#cc-actions .cc-prompt").textContent, "你弃牌。");
+  assert.equal(p.$("#cc-board .cc-me .cc-acted").textContent, "弃牌");
+  t.mock.timers.tick(T.lastMs);
+  assert.ok(visible(p.$("#cc-banner")), "弃牌：最后一步之后直接弹横幅");
+  assert.match(p.$("#cc-banner").textContent, /你弃牌/);
+  // fast（测试 / 真浏览器测试用）：不停，直接弹
+  p = open("fast", true);
+  click(p.$('#cc-actions [data-cc="check"]'));
+  assert.equal(p.UI.state().settle, null);
+  assert.ok(visible(p.$("#cc-banner")), "fast：不停");
+});
+
+test("结算前的过渡：不开 fast 和 AI 打完一局（人当庄家）——每一轮都是「最后一步 → 判定中 → 横幅」，过渡中 AI 不动、只有「直接看结算」、桌上只有牌背；最后一轮的横幅点「看总结算」才出总结算", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page(), T = p.UI.UI_CONFIG.settle, rng = p.CC.makeRng("过渡整局");
+  p.UI.start({ side: "dealer", level: "hard", seed: "过渡整局" });
+  const st = () => p.UI.state(), g = st().game, banner = p.$("#cc-banner"), snap = () => JSON.stringify(g);
+  const tickUntil = (done) => { for (let i = 0; i < 200 && !done(); i++) t.mock.timers.tick(50); assert.ok(done(), "AI 一直没走"); };
+  let seen = 0, lastBanner = false;
+  for (let guard = 0; guard < 600; guard++) {
+    if (st().settle) {
+      const res = g.results[g.results.length - 1], before = snap();
+      assert.ok(!visible(banner), `第 ${res.r} 轮：横幅不马上出来`);
+      assert.equal(st().settle.phase, "last");
+      assert.match(p.$("#cc-top .cc-round").textContent, new RegExp(`第 ${res.r} / 5 轮`));
+      assert.equal(p.$$("#cc-side .cc-results .cc-res").length, g.results.length - 1, "每轮结算里还没有这一轮");
+      assert.deepEqual(Array.from(p.$$("#cc-actions button[data-cc]"), b => b.dataset.cc), ["skipSettle"]);
+      assert.ok(!p.$("#cc-board button.cc-can") && !p.$("#cc-board .cc-slot [data-face]"), "点不了牌，桌上只有牌背");
+      t.mock.timers.tick(T.lastMs);
+      if (res.outcome !== "fold") {
+        assert.equal(st().settle.phase, "judge", `第 ${res.r} 轮：判定中`);
+        t.mock.timers.tick(T.reducedJudgeMs);
+      }
+      assert.ok(visible(banner) && banner.querySelector('[data-cc="dismiss"]') && !banner.querySelector(".cc-final"), `第 ${res.r} 轮：最后才弹结算横幅`);
+      assert.equal(snap(), before, "过渡中 AI 不动");
+      seen++;
+      continue;
+    }
+    if (visible(banner)) {
+      if (banner.querySelector(".cc-final")) break;
+      const d = banner.querySelector('[data-cc="dismiss"]');
+      lastBanner = g.over;
+      if (g.over) assert.equal(d.textContent, "看总结算");
+      click(d);
+      continue;
+    }
+    if (p.CC.toAct(g).indexOf(st().ai) >= 0) { const before = snap(); tickUntil(() => snap() !== before); continue; }   // AI 等一会儿走一步
+    const card = p.$("#cc-board button.cc-can");
+    if (card) { click(card); continue; }
+    const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && b.dataset.cc !== "amt" && b.dataset.cc !== "mode");
+    assert.ok(btns.length, "没有能点的按钮：" + g.stage);
+    const bet = btns.filter(b => ["check", "call", "bet", "raise", "fold"].includes(b.dataset.cc));
+    click(bet.length ? (rng() < 0.1 ? bet.find(b => b.dataset.cc === "fold") : bet[Math.floor(rng() * bet.length)]) : btns.find(b => b.classList.contains("primary")) || btns[0]);
+  }
+  assert.ok(g.over && p.$("#cc-banner .cc-final"), "打完了，有总结算");
+  assert.equal(seen, g.results.length, "每一轮都有过渡");
+  assert.ok(seen >= 1);
+  if (g.log[g.log.length - 2].t === "result") assert.ok(lastBanner, "最后一轮结算完结束的：那一轮的横幅点「看总结算」才出总结算");
 });
 
 test("AI 平时等一会儿再走（开局等发牌动画放完）；setFast(true) 把正在等的那一步马上走掉", () => {
@@ -998,6 +1222,62 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     assert.equal(await game(), before2, "开关克制表不动牌局");
     const overflow = await page.evaluate(() => document.getElementById("scr-cc").scrollWidth - innerWidth);
     assert.ok(overflow <= 1, "牌桌没有横向溢出（顶栏多了「菜单」）：" + overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 结算前的过渡（真浏览器，#499）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
+/** 人当玩家，走到第二轮下注、轮到人（同上面 Node 里的 bet2Game；在页面里跑）；两段各停 ms（机器忙时也来得及量） */
+function settleSetup(o) {
+  const g = CounterCards.newGame({ seed: o.seed, deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+  const A = (side, type, extra) => CounterCards.act(g, side, Object.assign({ type }, extra || {}));
+  A("dealer", "weather", { op: "pass" }); A("dealer", "play", { card: "flesh" }); A("player", "play", { card: "fire" });
+  A("player", "check"); A("dealer", "check"); A("player", "reveal"); if (g.stage === "normal") A("player", "noNormal"); A("dealer", "check");
+  Object.assign(CounterCardsUI.UI_CONFIG.settle, { lastMs: o.ms, judgeMs: o.ms });
+  CounterCardsUI.start({ side: "player", level: "normal", game: g });
+}
+/** 量一下过渡（在页面里跑）：到了哪一段、操作栏写什么、座位上的标签和「判定中」在不在牌桌里、「判定中」压没压到底池（手机上底池就在正上方）、
+ *  横幅出没出来、有没有横向溢出 */
+function measureSettle() {
+  const st = CounterCardsUI.state(), q = (s) => document.querySelector(s), table = q(".cc-table").getBoundingClientRect();
+  const inside = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.left >= Math.max(0, table.left) - 1 && r.right <= Math.min(innerWidth, table.right) + 1 && r.top >= table.top - 1 && r.bottom <= table.bottom + 1; };
+  const judge = q("#cc-board .cc-judge"), j = judge && judge.getBoundingClientRect(), pot = q("#cc-board .cc-pot").getBoundingClientRect();
+  return { phase: st.settle ? st.settle.phase : null, banner: !q("#cc-banner").hidden, prompt: q("#cc-actions .cc-prompt").textContent,
+    acted: (q("#cc-board .cc-acted") || {}).textContent || "", actedIn: inside(q("#cc-board .cc-acted")), judgeIn: inside(judge),
+    judgeClear: !!j && (j.top >= pot.bottom - 1 || j.bottom <= pot.top + 1 || j.left >= pot.right - 1 || j.right <= pot.left + 1),
+    collect: !!q("#cc-board .cc-me .cc-chips.cc-collect"), overflow: q("#scr-cc").scrollWidth - innerWidth };
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px" }]) {
+  test(`真浏览器（${vp.tag}）：结算前的过渡——最后一步（操作栏写着、座位上标着）→ 判定中（标签在牌桌里）→ 结算横幅（赢家的筹码收进来），没有横向溢出；点一下桌面直接看结算`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext({ viewport: { width: vp.width, height: vp.height } });
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.goto(GAME_URL);
+    await page.evaluate(settleSetup, { seed: "过渡-真浏览器", ms: 2500 });
+    await page.click('#cc-actions [data-cc="check"]', T);
+    const m1 = await page.evaluate(measureSettle);
+    assert.deepEqual([m1.phase, m1.banner, m1.prompt, m1.acted], ["last", false, "你过牌。", "过牌"], "① 最后一步：" + JSON.stringify(m1));
+    assert.ok(m1.actedIn, "座位上的标签在牌桌里、在屏幕里");
+    await page.waitForSelector("#cc-board .cc-judge", T);
+    const m2 = await page.evaluate(measureSettle);
+    assert.deepEqual([m2.phase, m2.banner], ["judge", false], "② 判定中");
+    assert.match(m2.prompt, /^判定中/);
+    assert.ok(m2.judgeIn, "「判定中」在牌桌里、在屏幕里");
+    assert.ok(m2.judgeClear, "「判定中」不压到底池");
+    await page.waitForSelector("#cc-banner:not([hidden])", T);
+    const m3 = await page.evaluate(measureSettle);
+    assert.deepEqual([m3.phase, m3.banner, m3.collect], [null, true, true], "③ 结算横幅，赢家的筹码收进来");
+    for (const m of [m1, m2, m3]) assert.ok(m.overflow <= 1, "没有横向溢出：" + m.overflow + "px");
+    // 点一下桌面：直接看结算（两段各停 2.5 秒，不跳过的话 1 秒内等不到横幅）
+    await page.evaluate(settleSetup, { seed: "过渡-跳过", ms: 2500 });
+    await page.click('#cc-actions [data-cc="check"]', T);
+    await page.click("#cc-board .cc-deck", T);
+    await page.waitForSelector("#cc-banner:not([hidden])", { timeout: 1000 });
     assert.deepEqual(errors, []);
   });
 }

@@ -244,6 +244,36 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-tip-cell.neu b { opacity: .65; font-weight: 400; }
 .cc-tip-foot { margin: 0; font-size: 11px; color: var(--sk-muted, #a8977b); }
 
+/* ---------- 结算前的过渡（counter-cards-ui.js · settleStart / settleView / settleHtml，#499）：① 最后一步 → ② 判定中 → 结算横幅 ---------- */
+/* ① 刚走的这一步：标在这一方的座位上（AI 走的也停一下） */
+.cc-who .cc-acted {
+  margin-top: 3px; padding: 1px 9px; font: 800 13px/1.35 var(--sk-name, var(--ui)); color: var(--sk-ink, #0b0806);
+  background: var(--sk-hazard, #f2c230); border: 2px solid #0b0806; box-shadow: 2px 2px 0 rgba(0, 0, 0, .5); rotate: -2deg;   /* 歪一点用 rotate：弹出动画动的是 transform */
+  animation: ccPop .3s cubic-bezier(.2, .8, .3, 1.3) both;
+}
+.cc-prompt.cc-last { font-weight: 800; color: var(--sk-hazard, #f2c230); }
+/* ② 判定中：桌上两张牌背轻轻抖、底池发光（不亮牌） */
+.cc-prompt.cc-judging { font-weight: 800; }
+.cc-prompt.cc-judging::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: ccDots 1.2s steps(4) infinite; }
+/* 「判定中」像一条胶带横贴在两张牌背的上沿（一半在上面的空隙里：手机上底池就在正上方，不能压到「本轮」那一行） */
+.cc-slots { position: relative; }
+.cc-judge {
+  position: absolute; left: 50%; top: 0; z-index: 1; translate: -50% -50%; padding: 0 10px; white-space: nowrap;
+  font: 800 12px/1.25 var(--sk-name, var(--ui)); color: var(--sk-ink, #0b0806); background: var(--sk-tape, #dcd2ba); box-shadow: 2px 2px 0 rgba(0, 0, 0, .5);
+}
+.cc-slots.cc-judging .cc-back { animation: ccJudge .8s ease-in-out infinite; }
+.cc-slots.cc-judging .cc-slot:nth-child(2) .cc-back { animation-delay: -.4s; }   /* 两张错开一点 */
+@keyframes ccJudge { 0%, 100% { transform: rotate(-2deg); } 25% { transform: rotate(-4deg) translateX(-1px); } 75% { transform: rotate(0deg) translateX(1px); } }
+.cc-pot.cc-judging .cc-potstack { animation: ccGlow 1s ease-in-out infinite alternate; }
+@keyframes ccGlow { from { filter: drop-shadow(0 0 0 rgba(242, 194, 48, 0)); } to { filter: drop-shadow(0 0 12px rgba(242, 194, 48, .9)); } }
+/* 弹出横幅：赢家那边的筹码堆「收进来」（从底池那一侧滑进来，数字亮一下） */
+.cc-opp .cc-chips.cc-collect { --from: 46px; }
+.cc-me .cc-chips.cc-collect { --from: -46px; }
+.cc-chips.cc-collect .cc-stack i { animation: ccCollect .45s cubic-bezier(.2, .8, .3, 1.1) both; animation-delay: calc(var(--i) * 30ms); }
+@keyframes ccCollect { from { opacity: 0; transform: translateY(var(--from, -46px)) scale(.85); } to { opacity: 1; transform: none; } }
+.cc-chips.cc-collect b { animation: ccWin .8s ease-out both; }
+@keyframes ccWin { from { transform: scale(1.4); color: #fff6c8; } to { transform: none; } }
+
 /* ---------- 结算横幅：只有胜负、分档和筹码变动 ---------- */
 .cc-banner { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .55); }
 .cc-banner-card {
@@ -265,6 +295,8 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 
 @media (prefers-reduced-motion: reduce) {
   .cc-deal, .cc-thrown, .cc-flip, .cc-flash, .cc-stack i, .cc-banner-card, .cc-peekcard, .cc-tip { animation: none !important; }
+  /* 结算前的过渡：不抖、不发光、不滑（判定中也缩短，见 UI_CONFIG.settle.reducedJudgeMs）；最后一步的文字照样停 */
+  .cc-who .cc-acted, .cc-prompt.cc-judging::after, .cc-slots.cc-judging .cc-back, .cc-pot.cc-judging .cc-potstack, .cc-chips.cc-collect b { animation: none !important; }
 }
 
 /* ---------- 手机 ---------- */
