@@ -260,7 +260,7 @@ test("开局：双方各 50 枚筹码；庄家 5 张层牌，玩家 7 张元素�
 
 /* ---------- 庄家天气行动 ---------- */
 
-test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到），放回原位或放到牌堆底，玩家看得到选了哪种", () => {
+test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到），放回原位或压到牌堆底，玩家看得到选了哪种", () => {
   const g = CC.newGame({ seed: "偷看", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
   assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["peek", "pass"]);
   A(g, "dealer", "weather", { op: "peek" });
@@ -275,7 +275,7 @@ test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到）�
   A(g, "dealer", "place", { where: "bottom" });
   assert.deepEqual(J(g.deck), ["heat", "snow", "acid", "thunder", "sand", "phase", "glow"]);
   const pv2 = CC.view(g, "player");
-  assert.ok(pv2.log.some(e => /偷看了天气堆顶的一张，放到了牌堆底/.test(e.text)));
+  assert.ok(pv2.log.some(e => /偷看了天气堆顶的一张，压到了牌堆底/.test(e.text)));
   assert.doesNotMatch(JSON.stringify(pv2), /glow|微光/);
   const dv2 = CC.view(g, "dealer");
   assert.equal(dv2.deckTop, null); assert.equal(dv2.deckBottom, "glow");
@@ -288,15 +288,177 @@ test("庄家天气行动：没有天气时偷看堆顶（只有庄家看到）�
   assert.equal(CC.view(g2, "dealer").deckTop, "glow");
 });
 
-test("庄家天气行动：场上有天气时弃掉或保留；弃掉的天气离场", () => {
+test("庄家天气行动：场上有天气时弃掉或保留（保留以后还可以接着偷看：peek）；弃掉的天气离场", () => {
   const g = CC.newGame({ seed: "弃天气", deck: DECK });
   quietRound(g, "flesh", "ice");                     // 第 1 轮翻出雷鸣（冰打血肉 0，平局滚存）
   assert.equal(g.weather, "thunder");
-  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep"]);
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep", "peek"]);
   A(g, "dealer", "weather", { op: "discard" });
   assert.equal(g.weather, null);
   assert.deepEqual(J(g.gone), ["thunder"]);
   assert.ok(CC.view(g, "player").log.some(e => /庄家弃掉了场上的天气〔雷鸣〕/.test(e.text)));
+});
+
+/* ---------- 庄家天气行动：保留以后也能偷看、按顺序往下看（#502，主人 10/30） ---------- */
+
+test("庄家天气行动（#502）：场上有天气时保留以后还能接着偷看下一张（peek = 保留 + 偷看），看完放回原位或压到牌堆底；不看就是 keep", () => {
+  const g = CC.newGame({ seed: "保留偷看", deck: DECK });
+  quietRound(g, "flesh", "ice");                     // 第 1 轮翻出雷鸣；堆里剩沙暴、微光、酷暑、雪天、酸雨、相位
+  assert.equal(g.weather, "thunder");
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.equal(g.weather, "thunder", "保留以后偷看：天气留在场上");
+  assert.deepEqual(J(g.gone), []);
+  assert.equal(g.stage, "dealerPeek");
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.where)), ["top", "bottom"]);
+  const dv = CC.view(g, "dealer");
+  assert.deepEqual(J(dv.peek), { card: "sand", where: null, at: 0 });
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.to === "dealer" && e.card === "sand" && e.text === "你偷看到天气堆顶是〔沙暴〕。"));
+  A(g, "dealer", "place", { where: "bottom" });
+  assert.deepEqual(J(g.deck), ["glow", "heat", "snow", "acid", "phase", "sand"]);
+  assert.equal(g.stage, "play");
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["sand"], unseen: 5 });
+  assert.equal(CC.view(g, "dealer").deckBottom, "sand");
+  // 放回原位
+  const g2 = CC.newGame({ seed: "保留偷看2", deck: DECK });
+  quietRound(g2, "flesh", "ice");
+  A(g2, "dealer", "weather", { op: "peek" }); A(g2, "dealer", "place", { where: "top" });
+  assert.equal(g2.weather, "thunder");
+  assert.deepEqual(J(g2.deck), ["sand", "glow", "heat", "snow", "acid", "phase"]);
+  assert.deepEqual(J(CC.view(g2, "dealer").deckSeen), { top: ["sand"], bottom: [], unseen: 5 });
+  assert.equal(CC.view(g2, "dealer").deckTop, "sand");
+  // 保留、不看（keep）：和以前一样，直接暗出
+  const g3 = CC.newGame({ seed: "保留不看", deck: DECK });
+  quietRound(g3, "flesh", "ice");
+  A(g3, "dealer", "weather", { op: "keep" });
+  assert.equal(g3.stage, "play");
+  assert.equal(g3.weather, "thunder");
+  assert.equal(g3.peek, null);
+  assert.deepEqual(J(CC.view(g3, "dealer").deckSeen), { top: [], bottom: [], unseen: 6 });
+});
+
+test("庄家天气行动（#502）：玩家只看得到庄家做了哪种操作（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌；view 里没有庄家看过的牌", () => {
+  const g = CC.newGame({ seed: "只看操作", deck: DECK });
+  quietRound(g, "flesh", "ice");                     // 雷鸣
+  A(g, "dealer", "weather", { op: "peek" });
+  let pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "keep" && e.text === "庄家保留了场上的天气〔雷鸣〕。"), "看得到庄家保留了");
+  assert.doesNotMatch(JSON.stringify(pv), /sand|沙暴/);
+  A(g, "dealer", "place", { where: "bottom" });
+  pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "peek" && e.where === "bottom" && e.text === "庄家偷看了天气堆顶的一张，压到了牌堆底。"));
+  assert.doesNotMatch(JSON.stringify(pv), /sand|沙暴/, "看不到压到牌堆底的是哪张");
+  for (const k of ["peek", "deckSeen", "deckTop", "deckBottom"]) assert.ok(!(k in pv), "玩家的 view 里没有 " + k);
+  assert.ok(pv.log.every(e => e.t !== "peekCard"), "偷看到的牌只记在庄家的私人记录里");
+  // 庄家自己看得到
+  const dv = CC.view(g, "dealer");
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.card === "sand"));
+  assert.deepEqual(J(dv.deckSeen.bottom), ["sand"]);
+});
+
+test("偷看按顺序往下看（#502）：每次看的是庄家自己还没看过的下一张——第 1 轮看了堆顶 A 放回原位，第 2 轮玩家暗弃跳过、A 还在堆顶，第 3 轮再偷看看到的是 A 下面的 B；B 压到堆底以后堆顶还是 A，玩家翻开的是真正的堆顶 A", () => {
+  const g = CC.newGame({ seed: "往下看", deck: ["glow", "heat", "snow", "acid", "thunder", "sand", "phase"] });
+  // 第 1 轮：没有天气，偷看堆顶的 A（微光），放回原位；玩家暗弃跳过
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.deepEqual(J(CC.view(g, "dealer").peek), { card: "glow", where: null, at: 0 });
+  A(g, "dealer", "place", { where: "top" });
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: ["glow"], bottom: [], unseen: 6 });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  checks(g); A(g, "player", "skip", { card: "fire" }); checks(g);
+  // 第 2 轮：庄家不动，玩家又暗弃跳过：A 还在堆顶
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: "physical" });
+  checks(g); A(g, "player", "skip", { card: "acid" }); checks(g);
+  assert.equal(g.round, 3);
+  assert.equal(g.deck[0], "glow");
+  assert.equal(CC.view(g, "dealer").deckTop, "glow", "庄家还记得堆顶是 A");
+  // 第 3 轮：再偷看，看到的是 A 下面的 B（酷暑），不会又看一遍 A
+  A(g, "dealer", "weather", { op: "peek" });
+  const dv = CC.view(g, "dealer");
+  assert.deepEqual(J(dv.peek), { card: "heat", where: null, at: 1 });
+  assert.ok(dv.log.some(e => e.t === "peekCard" && e.card === "heat" && e.at === 1 && e.text === "你偷看到天气堆从上往下第 2 张是〔酷暑〕（上面 1 张你已经看过）。"));
+  // 压到堆底：压的是 B 这一张，A 还留在堆顶；庄家记得堆底那张是 B
+  A(g, "dealer", "place", { where: "bottom" });
+  assert.deepEqual(J(g.deck), ["glow", "snow", "acid", "thunder", "sand", "phase", "heat"]);
+  const dv2 = CC.view(g, "dealer");
+  assert.deepEqual(J(dv2.deckSeen), { top: ["glow"], bottom: ["heat"], unseen: 5 });
+  assert.equal(dv2.deckTop, "glow"); assert.equal(dv2.deckBottom, "heat");
+  const pv = CC.view(g, "player");
+  assert.ok(pv.log.some(e => e.t === "dw" && e.op === "peek" && e.at === 1 && e.text === "庄家偷看了天气堆从上往下第 2 张，压到了牌堆底。"));
+  assert.doesNotMatch(JSON.stringify(pv), /glow|微光|heat|酷暑/);
+  // 玩家翻开的总是真正的堆顶：A
+  A(g, "dealer", "play", { card: "spirit" }); A(g, "player", "play", { card: "harmonic" });
+  checks(g); A(g, "player", "reveal");
+  assert.equal(g.weather, "glow");
+  assert.deepEqual(J(g.deck), ["snow", "acid", "thunder", "sand", "phase", "heat"]);
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["heat"], unseen: 5 }, "翻开的 A 从看过的记录里拿掉，堆底的 B 还记着");
+  if (g.stage === "normal") A(g, "player", "noNormal");
+  checks(g);
+  // 第 4 轮：保留微光以后偷看，看的又是现在的堆顶（没看过）
+  A(g, "dealer", "weather", { op: "peek" });
+  assert.deepEqual(J(CC.view(g, "dealer").peek), { card: "snow", where: null, at: 0 });
+});
+
+test("偷看按顺序往下看（#502）：天气堆里剩下的牌庄家都看过了就不能再偷看——场上有天气只能弃掉 / 保留，没有天气这一轮就没有天气行动", () => {
+  // 每轮都偷看、压到牌堆底，玩家翻开下一张：第 4 轮压完，堆里剩下的 4 张庄家全看过；玩家再翻开一张，剩 3 张也全看过
+  const deck = ["heat", "snow", "acid", "thunder", "glow", "sand", "phase"];
+  const fourRounds = (g, last) => {
+    [["flesh", "ice"], ["sand", "physical"], ["spirit", "harmonic"], ["shield", "energy"]].forEach(([dc, pc], i) => {
+      A(g, "dealer", "weather", { op: "peek" });
+      assert.equal(g.peek.at, 0, `第 ${i + 1} 轮：前面看过的都压到了堆底，看的是堆顶`);
+      A(g, "dealer", "place", { where: "bottom" });
+      A(g, "dealer", "play", { card: dc }); A(g, "player", "play", { card: pc });
+      checks(g); A(g, "player", "reveal");
+      if (g.stage === "normal") { if (i === 3 && last) last(g); else A(g, "player", "noNormal"); }
+      checks(g);
+    });
+  };
+  const g = CC.newGame({ seed: "看完", deck });
+  fourRounds(g);
+  assert.equal(g.round, 5);
+  assert.equal(g.weather, "heat", "玩家翻开的是真正的堆顶（压到底的酷暑转了一圈回到堆顶）");
+  assert.deepEqual(J(g.deck), ["acid", "glow", "phase"]);
+  assert.deepEqual(J(CC.view(g, "dealer").deckSeen), { top: [], bottom: ["acid", "glow", "phase"], unseen: 0 });
+  assert.deepEqual(J(CC.legal(g, "dealer").map(o => o.op)), ["discard", "keep"], "全看过了：保留以后不能再偷看");
+  assert.throws(() => A(g, "dealer", "weather", { op: "peek" }), /不能这样做/);
+  // 没有天气（第 4 轮用常态清掉了）：全看过了，庄家这一轮没有天气行动
+  const h = CC.newGame({ seed: "看完2", deck });
+  fourRounds(h, (x) => A(x, "player", "normal", { card: "fire" }));
+  assert.equal(h.round, 5);
+  assert.equal(h.weather, null);
+  assert.equal(h.stage, "play", "没有可选的天气行动：直接暗出");
+  assert.ok(CC.view(h, "player").log.some(e => e.t === "dw" && e.op === "none" && e.r === 5 && e.text === "场上没有天气、天气堆里剩下的 3 张庄家都看过了，庄家这一轮没有天气行动。"));
+});
+
+test("偷看按顺序往下看（#502）：随便合法地乱打 200 局，庄家看过的记录一直和天气堆对得上（top 是堆顶往下那几张，bottom 是最底下那几张）；每次偷看的都是第一张没看过的，看过的不会再看；保留以后偷看天气留在场上", () => {
+  const rng = CC.makeRng("往下看乱打");
+  const n = { peek: 0, deep: 0, kept: 0, bottom: 0 };
+  for (let i = 0; i < 200; i++) {
+    const g = CC.newGame({ seed: "P" + i });
+    for (let steps = 0; !g.over; steps++) {
+      assert.ok(steps < 400, "卡住了：" + g.stage);
+      const who = CC.toAct(g), side = who[Math.floor(rng() * who.length)];
+      const opts = CC.legal(g, side), o = opts[Math.floor(rng() * opts.length)];
+      const a = Object.assign({}, o);
+      if (o.min != null) a.amount = o.min;
+      const before = J(CC.view(g, "dealer").deckSeen), w = g.weather;
+      CC.act(g, side, a);
+      const s = CC.view(g, "dealer").deckSeen, d = g.deck;
+      assert.deepEqual(J(s.top), J(d.slice(0, s.top.length)), "top 是堆顶往下那几张");
+      assert.deepEqual(J(s.bottom), J(d.slice(d.length - s.bottom.length)), "bottom 是最底下那几张");
+      assert.equal(s.unseen, d.length - s.top.length - s.bottom.length);
+      assert.ok(s.unseen >= 0);
+      if (a.type === "weather" && a.op === "peek") {
+        n.peek++;
+        assert.ok(before.unseen > 0, "还有没看过的才能偷看");
+        assert.equal(g.peek.at, before.top.length, "看的是堆顶往下看过的几张后面那一张");
+        assert.ok(!before.top.includes(g.peek.card) && !before.bottom.includes(g.peek.card), "看过的不会再看");
+        if (g.peek.at > 0) n.deep++;
+        if (w) { n.kept++; assert.equal(g.weather, w, "保留以后偷看：天气还在场上"); }
+      }
+      if (a.type === "place" && a.where === "bottom") n.bottom++;
+    }
+  }
+  assert.ok(n.peek > 0 && n.deep > 0 && n.kept > 0 && n.bottom > 0, JSON.stringify(n));
 });
 
 /* ---------- 暗出 ---------- */

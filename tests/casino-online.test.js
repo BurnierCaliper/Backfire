@@ -121,10 +121,11 @@ test("主持人坐庄：主持人的包里有这一桌（庄家那一方：偷�
   // 天气名用中文查（酸、沙既是天气也是牌的 id）；玩家那一方根本没有偷看的字段
   assert.ok(!has(casino("p2"), topName), "玩家的包里没有偷看到的天气");
   const pg = mine("p2", "ruby").seat.game;
-  assert.ok(!("peek" in pg) && !("deckTop" in pg) && !("deckBottom" in pg));
+  assert.ok(!("peek" in pg) && !("deckTop" in pg) && !("deckBottom" in pg) && !("deckSeen" in pg));
   ok(send("host", { op: "act", kit: "ruby", asDealer: true, action: { type: "place", where: "bottom" } }));
   assert.equal(casino("host").dealing[0].game.deckBottom, top, "主持人知道堆底是哪张");
-  assert.ok(mine("p2", "ruby").seat.game.log.some(e => /放到了牌堆底/.test(e.text)), "玩家看得到庄家做了哪种操作");
+  assert.ok(mine("p2", "ruby").seat.game.log.some(e => /压到了牌堆底/.test(e.text)), "玩家看得到庄家做了哪种操作");
+  assert.deepEqual(plain(casino("host").dealing[0].game.deckSeen), { top: [], bottom: [top], unseen: 6 }, "主持人（庄家）看得到自己看过的天气（#502）");
   assert.ok(!has(casino("p2"), topName));
   // 主持人坐庄的桌子不在乙的包里，乙也看不到谁坐在哪桌
   assert.deepEqual(plain(casino("p3").dealing), []); assert.deepEqual(plain(casino("p3").seated), []);

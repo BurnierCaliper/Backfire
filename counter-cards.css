@@ -148,7 +148,13 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 }
 .cc-deck b { font-size: 18px; text-shadow: 1px 1px 0 #000; }
 .cc-deck small, .cc-wnow > small { font-size: 11px; color: #b9c8b8; }
-.cc-known { color: var(--sk-hazard, #f2c230) !important; text-align: center; }
+/* 庄家看过的天气（counter-cards-ui.js · seenHtml，#502）：天气堆旁边，只有人当庄家时画 */
+.cc-seen { display: flex; flex-direction: column; gap: 3px; max-width: 150px; padding: 4px 6px; background: rgba(0, 0, 0, .35); border: 1px dashed var(--sk-hazard, #f2c230); }
+.cc-seen > small { font-size: 11px; color: var(--sk-hazard, #f2c230); }
+.cc-seen > small.cc-seen-left { color: #b9c8b8; }
+.cc-seen-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.cc-seen-row i { font-style: normal; font-size: 11px; color: #b9c8b8; }
+.cc-seen .cc-mini { opacity: 1; }
 .cc-wnow { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .cc-wx { width: 92px; height: 120px; }
 .cc-wx .cc-ico { font-size: 38px; }
@@ -294,6 +300,7 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
   .cc-deck { width: 56px; }
   .cc-slot { width: 54px; min-height: 72px; }
   .cc-gone { flex-direction: row; flex-wrap: wrap; max-width: none; }
+  .cc-seen { max-width: none; }
   .cc-top { gap: 6px; padding: 4px 6px; font-size: 13px; }
   .cc-brand { font-size: 17px; }
   .cc-top .cc-btn { padding: 6px 8px; font-size: 12px; }
