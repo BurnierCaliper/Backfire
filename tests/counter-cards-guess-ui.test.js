@@ -1,6 +1,7 @@
 // High Flux 黑市玩法：猜大猜小（#489）· 界面 counter-cards-guess-ui.js：标题「本地玩法」里的入口、选桌（入场费 / 最低注 × 倍率）、
 // 牌桌（庄家三张牌盖着、赔率表 5 格写赔率和 k / N、不开盘的格子点不了）、点格子攒押注 → 一次交上去 → 翻牌、押过的注按锁定的赔率摆在格子上、
-// 第一轮不押直接结算（入场费不退）、结算横幅、一手接一手筹码带过去、交不起入场费只能重新坐下；相位的天气牌写猜大猜小自己的规则。
+// 第一轮不押直接结算（入场费不退）、结算横幅、一手接一手筹码带过去、交不起入场费只能重新坐下；相位的天气牌写猜大猜小自己的规则；
+// 侧栏的记录、每手结算按先后排，最新的在最下面，记录有新的时滚到底（#499）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构
 "use strict";
 const test = require("node:test");
@@ -183,6 +184,64 @@ test("一手接一手随便押：画面上的筹码、押注和规则层一致�
     click(banner.querySelector('[data-ccg="setup"]'));
     assert.ok(visible(p.$("#ccg-setup")));
   }
+});
+
+/** 小 DOM 不排版：给侧栏的记录列表一个假的高度（每条 30px、框高 100px），量滚动位置照浏览器的样子来（同 tests/counter-cards-ui.test.js）；
+ *  元素的类是所有页面共用的，用完一定要 stop() */
+function fakeLogBox(p) {
+  const proto = p.w.Element.prototype, log = (el) => el.classList.contains("cc-log");
+  const fake = { scrollHeight() { return log(this) ? this.children.length * 30 : 0; }, clientHeight() { return log(this) ? 100 : 0; } };
+  const saved = {};
+  Object.keys(fake).forEach(k => { saved[k] = Object.getOwnPropertyDescriptor(proto, k); Object.defineProperty(proto, k, { get: fake[k], configurable: true }); });
+  return { stop: () => Object.keys(saved).forEach(k => Object.defineProperty(proto, k, saved[k])) };
+}
+
+test("侧栏的记录（主人 10/30，#499，做法同 High Flux）：按时间顺序排，最新的一条在最下面；有新记录时滚到底，往上翻着看旧的就停在原处；「每手结算」也按先后排，第 1 手在上面", (t) => {
+  const p = page();
+  const box = fakeLogBox(p);
+  t.after(box.stop);
+  const N = p.UI.UI_CONFIG.logLines;
+  const list = () => p.$("#ccg-side .cc-log");
+  const texts = () => Array.from(list().querySelectorAll("li"), li => li.textContent);
+  const want = () => Array.from(p.UI.view().log.slice(-N), e => e.text);   // 页面里的数组先转成这边的
+  const atBottom = () => list().scrollHeight - list().scrollTop - list().clientHeight <= 0;
+  const betOne = () => { click(p.$("#ccg-board button.ccg-cell")); click(btn(p, "bet")); };   // 押开盘的第一格
+  const deal = { element: "fire", weather: "heat", layer: "flesh" };
+  p.UI.start({ table: "street", seed: "记录顺序", deals: [deal, deal] });
+  assert.deepEqual(texts(), want());
+  // 第 1 手：押两轮
+  betOne();
+  assert.deepEqual(texts(), want(), "按时间顺序：先发生的在上面");
+  assert.match(texts()[0], /^街边桌：庄家抽了一张元素、一张天气、一张层牌/, "最早的一条在最上面");
+  assert.equal(texts()[texts().length - 1], "翻开元素：火。", "最新的一条在最下面");
+  betOne();
+  assert.deepEqual(texts(), want());
+  assert.equal(texts()[texts().length - 1], "翻开天气：酷暑。");
+  assert.ok(list().scrollHeight > list().clientHeight + 24, "记录多到要滚动了：" + texts().length + " 条");
+  assert.ok(atBottom(), "有新记录：滚到底");
+  // 往上翻着看旧的：重画、来了新记录都停在原处，不强行拉回去
+  list().scrollTop = 20;
+  p.UI.render();
+  assert.equal(list().scrollTop, 20, "重画：停在原处");
+  const before = p.UI.view().log.length;
+  click(btn(p, "pass"));   // 第三轮不押：翻开层牌、结算
+  assert.ok(p.UI.view().log.length > before, "来了新记录");
+  assert.deepEqual(texts(), want());
+  assert.match(texts()[texts().length - 1], /拿回|没押中/, "最后一条是这一手的输赢");
+  assert.equal(list().scrollTop, 20, "往上翻着：不拉回最底下");
+  // 第 2 手：记录换成这一手的；在底部时新记录来了接着贴底
+  click(p.$('#ccg-banner [data-ccg="again"]'));
+  assert.deepEqual(texts(), want());
+  betOne(); betOne();
+  assert.deepEqual(texts(), want());
+  assert.ok(atBottom(), "新的一手：照样贴底");
+  list().scrollTop = list().scrollHeight - list().clientHeight;   // 自己翻回最底下
+  click(btn(p, "pass"));
+  assert.deepEqual(texts(), want());
+  assert.ok(atBottom(), "在底部：新记录来了接着贴底");
+  assert.ok(texts().length <= N, `最多显示最近 ${N} 条`);
+  // 每手结算：第 1 手在上面，最新的一手在最下面（以前最新的在最上面）
+  assert.deepEqual(p.$$("#ccg-side .cc-results .cc-res > b").map(b => b.textContent), ["第 1 手", "第 2 手"]);
 });
 
 test("回到标题：牌桌收起，标题露出来", () => {

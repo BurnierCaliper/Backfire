@@ -1,7 +1,8 @@
 /* High Flux 黑市玩法：猜大猜小（#489）· 界面：标题 → 本地玩法 → 猜大猜小 → 选桌 → 牌桌；赌命桌（长线养成 / 跑团接进来）
  * 规则在 counter-cards-guess.js；画面只拿 CounterCardsGuess.view(这一手, 你)，没翻开的牌根本不在里面。
  * 牌面、筹码堆、按钮借用 High Flux 的（counter-cards-ui.js · cardHtml / backHtml / chipsHtml / weatherMods，counter-cards.css），
- * 自己的布局在 counter-cards-guess.css。
+ * 侧栏的记录贴底也借（logScroll / stickLog）；自己的布局在 counter-cards-guess.css。
+ * 侧栏：每手结算、记录都按先后排，最新的在最下面（同 High Flux，#499）。
  * 桌上：庄家盖着的三张牌（元素 / 天气 / 层牌，翻开一张亮一张，天气翻开有天气特效）；赔率表 5 格（−2 … +2：赔率、「k / N 种」，
  *   不开盘的格子灰掉写「不开」）。轮到你押时点开盘的格子加进这一轮的押注（默认最低注，− / + 调），「押注」一次交上去；
  *   押过的注摆在格子上，写锁定的赔率。第一轮「不押」= 这一手后面都不能押（按钮上写清楚）。
@@ -264,7 +265,8 @@
     if (top) top.innerHTML = topHtml(v);
     if (board) board.innerHTML = boardHtml(v);
     if (actions) actions.innerHTML = actionsHtml(v);
-    if (side) side.innerHTML = sideHtml(v);
+    // 记录：在底部就滚到底看新记录，往上翻着看旧的就停在原处（借 High Flux 的 logScroll / stickLog，#499）
+    if (side) { const was = CUI().logScroll(side); side.innerHTML = sideHtml(v); CUI().stickLog(side, was); }
     if (banner) {
       const h = S.banner ? bannerHtml(v) : "";
       banner.innerHTML = h;
@@ -367,14 +369,15 @@
   }
   function sideHtml(v) {
     const L = UI_CONFIG.life;
-    const rows = S.history.slice(-UI_CONFIG.historyLines).reverse().map(x => {
+    // 每手结算、记录都按先后排，最新的在最下面（同 High Flux 的侧栏和战斗记录，#499；以前都是最新的在最上面）
+    const rows = S.history.slice(-UI_CONFIG.historyLines).map(x => {
       if (S.life) {
         const what = !x.bet ? "没押" : x.dead ? L.dead : [x.hits ? `押中 ${x.hits} 格` : "没押中", x.hurt ? L.hurt : ""].filter(Boolean).join(" · ");
         return `<li class="cc-res ${x.dead || x.hurt ? "lose" : x.hits ? "win" : "tie"}"><b>第 ${x.n} 手</b><span>结果 ${esc(G().label(x.score))}</span><span class="cc-wxname">${esc(what)}</span><span class="cc-delta"></span></li>`;
       }
       return `<li class="cc-res ${x.net > 0 ? "win" : x.net < 0 ? "lose" : "tie"}"><b>第 ${x.n} 手</b><span>结果 ${esc(G().label(x.score))}</span><span class="cc-wxname">${x.bet ? "" : "没押"}</span><span class="cc-delta">${signed(x.net)}</span></li>`;
     }).join("");
-    const log = v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li>${esc(e.text)}</li>`).join("");
+    const log = v.log.slice(-UI_CONFIG.logLines).map(e => `<li>${esc(e.text)}</li>`).join("");
     return `<h3>每手结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
       ${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;

@@ -863,7 +863,8 @@
       ${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;
   }
-  /** 侧栏的记录滚到了哪（整块重画之前看一眼）：null = 还没画过；bottom = 在底部（离底不到 logStick 像素，或者根本不用滚） */
+  /** 侧栏的记录滚到了哪（整块重画之前看一眼）：null = 还没画过；bottom = 在底部（离底不到 logStick 像素，或者根本不用滚）。
+   *  猜大猜小（counter-cards-guess-ui.js）的侧栏也借这两个 */
   function logScroll(side) {
     const el = side.querySelector(".cc-log");
     return el ? { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight <= UI_CONFIG.logStick } : null;
@@ -995,7 +996,7 @@
   root.CounterCardsUI = {
     // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用；倒计时到时间的时刻留着，下次重画接着数）
     UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
-    cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods,
+    cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
