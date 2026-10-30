@@ -244,7 +244,7 @@ test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排
 });
 
 /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步 → 判定中 → 结算横幅；用假时钟（t.mock.timers）一段段往前拨 ---------- */
-/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出血肉，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；
+/** 人当玩家，测试替两边走到第二轮下注、轮到人：庄家不动天气、暗出肉体，玩家暗出 card；第一轮都过牌，翻开天气堆顶（deck[0]），不用常态；
  *  庄家先过牌（open：庄家先下注这么多枚，轮到人跟注） */
 function bet2Game(p, seed, card, deck, open) {
   const g = p.CC.newGame({ seed, deck: deck || ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
@@ -269,7 +269,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后
   const p = page();   // 页面开着「减少动态效果」：判定中停 reducedJudgeMs
   const T = p.UI.UI_CONFIG.settle;
   assert.ok(T && T.lastMs > 0 && T.judgeMs > 0 && T.reducedJudgeMs > 0 && T.reducedJudgeMs <= T.judgeMs, "时长放在 UI_CONFIG.settle");
-  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打血肉 +2：玩家赢
+  const g = bet2Game(p, "过渡", "fire");   // 酷暑里火打肉体 +2：玩家赢
   p.UI.start({ side: "player", level: "normal", game: g });   // 不是 fast
   const banner = p.$("#cc-banner"), bar = () => p.$("#cc-actions"), board = () => p.$("#cc-board");
   const before = { me: chipsOn(p, ".cc-me"), pot: chipsOn(p, ".cc-pot") };
@@ -289,7 +289,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#499）：人走了最后
   const slots = board().querySelectorAll(".cc-slot");
   assert.ok(slots[0].querySelector(".cc-back") && slots[1].querySelector(".cc-back"), "桌上两张暗牌（牌背）");
   assert.match(slots[1].querySelector(".cc-peek").textContent, /火/, "自己那张照旧在角上标一下");
-  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("血肉"), "不亮牌");
+  assert.ok(!board().querySelector('[data-face="flesh"]') && !bar().textContent.includes("肉体"), "不亮牌");
   assert.deepEqual([chipsOn(p, ".cc-me"), chipsOn(p, ".cc-pot")], [before.me, before.pot], "过牌：筹码不动，底池还是结算之前的");
   assert.match(board().querySelector(".cc-wnow").textContent, /酷暑/, "场上天气");
   assert.equal(p.$$("#cc-side .cc-results .cc-res").length, 0, "每轮结算里还没有这一轮");
