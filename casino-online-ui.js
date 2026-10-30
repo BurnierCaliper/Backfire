@@ -73,8 +73,9 @@
     const ex = `<div class="crq-state cso-ex"><label>买 <input type="number" min="1" step="1" value="${esc(m.draft.buy)}" data-cso-in="buy"> 枚</label>${btn(`data-cso="buy" ${data}`, `买（每枚 ${cfg.buy} 奎支）`, { disabled: row.purse < cfg.buy })}
       <label>卖 <input type="number" min="1" step="1" value="${esc(m.draft.sell)}" data-cso-in="sell"> 枚</label>${btn(`data-cso="sell" ${data}`, `卖（每枚 ${cfg.sell} 奎支）`, { disabled: !row.sellable, title: row.sellable ? "" : "赠送的筹码不能换成奎支" })}</div>`;
     if (seat) {
-      const what = seat.kind === "pvp" ? `对赌（${seat.stakeKind === "chips" ? "押筹码" : `押奎支：1 枚 = ${cfg.face} 奎支`}，开局各 ${seat.start} 枚）· 对手 ${esc(seat.opponent || "还没坐下")}`
-        : `${esc(seat.tableName)} · 庄家：${seat.kind === "gm" ? "主持人" : `${LEVEL[seat.level] || ""} AI`} · 买入 ${seat.buyIn} 枚（入场费 ${seat.fee} 枚）`;
+      // 牌局里桌上不够时从钱包补的（#520）：赌场桌算进买入，对赌写补了几枚
+      const what = seat.kind === "pvp" ? `对赌（${seat.stakeKind === "chips" ? "押筹码" : `押奎支：1 枚 = ${cfg.face} 奎支`}，开局各 ${seat.start} 枚${seat.topUp ? `，你中途从钱包补了 ${seat.topUp} 枚` : ""}）· 对手 ${esc(seat.opponent || "还没坐下")}`
+        : `${esc(seat.tableName)} · 庄家：${seat.kind === "gm" ? "主持人" : `${LEVEL[seat.level] || ""} AI`} · 买入 ${seat.buyIn} 枚（${seat.topUp ? `含从钱包补的 ${seat.topUp} 枚，` : ""}入场费 ${seat.fee} 枚）`;
       const oppName = seat.kind === "pvp" ? seat.opponent : seat.kind === "gm" ? "主持人" : `${LEVEL[seat.level] || ""} AI`;
       return `${wallet}<p class="cso-line"><b>坐在桌上</b>：${what}</p>
         ${seat.game ? gameHtml(seat.game, Object.assign({}, m, { oppName }), k) : '<p class="ol-muted">等对手坐下。</p>'}
@@ -103,7 +104,8 @@
     const row = mine.find(r => r.kit === m.kit) || mine[0];
     const pick = mine.length > 1 ? `<div class="crq-state">${mine.map(r => btn(`data-cso="pick" data-kit="${esc(r.kit)}"`, esc(r.name), { primary: r.kit === row.kit })).join("")}</div>` : "";
     return `<div class="ol-card crq-card cso-card">${head}${pick}${walletHtml(row, c, m)}${m.error ? `<p class="ol-bad" role="alert">${esc(m.error)}</p>` : ""}
-      <p class="ol-muted cso-rule">赠送筹码只能和赌场对局下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码。玩家对赌只能押普通筹码或奎支。</p></div>`;
+      <p class="ol-muted cso-rule">赠送筹码只能和赌场对局下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码。玩家对赌只能押普通筹码或奎支。
+      牌局里桌上的筹码不够时先自动从钱包补到够用（对赌押筹码的只补普通筹码，押奎支的补奎支），钱包空了才问借不借。</p></div>`;
   }
   /** 主持人：自己坐庄的那几桌（庄家那一方）、谁坐在哪桌、等人坐的对赌桌 */
   function gmHtml(m) {

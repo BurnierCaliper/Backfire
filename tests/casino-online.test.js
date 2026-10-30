@@ -257,6 +257,88 @@ test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌�
   assert.match(g, /让他离桌/);
 });
 
+/* ---------- 桌上不够时先从钱包补（#520） ---------- */
+const uiModel = (casinoOf, who) => ({ casino: casinoOf(who), kit: null, busy: false, error: "", draft: { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips" }, amount: {} });
+
+test("联机跑团的赌场桌：牌局里桌上不够时先从这名角色的钱包补、不出借贷；玩家的包里有这一行记录、总买入和补了几枚（白名单放行 topUp），浮层写出来；离桌按总买入结算（#520）", () => {
+  const { c, send, casino, mine, book } = room();
+  vm.runInContext(read("casino-online-ui.js"), c, { filename: "casino-online-ui.js" });
+  ok(send("p2", { op: "open", kit: "ruby" }));                                          // 赠送 50 枚
+  ok(send("p2", { op: "sit", kit: "ruby", table: "hall", buyIn: 40, dealer: "gm" }));   // 买入 10 枚 + 入场费 0.5 枚：钱包剩 39.5 枚
+  ok(send("host", { op: "act", kit: "ruby", asDealer: true, action: { type: "weather", op: "pass" } }));
+  ok(send("host", { op: "act", kit: "ruby", asDealer: true, action: { type: "play", card: "armor" } }));
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "play", card: "fire" } }));
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "check" } }));
+  // 主持人（庄家）押到玩家手上的全部 39 枚：要跟 39 + 最低下注 1，手上只有 39 → 先从瑞比的钱包补 1 枚
+  ok(send("host", { op: "act", kit: "ruby", asDealer: true, action: { type: "bet", amount: 39 } }));
+  const row = mine("p2", "ruby"), g = row.seat.game;
+  assert.equal(g.me.chips, 40);
+  assert.ok(g.log.some(e => e.text === "玩家从钱包补了 1 枚到桌上。"), "玩家的包里有这一行记录");
+  assert.ok(g.legal.some(o => o.type === "call" && o.amount === 39), "跟得起");
+  assert.ok(!g.legal.some(o => o.type === "borrow"), "不出借贷");
+  assert.equal(row.chips.gift, 39.25, "桌上 1 枚 = 钱包 0.25 枚，先拿赠送的");
+  assert.deepEqual([row.seat.buyIn, row.seat.topUp], [41, 1], "总买入、补了几枚都发给玩家");
+  assert.equal(book().wallets.ruby.seat.buyIn, 41);
+  assert.deepEqual([casino("host").seated[0].buyIn, casino("host").seated[0].topUp], [41, 1], "主持人看到的谁坐在哪桌也写总买入");
+  const h = c.CasinoOnlineUI.playerHtml(uiModel(casino, "p2"));
+  assert.match(h, /买入 41 枚（含从钱包补的 1 枚，入场费 2 枚）/, "浮层的座位上写总买入");
+  assert.match(h, /玩家从钱包补了 1 枚到桌上/, "浮层的记录里写着");
+  assert.match(h, /牌局里桌上的筹码不够时先自动从钱包补到够用/);
+  ok(send("p2", { op: "leave", kit: "ruby" }));                                        // 打到一半离桌：底注押进去了，不退
+  // 联机包里的文字过了 online-view.js 的 NFKC：全角标点变成半角
+  assert.match(mine("p2", "ruby").last, /离开大厅:桌上剩 40 枚\(买入 41 枚,含从钱包补的 1 枚,输 1 枚\)/);
+});
+
+test("联机玩家对赌押筹码：牌局里不够时先从押注人钱包里的普通筹码补（赠送的不能用来对赌），浮层写补了几枚；结算按开局押的 + 补的算（#520）", () => {
+  const { c, send, casino, mine, book } = room();
+  vm.runInContext(read("casino-online-ui.js"), c, { filename: "casino-online-ui.js" });
+  ok(send("p2", { op: "open", kit: "ruby" })); ok(send("p3", { op: "open", kit: "helu" }));
+  ok(send("p2", { op: "buy", kit: "ruby", n: 53 })); ok(send("p3", { op: "buy", kit: "helu", n: 50 }));
+  ok(send("p2", { op: "pvpOpen", kit: "ruby", side: "dealer", stakeKind: "chips" }));  // 瑞比坐庄家押 50 枚：钱包剩普通 3 枚、赠送 50 枚
+  ok(send("p3", { op: "pvpJoin", kit: "helu", table: Object.keys(book().tables)[0] }));
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "weather", op: "pass" } }));
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "play", card: "armor" } }));
+  ok(send("p3", { op: "act", kit: "helu", action: { type: "play", card: "fire" } }));
+  // 第一轮下注玩家（赫鲁米卡）先，押上手上的全部 49 枚 → 轮到瑞比要跟 49 + 最低下注 1，手上只有 49 → 从钱包补 1 枚普通筹码
+  ok(send("p3", { op: "act", kit: "helu", action: { type: "bet", amount: 49 } }));
+  const row = mine("p2", "ruby"), g = row.seat.game;
+  assert.equal(g.me.chips, 50);
+  assert.ok(g.log.some(e => e.text === "庄家从钱包补了 1 枚到桌上。"));
+  assert.ok(mine("p3", "helu").seat.game.log.some(e => e.text === "庄家从钱包补了 1 枚到桌上。"), "对手也看得到（同借贷，公开）");
+  assert.ok(!g.legal.some(o => o.type === "borrow"), "不出借贷");
+  assert.deepEqual([row.chips.gift, row.chips.normal, row.seat.topUp], [50, 2, 1], "只拿普通筹码，赠送的不动");
+  assert.match(c.CasinoOnlineUI.playerHtml(uiModel(casino, "p2")), /对赌（押筹码，开局各 50 枚，你中途从钱包补了 1 枚）/);
+  // 瑞比弃牌、第 2 轮下完底注后离桌认输：开局 50 + 补 1，桌上剩 49 枚——输 2 枚
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "fold" } }));
+  ok(send("p2", { op: "leave", kit: "ruby" }));
+  assert.match(mine("p2", "ruby").last, /对赌结算\(庄家\):桌上剩 49 枚\(开局 50 枚,中途从钱包补了 1 枚\),输 2 枚筹码/);
+  assert.equal(mine("p2", "ruby").chips.normal + mine("p3", "helu").chips.normal, 103, "两人的普通筹码加起来不变（53 + 50）");
+  assert.equal(mine("p2", "ruby").chips.gift, 50, "赠送的不动");
+});
+
+test("联机玩家对赌押奎支：牌局里不够时先从那名角色的私人钱包补奎支（200 奎支 = 1 枚），不够整枚的才借；结算按开局押的 + 补的算（#520）", () => {
+  const { c, send, casino, mine } = room();
+  c.LEDGER.purse = { ruby: 50 * 200 + 300, helu: 50 * 200 };
+  ok(send("p2", { op: "pvpOpen", kit: "ruby", side: "dealer", stakeKind: "kuizhi" }));
+  ok(send("p3", { op: "pvpJoin", kit: "helu", table: casino("p3").open[0].id }));
+  assert.deepEqual([c.trpgPurse("ruby"), c.trpgPurse("helu")], [300, 0]);
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "weather", op: "pass" } }));
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "play", card: "armor" } }));
+  ok(send("p3", { op: "act", kit: "helu", action: { type: "play", card: "fire" } }));
+  ok(send("p3", { op: "act", kit: "helu", action: { type: "bet", amount: 49 } }));
+  assert.equal(c.trpgPurse("ruby"), 100, "从瑞比的私人钱包补了 1 枚（200 奎支）；剩下的 100 奎支不够 1 枚");
+  assert.equal(mine("p2", "ruby").seat.topUp, 1);
+  assert.ok(mine("p2", "ruby").seat.game.log.some(e => e.text === "庄家从钱包补了 1 枚到桌上。"));
+  // 瑞比加注 1 枚，轮到赫鲁米卡要跟 1 + 最低下注 1：她的私人钱包空了，照旧借
+  ok(send("p2", { op: "act", kit: "ruby", action: { type: "raise", amount: 1 } }));
+  assert.ok(mine("p3", "helu").seat.game.legal.some(o => o.type === "borrow"), "钱包空了才借");
+  assert.ok(!mine("p3", "helu").seat.game.log.some(e => e.text.startsWith("玩家从钱包补了")));
+  ok(send("p3", { op: "act", kit: "helu", action: { type: "fold" } }));                // 弃牌：瑞比拿走底池
+  ok(send("p3", { op: "leave", kit: "helu" }));                                         // 赫鲁米卡输光了，第 2 轮问借贷时离桌认输
+  assert.equal(c.trpgPurse("ruby") + c.trpgPurse("helu"), 50 * 200 * 2 + 300, "对赌不抽水：两人的奎支加起来不变");
+  assert.match(mine("p2", "ruby").last, /对赌结算\(庄家\):桌上剩 101 枚\(开局 50 枚,中途从钱包补了 1 枚\),赢 10000 奎支/, "开局 50 + 补 1，桌上剩 101 枚：赢 50 枚");
+});
+
 test("白名单（online-view.js · projectCasino）：没登记的字段丢掉；拿错别人的 view 不放赌场；主持人坐庄的桌子、谁坐在哪桌只给主持人", () => {
   const game = { side: "player", opponent: "dealer", round: 1, rounds: 5, stage: "play", over: false, myTurn: true, weather: null, revealed: null, deckCount: 7, gone: [], allIn: false,
     minBet: 1, ante: 1, maxRaises: 2, loan: { unit: 3, repay: 4, secret: "SECRET-1" }, loanAsk: null, pot: 2, normalUsed: false,

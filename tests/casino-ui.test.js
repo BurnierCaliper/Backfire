@@ -178,6 +178,37 @@ test("离桌：结算回钱包、回到模式的画面；再来一局：同一�
   assert.match(poor.box.textContent, /没能再来一局：筹码不够/);
 });
 
+test("牌局里从钱包补筹码看得见（#520）：牌桌的记录写「从钱包补了 N 枚到桌上」，顶栏、赌场面板座位上的买入跟着加上；「再来一局」照旧按当初选的买入；离桌按总买入结算", () => {
+  const p = page(), m = mode(p, { deck: PHASE_FIRST });
+  const CC = p.w.CounterCards;
+  m.adapter.sit("hall", 40);                                     // 赠送 50 枚：买入 10 枚 + 入场费 0.5 枚，钱包剩 39.5 枚
+  const g = m.w.seat.game;
+  CC.act(g, "dealer", { type: "weather", op: "pass" });
+  CC.act(g, "dealer", { type: "play", card: "armor" }); CC.act(g, "player", { type: "play", card: "fire" });
+  CC.act(g, "player", { type: "check" }); CC.act(g, "dealer", { type: "check" });
+  m.adapter.refresh();
+  click(m.$('[data-casino="play"]'));                            // 回到牌桌：轮到玩家翻天气
+  assert.equal(p.UI.state().game, g);
+  assert.match(p.$("#cc-top").textContent, /大厅 · 买入 40 枚/);
+  p.UI.setFast(true);
+  click(p.$('#cc-actions [data-cc="reveal"]'));                  // 翻开相位：双方全押，火打装甲——玩家输光，第 2 轮开始先从钱包补 3 枚
+  assert.equal(g.round, 2);
+  assert.match(p.$("#cc-side .cc-log").textContent, /玩家从钱包补了 3 枚到桌上。/, "牌桌的记录里写着");
+  assert.match(p.$("#cc-top").textContent, /大厅 · 买入 43 枚/, "顶栏的买入跟着加上");
+  assert.match(p.UI.state().casino.againText, /再来一局（买入 40 枚 \+ 入场费 2 枚）/, "「再来一局」照旧按当初选的买入");
+  m.adapter.refresh();
+  assert.match(m.$(".cs-seat").textContent, /你坐在大厅：买入 43 枚（含从钱包补的 3 枚），交了入场费 2 枚 · 第 2 \/ 5 轮/, "赌场面板座位上的买入跟着加上");
+  assert.match(m.box.textContent, /筹码 38\.75 枚/, "钱包少了 0.75 枚（桌上 3 枚）");
+  assert.match(m.box.textContent, /牌局里桌上的筹码不够时，先自动从钱包补到够用/);
+  // 再回到牌桌：顶栏照样写总买入，「再来一局」还是当初选的买入
+  click(m.$('[data-casino="play"]'));
+  p.UI.setFast(true);
+  assert.match(p.$("#cc-top").textContent, /大厅 · 买入 43 枚/);
+  assert.match(p.UI.state().casino.againText, /再来一局（买入 40 枚 \+ 入场费 2 枚）/);
+  click(p.$('#cc-top [data-cc="leave"]'));                       // 离桌：按总买入结算
+  assert.match(m.box.textContent, /离开大厅：桌上剩 2 枚（买入 43 枚，含从钱包补的 3 枚，输 41 枚）/);
+});
+
 test("长线养成的任务板接进来：去赌场（第一次送赠送筹码）、面板按钮交给 casino-ui.js、坐着的时候面板一直展开；game.html 加载赌场的脚本和样式", () => {
   const ui = read("rogue-ui.js");
   assert.match(ui, /\$\{renderCasino\(\)\}/, "长线养成的任务板上有赌场");
