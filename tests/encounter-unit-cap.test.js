@@ -207,8 +207,9 @@ test("README：代币制章节写了单位上限；规则改动记录里有本�
   const path = require("path");
   const md = fs.readFileSync(path.join(H.ROOT, "README.md"), "utf8");
   const changelog = md.split("## 规则改动记录")[1] || "";
-  const entry = changelog.split("\n- **").find(s => /ENCOUNTER_UNIT_CAP/.test(s)) || "";
-  assert.ok(/随机遭遇上场单位上限 12/.test(entry), "规则改动记录应有单位上限这一条");
+  // 别的条目也可能提到 ENCOUNTER_UNIT_CAP（比如 #426 的代币基线），所以每一条都找
+  const entries = changelog.split("\n- **").filter(s => /ENCOUNTER_UNIT_CAP/.test(s));
+  assert.ok(entries.some(s => /随机遭遇上场单位上限 12/.test(s)), "规则改动记录应有单位上限这一条");
   const tokenSec = md.split("### 2. 随机遭遇（代币制）")[1]?.split("### 3.")[0] || "";
   assert.ok(/12|单位上限|ENCOUNTER_UNIT_CAP/.test(tokenSec), "代币制章节应提到单位上限");
 });

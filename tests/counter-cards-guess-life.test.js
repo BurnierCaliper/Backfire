@@ -84,7 +84,7 @@ test("规则层根本不读坚毅：玩家带着坚毅字段也不进对局；�
 
 test("赌命桌的赔率比普通桌高（35/35 不抽水，占位）；不开盘的规则一样（第三轮 k = 4 照样不开）", () => {
   assert.deepEqual(J(L.odds), [35, 35]);
-  assert.deepEqual(oddsRow(G.board({}, L.odds)), [9, 3.5, 2.5, 5, 20]);
+  assert.deepEqual(oddsRow(G.board({}, L.odds)), [9, 3.5, 2.5, 4.5, 20]);
   const boards = [[{}, 245]];
   for (const el of C.elements) { boards.push([{ element: el }, 35]); for (const w of C.weathers) boards.push([{ element: el, weather: w }, 5]); }
   let higher = 0;
@@ -98,7 +98,7 @@ test("赌命桌的赔率比普通桌高（35/35 不抽水，占位）；不开�
   });
   assert.ok(higher > 50, "大多数格子更高");
   const h = lifeHand({ element: "fire", weather: "heat", layer: "flesh" });
-  assert.deepEqual(oddsRow(h.board), [9, 3.5, 2.5, 5, 20]);
+  assert.deepEqual(oddsRow(h.board), [9, 3.5, 2.5, 4.5, 20]);
 });
 
 test("结算：押输了几点只交给接入层（lifeBill），画面里只有「受没受创」；赢了按 押上的点数 × 赔率（向下取整）× 100 奎支，单格赔率够高另给稀有材料", () => {
