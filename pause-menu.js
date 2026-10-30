@@ -2,7 +2,7 @@
  *   · Esc 先做它原来的事：取消选中的技能 / 选择、跳过演出、关掉最上层的面板（game.js · bindInput、online-ui.js 的弹框……）。
  *     按下时有开着的面板（PAUSE_MENU.layers）、有东西要取消（PauseMenu.addBlocker：选着技能、正在选目标、在播演出……），
  *     或者别的处理拿这一下取消了东西（preventDefault），就不打开；打字的时候（输入框、聊天框里）也不打开。
- *   · 菜单里的每一项由对应的模块自己登记（PauseMenu.register）：克制表（matchup-ui.js；联机玩家在 online-ui.js）、
+ *   · 菜单里的每一项由对应的模块自己登记（PauseMenu.register）：克制表（matchup-ui.js；联机玩家在 online-ui.js；High Flux 牌局里的得分表在 counter-cards-ui.js）、
  *     主持人工具（online-gm-ui.js）、消息与成员 / 大厅 / 角色分配 / 音效开关（online-ui.js）、新画面的画质（hd2d/hd2d-field.js，#321）、
  *     友伤开关（#428：单机 game.js、联机玩家 online-ui.js）、
  *     教程（#263 合进来后接上，见 PAUSE_MENU.tutorial）。
@@ -54,9 +54,11 @@
     order: { tutorial: 10, matchup: 20, friendlyFire: 25, gmTools: 30, assign: 40, room: 50, lobby: 60, sfx: 70, quality: 75, leave: 90 },
     // 教程（#263）：教程页挂出 window.Tutorial.open() 后这一项才出现。#263 的入口名不一样就改这一行
     tutorial: { global: "Tutorial", method: "open" },
-    // Esc / 菜单按钮在这些画面里有效（<body data-screen>）；联机时（主持人、玩家）在哪个画面都有效
-    screens: ["battle", "run", "trpg"],
-    // 角上的「菜单」按钮插在这些顶栏的最前面（单机：战斗、单局、跑团探索；联机玩家的在 online-ui.js 的 #online-dock）
+    // Esc / 菜单按钮在这些画面里有效（<body data-screen>）；联机时（主持人、玩家）在哪个画面都有效。
+    // counter：High Flux 的牌桌（#485，counter-cards-ui.js；设置页上不开，那边登记了 addBlocker）
+    screens: ["battle", "run", "trpg", "counter"],
+    // 角上的「菜单」按钮插在这些顶栏的最前面（单机：战斗、单局、跑团探索；联机玩家的在 online-ui.js 的 #online-dock；
+    // High Flux 的顶栏每次整块重画，按钮由 counter-cards-ui.js 自己画在最前面）
     mounts: ["#g-app > .g-top", "#scr-run > .run-top", "#scr-trpg > .tr-top"],
     // 按 Esc 时这些东西开着：这一下是用来关它们的，不打开暂停页面（看得见才算开着）
     layers: [".sheet.show", ".choice.show", ".ovl:not([hidden])", ".ol-overlay:not([hidden])", "#ogm-panel", ".wm.show", ".bx.show",
