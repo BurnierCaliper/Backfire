@@ -328,19 +328,21 @@
     if (g.stage === "bet1" || g.stage === "bet2") return Math.max(0, g.sides[opp(g, side)].st - g.sides[side].st) + mb;
     return 0;
   }
-  /** 现在最多能借多少枚（0 = 不能借）：手上的筹码不够这一步用才能借，一份 3 枚，借到补上缺口为止（缺口向上取整到 3 的倍数） */
-  function loanMax(g, side) {
-    const s = g.sides[side], L = CC_CONFIG.loan;
-    if (s.infinite) return 0;
-    const gap = loanNeed(g, side) - s.chips;
-    if (gap <= 0) return 0;
+  /** 手上 chips 枚、这一步够用要 need 枚时能借多少（纯函数，Flux Hold'em 也用，#488）：不够才能借，一份 3 枚，
+   *  借到补上缺口为止（缺口向上取整到 3 的倍数）。返回借贷的操作 { type: "borrow", min, max, step, need }，不能借返回 null */
+  function loanRange(need, chips) {
+    const L = CC_CONFIG.loan, gap = need - chips;
+    if (gap <= 0) return null;
     const units = L.maxUnits != null ? L.maxUnits : Math.ceil(gap / L.unit);
-    return Math.max(0, Math.floor(units)) * L.unit;
+    const max = Math.max(0, Math.floor(units)) * L.unit;
+    return max > 0 ? { type: "borrow", min: L.unit, max, step: L.unit, need } : null;
   }
+  /** 现在最多能借多少枚（0 = 不能借） */
+  function loanMax(g, side) { const o = loanOption(g, side); return o ? o.max : 0; }
   /** 能借时的操作：借 min–max 枚（step 的倍数）；need = 这一步够用要多少 */
   function loanOption(g, side) {
-    const max = loanMax(g, side), u = CC_CONFIG.loan.unit;
-    return max > 0 ? { type: "borrow", min: u, max, step: u, need: loanNeed(g, side) } : null;
+    const s = g.sides[side];
+    return s.infinite ? null : loanRange(loanNeed(g, side), s.chips);
   }
 
   function startRound(g) {
@@ -886,7 +888,7 @@
    *  betting（open 开出来的）、log */
   const bet = {
     registerMode, open: openBetting, legal: betLegal, step: betStep, waiting: betWaiting,
-    loanOption, borrow, room, cap, pay, busted, note
+    loanOption, loanRange, borrow, room, cap, pay, busted, note
   };
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
