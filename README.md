@@ -370,6 +370,20 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **新玩法：Flux Duel（两人对决，完全博弈）**（#488；规则 Burnier，界面 Akane；名字、亮牌开关、Duel 自己的三档分档赔付按主人 10/30 在 issue 的补充评论，相位全押打平的处理按夕夏 10/30 的补充，下注规则照 #496。新文件 flux-duel.js（`DUEL_CONFIG`（挂在 `CC_CONFIG.duel`）/ `newGame` / `toAct` / `legal` / `act` / `view` / `closeWindow`）；counter-cards.js：两人对局的下注、借贷、追加窗口那几段改成按玩法取「两方是谁、底注多少、下注回合结束 / 弃牌以后接着走哪一步」（`registerMode` / `betLegal` / `betStep` / `betWaiting` / `openBetting`，导出成 `CounterCards.bet`），`tierOf` / `extraOf` / `settle` 加可选的分档表参数——High Flux 自己的行为一点没变；测试 tests/flux-duel.test.js（新，16 条））
+  - **以前**：只有 High Flux（庄家对玩家）。
+  - **现在**：新玩法 **Flux Duel**（名字在 `CC_CONFIG.duel.name`，界面上直接写英文名）：
+    - **牌**：不设庄家，每人 5 张层牌 + 7 张元素牌，没有常态，打 5 轮。层牌每轮必出一张（5 轮正好打完）；元素牌每张整局只能用一次（最后剩 2 张）。
+    - **天气**：7 张洗混成一堆，每轮开始从堆顶拿一张背面朝上放好，谁都不能偷看、也不能翻，第一轮下注后自动翻开；第一轮下注时有人弃牌，这一张就盖着弃掉（谁都不知道是哪张）。
+    - **每轮**：（筹码不够的先决定借不借）→ 双方各下底注 1 × 轮数 → 同时暗出一张层牌 + 一张元素牌 → 第一轮下注 → 翻开天气 → 第二轮下注 → 结算。先手每轮轮换（第 1 轮甲先、第 2 轮乙先……；同一轮的两次下注都是这一轮的先手先）。
+    - **结算**：各自用自己的元素牌打对方的层牌（`CounterCards.score`：克制表 + 这一轮的天气），分高的赢。分差最大 ±4，所以分档赔付在 Duel 自己的配置里留三档（`DUEL_CONFIG.tierExtra = [0, 0, 0.5, 1]`）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5；差 3 及以上 × 1（差 4 按差 3）。High Flux 自己还是两档。
+    - **亮牌开关** `DUEL_CONFIG.reveal`：默认 `false`（不亮，只公开胜负、分档和筹码变动）；改成 `true` 结算时公开双方出的牌和各自的得分。
+    - **相位**：翻到相位双方全押（上限 = 筹码较少一方的全部筹码），不再下注，直接比分；全押打平底池保留滚到下一轮（不是 High Flux 的各自退回），最后一轮打平双方平分底池。
+    - **下注、借贷**：最低下注额 = 轮数、每回合最多加注 2 次、下注不封顶（跟不起要先借）、跟注后 3 秒追加窗口、借贷 3 借 4 还不设上限、弃牌、平局滚池、第 5 轮平局各退各的，都**直接用 counter-cards.js 里同一份代码和同一份配置**（`CounterCards.bet` / `settle`），不另写一套。
+    - 对局结束按最终筹码数（扣还借款之后）比胜负。
+  - **自己定的地方（规则没写，等主人试玩再改）**：「先手每轮轮换」按每一大轮换一次、同一轮两次下注同一个先手先；Duel 的最低下注额、加注次数沿用 High Flux 的配置；相位全押最后一轮平分时多出的 1 枚给这一轮的先手（双方押的一样多，实际不会出现）。
+  - **测试**：tests/flux-duel.test.js（新，16 条）：配置（名字、亮牌开关默认不亮、三档分档表、底注）、High Flux 的 `tierOf` / `extraOf` / `settle` 带分档表和不带时各自的结果、开局（各 5 层 7 元素、没有常态、天气背面朝上不进 view）、每轮流程和先手轮换、元素牌只能用一次、四种分差的赔付（差 1 / 2 / 3 / 4→3）、平局滚池和最后一轮各退各的、弃牌和盖着弃掉的天气、相位全押（封顶、不下第二轮注、打平滚池、最后一轮平分）、下注不封顶 / 跟不起借 / 追加窗口 / 加注次数、改 High Flux 的 `maxRaises` Duel 跟着变（同一份代码）、借贷和结束时扣还、亮牌开关两种结算、看不到对方的牌、赌场的筹码无限一方。新测试在没改的 counter-cards.js 上全部失败。
+
 - **High Flux 的赌场接进长线养成 / 跑团 / 联机跑团：筹码钱包（赠送 / 普通分开记）、奎支 ⇄ 筹码（200 买 1、1 卖 190）、赌场桌每局入场费、联机的主持人坐庄和玩家对赌（全盲）**（#487；每局入场费、用赠送筹码赢来的算普通筹码按主人 10/30 在 issue 的补充评论。新文件 casino.js（规则：`CASINO_CONFIG` / `wallet` / `welcome` / `chips` / `buy` / `sell` / `sellable` / `tables` / `sit` / `leave` / `payBack` / `runAi` / `pvpTable` / `pvpSit` / `pvpBack` / `pvpSettle`）、casino-ui.js + casino.css（长线养成、本机跑团的赌场面板）、casino-online-ui.js（联机浮层）；counter-cards.js · `CC_CONFIG.casino.tables[i].entryFee`（只加配置，下注逻辑一行没动）；counter-cards-ui.js · `start({ casino })` / `topHtml` / `finalHtml` / `afterChange` / `casinoHook`（只加赌场模式，没碰下注栏）；rogue.js · `casinoOpen` / `casinoView` / `casinoBuy` / `casinoSell` / `casinoSit` / `casinoLeave` / `taskBlocked`；rogue-commands.js；rogue-ui.js · `renderCasino` / `casinoAdapter`；trpg.js · `trpgCasinoBook` / `trpgCasinoWallet` / `trpgCasinoOpen` / `trpgCasinoView` / `trpgCasinoBuy` / `trpgCasinoSell` / `trpgCasinoSit` / `trpgCasinoLeave` / `trpgCasinoSeatOf` / `trpgCasinoAct` / `trpgCasinoSitAt` / `trpgCasinoPvpOpen` / `trpgCasinoPvpJoin` / `trpgCasinoPacket`；trpg-commands.js；trpg-ui.js（页签「赌场」）；ledger.js · `LEDGER.casino`；hotseat-game.js · `casinoCommand` / `casinoView`（指令 `casino`）；online-game.js（`controls`）；online-view.js · `projectCasino`；online-ui.js；game.html；测试见下）
   - **以前**：赌场只是 #486 留的接口（`CounterCards.casino.*`：桌子、买入、离桌折算），玩家的筹码从哪来、输赢记到哪都没有；High Flux 只能从标题「本地玩法」进去和 AI 打着玩。
   - **现在**：
