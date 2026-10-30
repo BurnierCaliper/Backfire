@@ -127,6 +127,7 @@ test("离桌结算：输的先扣赠送筹码，赠送的扣完了再扣普通�
   A(g, "dealer", "weather", { op: "pass" });
   A(g, "dealer", "play", { card: "armor" }); A(g, "player", "play", { card: "fire" });
   A(g, "player", "bet", { amount: 24 }); A(g, "dealer", "call");       // 这一轮各押 25 枚
+  CC.closeWindow(g);                                                   // 跟注后的 3 秒追加窗口（#496）到时间关上
   A(g, "player", "skip", { card: "normal" });                         // 不翻相位（暗弃常态跳过）
   A(g, "dealer", "check"); A(g, "player", "check");                   // 火打装甲 −1：玩家输掉这一轮的 25 枚
   assert.equal(g.results[0].winner, "dealer");
