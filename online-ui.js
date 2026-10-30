@@ -90,6 +90,7 @@
     rollBox.hidden = true;
     let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
     let duelUi = null;     // 决斗（duel-ui.js，#472）：探索环节申请 / 准备（选队、选项）的浮层，下面 mount
+    let casinoUi = null;   // 赌场（casino-online-ui.js，#487）：探索环节打 High Flux 的浮层，下面 mount
     let loreUi = null;     // NPC 资料（lore-ui.js）：主持人编辑 / 玩家只读的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
     // 大字：主持人发，所有人画面中间出现（像 Minecraft 的 /title）
@@ -1523,6 +1524,7 @@
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (duelUi) duelUi.sync();
+      if (casinoUi) casinoUi.sync();
       if (loreUi) loreUi.sync();
       paperDress();   // 纸片画面（#308）：画完再贴纸纹（量得到大小）
       if (view.active && !view.isHost) scheduleAutoMenu();
@@ -2233,6 +2235,8 @@
       units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
     // 决斗（PvP 第三步，#472，duel-ui.js）：探索环节的申请 / 准备浮层；主持人点「开始决斗」由房主本机布置战场（trpg-ui.js · toDuel）
     if (global.DuelUI) duelUi = global.DuelUI.mount({ api, view: () => view, own, call, playerName, toDuel: () => global.TrpgFlow.toDuel() });
+    // 赌场（#487，casino-online-ui.js）：玩家的钱包 / 兑换 / 坐桌 / 对赌 / 出牌，主持人坐庄；数据只用 view.casino（online-view.js · projectCasino）
+    if (global.CasinoOnlineUI) casinoUi = global.CasinoOnlineUI.mount({ api, view: () => view, own, call });
     // NPC 资料：规则在 lore.js（主持人的写入走 api.submit），玩家看 packet.lore、点开一条用 api.loreEntry 要详细内容
     if (global.LoreUI) loreUi = global.LoreUI.mount({ api, view: () => view, confirm: askConfirm,
       toast: text => { toast.textContent = text; toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.hidden = true; }, 4500); } });
@@ -2240,7 +2244,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (duelUi) { duelUi.destroy(); duelUi = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (duelUi) { duelUi.destroy(); duelUi = null; } if (casinoUi) { casinoUi.destroy(); casinoUi = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);

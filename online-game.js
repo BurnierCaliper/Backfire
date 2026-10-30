@@ -7,7 +7,8 @@
   const listeners = new Set(), packetListeners = new Set(), pending = new Map(), requests = new Map(), requestHighWater = new Map();
   // battle.friendlyFire：每人改自己的友伤开关（#428；hotseat-game.js 按发指令的人记），随时能改、不排在演出后面；
   // duel*：探索环节里决斗的申请 / 同意 / 选队 / 选项（#472，hotseat-game.js 只在探索环节放行）
-  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "battle.friendlyFire", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback"]);
+  // casino：赌场（#487）：兑换、坐桌、对赌、出牌、离桌（hotseat-game.js · casinoCommand 只在探索环节放行，查是不是自己角色的钱包）
+  const gmContext = Object.freeze({}), controls = new Set(["orderPick", "orderConfirm", "orderMove", "orderSwapAccept", "answer", "chat", "battle.friendlyFire", "checkOpen", "checkRoll", "checkClose", "attrRequest", "attrDecide", "checkRequest", "checkDecide", "skillRoll", "showTitle", "duelRequest", "duelDecide", "duelOpen", "duelPick", "duelOptions", "purseTransfer", "shopBuy", "shopRedeem", "smithUpgrade", "workshopCraft", "workshopSalvage", "cyberRequest", "cyberwareInstall", "cyberwareRemove", "shopSell", "shopBuyback", "casino"]);
   const messageContexts = new WeakMap();
   const recipientWires = new Map(), displayWire = OnlineWire.create();
   let endpoint = null, identity = null, status = { connected: false, paused: true, roster: [] }, active = false;
