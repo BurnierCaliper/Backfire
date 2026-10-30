@@ -7,7 +7,8 @@
   const propNames = { button: "按钮", lever: "拉杆", battery: "超充能电池", boom: "爆炸桶", acid: "酸液桶", scrap: "碎渣机炮", turret: "防卫炮台", ironwall: "铁壁", scrapwall: "废铁墙", dome: "防护罩", coral_branch: "沙珊瑚枝", coral_tentacle: "沙珊瑚触须" };
   const factionNames = { player: "玩家", enemy: "敌人", neutral: "中立" };
   const isCoral = k => k === "coral_branch" || k === "coral_tentacle";   // 沙珊瑚是中立的（props.js · makeProp）
-  const statusNames = { burn: "灼烧层数", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "冲击", high: "高能", reso: "共振", unstable: "不稳定", weak: "虚弱", inspire: "振奋", sturdy: "坚固", hide: "隐蔽", advantage: "优势", chase: "追猎" };
+  const statusNames = { burn: "灼烧层数", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "冲击", high: "高能", reso: "共振", unstable: "不稳定", weak: "虚弱", inspire: "振奋", sturdy: "坚固", hide: "隐蔽", advantage: "优势", chase: "追猎", blind: "目盲层数" };
+  const stackStatuses = ["burn", "blind"];   // 按层数记的状态（目盲 0–3 层，gm-commands.js 验）；其余是开关，0 / 1
   const fieldNames = { "": "无主场地", fireOn: "火场", acid: "酸液", ice: "冰面", electric: "电场", energy: "能量", harmonic: "谐波", heal: "疗愈", quicksand: "流沙", coral: "沙珊瑚台地" };
   const weatherNames = { none: "常态", heat: "酷暑", snow: "雪天", acid: "酸雨", thunder: "雷鸣", glow: "微光", sand: "沙暴", phase: "相位" };
   const gapNames = { open: "畅通", bridge: "不稳桥梁", wall: "危墙", door: "机关门", void: "空隙" };
@@ -304,7 +305,7 @@
           else if (unitField === "iv") patch = { iv: { hp: num("ogm-iv-hp"), atk: num("ogm-iv-atk") } };
           else if (unitField === "race") patch = { race: value("ogm-unit-value") };
           else if (unitField === "enriched") patch = { enriched: value("ogm-unit-value") === "on" };
-          else if (unitField === "statuses") { const key = value("ogm-status"), n = num("ogm-status-value"); patch = { statuses: { [key]: key === "burn" ? n : n !== 0 } }; }
+          else if (unitField === "statuses") { const key = value("ogm-status"), n = num("ogm-status-value"); patch = { statuses: { [key]: stackStatuses.includes(key) ? n : n !== 0 } }; }
           else patch = { [unitField]: Object.prototype.hasOwnProperty.call(flagUnit, unitField) ? checked("ogm-unit-flag") : unitField === "self" ? value("ogm-unit-value") : num("ogm-unit-value") };
           cmd = { type: "gm.editUnit", actor: u.id, patch }; break;
         }

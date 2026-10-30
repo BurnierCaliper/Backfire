@@ -213,7 +213,7 @@
   /** 状态徽章：statuses 里的键 → 铭牌上的字（敌我通用）。数值型的（灼烧层数）带上层数 */
   const STATUS_LABELS = {
     burn: "灼烧", shock: "感电", corr: "腐蚀", frostbite: "冻伤", shockwave: "震荡", high: "高能", reso: "共振",
-    unstable: "不稳", weak: "虚弱", inspire: "鼓舞", sturdy: "坚毅", hide: "隐匿", advantage: "优势", chase: "追击"
+    unstable: "不稳", weak: "虚弱", inspire: "鼓舞", sturdy: "坚毅", hide: "隐匿", advantage: "优势", chase: "追击", blind: "目盲"
   };
 
   const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
