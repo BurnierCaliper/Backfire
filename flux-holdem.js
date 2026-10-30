@@ -11,16 +11,21 @@
  *   2. 翻开第 1 张公共层牌，交盲注；
  *   3. 每人盖下 1 张元素牌；
  *   4. 第一轮下注（从庄家左边开始顺时针）；
- *   5. 翻开第 1 张天气；
+ *   5. 翻开第 1 张天气（是相位：没弃牌的人全押，跳过第二轮下注，直接到 7）；
  *   6. 第二轮下注（同样从庄家左边开始）；
- *   7. 结算：同时翻开第 2 张公共层牌和第 2 张天气，亮牌——每人的元素牌对 2 张公共层牌分别计分求和（两张天气叠加），
- *      最高分拿走底池，同分平分（平局是这个模式的特色，不另加决胜规则；分不开的零头从庄家左边起一人一枚）。
+ *   7. 结算：同时翻开第 2 张公共层牌和第 2 张天气（第 2 张是相位：比分之前没弃牌的人补押到全押的数目），亮牌——
+ *      每人的元素牌对 2 张公共层牌分别计分求和（两张天气叠加），最高分拿走底池，同分平分
+ *      （平局是这个模式的特色，不另加决胜规则；分不开的零头从庄家左边起一人一枚）。
+ * 相位（主人 10/30 确认，取代正文「本轮最低注翻倍」）：翻开相位时所有还没弃牌的人全押——上限 = 没弃牌的人里筹码最少那位的全部筹码
+ *   （这一轮已下的 + 手上的），其他人押到同样的数（之前押得比这个数多的不退，照旧开边池），然后直接比分。
+ *   全押后同分：底池不分，留在桌上滚到下一轮（算进下一轮的主池）；最后一轮同分的人平分。
+ *   滚存的底池没有下一轮了（只剩一个人没出局，对局提前结束）：归坐在桌上的那个人。
  * 计分（CounterCards.score 那一套，两张天气叠加，scoreStack）：天气修正直接相加、不设上限；
  *   微光会反转克制表（能量的克制不反转），也会反转另一张天气给所有元素的修正（包括给能量的、酸雨打装甲那一项），微光自己给能量的 +1 保留。
  * 下注：过牌 / 跟注 / 加注 / 弃牌；加注至少等于上一次加注额（也不少于最低下注额 = 轮数，第一轮下注时大盲算第一次下注），
  *   每个下注回合最多加注 3 次；下注不封顶（#496，只受自己手上的筹码限制，跟不起要先借）；筹码不够也可以全押，比自己多押的部分开边池（同德州）；
  *   跟注后有 3 秒追加窗口（#496，还可以加注或弃牌；秒数、pass / closeWindow 的用法同 High Flux）；弃牌的不参与比分。
- *   多人局不用分档赔付，只按底池结算；相位在场上时最低下注额翻倍（正文「相位：本轮最低注翻倍」，HOLDEM_CONFIG.phaseMinBetMult）。
+ *   多人局不用分档赔付，只按底池结算。
  * 借贷 3 借 4 还、不设上限（同 High Flux：算借多少、记账、结束时扣还都直接用 counter-cards.js 的同一份代码）。5 轮后筹码最多的赢。
  * 规则层不碰网页：AI 在 flux-holdem-ai.js，界面在 flux-holdem-ui.js。
  *
@@ -29,7 +34,8 @@
  *   FluxHoldem.legal(g, "p1")                 → 这名玩家现在能做的
  *   FluxHoldem.act(g, "p1", { type: "play", card: "fire" })   → 盖下一张元素牌；下注：check / call / bet / raise / allIn / fold / pass / borrow
  *   FluxHoldem.closeWindow(g)                 → 跟注后的追加窗口到时间
- *   FluxHoldem.view(g, "p1")                  → 这名玩家能看到的（别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家）
+ *   FluxHoldem.view(g, "p1")                  → 这名玩家能看到的（别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家；
+ *                                               滚存的底池 carry 公开，pot 里也算上了）
  *   FluxHoldem.scoreStack("fire", "flesh", ["heat", "glow"])   → 两张天气叠加时的得分
  *   FluxHoldem.chart(["heat", "glow"])        → 克制表（得分）：场上的天气叠加后每张元素牌打每张层牌的实际得分（格式同 CounterCards.chart）
  */
@@ -51,7 +57,6 @@
     weathersPerRound: 2,               // 每轮翻 2 张天气，叠加
     blinds: [1, 2],                    // 小盲 1 × 轮数、大盲 2 × 轮数
     maxRaises: 3,                      // 每个下注回合最多加注 3 次
-    phaseMinBetMult: 2,                // 相位在场上时最低下注额（和加注的下限）× 2（正文「相位：本轮最低注翻倍」）
     seatNames: ["玩家 1", "玩家 2", "玩家 3", "玩家 4"],
     // 赌场桌（#488 第 5 步；钱照 #487，在 casino.js）：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），
     // 没有主持人坐庄。players = 这张桌子几人（含你）；names = 座位上的称呼（你坐第一个）。
@@ -127,7 +132,8 @@
     c.notes = [`得分 = 克制（克制 +1、被克制 −1、普通 0）+ 天气修正（每 ${Math.round(C.pctStep * 100)}% 记 ±1）。场上几张天气的修正直接相加、不设上限；`
       + `你的元素牌对 2 张公共层牌分别计分求和，最高分拿走底池。`];
     if (glow) c.notes.push("微光：克制关系反转（能量除外）；另一张天气给所有元素的修正（含给能量的、酸雨打装甲那一项）也反转，微光自己给能量的 +1 保留");
-    if (ws.indexOf(C.allInWeather) >= 0) c.notes.push(`${weatherName(C.allInWeather)}：不改得分；在场上时这一轮的最低下注额翻倍`);
+    if (ws.indexOf(C.allInWeather) >= 0) c.notes.push(`${weatherName(C.allInWeather)}：不改得分；翻开时没弃牌的人全押（上限是没弃牌的人里筹码最少那位的全部筹码），不再下注直接比分；`
+      + `全押后同分底池滚到下一轮，最后一轮同分的人平分`);
     c.legend = { adv: "加分（正分）", dis: "扣分（负分）", neu: "0 分" };
     c.tag = `${HOLDEM_CONFIG.name} 得分`;
     return c;
@@ -189,6 +195,8 @@
       discards: [],              // 弃掉的天气（公开；天气堆抽完时洗回去）
       reshuffles: 0,
       peek: null,                // 这一轮庄家偷看的那张：{ card, where }（只给庄家看）
+      allIn: null,               // 这一轮翻到相位、没弃牌的人全押了：{ at: 第几张天气是相位, cap: 押到多少 }
+      carry: null,               // 相位全押后同分、留在桌上滚到下一轮的底池（公开）：{ amount, from: 当时同分的人, r: 第几轮留下的 }
       betting: null, loanAsk: null,
       results: [], log: [], final: null
     };
@@ -200,11 +208,9 @@
   const inHand = (g, id) => !g.sides[id].out && !g.sides[id].folded;       // 这一轮还在牌局里（没出局、没弃牌）
   const canAct = (g, id) => inHand(g, id) && !g.sides[id].allIn;          // 还能下注（没全押）
   const blindOf = (round, k) => HOLDEM_CONFIG.blinds[k] * round;
-  /** 这一轮的最低下注额：轮数（CC_CONFIG.minBet）；相位在场上时 × phaseMinBetMult */
-  function minBetNow(g) {
-    const mb = CC().minBetOf(g.round);
-    return g.weathers.indexOf(CC().CC_CONFIG.allInWeather) >= 0 ? mb * HOLDEM_CONFIG.phaseMinBetMult : mb;
-  }
+  /** 这一轮的最低下注额：轮数（CC_CONFIG.minBet）。相位不再让它翻倍（翻到相位就全押、直接比分，后面没有下注） */
+  const minBetNow = (g) => CC().minBetOf(g.round);
+  const isPhase = (w) => !!w && w === CC().CC_CONFIG.allInWeather;
   /** 从 id 的下一位起顺时针的座位（不含 id 自己），只算还没出局的 */
   function after(g, id) {
     const ids = g.order, i = ids.indexOf(id), out = [];
@@ -229,7 +235,7 @@
       for (let k = 0; k < HOLDEM_CONFIG.draw; k++) seated(g).forEach(id => { if (g.elementDeck.length) g.sides[id].hand.push(g.elementDeck.shift()); });
     }
     g.order.forEach(id => { const s = g.sides[id]; s.card = null; s.bet = 0; s.st = 0; s.folded = false; s.allIn = false; s.roundStart = s.chips; });
-    g.betting = null; g.peek = null;
+    g.betting = null; g.peek = null; g.allIn = null;
     positions(g);
     // 借贷：手上不够「该下的盲注 + 最低下注额」的先问（输光的先问——输光了不借就出局），其余按座位顺序
     g.stage = "loan";
@@ -491,21 +497,39 @@
     shutWindow(g, "timeout");
     return true;
   }
-  /** 第一轮下注打完：翻开第 1 张天气，开第二轮下注；第二轮打完：结算 */
+  /** 第一轮下注打完：翻开第 1 张天气，开第二轮下注（翻到相位：没弃牌的人全押，不进第二轮下注，直接结算）；第二轮打完：结算 */
   function closeStreet(g) {
     const street = g.betting ? g.betting.street : 1;
     g.betting = null;
     if (street === 1) {
       const w = drawWeather(g);
       if (w) g.weathers.push(w);
-      note(g, { t: "weather", weather: w, text: w ? `翻开第 1 张天气〔${weatherName(w)}〕${w === CC().CC_CONFIG.allInWeather ? `：这一轮最低下注额翻倍（${minBetNow(g)} 枚）` : ""}。` : "天气堆空了，这一轮没有天气。" });
+      note(g, { t: "weather", weather: w, text: w ? `翻开第 1 张天气〔${weatherName(w)}〕。` : "天气堆空了，这一轮没有天气。" });
+      if (isPhase(w)) { phaseAllIn(g, 1); showdown(g); return; }
       openStreet(g, 2);
     } else showdown(g);
   }
+  /** 相位（主人 10/30 确认）：没弃牌的人全押——上限 = 没弃牌的人里筹码最少那位的全部筹码（这一轮已下的 + 手上的），其他人押到同样的数；
+   *  之前已经押得比这个数多的（有人全押得少、开过边池）不退，边池照旧。不借，不再下注。
+   *  at = 第几张天气是相位：1（第一轮下注后翻开）→ 接着直接比分；2（亮牌时翻开）→ 比分之前补押到这个数 */
+  function phaseAllIn(g, at) {
+    const live = g.order.filter(id => inHand(g, id));
+    const cap = Math.min(...live.map(id => g.sides[id].bet + Math.max(0, g.sides[id].chips)));
+    live.forEach(id => {
+      const s = g.sides[id], n = B().pay(s, cap - s.bet);
+      s.st += n;
+      if (s.chips <= 0) s.allIn = true;
+    });
+    g.allIn = { at, cap };
+    note(g, { t: "allIn", at, amount: cap, text: at === 1
+      ? `翻到相位：没弃牌的人全押，各押到 ${cap} 枚（没弃牌的人里筹码最少那位的全部筹码），不再下注，直接比分。`
+      : `第 2 张天气是相位：没弃牌的人补押到 ${cap} 枚（没弃牌的人里筹码最少那位的全部筹码），再比分。` });
+  }
 
   /* ---------- 结算 ---------- */
+  const carryOf = (g) => (g.carry ? g.carry.amount : 0);
   /** 底池（主池 + 边池）：按没弃牌的人各自押了多少分层，每一层只有押到这么多的人能分（同德州）。
-   *  返回 [{ amount, eligible: [id……] }]；弃牌的人押的也在里面（他们不参与分） */
+   *  返回 [{ amount, eligible: [id……] }]；弃牌的人押的也在里面（他们不参与分）；上一轮滚存下来的算进主池（这一轮还在牌局里的人都能分） */
   function potsOf(g) {
     const live = g.order.filter(id => inHand(g, id));
     const levels = uniq(live.map(id => g.sides[id].bet)).sort((x, y) => x - y);
@@ -520,44 +544,53 @@
     let rest = 0;
     g.order.forEach(id => { rest += Math.max(0, g.sides[id].bet - prev); });
     if (rest && out.length) out[out.length - 1].amount += rest;
+    const carry = carryOf(g);
+    if (carry) { if (out.length) out[0].amount += carry; else out.push({ amount: carry, eligible: live }); }
     return out;
   }
-  /** 一个池分给 winners：平分，分不开的零头从庄家左边起一人一枚 */
+  /** 一个池分给 winners：平分，分不开的零头从庄家左边起一人一枚（出局了的也照座位排，滚存的底池最后归同分的人时用得上） */
   function award(g, pot, winners) {
     const share = Math.floor(pot.amount / winners.length);
     let odd = pot.amount - share * winners.length;
     const got = {};
     winners.forEach(id => { got[id] = share; });
-    after(g, g.dealer).concat([g.dealer]).filter(id => winners.indexOf(id) >= 0)
-      .forEach(id => { if (odd > 0) { got[id] += 1; odd -= 1; } });
+    const i = g.order.indexOf(g.dealer), ring = g.order.slice(i + 1).concat(g.order.slice(0, i + 1));
+    ring.filter(id => winners.indexOf(id) >= 0).forEach(id => { if (odd > 0) { got[id] += 1; odd -= 1; } });
     winners.forEach(id => { g.sides[id].chips += got[id]; });
     return got;
   }
-  /** 亮牌：同时翻开第 2 张公共层牌和第 2 张天气，每人对 2 张公共层牌分别计分求和，每个池给池里分最高的（同分平分） */
+  /** 亮牌：同时翻开第 2 张公共层牌和第 2 张天气（是相位：比分之前没弃牌的人补押到全押的数目），每人对 2 张公共层牌分别计分求和，
+   *  每个池给池里分最高的（同分平分）。这一轮相位全押了、又不是最后一轮：同分的池不分，留在桌上滚到下一轮 */
   function showdown(g) {
     g.stage = "showdown";
     const L2 = g.layerDeck.shift(), w2 = drawWeather(g);
     if (L2) g.layers.push(L2);
     if (w2) g.weathers.push(w2);
     note(g, { t: "reveal", layer: L2, weather: w2, text: `同时翻开第 2 张公共层牌〔${cardName(L2)}〕和第 2 张天气〔${weatherName(w2)}〕。` });
+    if (isPhase(w2) && !g.allIn) phaseAllIn(g, 2);
     const live = g.order.filter(id => inHand(g, id));
     const shown = {};
     live.forEach(id => { shown[id] = { card: g.sides[id].card, score: handScore(g.sides[id].card, g.layers, g.weathers) }; });
+    const roll = !!g.allIn && g.round < g.rounds, carryIn = carryOf(g);
     const pots = potsOf(g).map(p => {
       const best = Math.max(...p.eligible.map(id => shown[id].score));
-      const winners = p.eligible.filter(id => shown[id].score === best);
-      return Object.assign(p, { winners, shares: award(g, p, winners) });
+      const top = p.eligible.filter(id => shown[id].score === best);
+      if (roll && top.length > 1) return Object.assign(p, { winners: [], tied: top, shares: {}, carried: true });
+      return Object.assign(p, { winners: top, shares: award(g, p, top) });
     });
-    closeRound(g, { r: g.round, outcome: "showdown", dealer: g.dealer, layers: g.layers.slice(), weathers: g.weathers.slice(), shown, pots,
-      winners: pots.length ? pots[0].winners.slice() : [], split: !!(pots.length && pots[0].winners.length > 1), pot: pots.reduce((t, p) => t + p.amount, 0) });
+    const kept = pots.filter(p => p.carried);
+    g.carry = kept.length ? { amount: kept.reduce((t, p) => t + p.amount, 0), from: uniq([].concat(...kept.map(p => p.tied))), r: g.round } : null;
+    closeRound(g, Object.assign({ r: g.round, outcome: "showdown", dealer: g.dealer, layers: g.layers.slice(), weathers: g.weathers.slice(), shown, pots,
+      winners: pots.length ? pots[0].winners.slice() : [], split: !!(pots.length && pots[0].winners.length > 1), pot: pots.reduce((t, p) => t + p.amount, 0),
+      carryIn, carry: carryOf(g), allIn: !!g.allIn }, g.allIn ? { phaseAt: g.allIn.at, cap: g.allIn.cap } : {}));
   }
-  /** 只剩一个人没弃牌：他拿走整个底池，不亮牌 */
+  /** 只剩一个人没弃牌：他拿走整个底池（含上一轮滚存下来的），不亮牌 */
   function foldWin(g, id) {
-    const pot = g.order.reduce((t, k) => t + g.sides[k].bet, 0);
+    const carryIn = carryOf(g), pot = g.order.reduce((t, k) => t + g.sides[k].bet, 0) + carryIn;
     g.sides[id].chips += pot;
-    g.betting = null;
+    g.betting = null; g.carry = null;
     closeRound(g, { r: g.round, outcome: "fold", dealer: g.dealer, layers: g.layers.slice(), weathers: g.weathers.slice(), winners: [id], split: false, pot,
-      pots: [{ amount: pot, eligible: [id], winners: [id], shares: { [id]: pot } }] });
+      pots: [{ amount: pot, eligible: [id], winners: [id], shares: { [id]: pot } }], carryIn, carry: 0, allIn: false });
   }
   function closeRound(g, res) {
     res.bets = {}; res.delta = {}; res.chips = {}; res.folded = [];
@@ -571,7 +604,7 @@
     // 这一轮的天气弃掉（之后天气堆抽完时洗回去），翻开的层牌记着（公开）
     g.discards.push(...g.weathers);
     g.usedLayers.push(...g.layers);
-    g.weathers = []; g.layers = []; g.peek = null;
+    g.weathers = []; g.layers = []; g.peek = null; g.allIn = null;
     g.results.push(res);
     note(g, { t: "result", res: clone(res), text: resultText(g, res) });
     g.stage = "settled";
@@ -580,14 +613,26 @@
   function resultText(g, res) {
     const n = (id) => nameOf(g, id);
     const chips = `（筹码变动：${g.order.filter(id => res.delta[id]).map(id => `${n(id)} ${res.delta[id] > 0 ? "+" : ""}${res.delta[id]}`).join("，") || "没有"}）`;
-    if (res.outcome === "fold") return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走底池 ${res.pot} 枚${chips}。`;
+    const carryIn = res.carryIn ? `（含上一轮滚存的 ${res.carryIn} 枚）` : "";
+    if (res.outcome === "fold") return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走底池 ${res.pot} 枚${carryIn}${chips}。`;
     const shown = Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，");
-    const pots = res.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚${p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分` : `归${n(p.winners[0])}`}`).join("；");
-    return `第 ${res.r} 轮亮牌：${shown}。${pots}${chips}。`;
+    const allIn = res.allIn ? `相位全押（各押到 ${res.cap} 枚）。` : "";
+    const pots = res.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
+      + (p.carried ? `${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
+        : p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分${res.allIn ? "（相位全押，最后一轮不再滚存）" : ""}` : `归${n(p.winners[0])}`)
+      + (i === 0 ? carryIn : "")).join("；");
+    return `第 ${res.r} 轮亮牌：${shown}。${allIn}${pots}${chips}。`;
   }
-  /** 对局结束：扣还借款，按最终筹码数比，最多的赢（一样多的都算赢） */
+  /** 对局结束：桌上还有滚存的底池就先分掉，扣还借款，按最终筹码数比，最多的赢（一样多的都算赢） */
   function finish(g) {
     g.over = true; g.stage = "over"; g.betting = null; g.loanAsk = null;
+    // 滚存的底池没有下一轮了（只剩一个人没出局，提前结束）：归坐在桌上的那个人；一个都不剩就由当时同分的人平分
+    if (g.carry) {
+      const left = seated(g), to = left.length === 1 ? left : g.carry.from, amount = g.carry.amount;
+      award(g, { amount }, to);
+      g.carry = null;
+      note(g, { t: "carry", ids: to.slice(), amount, text: `桌上滚存的 ${amount} 枚没有下一轮了，${to.length > 1 ? `由${to.map(id => nameOf(g, id)).join("、")}平分` : `归${nameOf(g, to[0])}`}。` });
+    }
     const held = {}, chips = {}, loans = {};
     g.order.forEach(id => { const s = g.sides[id]; held[id] = s.chips; s.chips -= s.owe; chips[id] = s.chips; loans[id] = { loan: s.loan, owe: s.owe }; });
     const best = Math.max(...g.order.map(id => chips[id]));
@@ -620,7 +665,8 @@
       weathers: g.weathers.slice(), deckCount: g.deck.length, discards: g.discards.slice(), elementDeckCount: g.elementDeck.length,
       blinds: [blindOf(g.round, 0), blindOf(g.round, 1)], minBet: minBetNow(g), maxRaises: HOLDEM_CONFIG.maxRaises,
       loan: { unit: C.loan.unit, repay: C.loan.repay }, loanAsk: g.loanAsk ? g.loanAsk.slice() : null,
-      pot: g.order.reduce((t, k) => t + g.sides[k].bet, 0),
+      // pot：这一轮大家押下去的 + 上一轮相位全押同分滚存下来的（carry，公开）
+      pot: g.order.reduce((t, k) => t + g.sides[k].bet, 0) + carryOf(g), carry: g.carry ? clone(g.carry) : null,
       me: Object.assign(seat(id), { hand: me.hand.slice(), card: me.card, history: clone(me.history) }),
       seats: g.order.map(seat),
       // window：跟注后的追加窗口开着（n 第几个、by 谁跟的注、sec 几秒、passed 自己放弃追加了没有；别人放没放弃不写）
@@ -637,10 +683,11 @@
   }
 
   /* ---------- 统计：平分底池有多常见（主人 10/30：试玩时统计一下 AI 自对局里平分的局占多少） ---------- */
-  /** 一局（打完的）里：打到亮牌的轮数、主池平分的轮数、任何一个池平分的轮数 */
+  /** 一局（打完的）里：打到亮牌的轮数、主池平分的轮数、任何一个池平分的轮数、相位全押的轮数、全押后同分滚存的轮数（滚存的不算平分） */
   function splitStats(g) {
     const sd = g.results.filter(r => r.outcome === "showdown");
-    return { rounds: g.results.length, showdowns: sd.length, mainSplit: sd.filter(r => r.split).length, anySplit: sd.filter(r => r.pots.some(p => p.winners.length > 1)).length };
+    return { rounds: g.results.length, showdowns: sd.length, mainSplit: sd.filter(r => r.split).length, anySplit: sd.filter(r => r.pots.some(p => p.winners.length > 1)).length,
+      allIns: sd.filter(r => r.allIn).length, carried: sd.filter(r => r.carry > 0).length };
   }
 
   const api = {

@@ -1,7 +1,8 @@
 // Flux Hold'em（#488）· 规则引擎 flux-holdem.js：2–4 人公共牌桌——元素牌 4 组 × 7 张发牌 / 摸牌、公共层牌 2 组 × 5 张每轮翻 2 张、
 // 天气每轮翻 2 张叠加（微光的反转规则、不设上限）、天气堆抽完只洗回弃掉的、庄家轮换 / 偷看 / 盲注、每轮的翻牌顺序（夕夏 10/30）、
 // 下注（从庄家左边起、加注至少等于上一次加注额、每回合最多加注 3 次、不封顶、全押开边池、跟注后追加窗口）、
-// 亮牌比分（2 张层牌求和、最高分拿走、同分平分、零头）、相位最低注翻倍、借贷和出局、能看到什么、平分底池的统计
+// 亮牌比分（2 张层牌求和、最高分拿走、同分平分、零头）、相位全押（主人 10/30 确认：第 1 张 / 第 2 张天气是相位、按没弃牌的人里筹码最少那位封顶、
+// 全押后同分底池滚到下一轮、最后一轮同分的人平分）、借贷和出局、能看到什么、平分底池的统计
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -46,10 +47,14 @@ function settleStreet(g) {
     A(g, id, L.some(o => o.type === "check") ? "check" : L.some(o => o.type === "call") ? "call" : "fold");
   }
 }
-/** 打完一整轮：盖下 cards（没写的盖第一张），两次下注都过牌 / 跟注 */
+/** 打完一整轮：盖下 cards（没写的盖第一张），两次下注都过牌 / 跟注。要借的不借——
+ *  除非输光了（翻到相位全押以后会有人输光，不借就出局；这里借够这一轮的接着打，免得后面几轮少人） */
 function quietRound(g, cards) {
   const r = g.round;
-  while (g.stage === "loan") A(g, X.toAct(g)[0], "noLoan");
+  while (g.stage === "loan") {
+    const id = X.toAct(g)[0], o = X.legal(g, id).find(x => x.type === "borrow");
+    if (o && g.sides[id].chips <= 0) A(g, id, "borrow", { amount: o.max }); else A(g, id, "noLoan");
+  }
   if (g.round !== r || g.over) return;
   A(g, g.dealer, "place", { where: "top" });
   X.toAct(g).forEach(id => A(g, id, "play", { card: (cards && cards[id]) || g.sides[id].hand[0] }));
@@ -59,7 +64,7 @@ function quietRound(g, cards) {
 
 /* ---------- 配置、计分 ---------- */
 
-test("配置：名字 Flux Hold'em 放在配置里（挂在 CC_CONFIG.holdem）；2–4 人、元素牌 4 组、开局 3 张每轮摸 1 张、公共层牌 2 组、盲注 1 / 2 × 轮数、每回合最多加注 3 次、相位最低注翻倍", () => {
+test("配置：名字 Flux Hold'em 放在配置里（挂在 CC_CONFIG.holdem）；2–4 人、元素牌 4 组、开局 3 张每轮摸 1 张、公共层牌 2 组、盲注 1 / 2 × 轮数、每回合最多加注 3 次；相位改成全押，没有最低注翻倍了", () => {
   const Hc = C.holdem;
   assert.equal(Hc, X.HOLDEM_CONFIG);
   assert.equal(Hc.name, "Flux Hold'em");
@@ -68,7 +73,7 @@ test("配置：名字 Flux Hold'em 放在配置里（挂在 CC_CONFIG.holdem）�
   assert.deepEqual([Hc.elementSets, Hc.hand, Hc.draw, Hc.layerSets, Hc.layersPerRound, Hc.weathersPerRound], [4, 3, 1, 2, 2, 2]);
   assert.deepEqual(J(Hc.blinds), [1, 2]);
   assert.equal(Hc.maxRaises, 3);
-  assert.equal(Hc.phaseMinBetMult, 2);
+  assert.ok(!("phaseMinBetMult" in Hc), "相位 = 全押（主人 10/30），去掉了「最低注翻倍」");
   assert.throws(() => X.newGame({ players: [{ id: "a" }] }), /2–4 人/);
   assert.throws(() => X.newGame({ players: [1, 2, 3, 4, 5].map(i => ({ id: "p" + i })) }), /2–4 人/);
 });
@@ -322,7 +327,7 @@ test("全押和边池（同德州）：押得少的只能赢到自己押到的�
   assert.equal(r.split, false, "主池没有平分");
   assert.deepEqual(J(r.chips), { p1: 30, p2: 40, p3: 40 });
   assert.match(g.log.find(e => e.t === "result").text, /主池 30 枚归甲；边池 1 4 枚由乙、丙平分/);
-  assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 0, anySplit: 1 });
+  assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 0, anySplit: 1, allIns: 0, carried: 0 });
 });
 
 test("同分平分：分不开的零头从庄家左边起一人一枚；弃牌的不参与比分", () => {
@@ -340,7 +345,7 @@ test("同分平分：分不开的零头从庄家左边起一人一枚；弃牌�
   assert.equal(r.pot, 5);
   assert.deepEqual(J(r.pots[0].shares), { p1: 2, p3: 3 }, "零头给庄家（甲）左边起第一个赢家：丙");
   assert.deepEqual(J(r.folded), ["p2"]);
-  assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 1, anySplit: 1 });
+  assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 1, anySplit: 1, allIns: 0, carried: 0 });
 });
 
 test("只剩一个人没弃牌：他拿走整个底池，不亮牌，第 2 张层牌、天气不翻", () => {
@@ -387,16 +392,169 @@ test("跟注后的追加窗口（同 High Flux，秒数读 CC_CONFIG.callWindowS
   assert.equal(X.closeWindow(g), false);
 });
 
-test("相位：第 1 张天气翻到相位，这一轮剩下的下注最低额翻倍（加注下限也跟着）", () => {
-  const g = game3({ weathers: ["phase", "heat", "snow", "acid", "thunder", "glow", "sand"] });
+/* ---------- 相位：没弃牌的人全押（主人 10/30 确认，取代「本轮最低注翻倍」） ---------- */
+
+const PHASE_FIRST = ["phase", "heat", "snow", "acid", "thunder", "glow", "sand"];
+
+test("相位在第 1 张天气：第一轮下注后翻到相位，没弃牌的人全押（上限 = 筹码最少那位的全部筹码），跳过第二轮下注，直接比分", () => {
+  const g = game3({ players: [{ id: "p1", name: "甲", chips: 20 }, { id: "p2", name: "乙" }, { id: "p3", name: "丙", chips: 30 }], weathers: PHASE_FIRST.slice() });
+  assert.equal(X.minBetNow(g), 1, "最低下注额就是轮数，不再翻倍");
+  toBet1(g, { p1: "fire", p2: "physical", p3: "ice" });
+  settleStreet(g);                                   // 第一轮都跟到大盲 2 枚
+  assert.equal(g.round, 2, "第 1 张天气是相位：不进第二轮下注，这一轮已经结算");
+  const r = g.results[0];
+  assert.equal(r.outcome, "showdown");
+  assert.equal(r.allIn, true);
+  assert.equal(r.phaseAt, 1);
+  assert.equal(r.cap, 20, "甲一共只有 20 枚（已下的 2 + 手上的 18）：其他人也只押到 20");
+  assert.deepEqual(J(r.bets), { p1: 20, p2: 20, p3: 20 });
+  assert.deepEqual(J(r.weathers), ["phase", "heat"], "亮牌时照样翻第 2 张天气");
+  assert.deepEqual(J(r.layers), ["flesh", "armor"]);
+  // 相位不改得分：火 +2、物理 −1、冰 −2
+  assert.deepEqual(J(r.shown), { p1: { card: "fire", score: 2 }, p2: { card: "physical", score: -1 }, p3: { card: "ice", score: -2 } });
+  assert.deepEqual(J(r.winners), ["p1"]);
+  assert.equal(r.pot, 60);
+  assert.deepEqual(J(r.chips), { p1: 60, p2: 30, p3: 10 });
+  assert.ok(!g.log.some(e => e.t === "bet" && e.r === 1 && e.street === 2), "第二轮下注没进行");
+  assert.match(g.log.find(e => e.t === "weather" && e.r === 1).text, /翻开第 1 张天气〔相位〕/);
+  assert.match(g.log.find(e => e.t === "allIn").text, /翻到相位：没弃牌的人全押，各押到 20 枚（没弃牌的人里筹码最少那位的全部筹码），不再下注，直接比分/);
+  assert.match(g.log.find(e => e.t === "result").text, /相位全押（各押到 20 枚）/);
+  // 克制表的说明照新规则写
+  assert.match(X.chart(["phase", "heat"]).notes.join("\n"), /相位：不改得分；翻开时没弃牌的人全押（上限是没弃牌的人里筹码最少那位的全部筹码），不再下注直接比分；全押后同分底池滚到下一轮，最后一轮同分的人平分/);
+});
+
+test("相位在第 2 张天气：第二轮下注照常，亮牌时翻到相位——比分之前没弃牌的人补押到全押的数目再比分（弃牌的不算进上限）", () => {
+  const g = game3({ players: [{ id: "p1", name: "甲" }, { id: "p2", name: "乙", chips: 10 }, { id: "p3", name: "丙", chips: 30 }],
+    weathers: ["heat", "phase", "snow", "acid", "thunder", "glow", "sand"] });
   toBet1(g, { p1: "fire", p2: "physical", p3: "ice" });
   settleStreet(g);
-  assert.deepEqual(J(g.weathers), ["phase"]);
-  assert.equal(X.minBetNow(g), 2);
-  assert.deepEqual(J(X.legal(g, "p2").find(o => o.type === "bet")), { type: "bet", min: 2, max: 48 });
-  assert.match(g.log.find(e => e.t === "weather").text, /这一轮最低下注额翻倍（2 枚）/);
-  A(g, "p2", "bet", { amount: 2 });
-  assert.equal(X.legal(g, "p3").find(o => o.type === "raise").min, 2);
+  assert.equal(g.stage, "bet2", "第 1 张天气是酷暑：照常第二轮下注");
+  assert.deepEqual(J(g.weathers), ["heat"]);
+  A(g, "p2", "fold");
+  A(g, "p3", "check");
+  A(g, "p1", "bet", { amount: 3 });
+  A(g, "p3", "call");
+  X.toAct(g).forEach(id => A(g, id, "pass"));
+  const r = g.results[0];
+  assert.equal(r.allIn, true);
+  assert.equal(r.phaseAt, 2);
+  assert.equal(r.cap, 30, "没弃牌的甲（50）、丙（30）里最少的是丙；弃牌的乙（10）不算");
+  assert.deepEqual(J(r.bets), { p1: 30, p2: 2, p3: 30 }, "甲、丙各从 5 枚补到 30 枚；弃牌的乙不补");
+  assert.deepEqual(J(r.weathers), ["heat", "phase"]);
+  assert.deepEqual(J(r.shown), { p1: { card: "fire", score: 2 }, p3: { card: "ice", score: -2 } });
+  assert.equal(r.pot, 62);
+  assert.deepEqual(J(r.chips), { p1: 82, p2: 8, p3: 0 });
+  assert.match(g.log.find(e => e.t === "allIn").text, /第 2 张天气是相位：没弃牌的人补押到 30 枚（没弃牌的人里筹码最少那位的全部筹码），再比分/);
+});
+
+test("相位全押的上限：筹码不一样多时按最少那位封顶——之前已经全押得少的那位就是上限，押得比上限多的不退、照旧开边池", () => {
+  const g = game3({ players: [{ id: "p1", name: "甲", chips: 6 }, { id: "p2", name: "乙" }, { id: "p3", name: "丙" }],
+    hands: { p1: ["acid", "ice", "physical"], p2: ["fire", "physical", "ice"], p3: ["ice", "physical", "fire"] }, weathers: PHASE_FIRST.slice() });
+  toBet1(g, { p1: "acid", p2: "fire", p3: "ice" });
+  A(g, "p2", "call");
+  A(g, "p3", "raise", { amount: 8 });
+  A(g, "p1", "allIn");                               // 甲跟不起：全押 6 枚
+  A(g, "p2", "call");
+  X.toAct(g).forEach(id => A(g, id, "pass"));
+  const r = g.results[0];
+  assert.equal(r.allIn, true);
+  assert.equal(r.cap, 6);
+  assert.deepEqual(J(r.bets), { p1: 6, p2: 10, p3: 10 }, "乙、丙不用再补，多押的 4 枚也不退");
+  // 酸 +3 拿主池 6 × 3 = 18 枚；乙、丙多押的 4 × 2 = 8 枚是边池，火 +2 拿走
+  assert.deepEqual(J(r.pots.map(p => ({ amount: p.amount, eligible: p.eligible, winners: p.winners }))),
+    [{ amount: 18, eligible: ["p1", "p2", "p3"], winners: ["p1"] }, { amount: 8, eligible: ["p2", "p3"], winners: ["p2"] }]);
+  assert.deepEqual(J(r.chips), { p1: 18, p2: 48, p3: 40 });
+  // 筹码一样多：全押就是各自的全部筹码
+  const h = game3({ weathers: PHASE_FIRST.slice() });
+  toBet1(h, { p1: "fire", p2: "physical", p3: "ice" });
+  settleStreet(h);
+  assert.equal(h.results[0].cap, 50);
+  assert.deepEqual(J(h.results[0].bets), { p1: 50, p2: 50, p3: 50 });
+});
+
+test("相位全押后同分：底池不分，留在桌上滚到下一轮——算进下一轮的主池，下一轮还在牌局里的人都能赢", () => {
+  const g = game3({ players: [{ id: "p1", name: "甲" }, { id: "p2", name: "乙" }, { id: "p3", name: "丙", chips: 20 }],
+    hands: { p1: ["acid", "ice", "physical"], p2: ["acid", "fire", "ice"], p3: ["fire", "ice", "physical"] }, weathers: PHASE_FIRST.slice() });
+  toBet1(g, { p1: "acid", p2: "acid", p3: "fire" });
+  settleStreet(g);
+  const r = g.results[0];
+  // 酸 +3、酸 +3、火 +2：甲、乙同分最高
+  assert.deepEqual(J(Object.keys(r.shown).map(id => r.shown[id].score)), [3, 3, 2]);
+  assert.equal(r.cap, 20);
+  assert.equal(r.pot, 60);
+  assert.equal(r.carry, 60, "整个底池滚到下一轮");
+  assert.equal(r.split, false, "没有平分");
+  assert.deepEqual(J(r.winners), [], "这一轮没人拿走底池");
+  assert.equal(r.pots[0].carried, true);
+  assert.deepEqual(J(r.pots[0].tied), ["p1", "p2"]);
+  assert.deepEqual(J(r.pots[0].shares), {});
+  assert.deepEqual(J(r.delta), { p1: -20, p2: -20, p3: -20 }, "谁都没拿回");
+  assert.deepEqual(J(g.carry), { amount: 60, from: ["p1", "p2"], r: 1 });
+  assert.match(g.log.find(e => e.t === "result").text, /主池 60 枚甲、乙同分（相位全押），滚到下一轮/);
+  assert.deepEqual(J(X.splitStats(g)), { rounds: 1, showdowns: 1, mainSplit: 0, anySplit: 0, allIns: 1, carried: 1 });
+  // 第 2 轮：丙输光了，借 6 枚接着打；滚存的 60 枚先放在底池里（大家都看得到）
+  assert.deepEqual(J(X.toAct(g)), ["p3"]);
+  A(g, "p3", "borrow", { amount: 6 });
+  A(g, "p2", "place", { where: "top" });
+  const v = X.view(g, "p1");
+  assert.deepEqual(J(v.carry), { amount: 60, from: ["p1", "p2"], r: 1 });
+  assert.equal(v.pot, 60 + 2 + 4, "底池 = 滚存的 60 + 小盲 2 + 大盲 4");
+  // 第 2 轮丙的冰 0 分最高（甲物理 −1、乙火 −4）：上一轮输给甲、乙的丙也能把滚存的拿走
+  ["p1", "p2", "p3"].forEach(id => A(g, id, "play", { card: { p1: "physical", p2: "fire", p3: "ice" }[id] }));
+  settleStreet(g); settleStreet(g);
+  const r2 = g.results[1];
+  assert.deepEqual(J(r2.weathers), ["snow", "acid"]);
+  assert.equal(r2.carryIn, 60);
+  assert.deepEqual(J(r2.pots.map(p => ({ amount: p.amount, winners: p.winners }))), [{ amount: 12 + 60, winners: ["p3"] }]);
+  assert.equal(r2.chips.p3, 2 + 72);
+  assert.equal(g.carry, null, "拿走了就不再滚存");
+  assert.match(g.log.filter(e => e.t === "result")[1].text, /主池 72 枚归丙（含上一轮滚存的 60 枚）/);
+  // 筹码守恒：开局 50 + 50 + 20，加上借的 6
+  assert.equal(g.order.reduce((t, id) => t + g.sides[id].chips, 0), 126);
+});
+
+test("相位全押后同分、最后一轮：同分的人平分（不再滚存）", () => {
+  // 前 4 轮天气都不是相位；第 5 轮第 1 张是相位
+  const g = game3({ weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "phase", "acid"] });
+  [{ p1: "fire", p2: "physical", p3: "ice" }, { p1: "ice", p2: "fire", p3: "physical" }, { p1: "physical", p2: "ice", p3: "fire" },
+    { p1: "harmonic", p2: "harmonic", p3: "acid" }].forEach(cards => quietRound(g, cards));
+  assert.equal(g.round, 5);
+  assert.ok(!g.results.some(r => r.allIn), "前 4 轮没有相位");
+  const before = J(g.order.map(id => g.sides[id].chips));
+  toBet1(g, { p1: "energy", p2: "acid", p3: "harmonic" });
+  settleStreet(g);
+  assert.equal(g.over, true);
+  const r = g.results[4];
+  assert.equal(r.allIn, true);
+  // 沙尘 + 星灵，相位 + 酸雨：能量 +1、酸 +1、谐波 −1——甲、乙同分最高
+  assert.deepEqual(J(Object.keys(r.shown).map(id => r.shown[id].score)), [1, 1, -1]);
+  assert.ok(!r.carry, "最后一轮不滚存");
+  assert.equal(r.split, true);
+  assert.deepEqual(J(r.winners), ["p1", "p2"]);
+  const cap = r.cap, pot = cap * 3;
+  assert.equal(cap, Math.min(...before));
+  assert.equal(r.pot, pot);
+  assert.equal(r.pots[0].shares.p1 + r.pots[0].shares.p2, pot);
+  assert.ok(Math.abs(r.pots[0].shares.p1 - r.pots[0].shares.p2) <= 1, "平分（分不开的零头一枚）");
+  assert.equal(g.carry, null);
+  assert.equal(g.order.reduce((t, id) => t + g.final.chips[id], 0), 150, "筹码守恒，没有留在桌上的");
+});
+
+test("滚存的底池没有下一轮了（只剩一个人没出局，对局提前结束）：归坐在桌上的那个人", () => {
+  const g = X.newGame({ seed: "滚存", players: [{ id: "a", name: "甲", chips: 20 }, { id: "b", name: "乙" }], layers: LAYERS.slice(), weathers: PHASE_FIRST.slice(),
+    hands: { a: ["acid", "fire", "ice"], b: ["acid", "ice", "physical"] }, elements: DRAWS.slice() });
+  toBet1(g, { a: "acid", b: "acid" });
+  settleStreet(g);
+  assert.equal(g.results[0].carry, 40, "甲 20 枚全押、乙也押 20：同分滚存 40");
+  assert.deepEqual(J([g.sides.a.chips, g.sides.b.chips]), [0, 30]);
+  // 第 2 轮：甲输光了不借，出局——只剩乙，对局结束，桌上滚存的 40 枚归乙
+  assert.deepEqual(J(X.toAct(g)), ["a"]);
+  A(g, "a", "noLoan");
+  assert.equal(g.over, true);
+  assert.equal(g.carry, null);
+  assert.deepEqual(J(g.final.chips), { a: 0, b: 70 });
+  assert.deepEqual(J(g.final.winners), ["b"]);
+  assert.match(g.log.map(e => e.text).join("\n"), /桌上滚存的 40 枚没有下一轮了，归乙/);
 });
 
 /* ---------- 借贷、出局、结束 ---------- */
