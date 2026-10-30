@@ -44,8 +44,12 @@ const VARIANTS = {
   noLate: { name: "关掉后手补偿", note: "只在模拟里把 PVP_DUEL_CFG.lateBonus 改成 0", late: false, stand: true, rounds: false, roll: true },
   noStand: { name: "不允许起身", note: "决斗选项「允许起身」不勾", late: true, stand: false, rounds: false, roll: true },
   rounds: { name: "回合上限 10", note: "决斗选项「限定回合数」勾上，10 回合", late: true, stand: true, rounds: true, roll: true },
-  noRoll: { name: "关掉起身翻滚", note: "只在模拟里让起身时都不翻滚（原地起身）", late: true, stand: true, rounds: false, roll: false }
+  noRoll: { name: "关掉起身翻滚", note: "只在模拟里让起身时都不翻滚（原地起身）", late: true, stand: true, rounds: false, roll: false },
+  // 只改 AI 的对照（不在默认清单里，单独出报告：--variants base,hold --fixed 0 --out docs/balance/pvp-balance-1030-hold）
+  hold: { name: "先手第一回合原地等", note: "只改 AI、规则和「现在的规则」一样：先手的人第 1 回合够不着就不走过去（够得着照常打），后手照常走过去", late: true, stand: true, rounds: false, roll: true, hold: true }
 };
+// 默认跑的情况（issue #491 要的那几种）
+const DEFAULT_VARIANTS = ["base", "noLate", "noStand", "rounds", "noRoll"];
 // 固定阵容（只跑「现在的规则」）：每组 × 每个等级打 fixedPairs 对，看先手优势是不是每种阵容都有
 const FIXED = [
   { id: "F1", a: ["kolt"], b: ["hiaki"] },
@@ -69,7 +73,7 @@ function lineup(prefix, size, index) {
 function plan(opt = {}) {
   const prefix = opt.seed || CONFIG.seedPrefix, sizes = opt.sizes || CONFIG.sizes, levels = opt.levels || CONFIG.levels;
   const pairs = opt.pairs || CONFIG.pairs, fixedPairs = opt.fixedPairs != null ? opt.fixedPairs : CONFIG.fixedPairs;
-  const variants = opt.variants || Object.keys(VARIANTS), jobs = [];
+  const variants = opt.variants || DEFAULT_VARIANTS, jobs = [];
   const pair = (base, i) => ["a", "b"].forEach(first => jobs.push(Object.assign({}, base, { first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1] })));
   for (const variant of variants) for (const size of sizes) for (const level of levels) for (let i = 0; i < pairs; i++) {
     const { a, b } = lineup(prefix, size, i);
@@ -183,8 +187,18 @@ function rollPick(c, u, zones) {
   zones.map(Number).forEach(z => { const v = score(z); if (v > bestV) { best = z; bestV = v; } });
   return best === here ? null : best;
 }
-/** 两队共用的打法：BASIC + 起身（能起就起；翻滚开着时按 rollPick 翻） */
-function duelPolicy(c, V) {
+/** 普攻现在打得到对手没有（倒地没起身的不算） */
+function inReach(c, u) {
+  const zm = Number(c.S.state.zoneMode), r = aaRange(c, u);
+  return c.hostilesOf(u).some(f => {
+    if ((f.dying && !f.upOnShp) || f.untargetable) return false;
+    const d = c.zoneDist(Number(u.zone), Number(f.zone), zm);
+    return d >= r.min && d <= r.max;
+  });
+}
+/** 两队共用的打法：BASIC + 起身（能起就起；翻滚开着时按 rollPick 翻）。
+ *  只改 AI 的对照 hold：先手的人第 1 回合够不着就原地等（不走过去），够得着照常打 */
+function duelPolicy(c, V, firstTeam) {
   const base = c.BattleSim.BASIC_POLICY;
   const dest = (u, zones) => (V.roll ? rollPick(c, u, zones || c.standRollZones(u)) : null);
   return Object.assign({}, base, {
@@ -195,6 +209,7 @@ function duelPolicy(c, V) {
         const d = dest(u);
         return () => c.standUp(u, d);
       }
+      if (V.hold && Number(c.S.state.turnNo) === 1 && c.pvpDuelTeamOf(u) === firstTeam && !inReach(c, u)) return null;
       return base.act(u);
     },
     standAsk(u, zones) { return { stand: true, dest: dest(u, zones) }; }
@@ -231,7 +246,7 @@ function runJob(job) {
   const row = { v: job.variant, k: job.kind, s: job.size, L: job.level, i: job.index, f: job.first, w: "E" };
   try {
     const { c, S, V, rec, firstTeam } = prepare(job);
-    const res = c.BattleSim.run({ maxRounds: CONFIG.maxRounds, policy: duelPolicy(c, V) });
+    const res = c.BattleSim.run({ maxRounds: CONFIG.maxRounds, policy: duelPolicy(c, V, firstTeam) });
     if (S.pvpDuel.first !== firstTeam) throw new Error("coin toss not forced");
     const duel = res.duel;
     row.w = !duel ? "T" : duel.winner ? sideOf(duel.winner, firstTeam) : "D";
@@ -368,7 +383,9 @@ function markdown(report) {
   if (has("noStand") && base) { const x = get("noStand"); if (x) l.push(`- **不允许起身**：先手胜率 ${pct(x.firstRate)}（${ciText(x.ci)}），平均 ${f1(x.rounds)} 回合（允许起身 ${f1(base.rounds)} 回合）。`); }
   if (has("rounds") && base) { const x = get("rounds"); if (x) l.push(`- **回合上限 10**：${pct(x.drawRate)} 平局，${pct((x.n - x.errors) ? report.rows.filter(r => r.v === "rounds" && r.k === "random" && r.why === "rounds").length / (x.n - x.errors) : null)} 的场次打满 10 回合按剩余血量判；先手胜率 ${pct(x.firstRate)}（${ciText(x.ci)}）。`); }
   if (has("noRoll") && base) { const x = get("noRoll"), d = diff(base, x); if (x && d) l.push(`- **起身翻滚**：关掉翻滚时先手胜率 ${pct(x.firstRate)}，有翻滚 ${pct(base.firstRate)}（差 ${pp(d.d)} 个百分点，95% 区间 ${pp(d.ci[0])} ~ ${pp(d.ci[1])}）；平均回合 ${f1(x.rounds)} → ${f1(base.rounds)}。`); }
-  if (base) l.push(`- **失衡滚雪球**：先打出第一次失衡的一方最后赢了 ${pct(base.stag.rate)}（${ciText(base.stag.ci)}）；先打倒对方第一个人的一方赢了 ${pct(base.down.rate)}（${ciText(base.down.ci)}）。`);
+  if (base) l.push(`- **失衡滚雪球**：先打出第一次失衡的一方最后赢了 ${pct(base.stag.rate)}（${ciText(base.stag.ci)}）；先打倒对方第一个人的一方赢了 ${pct(base.down.rate)}（${ciText(base.down.ci)}）；全员倒地后又起身的一队最后翻盘 ${base.wipes.n ? pct(base.wipes.won / base.wipes.n) : "—"}。`);
+  const holdTop = (report.companions || []).map(cp => cp.summary["hold|random|all|all"]).find(Boolean);
+  if (base && holdTop) { const dh = diff(holdTop, base); l.push(`- **只改 AI：先手第一回合原地等**（不走过去，等对面过来）：先手胜率 ${pct(holdTop.firstRate)}（${ciText(holdTop.ci)}），和现在的打法比 ${pp(dh.d)} 个百分点——「谁先走过去」对胜负的影响${Math.abs(dh.d) > 0.05 ? "很大" : "不大"}（见第 9 节）。`); }
   l.push("");
   // ---- 怎么测的 ----
   l.push("## 怎么测的", "");
@@ -389,6 +406,27 @@ function markdown(report) {
     l.push("", `一句话：${edgeText(get(v))}。`, "");
   };
   section("base", "1. 先手 vs 后手（现在的规则）", "随机阵容，每对先后手各一场。", { head: "后手在先手第 1 回合协助格挡（次 / 场）", cell: x => f2(x.blk1) });
+  if (base && report.lineups && report.heroes) {
+    // 先手胜率和两队的近战人数（随机阵容；每对阵容先后手各一场，所以「先手近战多」和「先手近战少」的场数一样）
+    const melee = k => /^近战/.test((report.heroes[k] || {}).range || "");
+    const rows = report.rows.filter(r => r.v === "base" && r.k === "random" && (r.w === "F" || r.w === "S"));
+    const tag = r => {
+      const lu = report.lineups[`${r.s}:${r.i}`];
+      if (!lu) return null;
+      const first = r.f === "a" ? lu.a : lu.b, second = r.f === "a" ? lu.b : lu.a, d = first.filter(melee).length - second.filter(melee).length;
+      return d > 0 ? "more" : d < 0 ? "less" : "same";
+    };
+    const TAGS = [["more", "先手队近战比后手多"], ["same", "两队近战一样多"], ["less", "先手队近战比后手少"]];
+    l.push("**1b. 先手胜率和两队的近战人数**（近战 / 远程按普攻射程分，见第 8 节；只看分出胜负的场次）", "");
+    l.push("|人数|" + TAGS.map(t => t[1] + "：场数 / 先手胜率（95% 区间）").join("|") + "|");
+    l.push("|---|" + TAGS.map(() => "---").join("|") + "|");
+    sizes.concat(["all"]).forEach(s => {
+      const xs = rows.filter(r => s === "all" || r.s === s);
+      l.push(`|${SIZE_NAME(s)}|` + TAGS.map(([t]) => { const g = xs.filter(r => tag(r) === t), w = g.filter(r => r.w === "F").length; return g.length ? `${g.length} / **${pct(w / g.length)}**（${ciText(B.wilson(w, g.length))}）` : "—"; }).join("|") + "|");
+    });
+    const g = t => { const xs = rows.filter(r => tag(r) === t); return xs.length ? xs.filter(r => r.w === "F").length / xs.length : null; };
+    l.push("", `一句话：先手队的近战比后手多时先手胜率 ${pct(g("more"))}，比后手少时 ${pct(g("less"))}——近战第一回合打不到人，先走过去的近战要先挨打（见「建议」「注意」）。`, "");
+  }
   if (has("base")) {
     const fixedRows = FIXED.filter(f => sizes.includes(f.a.length));
     if (fixedRows.length && o.fixedPairs) {
@@ -432,19 +470,24 @@ function markdown(report) {
     const limit = rows.filter(r => r.why === "rounds"), zero = limit.filter(r => r.pct && r.pct[0] === 0 && r.pct[1] === 0);
     if (limit.length) l.splice(l.length - 1, 0, `打满回合按血量判的 ${limit.length} 场里，${zero.length} 场两队剩余血量都是 0%（场上的人都在靠坚毅生命战斗或倒地）——这些都判成平局。`, "");
   }
-  if (has("noRoll") && base) {
-    l.push("## 6. 起身翻滚：有 vs 临时关掉", "", "关掉 = 只在模拟里让起身时都原地起身（不翻滚）。同一批阵容和种子。", "");
-    l.push("|人数|等级|有翻滚：先手胜率|关掉：先手胜率|差（百分点，95% 区间）|有翻滚：平均回合|关掉：平均回合|");
+  // 情况 vs 现在的规则（同一批阵容和种子）：起身翻滚，以及只改 AI 的对照（单独跑的报告里）
+  const versus = (v, title, lead) => {
+    const x = get(v);
+    if (!x || !base) return;
+    l.push(`## ${title}`, "", lead, "");
+    l.push(`|人数|等级|现在：先手胜率|${VARIANTS[v].name}：先手胜率|差（百分点，95% 区间）|现在：平均回合|${VARIANTS[v].name}：平均回合|`);
     l.push("|---|---|---|---|---|---:|---:|");
     for (const s of sizes.concat(["all"])) for (const L of levels.concat(["all"])) {
-      const a = get("base", s, L), b = get("noRoll", s, L);
+      const a = get("base", s, L), b = get(v, s, L);
       if (!a || !b) continue;
-      const d = diff(a, b);
+      const d = diff(b, a);
       l.push(`|${SIZE_NAME(s)}|${LEVEL_NAME(L)}|${rateCell(a)}|${rateCell(b)}|${d ? `${pp(d.d)}（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）` : "—"}|${f1(a.rounds)}|${f1(b.rounds)}|`);
     }
-    const d = diff(base, get("noRoll"));
-    l.push("", `一句话：${d ? `翻滚让先手胜率变化 ${pp(d.d)} 个百分点（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）${d.ci[0] <= 0 && d.ci[1] >= 0 ? "，区间包含 0：对先后手胜负看不出影响" : ""}` : "没有样本"}。`, "");
-  }
+    const d = diff(x, base);
+    l.push("", `一句话：${VARIANTS[v].name}时${edgeText(x)}${d ? `；和现在比，先手胜率 ${pp(d.d)} 个百分点（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）${d.ci[0] <= 0 && d.ci[1] >= 0 ? "，区间包含 0：看不出影响" : ""}` : ""}。`, "");
+  };
+  if (has("noRoll")) versus("noRoll", "6. 起身翻滚：有 vs 临时关掉", "关掉 = 只在模拟里让起身时都原地起身（不翻滚）。同一批阵容和种子。");
+  o.variants.filter(v => !DEFAULT_VARIANTS.includes(v)).forEach(v => versus(v, `6. 只改 AI 的对照：${VARIANTS[v].name}`, `${VARIANTS[v].note}。阵容、种子和第 1 节相同。`));
   // ---- 失衡滚雪球 ----
   if (base) {
     l.push("## 7. 失衡滚雪球（docs/pvp.md 第 7 节）", "", "「先打出第一次失衡的一方」= 对面第一个被打进失衡的人是谁打的；「先打倒对方第一个人」= 对面第一个倒地（濒死）的；「先让对方一人再起不能」= 对面第一个坚毅打到 1、移出战场的。只看分出胜负的场次。", "");
@@ -483,8 +526,27 @@ function markdown(report) {
     l.push(`|${h.name}（\`${k}\`）|${h.range}|${levels.map(L => (h.byLevel[L] ? `${h.byLevel[L].hp} / ${h.byLevel[L].def}` : "—")).join("|")}|`);
   });
   l.push("");
+  // ---- 只改 AI 的对照（同名前缀的单独报告，companionsOf） ----
+  const comps = (report.companions || []).filter(cp => (cp.options.variants || []).some(v => v !== "base"));
+  if (comps.length) {
+    l.push("## 9. 只改 AI 的对照（单独的报告）", "", "规则和「现在的规则」完全一样，只改 AI 的打法；阵容、种子和第 1 节相同，所以「现在的打法」那一列和第 1 节一样。", "");
+    comps.forEach(cp => cp.options.variants.filter(v => v !== "base").forEach(v => {
+      const V = VARIANTS[v] || { name: v, note: "" }, get2 = (vv, s) => cp.summary[[vv, "random", s, "all"].join("|")];
+      l.push(`**${V.name}**（\`${v}\`：${V.note}；详见 [${cp.file}.md](${cp.file}.md)）`, "");
+      l.push(`|人数|现在的打法：先手胜率|${V.name}：先手胜率|差（百分点，95% 区间）|平均回合（现在 → ${V.name}）|`);
+      l.push("|---|---|---|---|---|");
+      (cp.options.sizes || []).concat(["all"]).forEach(s => {
+        const a = get2("base", s), b = get2(v, s);
+        if (!a || !b) return;
+        const d = diff(b, a);
+        l.push(`|${SIZE_NAME(s)}|${rateCell(a)}|${rateCell(b)}|${d ? `${pp(d.d)}（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）` : "—"}|${f1(a.rounds)} → ${f1(b.rounds)}|`);
+      });
+      const b = get2(v, "all");
+      l.push("", `一句话：${b ? `${V.name}时${edgeText(b)}` : "没有样本"}。`, "");
+    }));
+  }
   // ---- bug ----
-  l.push("## 9. 撞到的问题", "");
+  l.push(`## ${comps.length ? 10 : 9}. 撞到的问题`, "");
   const errs = report.rows.filter(r => r.w === "E"), bugRows = report.rows.filter(r => r.bugs);
   if (!errs.length && !bugRows.length) l.push(`跑了 ${report.rows.length} 场，没有脚本异常，自检（没人真的死亡、全倒判负的一队没人站着、规则没有 console.error）都通过。`);
   else {
@@ -499,39 +561,60 @@ function markdown(report) {
   }
   l.push("");
   // ---- 建议 / 注意（按数据挑的方向 + 固定的局限说明，notesFor）；「注意」放在最后 ----
-  if (report.notes && report.notes.suggest) l.push("## 10. 建议（只是建议，没有改）", "", ...report.notes.suggest, "");
+  if (report.notes && report.notes.suggest) l.push(`## ${comps.length ? 11 : 10}. 建议（只是建议，没有改）`, "", ...report.notes.suggest, "");
   if (report.notes && report.notes.caveats) l.push("## 注意", "", ...report.notes.caveats);
   return l.join("\n") + "\n";
 }
 
-/* ---------- 报告里的固定文字（建议 / 注意） ---------- */
-// 建议按数据挑方向：先手 / 后手哪边明显占优就列对应的调整方向；都不明显就写「暂时不用调」
+/* ---------- 报告里的文字（建议 / 注意） ---------- */
+// 建议按数据挑方向：先手 / 后手哪边明显占优就列对应的调整方向；都不明显就写「暂时不用调」。「注意」是固定的局限说明
 function notesFor(report) {
-  const S = report.summary, base = S["base|random|all|all"], noLate = S["noLate|random|all|all"];
+  const S = report.summary, get = (v, s = "all", L = "all") => S[[v, "random", s, L].join("|")];
+  const base = get("base"), noLate = get("noLate"), noStand = get("noStand"), sizes = report.options.sizes;
+  const side = x => (x && x.ci ? (x.ci[0] > 0.5 ? "先手" : x.ci[1] < 0.5 ? "后手" : null) : null);
+  const hold = (report.companions || []).map(cp => cp.summary["hold|random|all|all"]).find(Boolean);
   const suggest = [], caveats = [];
   if (base) {
+    const lean = sizes.map(s => [s, get("base", s)]).filter(([, x]) => side(x)).map(([s, x]) => `${s}v${s} ${side(x)}占优（${pct(x.firstRate)}，${ciText(x.ci)}）`);
+    const head = `现在的规则下合计先手胜率 ${pct(base.firstRate)}（${ciText(base.ci)}）`;
     const d = noLate ? diff(base, noLate) : null;
-    if (base.ci[0] > 0.5) {
-      suggest.push(`- 现在先手胜率 ${pct(base.firstRate)}，先手明显占优。可以考虑的方向（任选其一、先小步）：`);
-      suggest.push("  - 加大后手补偿：开局给后手每人 2 个附赠（`PVP_DUEL_CFG.lateBonus` 1 → 2），或者给 1 个附赠 + 第一回合架势 +1；");
-      suggest.push("  - 削弱先手的第一回合：先手第一回合只有附赠没有行动点 / 第一回合不能协助攻击（类似很多对战游戏「先手第一回合不能攻击」）；");
-      suggest.push("  - 开局站位再拉开（远程第一回合也打不到），让先手的第一回合只能用来走位。");
-    } else if (base.ci[1] < 0.5) {
-      suggest.push(`- 现在先手胜率 ${pct(base.firstRate)}，后手明显占优。可以考虑的方向：`);
-      suggest.push("  - 先减少后手补偿：`PVP_DUEL_CFG.lateBonus` 1 → 0，或者补偿的附赠只能用来协助格挡、不能留到后手自己的回合；");
-      suggest.push("  - 看后手占优是不是来自「后手在一整轮的最后行动、打完紧接着就是自己的下一回合开始」（例如失衡在敌人回合打出、对方整个我方回合跳过），必要时让失衡的跳过回合按「下一个自己的回合」算清楚。");
-    } else suggest.push(`- 现在合计先手胜率 ${pct(base.firstRate)}（${ciText(base.ci)}），看不出明显的先后手优势：暂时不用为先后手调数值。`);
-    if (d) suggest.push(`- 后手补偿的作用：有补偿和关掉补偿的先手胜率差 ${pp(d.d)} 个百分点（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）。${Math.abs(d.d) < 0.03 ? "作用很小：如果想让补偿有存在感，可以让补偿也能在后手自己的第一回合当行动用，或者改成别的形式（例如开局 +1 架势）。" : "补偿确实把胜率往后手那边拉了。"}`);
+    if (side(base) === "先手") {
+      suggest.push(`- **先后手**：${head}，先手明显占优${lean.length ? "；分人数：" + lean.join("、") : ""}。可以考虑（任选其一、先小步）：`);
+      suggest.push("  - 加大后手补偿：开局给后手每人 2 个附赠（`PVP_DUEL_CFG.lateBonus` 1 → 2），或者 1 个附赠 + 第一回合架势 +1；");
+      suggest.push("  - 削弱先手的第一回合：先手第一回合没有行动点（只能走位 / 格挡），类似很多对战游戏「先手第一回合不能攻击」。");
+    } else if (side(base) === "后手") {
+      const small = base.firstRate > 0.45;
+      suggest.push(`- **先后手**：${head}，后手${small ? "略" : "明显"}占优${lean.length ? "（分人数：" + lean.join("、") + "）" : ""}${small ? "，差得不多（不到 5 个百分点，比阵容强弱的影响小得多，见第 2 节），可以先不动，等真人对局再看" : ""}。如果要调，可以考虑：`);
+      suggest.push(`  - 补偿稍微减一点：${d ? `关掉补偿时先手胜率 ${pct(noLate.firstRate)}（先手占优），有补偿 ${pct(base.firstRate)}，1 个附赠的补偿略多了一点；` : ""}例如补偿的附赠只在先手的第一回合里有效（只能拿来协助格挡，不留到后手自己的回合），或者 4 人队以下才给；`);
+      suggest.push("  - 或者减轻「先走过去」的吃亏（见下面「先走过去」那一条）。");
+    } else suggest.push(`- **先后手**：${head}，整体看不出明显的先后手优势，暂时不用为先后手调数值${lean.length ? `；分人数看 ${lean.join("、")}，可以等真人对局再确认` : ""}。`);
+    if (d) {
+      const how = d.ci[1] < 0 ? "明显把先手胜率往下拉" : d.ci[0] > 0 ? "反而把先手胜率往上推" : "作用不明显（区间包含 0）";
+      suggest.push(`- **后手补偿**：关掉补偿时先手胜率 ${pct(noLate.firstRate)}（${side(noLate) ? side(noLate) + "明显占优" : "看不出差别"}），有补偿 ${pct(base.firstRate)}：补偿${how}，${pp(d.d)} 个百分点（${pp(d.ci[0])} ~ ${pp(d.ci[1])}）。` +
+        (side(noLate) === "先手" && !side(base) ? "补偿正好把先手的优势抹平，现在的 1 个附赠合适，不用改。" : side(noLate) === "先手" && side(base) === "后手" ? "方向对，但力度略大：从先手占优变成了后手略占优。" : ""));
+    }
+    if (noStand && side(noStand) && (side(noStand) !== side(base) || Math.abs(noStand.firstRate - base.firstRate) > 0.05)) {
+      suggest.push(`- **不允许起身**：这个选项下先手胜率 ${pct(noStand.firstRate)}（${ciText(noStand.ci)}），${side(noStand)}明显占优（允许起身时 ${pct(base.firstRate)}）。倒地就再也起不来时，谁先打倒人更值钱，而第一回合先打到人的多半是后手（先手要先走过去）。如果这个选项常用，可以考虑选了「不允许起身」时${side(noStand) === "后手" ? "不给后手补偿，或者补偿只在先手的第一回合里有效" : "加大后手补偿"}，定之前可以先用这个工具跑一下。`);
+    }
+    const rows = (report.rows || []).filter(r => r.v === "rounds" && r.k === "random" && r.w !== "E");
+    const limit = rows.filter(r => r.why === "rounds"), zero = limit.filter(r => r.pct && r.pct[0] === 0 && r.pct[1] === 0);
+    if (zero.length) suggest.push(`- **回合上限的平局**：打满 10 回合按剩余血量判的 ${limit.length} 场里有 ${zero.length} 场两队都是 0%（场上的人都在靠坚毅生命战斗或倒地），只能判平局。可以考虑加一条不用坚毅数值的判法，例如百分比一样时比「还站着的人数」（倒地、再起不能的不算），再一样才算平局——不会透露坚毅数值。`);
     const stag = base.stag, down = base.down;
-    if (stag.rate != null && stag.rate > 0.65) suggest.push(`- 失衡滚雪球：先打出第一次失衡的一方赢了 ${pct(stag.rate)}，第一次失衡和胜负关系很强。可以考虑：PvP 里失衡只跳过行动点、保留附赠（还能协助格挡）；或者 PvP 里失衡后的协助攻击不回满协助者的架势；或者每回合每队只能接一次协助攻击。`);
-    else if (stag.rate != null) suggest.push(`- 失衡滚雪球：先打出第一次失衡的一方赢了 ${pct(stag.rate)}，关系不算特别强，暂时不用专门调。`);
-    if (down.rate != null && down.rate > 0.7) suggest.push(`- 先打倒对方第一个人的一方赢了 ${pct(down.rate)}：人数优势一旦拉开很难追回，和 PvE 一样是正常现象；如果想要更多翻盘，可以考虑起身时多给 1 架势或 1 个附赠。`);
+    if (stag.rate != null) suggest.push(stag.rate > 0.65
+      ? `- **失衡滚雪球**：先打出第一次失衡的一方赢了 ${pct(stag.rate)}（${ciText(stag.ci)}；1v1 里 ${pct((get("base", 1) || {}).stag ? get("base", 1).stag.rate : null)}），第一次失衡和胜负关系很强（不过先打出失衡往往也说明这一方本来就占上风，不全是失衡本身的作用）；先打倒对方第一个人的一方赢了 ${pct(down.rate)}。如果想减弱：PvP 里失衡只跳过行动点、保留附赠（还能协助格挡），或者 PvP 里协助攻击不回满协助者的架势，或者每回合每队只能接一次协助攻击。`
+      : `- **失衡滚雪球**：先打出第一次失衡的一方赢了 ${pct(stag.rate)}，关系不算特别强，暂时不用专门调。`);
+    if (hold) {
+      const dh = diff(hold, base);
+      suggest.push(`- **先走过去的吃亏**：只改 AI、让先手第一回合原地等对面过来时，先手胜率变成 ${pct(hold.firstRate)}（${ciText(hold.ci)}；和现在的打法比 ${pp(dh.d)} 个百分点，见第 9 节）。开局两队隔着一个区，谁先走过去谁吃亏（走过去要用附赠、近战还打不到人、也没有附赠协助格挡），${d && Math.abs(dh.d) > Math.abs(d.d) ? "这比补偿的影响还大。" : "影响和补偿差不多大。"}真人对局里可能出现「谁都不愿先过去」：开了回合上限时就是平局。如果不希望这样，可以考虑开局只隔一个区（1 区对 2 区）、2 区制，或者给先手第一回合一个只能移动的附赠。`);
+    }
   }
-  caveats.push("- **自动打法和真人差很多**：两队都是 `BASIC_POLICY`，只会普攻血量最少的对手、打不到就走一格，**不用任何技能、道具，不召唤武器人**。真人会用技能（很多技能的击破比普攻高，失衡会来得更早、更多）、集火、走位拉开距离、留附赠格挡、故意拖回合等，先后手的差别可能更大也可能更小。");
+  caveats.push("- **自动打法和真人差很多**：两队都是 `BASIC_POLICY`，只会普攻血量最少的对手、打不到就用附赠走一格，**不用任何技能、道具，不召唤武器人**。真人会用技能（很多技能的击破比普攻高，失衡会来得更早、更多）、集火、走位、留附赠格挡、故意拖回合等，先后手的差别可能更大也可能更小。");
+  caveats.push("- **AI 总是主动走过去**：3 区开局两队隔一个区，先手第一回合会用附赠走到 2 区（近战还打不到人，也没有附赠协助格挡），后手接着就能打到它。真人先手可能原地等（第 9 节的对照就是这样），对面也可以等——这时结果取决于谁先忍不住，这里测不到。");
   caveats.push("- **协助格挡 / 协助攻击总是用**：AI 能挡就挡、能协助攻击就打，不会为了留附赠移动而不挡；真人会权衡。后手补偿的价值主要在协助格挡上，所以这里测出来的补偿作用依赖这一点。");
   caveats.push("- **起身翻滚的用法是简单规则**：远程翻离同区的对手、近战翻到有对手的区；真人可能用得更好（例如翻到对手够不着、自己又能打到的地方），所以翻滚的影响可能被低估。");
-  caveats.push("- **角色培养是固定的**：升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6，没有义体、图纸、改装件；真实的 PvP 里两边的养成差别可能比先后手的影响大得多。");
-  caveats.push("- **阵容**：随机阵容来自 11 名角色，两队角色不重复；没有测两队人数不一样（例 4 对 2）、没有测友伤开关、没有地形 / 天气（决斗本来就是空场地）。");
+  caveats.push("- **角色培养是固定的**：升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6，没有义体、图纸、改装件；真实的 PvP 里两边的养成差别可能比先后手的影响大得多（第 2 节固定阵容里，阵容强弱能把一方的胜率拉到 90% 以上）。");
+  caveats.push("- **阵容**：随机阵容来自 11 名角色，两队角色不重复；没有测两队人数不一样（例 4 对 2）、没有测友伤开关；决斗本来就是空场地，没有地形 / 天气。");
+  caveats.push("- **「失衡滚雪球」是相关、不是因果**：先打出失衡的一方往往本来就占上风（阵容、骰子），所以它的高胜率不全是失衡本身带来的；镜像对局只抵消了先后手和阵容的平均影响。");
   caveats.push("- **统计**：每格几百场，单格的 95% 区间大约 ±5–6 个百分点，单格的小差别不要过度解读，看合计和趋势；不同情况用的是同一批阵容和种子，差值的区间按独立样本算，偏保守。");
   return { suggest, caveats };
 }
@@ -581,7 +664,7 @@ function parseArgs(argv) {
     levels: out.levels ? list(out.levels, Number) : CONFIG.levels.slice(),
     pairs: out.pairs ? B.positiveInt(out.pairs, "pairs") : CONFIG.pairs,
     fixedPairs: out.fixed != null ? Number(out.fixed) : CONFIG.fixedPairs,
-    variants: out.variants ? list(out.variants, String) : Object.keys(VARIANTS),
+    variants: out.variants ? list(out.variants, String) : DEFAULT_VARIANTS.slice(),
     seed: out.seed || CONFIG.seedPrefix,
     workers: out.workers ? B.positiveInt(out.workers, "workers") : CONFIG.workers,
     maxRounds: out["max-rounds"] ? B.positiveInt(out["max-rounds"], "max rounds") : CONFIG.maxRounds,
@@ -594,12 +677,30 @@ function parseArgs(argv) {
   if (!Number.isInteger(opt.fixedPairs) || opt.fixedPairs < 0) throw new Error("fixed must be a nonnegative integer");
   return opt;
 }
-function writeReport(report, outBase) {
+// json 里每场一行写成数组（字段顺序见 rowKeys），比对象小一半多；读的时候两种都认
+const ROW_KEYS = ["v", "k", "s", "L", "i", "f", "w", "why", "r", "act", "st", "stR", "dn", "dnR", "out", "outR", "stF", "stS", "dnF", "dnS", "outF", "outS", "blk1", "blkF", "blkS", "asks", "wipes", "pct", "bugs", "err"];
+function packRow(r) { const a = ROW_KEYS.map(k => (r[k] === undefined ? null : r[k])); while (a.length && a[a.length - 1] === null) a.pop(); return a; }
+function unpackRow(a) { return Array.isArray(a) ? Object.fromEntries(ROW_KEYS.map((k, i) => [k, a[i]]).filter(([, v]) => v != null)) : a; }
+/** 同名前缀的单独报告（例 pvp-balance-1030-hold.json）：只取设置和汇总，主报告里列一节 */
+function companionsOf(outBase) {
+  const file = path.resolve(H.ROOT, outBase), dir = path.dirname(file), stem = path.basename(file) + "-";
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).filter(f => f.startsWith(stem) && f.endsWith(".json")).sort().map(f => {
+    const r = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+    return { file: f.replace(/\.json$/, ""), options: r.options || {}, summary: summarizeAll((r.rows || []).map(unpackRow)) };
+  });
+}
+/** 汇总、报告文字、写文件（跑完和 --rebuild 共用） */
+function finalize(report, outBase) {
+  report.summary = summarizeAll(report.rows);
+  report.heroNames = k => (report.heroes[k] || {}).name || k;
+  report.companions = companionsOf(outBase);
+  report.notes = notesFor(report);
   const file = path.resolve(H.ROOT, outBase);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  // json：表头照常缩进，rows 一场一行（几万场也好比对）
-  const head = Object.assign({}, report, { rows: "__ROWS__" });
-  const rows = report.rows.map(r => "    " + JSON.stringify(r)).join(",\n");
+  // json：表头照常缩进，rows 一场一行（几万场也好比对）；单独报告的汇总不重复存
+  const head = Object.assign({}, report, { companions: undefined, rowKeys: ROW_KEYS, rows: "__ROWS__" });
+  const rows = report.rows.map(r => "    " + JSON.stringify(packRow(r))).join(",\n");
   fs.writeFileSync(file + ".json", JSON.stringify(head, null, 2).replace('"__ROWS__"', () => "[\n" + rows + "\n  ]") + "\n");
   fs.writeFileSync(file + ".md", markdown(report));
   return file;
@@ -610,10 +711,8 @@ async function main(argv = process.argv.slice(2)) {
   if (opt.rebuild) {
     const file = path.resolve(H.ROOT, opt.rebuild);
     const report = JSON.parse(fs.readFileSync(file + ".json", "utf8"));
-    report.summary = summarizeAll(report.rows);
-    report.heroNames = k => (report.heroes[k] || {}).name || k;
-    report.notes = notesFor(report);
-    fs.writeFileSync(file + ".md", markdown(report));
+    report.rows = report.rows.map(unpackRow);
+    finalize(report, opt.rebuild);
     console.log("rebuilt " + file + ".md");
     return 0;
   }
@@ -639,12 +738,9 @@ async function main(argv = process.argv.slice(2)) {
       pct: "回合上限判的剩余血量百分比 [先手, 后手]", bugs: "自检没通过", err: "异常" },
     rows
   };
-  report.summary = summarizeAll(rows);
-  report.heroNames = k => (report.heroes[k] || {}).name || k;
-  report.notes = notesFor(report);
-  const file = writeReport(report, opt.out);
+  const file = finalize(report, opt.out);
   console.log(`${rows.length} 场，${report.seconds} 秒 → ${file}.md`);
   return rows.some(r => r.w === "E") ? 1 : 0;
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
-module.exports = { CONFIG, VARIANTS, FIXED, lineup, plan, prepare, runJob, runJobs, rollPick, summarize, summarizeAll, diff, markdown, notesFor, main };
+module.exports = { CONFIG, VARIANTS, DEFAULT_VARIANTS, FIXED, lineup, plan, prepare, duelPolicy, runJob, runJobs, rollPick, summarize, summarizeAll, diff, packRow, unpackRow, markdown, notesFor, main };

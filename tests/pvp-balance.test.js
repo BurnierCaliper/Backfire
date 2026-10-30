@@ -67,6 +67,25 @@ test("一场打完：同一场重跑结果一样，没有异常、自检通过�
   assert.equal(P.rollPick(c, kolt, c.standRollZones(kolt)), null, "近战（柯尔特）和对手同区：原地起身");
 });
 
+test("只改 AI 的对照「先手第一回合原地等」：先手的人第 1 回合够不着就不走过去，够得着照常打；后手、第 2 回合起照常；不在默认清单里", () => {
+  assert.ok(!P.DEFAULT_VARIANTS.includes("hold") && P.VARIANTS.hold.hold, "默认不跑，单独出报告");
+  assert.deepEqual(P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0 }).map(j => j.variant).filter((v, i, a) => a.indexOf(v) === i), P.DEFAULT_VARIANTS);
+  const job = { kind: "random", variant: "hold", size: 2, level: 10, index: 0, a: ["kolt", "ruby"], b: ["hiaki", "helu"], seed: "T491-HOLD", first: "a", aTeam: "1队" };
+  const { c, S, V, firstTeam } = P.prepare(job);
+  c.startCombat();
+  const unit = k => S.units.find(u => u.kit === k);
+  const hold = P.duelPolicy(c, V, firstTeam), basic = P.duelPolicy(c, P.VARIANTS.base, firstTeam);
+  assert.equal(hold.act(unit("ruby")), null, "先手第 1 回合够不着：原地等");
+  assert.equal(typeof basic.act(unit("ruby")), "function", "现在的打法：走过去");
+  unit("hiaki").zone = 2;
+  assert.equal(typeof hold.act(unit("ruby")), "function", "够得着（距离 1）：照常打");
+  unit("helu").ap = 1;   // 轮到后手自己的回合（先手的回合里后手没有行动点）
+  assert.equal(typeof hold.act(unit("helu")), "function", "后手照常走过去");
+  S.turnNo = 2;
+  unit("hiaki").zone = 3;
+  assert.equal(typeof hold.act(unit("kolt")), "function", "第 2 回合起照常走过去");
+});
+
 test("汇总：先手胜率只算分出胜负的场次，平局、超时、异常另列；差值带区间", () => {
   const row = (w, extra) => Object.assign({ v: "base", k: "random", s: 2, L: 10, i: 0, f: "a", w, r: 5 }, extra || {});
   const rows = [row("F", { st: "F", stR: 1, dn: "F", dnR: 2 }), row("F", { st: "S", stR: 2 }), row("S", { st: "S", stR: 1 }), row("D"), row("T"), row("E")];
