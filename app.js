@@ -3473,7 +3473,6 @@ function resetBattleRecords() {
   state.scoreSeen = {};
   state.scoreActLv = 0;
   state.battleGains = { xp: 0, kuizhi: 0 };
-  state.lastBrokenLayer = null;   // 废物利用：每场重新记（上一场打碎的层不能拿来用）
   state.weaponFallen = {};        // 本场倒下过的武器（取回后 atk / 格挡加成减半）
   state.ffHurt = {};              // 友伤打掉、还没补回来的血（ffHurtOf，#428）
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
@@ -6922,7 +6921,7 @@ function stripFocusLayer(target, layerType, lines) {
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
   // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
-  state.lastBrokenLayer = { type: layerType, lost: layerMax, dmg: lost };
+  koltScrapAdd(layerType, layerMax);   // 被抹去的层也算被摧毁：累积成柯尔特的废料
   noteSideDamage(lost, "聚焦抹层", target);
   const msg = `${target.name} 聚焦完成：${(typeof LAYER !== "undefined" && LAYER[layerType]) || layerType}被抹去（视为 ${lost} 点伤害，该层无法再被治疗）。`;
   if (lines) lines.push(msg);
@@ -7015,8 +7014,9 @@ function koltPrideCut(u) {
   return typeof passivePlus === "function" && passivePlus(u, 2) ? KOLT_PRIDE.plusCut : KOLT_PRIDE.cut;
 }
 
-/* 柯尔特的废料（koltScrapCap / koltScrapTotal / koltScrapSpend）：
- *   capPct     废料上限 = 柯尔特生命上限 × capPct。敌人血量层来的废料按它封顶（和废物利用一样）；
+/* 柯尔特的废料（koltScrapCap / koltScrapAdd / koltScrapTotal / koltScrapSpend）：
+ *   capPct     废料上限 = 柯尔特生命上限 × capPct。废物利用每次从敌人血量层累积的废料里最多领这么多；
+ *              废料合计里敌人血量层那部分也按它封顶（仪表、碎渣重炮装填）；
  *              「非法」改装要废料合计达到它，才能消耗等量的废料给我方目标行动点
  *   modAp      「非法」改装消耗废料给目标的行动点（可以超过行动点上限）
  *   spendOrder 「非法」改装扣废料的顺序：layer 敌人血量层（按封顶后的数）→ rot 腐坏抛射 → divert 扭矩转移注意 → strip 扭矩拆卸模式 */
@@ -7025,19 +7025,28 @@ const KOLT_SCRAP = { capPct: 0.5, modAp: 1, spendOrder: ["layer", "rot", "divert
 function koltScrapCap(k) {
   return k && typeof baseMaxHp === "function" ? Math.floor(baseMaxHp(k) * KOLT_SCRAP.capPct) : Infinity;
 }
-/** 柯尔特的废料：上一个被摧毁的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
+/** 敌人血量层被摧毁：按那一层的种类，把等于这一层上限的废料累积到柯尔特身上（resources.scrapStore，按记录的先后）。
+ *  每个被摧毁的层都记，不再只留最近的一层；每场开战清空（resetBattleFlags） */
+function koltScrapAdd(type, amount) {
+  const k = findKit("kolt", state.units || []);
+  const amt = Math.max(0, Math.floor(Number(amount) || 0));
+  if (!k || !type || !amt) return;
+  k.resources = k.resources || {};
+  const store = k.resources.scrapStore = k.resources.scrapStore || {};
+  store[type] = (Number(store[type]) || 0) + amt;
+}
+/** 柯尔特的废料：累积的敌人血量层 + 腐坏抛射记下的腐蚀伤害 + 扭矩「转移注意」失去的装甲 + 扭矩「拆卸模式」变成废料的外层血量。
  *  废物利用领走它们；碎渣重炮把它们全部装填打出去；「非法」改装达到上限时扣掉一部分（koltScrapSpend） */
 function koltScrapTotal(k) {
   k = k || findKit("kolt", state.units);
   const r = (k && k.resources) || {};
-  // 敌人失去血量层得来的废料：不超过废料上限（和废物利用的封顶一样）；其余几种单独计算，不受上限
-  const last = state.lastBrokenLayer ? Math.min(koltScrapCap(k), Math.floor(Number(state.lastBrokenLayer.lost) || 0)) : 0;
   const sum = store => Object.keys(store || {}).reduce((s, t) => s + Math.floor(Number(store[t]) || 0), 0);
-  return Math.max(0, last + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
+  // 敌人血量层累积的废料：算进合计时不超过废料上限（和废物利用一次最多领的一样）；其余几种单独计算，不受上限
+  const layer = Math.min(koltScrapCap(k), sum(r.scrapStore));
+  return Math.max(0, layer + sum(r.rotStore) + Math.floor(Number(r.divertArmor) || 0) + sum(r.stripStore));
 }
 function koltScrapClear(k) {
-  state.lastBrokenLayer = null;
-  if (k && k.resources) { k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
+  if (k && k.resources) { k.resources.scrapStore = {}; k.resources.rotStore = {}; k.resources.divertArmor = 0; k.resources.stripStore = {}; }
 }
 /** 「非法」改装：废料（所有来源合计）达到上限了没有 */
 function koltScrapFull(k) {
@@ -7045,28 +7054,25 @@ function koltScrapFull(k) {
   return cap > 0 && cap !== Infinity && koltScrapTotal(k) >= cap;
 }
 /** 「非法」改装：从柯尔特的废料里扣掉 n 点，按 KOLT_SCRAP.spendOrder 的顺序扣；扣完的来源清零，没扣完的留着。
- *  腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
+ *  敌人血量层、腐坏抛射、拆卸模式各自记着几种血量，按记录的先后依次扣。返回实际扣掉的量 */
 function koltScrapSpend(k, n) {
   const r = (k && k.resources) || {};
   const want = Math.max(0, Math.floor(Number(n) || 0));
   let left = want;
-  const fromStore = store => Object.keys(store || {}).forEach(t => {
-    if (left <= 0) return;
-    const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(left, have);
-    left -= use;
-    if (use >= have) delete store[t];
-    else store[t] = have - use;
-  });
+  // 从按种类记的废料里依次扣，这一个来源最多扣 most 点
+  const fromStore = (store, most) => {
+    let room = Math.min(left, most == null ? Infinity : most);
+    Object.keys(store || {}).forEach(t => {
+      if (room <= 0) return;
+      const have = Math.max(0, Math.floor(Number(store[t]) || 0)), use = Math.min(room, have);
+      room -= use; left -= use;
+      if (use >= have) delete store[t];
+      else store[t] = have - use;
+    });
+  };
   const take = {
-    // 敌人血量层：按封顶后的数算；扣不完的记回那一层，下次废物利用照样能领剩下的
-    layer: () => {
-      const rec = state.lastBrokenLayer;
-      if (!rec) return;
-      const have = Math.min(koltScrapCap(k), Math.max(0, Math.floor(Number(rec.lost) || 0))), use = Math.min(left, have);
-      left -= use;
-      if (use >= have) state.lastBrokenLayer = null;
-      else rec.lost = have - use;
-    },
+    // 敌人血量层：按封顶后的数算（最多扣上限那么多）；没扣到的照样留着，下次废物利用能领
+    layer: () => fromStore(r.scrapStore, koltScrapCap(k)),
     rot: () => fromStore(r.rotStore),
     divert: () => {
       const have = Math.max(0, Math.floor(Number(r.divertArmor) || 0)), use = Math.min(left, have);
@@ -8438,7 +8444,8 @@ function resetBattleFlags(u) {
   if (u.kit === "xia") { r.engine = false; r.fuel = 0; }
   if (u.kit === "yuito") r.bean = Math.max(1, Number(r.bean) || 0);
   if (u.kit === "ruby" && r.nano == null) r.nano = 40;
-  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
+  // 废料每场重新记：上一场累积的敌人血量层（scrapStore）、腐坏抛射、转移注意、拆卸模式都不带到这一场
+  if (u.kit === "kolt") { r.bit = r.bit || "drill"; r.scrapStore = {}; r.rotStore = {}; r.divertArmor = 0; r.stripStore = {}; }
   if (u.kit === "torque") { r.divertGuard = false; r.divertArmor0 = 0; }
   if (u.kit === "ecmo") { r.probe = false; r.probeZones = []; }
   if (u.kit === "ras") r.siphon = false;
@@ -9678,8 +9685,8 @@ function dealToInner(attacker, target, opt) {
       const l = now.find((x, j) => x.type === p0.type && j >= i - 1 && j <= i);   // 外层被移除时会往前挪一位
       return !l || (Number(l.current) || 0) <= 0;
     });
-    const deadLayer = broken[broken.length - 1];   // 一击打穿多层时取最里面那层
-    if (deadLayer) state.lastBrokenLayer = { type: deadLayer.type, lost: deadLayer.max || 0, dmg: res.total || 0 };
+    // 每个被摧毁的层都按种类累积成柯尔特的废料（一击打穿多层时每层都算，从外到内记）
+    broken.forEach(p0 => koltScrapAdd(p0.type, p0.max));
   }
   advanceFocusOnHit(attacker, target, opt.element || res.element, res, extra);   // 聚焦不看来源，任何伤害都算
   rasUnstableHit(target, res, extra);
@@ -12745,9 +12752,9 @@ const SKILL_REQUIREMENT = {
   helu_forge:     (a) => !res(a).scanned ? "只有扫描过当前战场（用过环境扫描）才能使用"
     : !boardGapKeys().length ? "这块战场没有间隙" : null,
   torque_strip:   (a) => ((findKit("kolt", state.units) || {}).resources || {}).bit === "acid" ? "拆卸模式需要电钻模式" : null,
-  // 废物利用：要有「还没利用过的被摧毁的敌人血量层」或腐坏抛射 / 转移注意 / 拆卸模式攒下的废料才能用（同一层不能反复利用）
-  kolt_scrap:     (a) => state.lastBrokenLayer || (Number(res(a).divertArmor) || 0) > 0 ||
-    [res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
+  // 废物利用：要有还没领完的废料才能用——累积的敌人血量层，或腐坏抛射 / 转移注意 / 拆卸模式攒下的（领过的部分不能再领）
+  kolt_scrap:     (a) => (Number(res(a).divertArmor) || 0) > 0 ||
+    [res(a).scrapStore, res(a).rotStore, res(a).stripStore].some(s => Object.keys(s || {}).some(k => (Number(s[k]) || 0) > 0))
     ? null : "还没有可以利用的残骸（被摧毁的敌人血量层，或腐坏抛射留下的记录）",
   kolt_rot:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit !== "acid" ? "腐坏抛射需要酸液炮模式" : null,
   kolt_mod:       (a) => ((findKit("kolt", state.units) || a).resources || {}).bit === "acid" ? "「非法」改装需要电钻模式" : null,
@@ -15106,7 +15113,6 @@ function runSkillInner(id, optRun) {
       popStatus(t, "chase");
       lines.push(`${t.name} 被 ${a.name} 紧追：它移动时，${a.name} 会自动跟上。`);
     } else if (id === "kolt_scrap") {
-      const rec = state.lastBrokenLayer;
       const hp0 = totalHp(a);
       const grant = (type, amt, from) => {
         if (amt <= 0) return;
@@ -15118,14 +15124,22 @@ function runSkillInner(id, optRun) {
           lines.push(`${from}：获得 ${amt} 点${LAYER[type] || type}（战斗结束消失）。`);
         }
       };
-      // 获得上一个被摧毁的敌人血量层等量的对应血量，最多为柯尔特生命上限的 50%（腐坏抛射的记录不算在内）
-      if (!rec) lines.push("本场还没有被摧毁的敌人血量层。");
+      // 累积的废料（被摧毁的敌人血量层）：按记录的先后、按种类领取，这一次合计最多柯尔特生命上限的一半（koltScrapCap）；
+      // 没领完的留着，下次废物利用接着领（腐坏抛射等其他来源不算在这个上限里）
+      const store = (a.resources && a.resources.scrapStore) || {};
+      if (!Object.keys(store).some(type => (Number(store[type]) || 0) > 0)) lines.push("还没有累积的敌人血量层废料。");
       else {
         const cap = koltScrapCap(a);
-        const amt = Math.min(Math.floor(Number(rec.lost) || 0), cap);
-        grant(rec.type, amt, "废物利用");
-        if ((Number(rec.lost) || 0) > cap) lines.push(`（那一层有 ${Math.floor(rec.lost)}，按生命上限一半封顶为 ${cap}）`);
-        state.lastBrokenLayer = null;   // 这一层已经利用过了：要等下一个被摧毁的层
+        let room = cap;
+        Object.keys(store).forEach(type => {
+          const have = Math.max(0, Math.floor(Number(store[type]) || 0)), take = Math.min(room, have);
+          grant(type, take, "废物利用");
+          room -= take;
+          if (take >= have) delete store[type];
+          else store[type] = have - take;
+        });
+        const kept = Object.keys(store).reduce((s, type) => s + Math.floor(Number(store[type]) || 0), 0);
+        if (kept > 0) lines.push(`（这一次最多领生命上限的一半 ${cap}；还剩 ${kept} 点废料留着，下次废物利用再领）`);
       }
       // 腐坏抛射留下的腐蚀记录：这一次废物利用一起领取，然后清空
       const rot = (a.resources && a.resources.rotStore) || {};

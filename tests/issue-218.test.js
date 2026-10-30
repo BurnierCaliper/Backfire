@@ -25,7 +25,7 @@ function setup() {
   kolt.layers = [{ type: "flesh", current: 100, max: 100, inner: true }];   // 生命上限 100：废料上限 50
   helu.ap = helu.apMax = 1; helu.bonus = 1;
   [foe, far].forEach(f => { f.layers = [{ type: "armor", current: 500, max: 500 }, { type: "flesh", current: 500, max: 500, inner: true }]; });
-  S.lastBrokenLayer = null; kolt.resources.rotStore = {}; kolt.resources.divertArmor = 0; kolt.resources.stripStore = {};
+  kolt.resources.scrapStore = {}; kolt.resources.rotStore = {}; kolt.resources.divertArmor = 0; kolt.resources.stripStore = {};
   const cap = Math.floor(c.baseMaxHp(kolt) * 0.5);
   assert.equal(cap, 50, "废料上限 = 柯尔特生命上限的一半");
   const use = (actor, skill, target, picks) => c.Commands.dispatch(plain({ type: "skill", actor: actor.id, skill, target: target ? target.id : null, picks: picks || {} }));
@@ -49,8 +49,8 @@ test("配置表：废料上限是生命上限的 0.5、给 1 行动点、扣废�
 });
 
 test("「非法」改装：废料达到上限、目标是我方单位时多一步；选「过载 + 消耗废料」扣掉等于上限的废料，目标过载、行动点 +1", () => {
-  const { c, S, kolt, helu, foe, far, cap, use, logs } = setup();
-  S.lastBrokenLayer = { type: "armor", lost: cap * 3, dmg: 1 };   // 封顶后正好等于上限
+  const { c, kolt, helu, foe, far, cap, use, logs } = setup();
+  kolt.resources.scrapStore = { armor: cap * 3 };   // 敌人血量层累积的废料：算进合计时封顶，正好等于上限
   assert.equal(c.koltScrapTotal(kolt), cap);
   const steps = c.skillFlowSteps("kolt_mod", kolt, {});
   assert.deepEqual(plain(steps.map(s => s.key)), ["target"], "先选目标");
@@ -64,16 +64,16 @@ test("「非法」改装：废料达到上限、目标是我方单位时多一�
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "ap" });
   assert.ok(helu.instant && helu.instant.overload, "照样施加过载");
   assert.equal(helu.ap, 2, "行动点 +1");
-  assert.equal(c.koltScrapTotal(kolt), 0, "扣掉了等于上限的废料");
-  assert.equal(S.lastBrokenLayer, null);
+  assert.deepEqual(plain(kolt.resources.scrapStore), { armor: cap * 2 }, "只扣掉等于上限的废料，累积的其余部分留着");
+  assert.equal(c.koltScrapTotal(kolt), cap, "剩下的算进合计时照样封顶");
   assert.equal(kolt.ap, 2, "「非法」改装本身照常花 1 行动点");
   assert.equal(plain(helu.resources.apGifts)[0].from, kolt.id, "和意式浓缩一样记成队友给的行动点");
   assert.match(logs(), new RegExp(`消耗 ${cap} 废料`));
 });
 
 test("「非法」改装：废料达到上限也可以只施加过载，废料和行动点都不动", () => {
-  const { c, S, kolt, helu, cap, use } = setup();
-  S.lastBrokenLayer = { type: "armor", lost: cap, dmg: 1 };
+  const { c, kolt, helu, cap, use } = setup();
+  kolt.resources.scrapStore = { armor: cap };
   assert.ok(c.skillFlowSteps("kolt_mod", kolt, { target: helu.id }).some(s => s.key === "mode"), "有得选");
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "overload" });
   assert.ok(helu.instant && helu.instant.overload);
@@ -112,8 +112,8 @@ test("「非法」改装：所有来源合计达到上限就算（腐坏抛射 +
 });
 
 test("「非法」改装：目标是敌人时没有这个选项（施加过载照旧，不扣废料）；硬塞也会被拦下", () => {
-  const { c, S, kolt, helu, foe, cap, use } = setup();
-  S.lastBrokenLayer = { type: "armor", lost: cap, dmg: 1 };
+  const { c, kolt, helu, foe, cap, use } = setup();
+  kolt.resources.scrapStore = { armor: cap };
   assert.deepEqual(plain(c.skillFlowSteps("kolt_mod", kolt, { target: foe.id }).map(s => s.key)), ["target"], "敌人：没有消耗废料这一步");
   assert.ok(c.skillFlowSteps("kolt_mod", kolt, { target: helu.id }).some(s => s.key === "mode"), "同样的废料，我方单位就有");
   const fap = foe.ap;
@@ -128,37 +128,37 @@ test("「非法」改装：目标是敌人时没有这个选项（施加过载�
 });
 
 test("「非法」改装扣废料：敌人血量层按封顶后的数算，先扣它；只扣上限那么多，后面的来源原样留着", () => {
-  const { c, S, kolt, helu, cap, use } = setup();
-  S.lastBrokenLayer = { type: "armor", lost: cap * 2, dmg: 1 };   // 封顶为上限：一层就够扣
+  const { c, kolt, helu, cap, use } = setup();
+  kolt.resources.scrapStore = { armor: cap * 2 };   // 算进合计时封顶为上限：它就够扣
   kolt.resources.rotStore = { flesh: 4 };
   kolt.resources.divertArmor = 3;
   kolt.resources.stripStore = { armor: 2 };
   assert.equal(c.koltScrapTotal(kolt), cap + 9);
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "ap" });
-  assert.equal(S.lastBrokenLayer, null, "敌人血量层扣完清零（多出上限的部分本来就不算）");
+  assert.deepEqual(plain(kolt.resources.scrapStore), { armor: cap }, "敌人血量层只扣上限那么多，累积的其余部分留着");
   assert.deepEqual(plain(kolt.resources.rotStore), { flesh: 4 });
   assert.equal(kolt.resources.divertArmor, 3);
   assert.deepEqual(plain(kolt.resources.stripStore), { armor: 2 });
-  assert.equal(c.koltScrapTotal(kolt), 9);
+  assert.equal(c.koltScrapTotal(kolt), cap + 9);
   assert.equal(helu.ap, 2);
 });
 
 test("「非法」改装扣废料：敌人血量层 → 腐坏抛射 → 转移注意 → 拆卸模式，扣完的清零，没扣完的留着", () => {
-  const { c, S, kolt, helu, cap, use } = setup();
-  S.lastBrokenLayer = { type: "flesh", lost: 5, dmg: 5 };
+  const { c, kolt, helu, cap, use } = setup();
+  kolt.resources.scrapStore = { flesh: 5 };
   kolt.resources.rotStore = { flesh: 3, armor: 4 };
   kolt.resources.divertArmor = cap - 10;   // 前两种一共 12：转移注意扣 cap − 12，剩 2
   kolt.resources.stripStore = { shield: 6 };
   assert.equal(c.koltScrapTotal(kolt), cap + 8);
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "ap" });
-  assert.equal(S.lastBrokenLayer, null, "敌人血量层清零");
+  assert.equal(sum(kolt.resources.scrapStore), 0, "敌人血量层清零");
   assert.equal(sum(kolt.resources.rotStore), 0, "腐坏抛射清零");
   assert.equal(kolt.resources.divertArmor, 2, "转移注意没扣完的留着");
   assert.deepEqual(plain(kolt.resources.stripStore), { shield: 6 }, "拆卸模式的废料最后扣：这次没动");
   assert.equal(c.koltScrapTotal(kolt), 8);
   // 只剩拆卸模式的废料、够上限：从它里面扣
   helu.ap = 1; kolt.ap = 3;
-  S.lastBrokenLayer = null; kolt.resources.rotStore = {}; kolt.resources.divertArmor = 0;
+  kolt.resources.scrapStore = {}; kolt.resources.rotStore = {}; kolt.resources.divertArmor = 0;
   kolt.resources.stripStore = { armor: cap + 5 };
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "ap" });
   assert.deepEqual(plain(kolt.resources.stripStore), { armor: 5 });
@@ -166,9 +166,9 @@ test("「非法」改装扣废料：敌人血量层 → 腐坏抛射 → 转移�
 });
 
 test("「非法」改装：行动点可以超过上限（满了也 +1）；对自己用也行", () => {
-  const { c, S, kolt, helu, cap, use } = setup();
+  const { c, kolt, helu, cap, use } = setup();
   helu.ap = helu.apMax = 1;
-  S.lastBrokenLayer = { type: "armor", lost: cap, dmg: 1 };
+  kolt.resources.scrapStore = { armor: cap };
   use(kolt, "kolt_mod", helu, { target: helu.id, mode: "ap" });
   assert.equal(helu.ap, 2, "原本行动点是满的，照样 +1");
   // 对自己：花 1 行动点，再拿回 1 行动点
@@ -202,9 +202,9 @@ test("拆卸模式：多一个选择——转移量给同区友方，或者变�
 
 test("拆卸模式选废料：单独计算、不受上限，算进废料合计，碎渣重炮装填时一起打出去", () => {
   const f = setup();
-  const { c, S, kolt, helu, foe, cap, use, logs } = f;
+  const { c, kolt, helu, foe, cap, use, logs } = f;
   const torque = withTorque(f);
-  S.lastBrokenLayer = { type: "armor", lost: cap * 3, dmg: 1 };   // 已经在上限
+  kolt.resources.scrapStore = { armor: cap * 3 };   // 敌人血量层的废料已经在上限
   const h0 = armorOf(helu), k0 = armorOf(kolt);
   use(torque, "torque_strip", foe, { target: foe.id, mode: "scrap" });
   const got = 500 - foe.layers[0].current;
@@ -225,13 +225,13 @@ test("拆卸模式选废料：单独计算、不受上限，算进废料合计�
 
 test("拆卸模式选废料：废物利用按那一层的种类领取（不受 50% 限制），用过就清空", () => {
   const f = setup();
-  const { c, S, kolt, foe, cap, use } = f;
+  const { c, kolt, foe, cap, use } = f;
   const torque = withTorque(f);
   use(torque, "torque_strip", foe, { target: foe.id, mode: "scrap" });
   const got = 500 - foe.layers[0].current;
   assert.ok(got > 0);
   c.returnWeapon(torque);   // 扭矩收回柯尔特手里（唤出时柯尔特空手，用不了废物利用）
-  assert.equal(S.lastBrokenLayer, null);
+  assert.equal(sum(kolt.resources.scrapStore), 0, "没有敌人血量层的废料");
   assert.equal(c.skillRequirementError(kolt, "kolt_scrap"), null, "只有拆卸模式的废料也能用废物利用");
   const a0 = armorOf(kolt);
   use(kolt, "kolt_scrap");
@@ -268,7 +268,6 @@ function online() {
   kolt.level = 11; kolt.resources.bit = "drill";
   kolt.ap = kolt.apMax = 4; kolt.bonus = kolt.bonusMax = 4; helu.ap = helu.apMax = 1;
   enemy.layers = [{ type: "armor", current: 500, max: 500 }, { type: "flesh", current: 500, max: 500, inner: true }];
-  state.lastBrokenLayer = null;
   const session = Hotseat.create({ operators: ["p1", "p2"], gmId: "p1", assignments: { [kolt.id]: "p1", [helu.id]: "p2" }, getUnits: () => state.units, canStand: u => !c.standUpBlocked(u) });
   session.beginRound(1); session.pick("p1", kolt.id, 0); session.pick("p2", helu.id, 1); session.forceStart("p1");
   const service = c.OnlineActions.create({ game: c.GAME, validation: c.HotseatValidation, inspect: c.HotseatValidation.inspect,
@@ -282,7 +281,9 @@ test("联机：「非法」改装废料达到上限时，玩家端按「目标 �
   const f = online();
   const { c, state, kolt, helu, enemy, menu, validate } = f;
   const cap = c.koltScrapCap(kolt);
-  state.lastBrokenLayer = { type: "armor", lost: cap * 2, dmg: 1 };
+  // 敌人血量层累积的废料正好到上限。用规则自己的函数记（废料对象建在规则环境里）：房主菜单会先预演一遍技能，
+  // 预演的快照（game.js · deepClone）只复制规则环境里的普通对象，测试这边直接写的对象会被预演里扣废料改掉
+  c.koltScrapAdd("armor", cap);
   const first = menu(kolt, { skill: "kolt_mod" });
   assert.equal(first.choices.kind, "unit"); assert.equal(first.choices.key, "target");
   assert.ok(first.choices.options.some(o => o.value === helu.id) && first.choices.options.some(o => o.value === enemy.id));

@@ -86,12 +86,12 @@ test("绯秋：倒下的那把刀取回后只减那一把", () => {
 
 test("碎渣重炮：扭矩倒下过后，子弹数照原来的 atk 算，伤害减半", () => {
   const run = (down) => {
-    const { c, S, owner, w, foe } = setup(["kolt"], "torque");
+    const { c, owner, w, foe } = setup(["kolt"], "torque");
     owner.level = 11;
     if (down) { kill(c, w); owner.zone = w.zone; cmd(c, { actor: owner.id, skill: "weapon_retrieve" }); }
     else c.returnWeapon(w);
     owner.zone = 2; owner.ap = 3;
-    S.lastBrokenLayer = null; owner.resources.rotStore = { flesh: 40 }; owner.resources.bit = "drill";
+    owner.resources.scrapStore = {}; owner.resources.rotStore = { flesh: 40 }; owner.resources.bit = "drill";
     const pops = [];
     c.spawnPopup = (u, spec) => { if (spec.kind === "dmg" && u.id === foe.id) pops.push(spec.value); };
     c.S.RNG.install("CANNON");

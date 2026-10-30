@@ -160,9 +160,9 @@ function endTurn(c) {
   refillDummy(S);
   S.combatPhase = "player";
   // 假人不动：敌人回合只走回合流转
-  // 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾（覆盖上一个，和实战一样只记最近一层）
+  // 柯尔特：第 3、6……个回合开始时，当作刚打碎了一层牛的护盾（和实战一样累积成废料，没领完的留着）
   const sc = S.dptScrap;
-  if (sc && Number(S.turnNo) % sc.every === 0) S.lastBrokenLayer = { type: sc.type, lost: sc.lost, dmg: sc.lost };
+  if (sc && Number(S.turnNo) % sc.every === 0) c.koltScrapAdd(sc.type, sc.lost);
 }
 
 /** 假人身上会自己持续打伤害的东西（状态、聚焦、高能、被抓住……）：变了才需要重新往后看 */

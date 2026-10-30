@@ -370,6 +370,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **柯尔特「废物利用」改成累积废料：敌人血量层每被摧毁一层都按种类记成柯尔特的废料，一次最多领生命上限的 50%，没领完的留着下次接着领**（PR #376，作者 10/26 定；app.js · `koltScrapAdd`（新）/ `koltScrapTotal` / `koltScrapClear` / `koltScrapSpend` / `dealTo` / `stripFocusLayer` / `resetBattleFlags` / `resetBattleRecords` / `SKILL_REQUIREMENT.kolt_scrap` / `runSkillInner`（`kolt_scrap`），skill-text.js 的卡面、party.js 的技能栏提示，training.js · `injectScrap`、tools/dpt.js · `endTurn` 的废料注入；测试 tests/kolt-scrap-accumulate.test.js（新），tests/card-update.test.js、tests/issue-218.test.js、tests/kolt-helu-ras-skills.test.js、tests/reduce-score.test.js、tests/rules.test.js、tests/audit-P4-heroes.test.js、tests/weapon-retrieve.test.js 改成往累积的废料里放）
+  - **以前**：只记「上一个被摧毁的敌人血量层」（`state.lastBrokenLayer`）：新碎一层就把旧的盖掉，一击打穿好几层只记最里面那层；废物利用领一次（最多生命上限的一半）就整条清掉，那一层超出一半的部分直接作废。
+  - **现在**：
+    - 敌人血量层每被摧毁一层（攻击打碎、聚焦抹去），就按那一层的种类把等于这一层上限的废料累积到柯尔特身上（`resources.scrapStore`，按记录的先后）；一击打穿好几层每层都记。只认敌人的层、只认真正把它打碎的那一击，和以前一样；柯尔特不在场时不记。
+    - 废物利用：按记录的先后、按种类领取（肉体 / 星灵回血，装甲 / 护盾 / 沙尘加临时血量层），这一次合计最多柯尔特生命上限的一半（读 `KOLT_SCRAP.capPct`，经 `koltScrapCap`）；没领完的留着，下次接着领，日志写「还剩 N 点废料」。腐坏抛射、转移注意、拆卸模式的废料照旧一起全部领取，不受这个上限。还有没领完的废料就能用，全部领完才要等新的被摧毁的层。
+    - 每场开战清空（`resetBattleFlags`，和腐坏抛射等一起清）；`state.lastBrokenLayer` 不再用。
+    - 废料合计（`koltScrapTotal`：仪表、资源行、碎渣重炮的装填量、「非法」改装够不够上限）里，累积的敌人血量层照旧按上限封顶后算。「非法」改装扣废料（`koltScrapSpend`）时敌人血量层最多扣上限那么多，从累积的里面按记录的先后扣，没扣到的留着（以前那一层超出上限的部分直接作废）；碎渣重炮照旧把全部废料装填后清空（`koltScrapClear` 也清累积的敌人血量层）。
+    - 训练场和输出循环（training.js / tools/dpt.js）每 3 回合注入的护盾废料改成和实战一样累积，不再覆盖上一次。
+    - 卡面（skill-text.js）按 PR 里的写法；技能栏提示（party.js）改成「领取被摧毁的敌人血量层累积的废料……没领完的留着」。
+  - **联机**：累积的明细（`scrapStore`）不在 `online-view.js` 的资源白名单里，不下发；玩家只看到仪表 / 资源行里的废料合计，不含任何坚毅数值。
+  - **测试**：tests/kolt-scrap-accumulate.test.js 11 条（每层都累积、一击打穿几层都记、聚焦抹层也记、一次最多领上限且按先后领、其余来源不受上限、上限读配置表、合计封顶 / 「非法」改装只扣用掉的 / 碎渣重炮清空、每场清空、训练场注入累积、卡面和提示、联机不下发明细）。
 - **特盛乱打的瞬斩砍飞行的敌人不再要附赠动作：绯秋协助格挡进入居合时，被标记的穴鸦照样挨砍**（#402；app.js · `setHiakiStance` 的瞬斩加 `flyFree`；测试 tests/issue-402.test.js（新））
   - **以前**：瞬斩走的是普通的攻击结算，砍同区飞行的敌人（穴鸦）被当成「近程攻击飞行单位」，要额外付 1 附赠动作。协助格挡刚花掉附赠动作，绯秋格挡成功进入居合时一般已经付不起：被标记的穴鸦一刀都没挨（日志写「附赠行动不足」），标记却在出刀前就清掉了，下次进入居合也不会再砍。还有附赠动作时，每只飞行的敌人各扣 1 个，技能说明里没有这笔花费。
   - **现在**：瞬斩砍飞行的敌人不用额外付附赠动作（和柯尔特切刀、龙哥开枪这类附带的一击一样，`flyFree`）。不管是协助格挡、收刀还是丹生谷待命格挡成功进入居合，被标记的敌人都各挨 0.5atk，附赠动作不动。
