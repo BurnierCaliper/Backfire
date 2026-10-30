@@ -28,6 +28,7 @@
  *   FluxDuel.act(g, "a", { type: "bet", amount: 2 })   → 下注回合里的操作同 High Flux：check / bet / call / raise / fold / pass / borrow
  *   FluxDuel.closeWindow(g)                   → 跟注后的追加窗口到时间（同 CounterCards.closeWindow）
  *   FluxDuel.view(g, "a")                     → 这一方能看到的（对方的手牌、暗出的牌、没翻开的天气都不在里面）
+ *   FluxDuel.chart(g.weather)                 → 克制表（得分）：这一轮的天气下每张元素牌打每张层牌的实际得分（CounterCards.chart 换成 Duel 的说法）
  */
 (function (root) {
   "use strict";
@@ -325,6 +326,24 @@
     note(g, { t: "over", text: `对局结束：${SEATS.filter(k => !g.sides[k].infinite).map(k => `${nameOf(g, k)} ${g.sides[k].chips} 枚${repaid(g.sides[k])}`).join("，")}——按最终筹码数，${tail}。` });
   }
 
+  /* ---------- 克制表（得分）：就是 High Flux 的 CounterCards.chart，换成 Duel 的说法 ---------- */
+  /** 这一轮的天气（null = 还没翻开 / 没有天气）下每张元素牌打每张层牌的实际得分（格子同 CounterCards.chart，就是 CounterCards.score）；
+   *  图例、说明换成 Duel 的：两边各用自己的元素打对方的层、各算一个分，相减定胜负和分档；相位全押打平滚池 */
+  function chart(weather) {
+    needCC();
+    const C = CC().CC_CONFIG, c = CC().chart(weather), W = c.weatherName;
+    const K = { adv: "加分", dis: "扣分", neu: "0 分" }, kindOf = (n) => (n > 0 ? "adv" : n < 0 ? "dis" : "neu");
+    c.cells.forEach(row => row.forEach(x => { x.kind = K[x.kindId]; x.baseKind = K[kindOf(x.base)]; }));
+    const phase = c.weather === C.allInWeather;
+    c.notes = c.notes.slice(1).filter(n => !(phase && n.indexOf(`${W}：不改得分`) === 0));
+    c.notes.unshift(`得分 = 克制（克制 +1、被克制 −1、普通 0）+ 天气修正（每 ${Math.round(C.pctStep * 100)}% 记 ±1）。`
+      + `你的元素牌打对方的层牌、对方的元素牌打你的层牌都照这张表算；两边的分相减就是分差（定胜负和分档：差 1 / 差 2 / 差 3 及以上）。`);
+    if (phase) c.notes.push(`${W}：不改得分；翻到${W}双方全押（上限是筹码较少一方的全部筹码），不再下注直接比分；打平底池滚到下一轮，最后一轮平分`);
+    c.legend = { adv: "加分（正分）", dis: "扣分（负分）", neu: "0 分" };
+    c.tag = `${DUEL_CONFIG.name} 得分`;
+    return c;
+  }
+
   /* ---------- 这一方能看到的东西 ---------- */
   /** 对方的手牌、暗出的牌、天气堆的顺序都不在里面；不亮牌时对方每轮出了什么也不在里面（亮牌时在 results[i].shown） */
   function view(g, side) {
@@ -357,7 +376,7 @@
 
   const api = {
     DUEL_CONFIG, MODE, SEATS, other, anteOf, leadOf,
-    newGame, toAct, legal, act, view, resultText, scoreOf,
+    newGame, toAct, legal, act, view, resultText, scoreOf, chart,
     closeWindow: (g) => CC().closeWindow(g),
     name: () => DUEL_CONFIG.name, seatName: nameOf
   };

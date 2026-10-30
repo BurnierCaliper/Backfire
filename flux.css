@@ -1,0 +1,22 @@
+/* Flux Duel / Flux Hold'em（#488）的牌桌：牌面、按钮、布局沿用 High Flux 的 counter-cards.css（.scr-cc / .cc-*），这里只补两张新牌桌自己的东西 */
+
+/* ---------- Flux Duel ---------- */
+/* 对方的手牌：层牌、元素牌各一叠牌背，下面写张数 */
+.fd-backs { display: grid; grid-template-columns: auto auto; align-items: center; gap: 2px 10px; }
+.fd-backs > small { grid-row: 2; font-size: 11px; color: #b9c8b8; text-align: center; }
+.fd-backs .cc-hand-back .cc-card + .cc-card { margin-left: -50px; }
+/* 自己的手牌分两排：层牌、元素牌；各点一张选中（抬起来、描一圈黄） */
+.fd-hand2 { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.fd-row { align-items: center; }
+.fd-rowlabel { width: 3em; font-size: 12px; color: #b9c8b8; text-align: right; }
+.cc-hand .cc-card.fd-sel { transform: translateY(-10px); box-shadow: 0 3px 0 #0b0806, 0 0 0 3px var(--sk-hazard, #f2c230), 0 12px 16px rgba(0, 0, 0, .5); filter: none; }
+/* 暗出的两张（层牌 + 元素牌）摆在一个格子里 */
+.fd-slot { width: 152px; gap: 8px; }
+/* 这一轮背面朝上的天气 */
+.fd-wback { width: 92px; height: 120px; }
+.fd-shown { margin: 0; font-size: 13px; color: #ffe08a; }
+
+@media (max-width: 760px) {
+  .fd-slot { width: 128px; gap: 4px; }
+  .fd-rowlabel { display: none; }
+}

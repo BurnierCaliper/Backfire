@@ -16,6 +16,7 @@
  *   CounterCardsAI.decide(view, "hard", rng)          → 一个操作（交给 CounterCards.act）
  *   CounterCardsAI.step(对局, "dealer", "hard", rng)    → 让这一方做一步（不是它的回合返回 null）
  *   CounterCardsAI.belief(view, "hard")                → 推理出的「对方这一轮出的是哪张」的概率
+ *   CounterCardsAI.decideBet(view, "hard", rng, edge)  → 借贷 / 下注 / 追加窗口的决定，胜率由 edge 给（Flux Duel 借用，#488）
  */
 (function (root) {
   "use strict";
@@ -376,13 +377,19 @@
    *  诈唬率 bluffP（困难按对手面对下注时的弃牌率加减）；下注额 size(可选项)（困难按底池 × 胜率差，普通牌很好时下双倍最低额） */
   function betRead(ctx) {
     const v = ctx.v, cfg = ctx.cfg;
-    let bel = ctx.belief, st = null;
-    if (ctx.level === "hard") { st = oppStats(v); bel = readOpponent(ctx, bel, st); }
-    const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
-    const e = evaluate(ctx, v.me.card, Q, bel);
+    const st = ctx.level === "hard" ? oppStats(v) : null;
+    // 别的两人玩法（Flux Duel，#488）借用这套下注决定时，胜率由它自己算（ctx.edge）
+    const e = ctx.edge ? ctx.edge(ctx, st) : handEdge(ctx, st);
     const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
     const size = (o) => (ctx.level === "hard" ? o.min + v.pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
     return { e, st, bluffP, size };
+  }
+  /** High Flux：自己出的牌在结算时的胜率（困难按对手这一轮的下注修正对方出的是哪张；结算时的天气按现在到哪一步算） */
+  function handEdge(ctx, st) {
+    const v = ctx.v;
+    const bel = st ? readOpponent(ctx, ctx.belief, st) : ctx.belief;
+    const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
+    return evaluate(ctx, v.me.card, Q, bel);
   }
   /** 跟注后的追加窗口（#496）：马上决定加注还是不动作（pass），不用等倒计时（人当对手时界面照样给人留足秒数）。
    *  简单：偶尔随手加注；普通 / 困难：牌好到 raiseEdge 才加注（和面对下注时加注一样），偶尔诈唬加注最低额，不然不动作。
@@ -535,14 +542,34 @@
       case "weather": a = playerWeather(ctx); break;
       case "normal": a = playerNormal(ctx); break;
     }
-    // 保险：算出来的不在可选的里面，就随便挑一个合法的
-    const ok = a && view.legal.find(o => o.type === a.type && (o.op == null || o.op === a.op) && (o.where == null || o.where === a.where) && (o.card == null || o.card === a.card));
+    return safe(view, a, rng);
+  }
+  /** 保险：算出来的不在可选的里面，就随便挑一个合法的 */
+  function safe(view, a, rng) {
+    const ok = a && view.legal.find(o => o.type === a.type && (o.op == null || o.op === a.op) && (o.where == null || o.where === a.where)
+      && (o.card == null || o.card === a.card) && (o.layer == null || o.layer === a.layer) && (o.element == null || o.element === a.element));
     if (!ok) {
       const o = pick(view.legal, rng);
       a = Object.assign({}, o);
       if (o.type === "bet" || o.type === "raise" || o.type === "borrow") a.amount = o.min;
     }
     return a;
+  }
+  /** 别的两人玩法（Flux Duel，#488）借用这里的借贷、下注、追加窗口决定，不另写一套：
+   *  每轮开始借不借（loan）、下注回合（bet1 / bet2，含跟注后的追加窗口）都和 High Flux 的 AI 一样（阈值 AI_CONFIG），
+   *  只是胜率由 edge(ctx, st) 给：返回 { ev, win, lose, edge }（结算时自己赢 / 输的概率；st = 困难时对手的习惯，普通是 null）。
+   *  view 要有 High Flux 的 view 里下注用到的那些字段（stage、legal、betting、pot、round / rounds、me / opp 的 chips / pot / bet / owe / start / infinite、log、results）。
+   *  不是借贷、下注的阶段返回 null */
+  function decideBet(view, level, rng, edge) {
+    if (!view || !view.legal || !view.legal.length) return null;
+    level = LEVELS.indexOf(level) >= 0 ? level : "normal";
+    rng = rng || Math.random;
+    const ctx = { v: view, level, rng, cfg: AI_CONFIG[level], opts: view.legal, edge };
+    let a = null;
+    if (view.stage === "loan") a = loanAtStart(ctx);
+    else if (view.stage === "bet1" || view.stage === "bet2") a = view.betting && view.betting.window ? windowAct(ctx) : bet(ctx);
+    else return null;
+    return safe(view, a, rng);
   }
   /** 让 side 这一方（AI）走一步；不是它的回合返回 null */
   function step(g, side, level, rng) {
@@ -563,7 +590,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, step, playOut, belief, candidates };
+  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCardsAI = api;
 })(typeof window !== "undefined" ? window : globalThis);
