@@ -20,6 +20,9 @@
  *
  *   CounterCardsUI.open()                                打开设置页
  *   CounterCardsUI.start({ side: "player", level: "hard", seed, fast })   直接开一局（fast：AI 不等，测试用）
+ *   CounterCardsUI.start({ game, side: "player", level, casino: { label, againText, onChange, onLeave, onAgain } })
+ *                                                        赌场桌（#487，casino-ui.js 打开）：顶栏「离桌」、总结算「再来一局 / 离桌」交回给模式，
+ *                                                        牌局每走一步叫 onChange（模式存档）；不能换边 / 换难度
  */
 (function (root) {
   "use strict";
@@ -185,6 +188,7 @@
     const game = opt.game || CC().newGame(Object.assign({ seed }, opt.gameOpt || {}));
     S = { game, human: side, ai: CC().other(side), level, rng: CC().makeRng(seed + "|ai"), seen: game.results.length, banner: null, mode: null, amount: null,
       anim: { deal: true }, fast: !!opt.fast, timer: null, revealKey: "", msg: "", last: {}, holdUntil: opt.fast ? 0 : Date.now() + UI_CONFIG.dealMs };
+    S.casino = opt.casino || null;   // 赌场桌（#487）：顶栏 / 总结算的按钮、每一步存档交给打开牌桌的模式
     SETUP.side = side; SETUP.level = level;
     enterScreen();
     show("game");
@@ -362,6 +366,13 @@
     if (key && key !== S.revealKey) { S.revealKey = key; S.anim.reveal = g.revealed; }
     render();
     schedule();
+    // 赌场桌（#487）：牌局走了一步（人或 AI），交给模式存档（打到一半的牌局记在钱包里）
+    if (S.casino && S.casino.onChange) S.casino.onChange(g);
+  }
+  /** 赌场桌的「离桌」「再来一局」：交给打开牌桌的模式（casino-ui.js）；没做成（筹码不够再来一局）把原因写在操作栏 */
+  function casinoHook(name) {
+    if (!S || !S.casino || typeof S.casino[name] !== "function") return;
+    try { S.casino[name](); } catch (e) { if (S) { S.msg = e.message; render(); } }
   }
   function schedule() {
     stopTimer();
@@ -492,6 +503,10 @@
   }
   function topHtml(v) {
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮`;
+    // 赌场桌（#487）：写上桌子，不能换边 / 换难度，「回到标题」换成「离桌」（回到打开牌桌的模式）
+    if (S.casino) return `${menuBtn()}<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
+      + `<span class="cc-role">${esc(S.casino.label || "赌场")} · 庄家：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
+      + `<span class="cc-spacer"></span>${btn("leave", "离桌", { title: S.casino.leaveTitle || "" })}`;
     return `${menuBtn()}<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
@@ -763,7 +778,9 @@
       <h3>${big}</h3>
       <p class="cc-deltas"><span class="${tone}">你 ${fin[me]} 枚</span><span>${sideName(op)} ${theirs} 枚</span></p>
       <p class="cc-tier">${esc(rule)}${repaid.length ? `；已扣还借款：${esc(repaid.join("，"))}` : ""}。</p>
-      <div class="cc-btns">${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${bannerChartBtn()}${btn("title", "回到标题")}</div>
+      <div class="cc-btns">${S.casino
+        ? `${btn("casinoAgain", esc(S.casino.againText || "再来一局"), { primary: true })}${bannerChartBtn()}${btn("leave", "离桌")}`
+        : `${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${bannerChartBtn()}${btn("title", "回到标题")}`}</div>
     </div>`;
   }
 
@@ -784,6 +801,8 @@
       case "swap": start({ side: CC().other(S ? S.human : SETUP.side), level: S ? S.level : SETUP.level }); return;
       case "dismiss": if (S) { S.banner = null; render(); schedule(); } return;
       case "chart": openChart(); return;   // 只开克制表，不动对局和操作栏
+      case "leave": casinoHook("onLeave"); return;          // 赌场桌：离桌
+      case "casinoAgain": casinoHook("onAgain"); return;    // 赌场桌：同一张桌子再开一局（再交入场费）
     }
     if (!S) return;
     switch (act) {

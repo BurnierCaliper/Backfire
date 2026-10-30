@@ -351,6 +351,177 @@ function trpgBlackMarketSettle(kit, bill) {
   if (typeof ledgerCapture === "function") ledgerCapture();
   return notes.length ? notes : [`${u.name} 在黑市赌命桌这一手没押。`];
 }
+/* ---------- 赌场（#487）：跑团里去赌场，和庄家打 High Flux ----------
+ * 钱的规则在 casino.js（筹码钱包、200 奎支买 1 枚 / 1 枚卖 190、入场费、离桌结算），牌局在 counter-cards.js。
+ * 记在 LEDGER.casino，跟着跑团存档走：{ wallets, tables, seq }
+ *   wallets.party = 这个存档自己的钱包（本机跑团：主持人在「赌场」页带着大家玩，庄家是 AI）；
+ *   wallets[角色 kit] = 联机玩家各自的钱包（按操控的角色记：换了房间、玩家 id 变了也认得）；
+ *   tables = 联机玩家对赌的桌子（两边的钱包都坐在同一张桌子上，牌局只存一份）；seq = 对赌桌编号。
+ * 买筹码由谁付、卖筹码的钱进谁的钱包：队伍公账或某名角色的私人钱包（trpgPurse；联机玩家只能用自己角色的）。
+ * 赌场桌（AI / 主持人坐庄）打到一半的牌局在钱包里（seat.game）。 */
+const TRPG_CASINO_LOCAL = "party";
+function trpgCasinoBook() {
+  if (typeof Casino === "undefined") throw new Error("没有加载赌场（casino.js）");
+  const c = LEDGER.casino && typeof LEDGER.casino === "object" && !Array.isArray(LEDGER.casino) ? LEDGER.casino : {};
+  if (!c.wallets || typeof c.wallets !== "object") c.wallets = {};
+  if (!c.tables || typeof c.tables !== "object") c.tables = {};
+  c.seq = Math.max(0, Math.floor(Number(c.seq) || 0));
+  LEDGER.casino = c;
+  return c;
+}
+function trpgCasinoWallet(key) {
+  const c = trpgCasinoBook(), k = key || TRPG_CASINO_LOCAL;
+  c.wallets[k] = Casino.wallet(c.wallets[k]);
+  return c.wallets[k];
+}
+/** 付钱 / 收钱的钱包：队伍公账或还活着的角色 */
+function trpgCasinoPurse(who) {
+  const p = who || TRPG_PARTY_PURSE;
+  if (p !== TRPG_PARTY_PURSE && !trpgHeroes().some(h => h.kit === p && !h.dead)) throw new Error("没有这个钱包");
+  return p;
+}
+/** 进赌场：第一次来送赠送筹码（每个钱包只送一次）。返回日志行 */
+function trpgCasinoOpen(key) { return Casino.welcome(trpgCasinoWallet(key)).map(t => "赌场：" + t); }
+/** 界面用：钱包（按枚）、能卖几枚、付钱那个钱包的奎支、桌子、兑换价、坐着的这一局 */
+function trpgCasinoView(key, payer) {
+  const w = trpgCasinoWallet(key);
+  return { chips: Casino.chips(w), sellable: Casino.sellable(w), kuizhi: trpgPurse(payer || TRPG_PARTY_PURSE), tables: Casino.tables(),
+    buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, game: w.seat ? w.seat.game : null };
+}
+function trpgCasinoBuy(n, payer, key) {
+  const w = trpgCasinoWallet(key), p = trpgCasinoPurse(payer);
+  const r = Casino.buy(w, n, trpgPurse(p));
+  trpgPurseSet(p, trpgPurse(p) - r.cost);
+  return [`赌场：${r.text.replace(/。$/, "")}（由 ${trpgPurseName(p)} 付）。`];
+}
+function trpgCasinoSell(n, payee, key) {
+  const w = trpgCasinoWallet(key), p = trpgCasinoPurse(payee);
+  const r = Casino.sell(w, n);
+  trpgPurseSet(p, trpgPurse(p) + r.gain);
+  return [`赌场：${r.text.replace(/。$/, "")}（进 ${trpgPurseName(p)}）。`];
+}
+/** 坐上一张赌场桌开一局（先收入场费）；opt：dealer（"ai" / "gm"）、deck（测试用） */
+function trpgCasinoSit(table, buyIn, key, opt) {
+  const w = trpgCasinoWallet(key);
+  Casino.sit(w, table, buyIn, { dealer: opt && opt.dealer, deck: opt && opt.deck });
+  return [`赌场：坐上${w.seat.name}，买入 ${w.seat.buyIn} 枚，交入场费 ${w.seat.fee} 枚（不退）。`];
+}
+/** 离桌：赌场桌桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退）；
+ *  对赌桌：还没开局的退回押的；开了局以后有人离桌，这一桌就结束了——打到一半离桌的算认输（和弃牌一样，底池归对方），两边一起结算 */
+function trpgCasinoLeave(key) {
+  const w = trpgCasinoWallet(key), s = w.seat;
+  if (!s || s.kind !== "pvp") { const text = Casino.leave(w).text; w.last = text; return ["赌场：" + text]; }
+  const c = trpgCasinoBook(), t = c.tables[s.table];
+  if (!t) { w.seat = null; return ["赌场：这一桌已经没有了。"]; }
+  const leaver = t.game && !t.game.over ? s.side : null, notes = [];
+  const settle = (side) => {
+    const who = t.seats[side];
+    if (!who) return;
+    const ww = trpgCasinoWallet(who), r = Casino.pvpSettle(t, side, ww, leaver);
+    if (r.kuizhi) trpgPurseSet(who, trpgPurse(who) + r.kuizhi);   // 押奎支：桌上剩下的按 1 枚 200 奎支回钱包（还不上的借款扣到 0 为止）
+    ww.last = r.text;
+    notes.push(`赌场：${trpgPurseName(who)}${leaver === side ? "离桌认输，" : ""}${r.text}`);
+  };
+  settle(s.side);
+  if (t.game) settle(s.side === "dealer" ? "player" : "dealer");
+  if (!t.seats.dealer && !t.seats.player) delete c.tables[t.id];
+  return notes;
+}
+
+/* ---------- 赌场 · 联机（hotseat-game.js 的 casino 指令；谁能动哪个钱包在那边查）---------- */
+/** kit 这名角色坐着的牌局：{ kind: "ai" | "gm" | "pvp", side（人坐哪一方）, game（对赌还没开局是 null）, table, level（AI 庄家的难度）} 或 null */
+function trpgCasinoSeatOf(kit) {
+  const c = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};   // 只读：联机包每一包都要看，不往存档里加东西
+  const w = c.wallets && c.wallets[kit] ? Casino.wallet(c.wallets[kit]) : null, s = w && w.seat;
+  if (!s) return null;
+  if (s.kind === "pvp") { const t = c.tables && c.tables[s.table]; return t ? { kind: "pvp", side: s.side, game: t.game, table: t } : null; }
+  const cfg = Casino.tables().find(x => x.id === s.table) || {};
+  return { kind: s.kind, side: "player", game: s.game, table: cfg, level: cfg.difficulty || "normal" };
+}
+/** 牌局里走一步：kit 坐着的那一局、他那一方（opt.asDealer：主持人替主持人坐庄的那一桌出庄家那一方）。
+ *  AI 当庄的桌子接着让 AI 走到轮到人；主持人坐庄的桌子等主持人 */
+function trpgCasinoAct(kit, action, opt) {
+  const seat = trpgCasinoSeatOf(kit);
+  if (!seat) throw new Error("没坐在桌上");
+  if (!seat.game) throw new Error("对手还没坐下，还没开局");
+  let side = seat.side;
+  if (opt && opt.asDealer) {
+    if (seat.kind !== "gm") throw new Error("这一桌不是主持人坐庄");
+    side = "dealer";
+  }
+  CounterCards.act(seat.game, side, action);
+  if (seat.kind === "ai") Casino.runAi(seat.game, seat.level);
+  return [];
+}
+/** 坐上赌场桌（opt.dealer = "ai" / "gm"）；AI 坐庄的先走到轮到人 */
+function trpgCasinoSitAt(kit, table, buyIn, opt) {
+  const notes = trpgCasinoSit(table, buyIn, kit, opt);
+  const seat = trpgCasinoSeatOf(kit);
+  if (seat && seat.kind === "ai") Casino.runAi(seat.game, seat.level);
+  return notes;
+}
+/** 开一张对赌桌：kit 先坐 side 那一方，押筹码（只能押普通筹码）或押奎支（从这名角色的钱包扣） */
+function trpgCasinoPvpOpen(kit, side, stakeKind, opt) {
+  const c = trpgCasinoBook(), w = trpgCasinoWallet(kit);
+  const t = Casino.pvpTable("t" + (c.seq + 1), stakeKind);
+  const pay = Casino.pvpSit(t, side, kit, w, trpgPurse(kit), opt);
+  if (pay) trpgPurseSet(kit, trpgPurse(kit) - pay);
+  c.seq += 1;
+  c.tables[t.id] = t;
+  return [`赌场：${trpgPurseName(kit)} 开了一桌对赌（坐${CounterCards.sideName(side)}，${stakeKind === "chips" ? "押筹码" : "押奎支"}），等对手坐下。`];
+}
+/** 坐上别人开的对赌桌（空着的那一方），两边都坐下就开局 */
+function trpgCasinoPvpJoin(kit, tableId, opt) {
+  const c = trpgCasinoBook(), t = c.tables[tableId];
+  if (!t) throw new Error("没有这一桌");
+  const side = !t.seats.dealer ? "dealer" : !t.seats.player ? "player" : null;
+  if (!side || t.game) throw new Error("这一桌已经满了");
+  const pay = Casino.pvpSit(t, side, kit, trpgCasinoWallet(kit), trpgPurse(kit), opt);
+  if (pay) trpgPurseSet(kit, trpgPurse(kit) - pay);
+  return [`赌场：${trpgPurseName(kit)} 坐上了对赌桌（${CounterCards.sideName(side)}），开局。`];
+}
+/** 联机包：这个人能看到的赌场（hotseat-game.js · getViewFor 按收件人造，online-view.js · projectCasino 再按白名单拷）。
+ *  kits = 他操控的角色；isGM = 主持人。只读，不往存档里加东西。
+ *   - 人人都有：桌子（倍率、最低买入、入场费）、兑换价、等人坐的对赌桌（谁开的、押什么、空着哪一方）；
+ *   - mine：自己每名角色的钱包（筹码、能卖几枚、角色钱包里的奎支、上一局的结算）和坐着的那一局——只有自己这一方的 view
+ *     （CounterCards.view：对方的手牌、暗出 / 暗弃的牌、庄家偷看到的天气都不在里面）；
+ *   - 主持人另有 dealing：主持人坐庄的那几桌（庄家那一方的 view）；seated：谁坐在哪桌、第几轮（公开的，没有牌）。
+ *   别人的钱包、别人那一方的 view 都不放。 */
+function trpgCasinoPacket(kits, isGM) {
+  if (typeof Casino === "undefined" || typeof CounterCards === "undefined") return null;
+  const raw = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};
+  const wallets = raw.wallets && typeof raw.wallets === "object" ? raw.wallets : {}, tables = raw.tables && typeof raw.tables === "object" ? raw.tables : {};
+  const nameOf = (k) => (k ? trpgPurseName(k) : null);
+  const meta = (kit, seat) => {
+    if (seat.kind === "pvp") {
+      const t = seat.table, opp = t.seats[seat.side === "dealer" ? "player" : "dealer"];
+      return { kind: "pvp", table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp) };
+    }
+    return { kind: seat.kind, table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level };
+  };
+  const out = {
+    config: { buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, face: Casino.CONFIG.face, gift: Casino.CONFIG.gift },
+    tables: Casino.tables(),
+    open: Object.keys(tables).map(k => tables[k]).filter(t => t && !t.game).map(t => ({ id: t.id, stakeKind: t.stakeKind, start: t.start, dealer: nameOf(t.seats.dealer), player: nameOf(t.seats.player) })),
+    mine: [], dealing: [], seated: []
+  };
+  (kits || []).forEach(kit => {
+    const w = Casino.wallet(JSON.parse(JSON.stringify(wallets[kit] || null)));   // 拷一份看：没来过赌场的角色不往存档里加钱包
+    const seat = trpgCasinoSeatOf(kit);
+    const row = { kit, name: nameOf(kit), purse: trpgPurse(kit), chips: Casino.chips(w), sellable: Casino.sellable(w), last: typeof w.last === "string" ? w.last : "" };
+    if (seat) row.seat = Object.assign(meta(kit, seat), { side: seat.side, game: seat.game ? CounterCards.view(seat.game, seat.side) : null });
+    out.mine.push(row);
+  });
+  if (isGM) Object.keys(wallets).forEach(kit => {
+    if (kit === TRPG_CASINO_LOCAL) return;
+    const seat = trpgCasinoSeatOf(kit);
+    if (!seat || (seat.kind === "pvp" && seat.side !== "player")) return;   // 对赌桌只列一次（按坐玩家那一方的人）
+    const m = meta(kit, seat), g = seat.game;
+    out.seated.push(Object.assign({ kit, name: nameOf(kit), round: g ? g.round : 0, over: !!(g && g.over) }, m));
+    if (seat.kind === "gm" && g) out.dealing.push(Object.assign({ kit, name: nameOf(kit), game: CounterCards.view(g, "dealer") }, m));
+  });
+  return out;
+}
 /* ---------- 诊所：义体改造（规则和单局一样：growth.js · cyberPlanError / cyberLayersFor，价格 ROGUE_CLINIC.cyberPerHp）----------
  * 方案记在角色身上（u.cyberPlan），跟着跑团存档走（game.js · packHero）；升级后按方案重建血量层。
  * 主持人在「诊所」页直接改（可以选由谁付）；联机玩家在诊所开放时提交申请，主持人同意后才改，钱从那名角色的钱包出。 */

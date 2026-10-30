@@ -198,9 +198,9 @@ test("跑团回购：卖的人从自己钱包付、东西回公用背包；关�
 });
 test("跑团联机接线：shopSell / shopBuyback 消息、packet.shopSell 投影白名单", () => {
   const og = read("online-game.js"), hg = read("hotseat-game.js");
-  assert.match(og, /"shopSell", "shopBuyback"\]\);/);
+  assert.match(og, /"shopSell", "shopBuyback"[\],]/);   // 后面可以再加别的消息（#487 加了 casino）
   assert.match(og, /shopSell: [^\n]*trpgShopSellFor\(id, id === identity\.id\)/);
-  assert.match(hg, /"cyberwareRemove", "shopSell", "shopBuyback"\]\);/);
+  assert.match(hg, /"cyberwareRemove", "shopSell", "shopBuyback"[\],]/);
   assert.match(hg, /shopSell: c => \{[\s\S]*?session\.ownerOf\(own\.id\) !== sender\) fail/);
   const { c, m } = trpg();
   c.bagAdd("food_can", 1); c.trpgMerchantOpen(m.id);

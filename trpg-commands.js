@@ -23,6 +23,12 @@ const TrpgCommands = (() => {
     purseTransfer: c => trpgPurseTransfer(c.from, c.to, c.amount),
     // 黑市赌命桌一手的账（#489，counter-cards-guess.js · lifeBill）：主持人当庄；扣坚毅、扣光真死、发奖
     blackMarket: c => trpgBlackMarketSettle(c.kit, c.bill),
+    // 赌场（#487）：本机跑团用这个存档自己的钱包（LEDGER.casino.wallets.party）；payer = 买筹码由谁付 / 卖筹码的钱进谁的钱包
+    casinoOpen: () => trpgCasinoOpen(),
+    casinoBuy: c => trpgCasinoBuy(c.n, c.payer),
+    casinoSell: c => trpgCasinoSell(c.n, c.payer),
+    casinoSit: c => trpgCasinoSit(c.table, c.buyIn),
+    casinoLeave: () => trpgCasinoLeave(),
     modifyHero: c => trpgModifyHero(c.kit, c.plan, !!c.free),
     clinicOpen: c => { TRPG.clinicOpen = !!c.on; return [TRPG.clinicOpen ? "诊所开门了：联机玩家可以申请义体改造。" : "诊所关门了。"]; },
     smithOpen: c => { TRPG.smithOpen = !!c.on; return [TRPG.smithOpen ? "工匠开门了：联机玩家可以给自己的武器升级（加工费从自己的钱包出）。" : "工匠收摊了。"]; },
