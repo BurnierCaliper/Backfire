@@ -427,7 +427,7 @@ test("庄家 AI 会用新选项（#502）：场上有天气时保留以后接着
   assert.ok(LEVELS.every(l => n[l].deep > 0), "按顺序往下看：看过第 2 张以后的 " + JSON.stringify(n));
 });
 
-test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还是压到牌堆底，按「没看过的牌」比——同样的公开局面、第 2 轮偷看到同一张酷暑，第 1 轮压到牌堆底的是微光就把酷暑也压下去，是相位就放回原位（看过的知道在哪儿，不会换上来）；简单随手放", () => {
+test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还是压到牌堆底，按「没看过的牌」比——同样的公开局面、第 2 轮偷看到同一张酷暑，第 1 轮压到牌堆底的是微光就多半把酷暑也压下去，是相位就多半放回原位（看过的知道在哪儿，不会换上来；#521 起按好处两选一，换 100 个随机数数一数）；简单随手放", () => {
   const mk = (buried, other) => {
     const g = CC.newGame({ seed: "放哪儿", deck: [buried, "heat", "snow", "acid", other, "thunder", "sand"] });
     // 第 1 轮：偷看堆顶、压到牌堆底；玩家暗弃常态跳过（没翻天气，公开的局面两局一样）
@@ -444,9 +444,12 @@ test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还�
   const v1 = CC.view(g1, "dealer"), v2 = CC.view(g2, "dealer");
   assert.deepEqual([v1.peek.card, v2.peek.card], ["heat", "heat"]);
   assert.deepEqual([J(v1.deckSeen.bottom), J(v2.deckSeen.bottom)], [["glow"], ["phase"]]);
+  const share = (v, level, where) => Array.from({ length: 100 }, (_, i) => AI.decide(v, level, CC.makeRng("x" + i)).where).filter(w => w === where).length / 100;
   for (const level of ["normal", "hard"]) {
-    const a1 = AI.decide(v1, level, CC.makeRng("x")), a2 = AI.decide(v2, level, CC.makeRng("x"));
-    assert.deepEqual([a1.where, a2.where], ["bottom", "top"], level);
+    const down1 = share(v1, level, "bottom"), down2 = share(v2, level, "bottom");
+    assert.ok(down1 > 0.5 && down2 < 0.5, `${level}：压微光时压下去 ${down1}，压相位时压下去 ${down2}`);
+    assert.ok(down1 - down2 >= 0.3, level + "：用上了看过的情报");
+    if (level === "hard") assert.ok(down1 >= 0.9 && down2 <= 0.1, "困难温度低：差得多时几乎总选好的那边");
   }
   const easy = new Set(Array.from({ length: 12 }, (_, i) => AI.decide(v1, "easy", CC.makeRng("e" + i)).where));
   assert.equal(easy.size, 2, "简单随手放");
@@ -557,6 +560,51 @@ test("同一个种子打两次，结果完全一样（#521：随机数只用传�
     const v = CC.view(g, side);
     assert.deepEqual(J(AI.decide(v, level, CC.makeRng("同" + level))), J(AI.decide(v, level, CC.makeRng("同" + level))));
   }
+});
+
+/* ---------- 其他照好处选的决定也带随机性（#521 第 2 条） ---------- */
+
+test("庄家弃掉 / 留着天气、偷看后放哪、玩家翻天气还是跳过、下注额也带随机性（#521）：普通、困难自己打的局面里，同一个局面换随机数重新决定，有时不一样（以前同一个局面每次都一样）", () => {
+  const KINDS = ["discard", "place", "skip", "size"];
+  const kindOf = (v) => (v.stage === "dealerWeather" && v.legal.some(o => o.op === "discard") ? "discard"
+    : v.stage === "dealerPeek" ? "place"
+    : v.stage === "weather" && v.legal.some(o => o.type === "skip") ? "skip"
+    : v.stage === "bet1" || v.stage === "bet2" ? "size" : null);
+  for (const level of ["normal", "hard"]) {
+    const seen = {}, varied = {};
+    KINDS.forEach(k => { seen[k] = 0; varied[k] = 0; });
+    for (let n = 0; n < 30; n++) {
+      const g = CC.newGame({ seed: `随机性-${level}-${n}` });
+      const rngs = { dealer: CC.makeRng("d" + n), player: CC.makeRng("p" + n) };
+      for (let step = 0; !g.over; step++) {
+        assert.ok(step < 400, "卡住了：" + g.stage);
+        const side = CC.toAct(g)[0], v = CC.view(g, side), kind = kindOf(v);
+        if (kind) {
+          const acts = Array.from({ length: 16 }, (_, i) => AI.decide(v, level, CC.makeRng(`${n}-${step}-${i}`)));
+          // 下注额：只比下注 / 加注押了多少（下不下注本来就有诈唬的随机）
+          const keys = kind === "size" ? acts.filter(a => a.type === "bet" || a.type === "raise").map(a => a.amount) : acts.map(a => JSON.stringify(a));
+          if (keys.length) { seen[kind]++; if (new Set(keys).size > 1) varied[kind]++; }
+        }
+        AI.step(g, side, level, rngs[side]);
+      }
+    }
+    KINDS.forEach(k => assert.ok(varied[k] > 0, `${level} ${k}：${varied[k]} / ${seen[k]} 个局面换随机数决定不一样`));
+    ["discard", "place", "skip"].forEach(k => assert.ok(varied[k] < seen[k], `${level} ${k}：好处差得多的局面照样每次选好的那边`));
+  }
+});
+
+test("下注额（#521，CounterCardsAI.betSize）：普通胜率差远高于 / 远低于 bigEdge 时几乎总是双倍 / 最低额，在 bigEdge 附近两种都下；困难按底池 × 胜率差算，多出来的那部分上下浮动 sizeJitter", () => {
+  const N = AI.AI_CONFIG.normal, Hd = AI.AI_CONFIG.hard;
+  const sizes = (edge, level, cfg, pot) => Array.from({ length: 200 }, (_, i) => AI.betSize(3, pot, edge, level, cfg, CC.makeRng("下注额" + i)));
+  const doubled = (edge) => sizes(edge, "normal", N, 20).filter(x => x === 6).length / 200;
+  assert.ok(sizes(N.bigEdge, "normal", N, 20).every(x => x === 3 || x === 6));
+  assert.ok(doubled(N.bigEdge + 0.4) > 0.95 && doubled(N.bigEdge - 0.4) < 0.05);
+  const mid = doubled(N.bigEdge);
+  assert.ok(mid > 0.3 && mid < 0.7, "在门槛上差不多一半一半：" + mid);
+  const base = 20 * 0.5 * Hd.sizePot, hard = sizes(0.5, "hard", Hd, 20);
+  assert.ok(hard.every(x => x >= 3 + base * (1 - Hd.sizeJitter) - 1e-9 && x <= 3 + base * (1 + Hd.sizeJitter) + 1e-9));
+  assert.ok(new Set(hard.map(Math.round)).size >= 3, "困难的下注额会浮动");
+  assert.ok(sizes(-0.2, "hard", Hd, 20).every(x => x === 3), "胜率差不到 0：最低额");
 });
 
 test("玩家方从公开记录推出庄家知道堆顶往下几张（#502）：偷看后放回原位 +1、压到牌堆底不变、翻开一张 −1——庄家第 3 轮往下看了第 2 张、压到牌堆底，堆顶还是庄家看过、留着的那张（困难的玩家方照样认为它多半对庄家有利）", () => {

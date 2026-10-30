@@ -15,6 +15,8 @@
  *   普通 / 困难按期望加权抽签（softOdds，温度 playTemp：普通高、困难低但不是 0）——期望越高越容易出，但不是 100%；
  *   困难再「别被摸透」（readBack）：假设对手看穿了自己出牌的概率、拿克制的牌来打，把这个可能掺进推理里重新算一遍，和原来的取平均，
  *   最容易被猜到的那张（多半是平时最强的）被压一压，同一局里不会按「先强后弱」的固定顺序出。
+ *   其他照好处选的两选一（庄家弃掉 / 留着天气、偷看后放回原位 / 压到牌堆底，玩家翻天气 / 暗弃跳过）和下注额也一样带随机性：
+ *   好处差得多几乎总选好的那边，差不多时两边都会选（choiceTemp）；下注额普通在双倍的门槛附近两种都下（sizeTemp），困难上下浮动（sizeJitter）。
  *   随机数只用传进来的 rng：同一个种子打出同样的一局。
  * 所有阈值都在 AI_CONFIG。
  *
@@ -24,8 +26,8 @@
  *   CounterCardsAI.decideBet(view, "hard", rng, edge)  → 借贷 / 下注 / 追加窗口的决定，胜率由 edge 给（Flux Duel 借用，#488）
  *   CounterCardsAI.dealerKnownTop(view)                → 从公开记录推出庄家知道堆顶往下几张（偷看按顺序往下看，#502）
  *   CounterCardsAI.cardOdds(view, "hard")              → 出牌那一步每张牌会被抽中的概率 { 牌: 概率 }（decide 就按它抽，#521）
- *   CounterCardsAI.softOdds(分[], 温度)                → 按温度加权抽签的概率（#521；softPick(项[], 项 → 分, 温度, rng) / draw(项[], 概率[], rng) 按它抽）——
- *                                                        Flux Duel / Flux Hold'em 的 AI 也用这一份
+ *   CounterCardsAI.softOdds(分[], 温度)                → 按温度加权抽签的概率（#521；softPick(项[], 项 → 分, 温度, rng) / draw(项[], 概率[], rng) 按它抽，
+ *                                                        softChoose(a 的分, b 的分, 温度, rng) 两选一，betSize(…) 下注额）——Flux Duel / Flux Hold'em 的 AI 也用这一份
  */
 (function (root) {
   "use strict";
@@ -61,7 +63,9 @@
       elementKeep: 0.15, elementFv: 0.5,  // 留着一张元素牌的价值：基础 + 它平时的期望 × 系数
       loanEdge: 0.4,         // 下注时筹码不够：胜率差（赢 − 输）到这里、而且想下注 / 加注才借
       loanCallEdge: 0.1,     // 对方押得比自己手上的还多（跟不起）：胜率差到这里才借来跟，不然弃牌
-      playTemp: 0.3          // 出牌按期望加权抽签的温度（#521）：越高越随机，0 = 只出期望最高的那张
+      playTemp: 0.3,         // 出牌按期望加权抽签的温度（#521）：越高越随机，0 = 只出期望最高的那张
+      choiceTemp: 0.1,       // 两选一的温度（#521）：庄家弃掉 / 留着天气、偷看后放回原位 / 压到牌堆底，玩家翻天气 / 暗弃跳过——好处差得不多时两边都会选
+      sizeTemp: 0.1          // 下注额的温度（#521）：胜率差在 bigEdge 附近时最低额、双倍都会下
     },
     hard: {
       betEdge: 0.2, bigEdge: 0.5, raiseEdge: 0.4, callEdge: -0.1, cheapCall: 0.3,
@@ -77,7 +81,9 @@
       loanEdge: 0.3,         // 同普通
       loanGrowth: 2.5,       // 借贷：一轮最多能把筹码翻几倍（全押赢差 2 = 2.5 倍），估算借了还追不追得上
       playTemp: 0.15,        // 出牌的温度（#521）：比普通低（更常出期望高的），但不是 0
-      readBack: 0.5          // 别被摸透（#521）：假设对手看穿了自己出牌的概率、拿克制的牌来打，这个可能掺进推理的分量（再和没掺的取平均）
+      readBack: 0.5,         // 别被摸透（#521）：假设对手看穿了自己出牌的概率、拿克制的牌来打，这个可能掺进推理的分量（再和没掺的取平均）
+      choiceTemp: 0.05,      // 两选一的温度（#521）：比普通低
+      sizeJitter: 0.25       // 下注额（#521）：按底池算出来的、比最低额多出来的那部分上下浮动 25%
     }
   };
   const LEVELS = ["easy", "normal", "hard"];
@@ -120,6 +126,16 @@
   function softPick(items, score, temp, rng) {
     if (!items.length) return null;
     return draw(items, softOdds(items.map(score), temp), rng);
+  }
+  /** 两选一（#521）：a、b 两边的分按温度加权抽签，抽中 a 返回 true——好处差得多几乎总选好的那边，差不多时两边都会选 */
+  function softChoose(a, b, temp, rng) { return softPick([true, false], x => (x ? a : b), temp, rng); }
+  /** 下注额（#521 起带随机性；Flux Hold'em 的 AI 也用这一份）。edge = 胜率比「不赢不输」好多少（各玩法自己算），
+   *  cfg 要有 bigEdge / sizeTemp（普通）、sizePot / sizeJitter（困难）：
+   *  普通：胜率差到 bigEdge 下双倍最低额，不然下最低额——按温度 sizeTemp 两选一，胜率差在 bigEdge 附近时两种都会下；
+   *  困难：≈ 最低额 + 底池 × 胜率差 × sizePot，多出来的那部分再上下浮动 sizeJitter（±25% 就是 0.25） */
+  function betSize(min, pot, edge, level, cfg, rng) {
+    if (level === "hard") return min + pot * Math.max(0, edge) * cfg.sizePot * (1 + (cfg.sizeJitter || 0) * (2 * rng() - 1));
+    return min * (softChoose(edge, cfg.bigEdge, cfg.sizeTemp, rng) ? 2 : 1);
   }
   /** 这一方的得分（> 0 对自己有利） */
   function myScore(v, mine, opp, w) {
@@ -325,7 +341,8 @@
   /* ---------- 各步的决定 ---------- */
   /** 庄家天气行动（#502：场上有天气时保留以后也能接着偷看，偷看按顺序往下看）。
    *  简单：随手选——有天气时一半弃掉；不弃（或者没有天气）多半偷看下一张。
-   *  普通 / 困难：清掉天气比留着好才弃掉；留着（或者没有天气）时堆里还有没看过的牌就偷看——看的是没看过的下一张，
+   *  普通 / 困难：弃掉还是留着按「清掉天气以后」和「留着」哪边好、按温度 choiceTemp 两选一（#521：差不多时两边都会选，不再每次都一样；
+   *  弃掉要好过 weatherMargin 才算好）；留着（或者没有天气）时堆里还有没看过的牌就偷看——看的是没看过的下一张，
    *  看过的都记着：放回原位还是压到牌堆底（dealerPlace）、猜下一张天气（topDist：出牌、下注）都用上 */
   function dealerWeather(ctx) {
     const v = ctx.v, has = (op) => ctx.opts.some(o => o.op === op), go = (op) => ({ type: "weather", op });
@@ -334,7 +351,7 @@
       if (has("peek") && ctx.rng() < ctx.cfg.peekChance) return go("peek");
       return go(has("keep") ? "keep" : "pass");
     }
-    if (has("discard") && weatherValue(ctx, null) > weatherValue(ctx, v.weather) + ctx.cfg.weatherMargin) return go("discard");
+    if (has("discard") && softChoose(weatherValue(ctx, null) - ctx.cfg.weatherMargin, weatherValue(ctx, v.weather), ctx.cfg.choiceTemp, ctx.rng)) return go("discard");
     return go(has("peek") ? "peek" : has("keep") ? "keep" : "pass");
   }
   /** 庄家：这个天气下自己手里最好的那张牌的期望 */
@@ -347,7 +364,8 @@
     return best;
   }
   /** 偷看后放回原位还是压到牌堆底。简单随手放；普通 / 困难用上看过的情报（#502）：
-   *  这张对自己的牌不比「压下去以后换到这个位置上的那张」差太多就放回原位，不然压到牌堆底。
+   *  这张对自己的牌不比「压下去以后换到这个位置上的那张」差太多就放回原位，不然压到牌堆底——
+   *  按温度 choiceTemp 两选一（#521：差不多时两边都会选；差得多几乎总选好的那边）。
    *  换上来的：堆里还有没看过的牌 → 没看过的那些里的一张（看过的都知道在哪儿，不会换上来，不算进平均）；
    *  都看过了 → 压到底的第一张；下面没有牌了 → 放哪儿都一样。
    *  困难还看位置：这张在堆顶往下第几张、剩下几轮最多还能翻几张（这一轮也算）——翻不到它就不用挪 */
@@ -362,7 +380,7 @@
     if (!next.length) return top;
     if (ctx.level === "hard" && at >= v.rounds - v.round + 1) return top;
     const avg = next.reduce((s, w) => s + weatherValue(ctx, w), 0) / next.length;
-    return { type: "place", where: weatherValue(ctx, card) >= avg - ctx.cfg.weatherMargin ? "top" : "bottom" };
+    return { type: "place", where: softChoose(weatherValue(ctx, card) + ctx.cfg.weatherMargin, avg, ctx.cfg.choiceTemp, ctx.rng) ? "top" : "bottom" };
   }
   /** 出牌（#521 改成混合策略）：简单随手出；普通 / 困难按 playOdds 的概率抽一张——期望越高越容易出，但不是 100% */
   function playCard(ctx) {
@@ -463,14 +481,15 @@
     return { type: "fold" };
   }
   /** 下注时看牌（普通 / 困难）：对方出的是哪张（困难按对手这一轮的下注当信号修正）、结算时的天气 → 胜率 e；
-   *  诈唬率 bluffP（困难按对手面对下注时的弃牌率加减）；下注额 size(可选项)（困难按底池 × 胜率差，普通牌很好时下双倍最低额） */
+   *  诈唬率 bluffP（困难按对手面对下注时的弃牌率加减）；下注额 size(可选项)（betSize：困难按底池 × 胜率差、上下浮动，
+   *  普通牌很好时下双倍最低额，#521 起都带随机性） */
   function betRead(ctx) {
     const v = ctx.v, cfg = ctx.cfg;
     const st = ctx.level === "hard" ? oppStats(v) : null;
     // 别的两人玩法（Flux Duel，#488）借用这套下注决定时，胜率由它自己算（ctx.edge）
     const e = ctx.edge ? ctx.edge(ctx, st) : handEdge(ctx, st);
     const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
-    const size = (o) => (ctx.level === "hard" ? o.min + v.pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
+    const size = (o) => betSize(o.min, v.pot, e.edge, ctx.level, cfg, ctx.rng);
     return { e, st, bluffP, size };
   }
   /** High Flux：自己出的牌在结算时的胜率（困难按对手这一轮的下注修正对方出的是哪张；结算时的天气按现在到哪一步算） */
@@ -553,8 +572,9 @@
         return s + top[w] * (w === conf().allInWeather ? here : Math.max(here, clear));
       }, 0);
     } else rev = evaluate(ctx, m, top).ev;
+    // 留着现在的天气（暗弃最便宜的那张跳过，要好过 skipMargin 才算好）还是翻新的：按温度 choiceTemp 两选一（#521）
     const c = cheapest(ctx, skips);
-    if (keep - c.cost > rev + cfg.skipMargin) return { type: "skip", card: c.card };
+    if (softChoose(keep - c.cost - cfg.skipMargin, rev, cfg.choiceTemp, rng)) return { type: "skip", card: c.card };
     return { type: "reveal" };
   }
   function playerNormal(ctx) {
@@ -690,7 +710,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates, dealerKnownTop, cardOdds, softOdds, softPick, draw };
+  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates, dealerKnownTop, cardOdds, softOdds, softPick, softChoose, draw, betSize };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCardsAI = api;
 })(typeof window !== "undefined" ? window : globalThis);
