@@ -94,8 +94,46 @@ test("庄家（普通、困难）：偷看到的天气对自己的手牌好就�
   }
 });
 
-test("AI 对 AI：开过追加窗口、窗口里加注过，AI 在窗口里从不弃牌；全押、边池、借贷都出现过，对局不会卡住", () => {
-  let windows = 0, windowRaises = 0, allIns = 0, sidePots = 0, loans = 0;
+test("庄家（普通、困难）偷看到相位（留在顶上第 1 张天气就是它，翻开就全押）：手牌好就留在顶上，手牌差就压到堆底", () => {
+  const mk = (hand) => X.newGame({ seed: "偷看相位", players: seatsOf(2), layers: LAYERS.slice(), weathers: ["phase", "heat", "snow", "acid", "thunder", "glow", "sand"],
+    hands: { p1: hand, p2: ["physical", "energy", "acid"] }, elements: [] });
+  for (const level of ["normal", "hard"]) {
+    const strong = X.view(mk(["energy", "electric", "harmonic"]), "p1"), weak = X.view(mk(["ice", "ice", "ice"]), "p1");
+    // 能量打肉体的胜率比平均份额（0.5）高得多：留着，翻开就全押
+    assert.ok(AI.equity(strong, "energy", level, { w1: "phase" }).e > 0.6);
+    assert.deepEqual(J(AI.decide(strong, level, CC.makeRng("k"))), { type: "place", where: "top" }, level);
+    // 三张冰都比平均份额差：压到堆底，免得被逼全押
+    assert.ok(AI.equity(weak, "ice", level, { w1: "phase" }).e < 0.5);
+    assert.deepEqual(J(AI.decide(weak, level, CC.makeRng("k"))), { type: "place", where: "bottom" }, level);
+  }
+});
+
+test("相位的风险（普通、困难）：后面还可能翻到相位（翻开就全押）、自己的牌又差，被逼全押的期望亏损比留下来能分到的多——能过牌也弃牌；牌好不弃；简单照旧随手", () => {
+  const at = (card) => {
+    const g = X.newGame({ seed: "风险", players: seatsOf(2), layers: LAYERS.slice(), weathers: ["heat", "phase", "snow", "acid", "thunder", "glow", "sand"],
+      hands: { p1: [card, "physical", "energy"], p2: ["harmonic", "ice", "acid"] }, elements: [] });
+    A(g, "p1", "place", { where: "top" });
+    A(g, "p1", "play", { card }); A(g, "p2", "play", { card: "harmonic" });
+    A(g, "p2", "check"); A(g, "p1", "call");
+    X.toAct(g).forEach(id => A(g, id, "pass"));
+    A(g, "p2", "check");                               // 第二轮：乙过牌，轮到甲；第 2 张天气亮牌时才翻，可能是相位
+    return X.view(g, "p1");
+  };
+  const weak = at("harmonic"), strong = at("fire");
+  assert.ok(weak.legal.some(o => o.type === "check"), "能过牌");
+  assert.ok(AI.equity(weak, "harmonic", "hard").e < 0.5 && AI.equity(strong, "fire", "hard").e > 0.5);
+  for (const level of ["normal", "hard"]) for (let s = 0; s < 4; s++) {
+    // 两人都还有 48 枚：翻到相位要各补 48 枚，差牌亏得多，不如现在弃掉（只丢已经押下去的 2 枚）
+    assert.equal(AI.decide(weak, level, CC.makeRng("s" + s)).type, "fold", level);
+    assert.notEqual(AI.decide(strong, level, CC.makeRng("s" + s)).type, "fold", level);
+  }
+  // 简单不算这个：随手过牌、下注（偶尔随手弃牌，同以前）
+  const easy = [0, 1, 2, 3, 4, 5, 6, 7].map(s => AI.decide(weak, "easy", CC.makeRng("e" + s)).type);
+  assert.ok(easy.some(t => t !== "fold"));
+});
+
+test("AI 对 AI：开过追加窗口、窗口里加注过，AI 在窗口里从不弃牌；全押、边池、借贷、相位全押、全押同分滚存都出现过，对局不会卡住", () => {
+  let windows = 0, windowRaises = 0, allIns = 0, sidePots = 0, loans = 0, phaseAllIns = 0, carried = 0;
   for (let n = 0; n < 18; n++) {
     const g = X.newGame({ seed: "窗口" + n, players: seatsOf(2 + (n % 3)) });
     const levels = {};
@@ -106,6 +144,9 @@ test("AI 对 AI：开过追加窗口、窗口里加注过，AI 在窗口里从�
     allIns += g.log.filter(e => e.t === "bet" && e.op === "allIn").length;
     sidePots += g.results.filter(r => r.pots.length > 1).length;
     loans += g.order.reduce((t, id) => t + g.sides[id].loan, 0);
+    phaseAllIns += g.results.filter(r => r.allIn).length;
+    carried += g.results.filter(r => r.carry > 0).length;
+    assert.equal(g.carry, null, "打完了桌上不留滚存的");
     let open = false;
     g.log.forEach(e => {
       if (e.t === "window") open = e.op === "open";
@@ -120,6 +161,7 @@ test("AI 对 AI：开过追加窗口、窗口里加注过，AI 在窗口里从�
   assert.ok(windows > 0 && windowRaises > 0, `窗口 ${windows}，窗口里加注 ${windowRaises}`);
   assert.ok(allIns > 0 && sidePots > 0, `全押 ${allIns}，边池 ${sidePots}`);
   assert.ok(loans > 0);
+  assert.ok(phaseAllIns > 0 && carried > 0, `相位全押 ${phaseAllIns} 轮，同分滚存 ${carried} 轮`);
 });
 
 test("困难比简单强：两人局、四人局（两困难两简单）同样的种子、座位轮换，困难平均赢筹码", () => {
@@ -136,7 +178,7 @@ test("困难比简单强：两人局、四人局（两困难两简单）同样�
   }
 });
 
-test("统计工具 tools/flux-holdem-stats.js：AI 自对局里平分底池占亮牌的比例、占全部轮数的比例、平分过的局数", () => {
+test("统计工具 tools/flux-holdem-stats.js：AI 自对局里平分底池占亮牌的比例、占全部轮数的比例、平分过的局数；相位全押的轮数、其中同分滚存的轮数", () => {
   const S = require("../tools/flux-holdem-stats.js");
   const t = S.run(3, 4, { ctx: c });
   assert.equal(t.games, 4);
@@ -145,6 +187,8 @@ test("统计工具 tools/flux-holdem-stats.js：AI 自对局里平分底池占�
   assert.ok(t.mainSplit <= t.showdowns && t.anySplit >= t.mainSplit);
   assert.equal(t.splitPerShowdown, t.showdowns ? Math.round(t.mainSplit / t.showdowns * 1000) / 10 : 0);
   assert.equal(Object.values(t.splitWays).reduce((a, b) => a + b, 0), t.mainSplit);
+  assert.ok(t.allIns >= 1 && t.carried <= t.allIns, `相位全押 ${t.allIns} 轮，滚存 ${t.carried} 轮`);
+  assert.equal(t.carriedPerAllIn, t.allIns ? Math.round(t.carried / t.allIns * 1000) / 10 : 0);
   // 同样的参数结果一样
   assert.deepEqual(J(S.run(3, 4, { ctx: c })), J(t));
 });

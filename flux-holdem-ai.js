@@ -5,8 +5,12 @@
  *   简单不看牌；普通只扣掉自己手里、用过的牌；困难另外扣掉之前亮牌时公开过的牌，还把对手这一回合的下注 / 加注当成信号。
  *   庄家偷看过天气堆顶：留在顶上的那张就是第 1 张天气，压到堆底的那张（堆里不止一张时）不会是第 1 张。
  *   简单：随手盖牌，下注也随机，偶尔乱弃牌；
- *   普通：盖胜率最高的那张；下注看胜率比「平均份额」（1 ÷ 还在牌局里的人数）高多少，跟注看底池赔率，偶尔诈唬；
+ *   普通：盖胜率最高的那张；下注看胜率比「平均份额」（1 ÷ 还在牌局里的人数）高多少，跟注看底池赔率（底池算上滚存的），偶尔诈唬；
  *   困难：同普通，下注额按底池 × 多出来的胜率，对手加注时把自己的胜率往下调。
+ *   相位（主人 10/30：翻开就全押，上限按没弃牌的人里筹码最少那位）——普通、困难：
+ *     庄家偷看到相位：手牌最好那张的胜率比平均份额高够了才留在顶上（翻开就全押），不然压到堆底；
+ *     下注时后面还可能翻到相位、自己的牌又比平均份额差：被逼全押的期望亏损（概率 × (自己要补的 − 胜率 × 大家补进来的)）
+ *     比留在牌局里能分到的还多，就弃牌（能过牌也弃）。
  *   借贷：每轮开始落后才借（输光了也一样），领先不借；困难先估一下剩下几轮追不追得上。下注时跟不起：胜率够就借到够跟，一般就全押，不然弃牌。
  *   跟注后的追加窗口：马上决定，牌好就加注，不然不动作；窗口里不弃牌（同 High Flux 的 AI）。
  * 所有阈值都在 AI_CONFIG。
@@ -42,11 +46,13 @@
       loanEdge: 0.25,        // 跟不起时胜率比平均份额高这么多才借来跟（不然全押或弃牌）
       allInEdge: 0,          // 跟不起时胜率不低于平均份额就全押
       seen: false,           // 记不记之前亮牌公开过的牌
-      peekMargin: 0.02       // 庄家：留在顶上比压到堆底好这么多才留
+      peekMargin: 0.02,      // 庄家：留在顶上比压到堆底好这么多才留
+      phaseKeep: 0.05,       // 庄家偷看到相位：手牌最好那张的胜率比平均份额高这么多才留在顶上（翻开就全押）
+      phaseEdge: 0           // 后面还可能翻到相位时，胜率比平均份额低于这个数才算被逼全押亏不亏（亏得多就弃牌）
     },
     hard: {
       betEdge: 0.1, bigEdge: 0.3, raiseEdge: 0.25, callSlack: 0.08, cheapCall: 0.25, bluff: 0.1, loanEdge: 0.2, allInEdge: -0.02,
-      seen: true, peekMargin: 0.01,
+      seen: true, peekMargin: 0.01, phaseKeep: 0.02, phaseEdge: 0,
       sizePot: 0.6,          // 下注额 ≈ 最低额 + 底池 × 多出来的胜率 × 这个系数
       aggrRead: 0.12,        // 这一回合别人每下注 / 加注一次，自己的胜率往下调这么多 ÷ 对手人数（人多时一次下注说明不了几个人的牌）
       loanGrowth: 2.2        // 借贷：一轮最多能把筹码翻几倍，估算借了还追不追得上
@@ -136,13 +142,15 @@
 
   /* ---------- 胜率 ---------- */
   /** 出 card 时亮牌能分到底池的期望份额：每种可能里，自己的分对上每个对手（盖的牌按牌池加权）——
-   *  n 个对手都比自己低就拿全部，有 j 个同分就分 1 / (j + 1)。fair = 平均份额 1 / (n + 1) */
+   *  n 个对手都比自己低就拿全部，有 j 个同分就分 1 / (j + 1)。fair = 平均份额 1 / (n + 1)；
+   *  phase = 还没翻开的天气里翻出相位的概率（翻开就全押） */
   function equity(v, card, level, force) {
     const cfg = AI_CONFIG[LEVELS.indexOf(level) >= 0 ? level : "normal"];
     const n = rivals(v).length;
-    if (!n) return { e: 1, fair: 1, n: 0 };
+    if (!n) return { e: 1, fair: 1, n: 0, phase: 0 };
     const pool = elementPool(v, cfg), tot = Object.values(pool).reduce((a, b) => a + b, 0);
-    let e = 0;
+    const ph = conf().allInWeather;
+    let e = 0, phase = 0;
     scenarios(v, force).forEach(sc => {
       const s = hs(card, sc.layers, sc.weathers);
       let lt = 0, eq = 0;
@@ -150,8 +158,19 @@
       let share = 0;
       for (let j = 0; j <= n; j++) share += choose(n, j) * Math.pow(eq, j) * Math.pow(lt, n - j) / (j + 1);
       e += sc.p * share;
+      if (sc.weathers.indexOf(ph, v.weathers.length) >= 0) phase += sc.p;
     });
-    return { e, fair: 1 / (n + 1), n };
+    return { e, fair: 1 / (n + 1), n, phase };
+  }
+  /** 被逼全押这一下的期望（翻开相位：没弃牌的人全押，上限 = 没弃牌的人里筹码最少那位的全部筹码）：
+   *  概率 p ×（胜率 e × 大家补进来的 − 自己要补的），已经押下去的不算；call = 先跟多少（跟完再算）。负数 = 预计要亏 */
+  function phaseRisk(v, e, p, call) {
+    if (!p) return 0;
+    const live = v.seats.filter(s => !s.folded && !s.out);
+    const bet = (s) => s.bet + (s.id === v.side ? call : 0);
+    const cap = Math.min(...live.map(s => bet(s) + Math.max(0, s.chips - (s.id === v.side ? call : 0))));
+    const extra = live.reduce((t, s) => t + Math.max(0, cap - bet(s)), 0);
+    return p * (e * extra - Math.max(0, cap - (v.me.bet + call)));
   }
 
   /* ---------- 各步的决定 ---------- */
@@ -162,10 +181,15 @@
     cards.forEach(c => { const x = equity(ctx.v, c, ctx.level).e + ctx.rng() * 1e-6; if (x > bestV) { bestV = x; best = c; } });
     return { type: "play", card: best };
   }
-  /** 庄家：偷看到的那张当第 1 张天气，比压到堆底（第 1 张换成别的）好就留在顶上 */
+  /** 庄家：偷看到的那张当第 1 张天气，比压到堆底（第 1 张换成别的）好就留在顶上。
+   *  偷看到相位（相位不改得分，留在顶上就是翻开就全押）：手牌最好那张的胜率比平均份额高 phaseKeep 才留 */
   function place(ctx) {
     const v = ctx.v;
     if (ctx.level === "easy" || !v.peek) return { type: "place", where: ctx.rng() < ctx.cfg.peekKeep ? "top" : "bottom" };
+    if (v.peek.card === conf().allInWeather && v.deckCount > 1) {
+      const qs = v.me.hand.map(c => equity(v, c, ctx.level, { w1: v.peek.card }));
+      return { type: "place", where: Math.max(...qs.map(q => q.e)) - qs[0].fair >= ctx.cfg.phaseKeep ? "top" : "bottom" };
+    }
     const best = (force) => Math.max(...v.me.hand.map(c => equity(v, c, ctx.level, force).e));
     const keep = best({ w1: v.peek.card }), away = v.deckCount > 1 ? best({ not: v.peek.card }) : keep;
     return { type: "place", where: keep >= away - ctx.cfg.peekMargin ? "top" : "bottom" };
@@ -218,7 +242,7 @@
       if (r && rng() < cfg.raiseChance) return amount(r, r.min + rng() * (Math.min(r.max, r.min * cfg.maxBetMult) - r.min));
       return { type: "call" };
     }
-    const { e, edge } = read(ctx);
+    const { e, edge, phase } = read(ctx);
     const pot = v.pot;
     const odds = toCall > 0 ? toCall / (pot + toCall) : 0;
     const worthCall = toCall > 0 && (e >= odds - cfg.callSlack || toCall <= pot * cfg.cheapCall);
@@ -228,6 +252,9 @@
       if (allIn && (worthCall || edge >= cfg.allInEdge)) return { type: "allIn" };
       return { type: "fold" };
     }
+    // 相位的风险：后面还可能翻到相位、牌又比平均份额差——留在牌局里能分到的（跟完、过牌到亮牌）加上被逼全押的期望还是亏，就弃牌（能过牌也弃）
+    const call0 = Math.max(0, toCall);
+    if (edge < cfg.phaseEdge && e * (pot + call0) - call0 + phaseRisk(v, e, phase, call0) < 0) return { type: "fold" };
     const b = has("bet"), r = has("raise");
     if (toCall <= 0) {
       if (b && edge >= cfg.betEdge) return amount(b, size(ctx, b, edge));
@@ -240,12 +267,12 @@
     if (r && rng() < cfg.bluff / 2) return amount(r, r.min);
     return { type: "fold" };
   }
-  /** 下注时看牌：自己盖的那张的胜率；困难按这一回合别人的下注 / 加注往下调 */
+  /** 下注时看牌：自己盖的那张的胜率；困难按这一回合别人的下注 / 加注往下调。phase = 后面翻出相位的概率 */
   function read(ctx) {
     const v = ctx.v, q = equity(v, v.me.card, ctx.level);
     let e = q.e;
     if (ctx.level === "hard") e = Math.max(0, e - ctx.cfg.aggrRead * aggression(v) / Math.max(1, q.n));
-    return { e, fair: q.fair, edge: e - q.fair };
+    return { e, fair: q.fair, edge: e - q.fair, phase: q.phase };
   }
   /** 下注额：普通牌很好时双倍最低额；困难按底池 × 多出来的胜率 */
   function size(ctx, o, edge) {
