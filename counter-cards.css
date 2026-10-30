@@ -205,7 +205,12 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-res.lose { border-left-color: #d8322a; }
 .cc-res .cc-wxname { color: #b9c8b8; font-size: 11.5px; }
 .cc-res .cc-delta { font: 800 14px var(--num, var(--ui)); }
-.cc-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: #d6cdbb; }
+/* 记录：按时间顺序、最新的在最下面（同战斗记录），自己带滚动条；有新记录时贴底，往上翻着看旧的就停在原处（counter-cards-ui.js · logScroll / stickLog）。
+ * 不跟着侧栏压扁（flex: none）：侧栏放不下时照旧是侧栏自己滚 */
+.cc-log {
+  list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; line-height: 1.45; color: #d6cdbb;
+  flex: none; max-height: 22em; overflow-y: auto; overscroll-behavior: contain;
+}
 .cc-log .cc-private { color: #ffe08a; }
 /* 克制表的入口（counter-cards-ui.js · chartBtn）：点了打开和平时一样的克制表浮层（matchup-ui.js / matchup.css），格子是得分 */
 .cc-chartbtn { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; text-align: left; }

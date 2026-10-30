@@ -27,6 +27,7 @@
     maxDiscs: 12,          // 筹码堆最多画几枚
     chipsPerDisc: 5,       // 每枚圆片代表几枚筹码
     logLines: 14,          // 侧栏记录显示最近几条
+    logStick: 24,          // 侧栏记录离底部不到这么多像素算「在底部」：有新记录时接着贴底；往上翻得更多就停在原处（像素）
     // 克制表（得分）：入口按钮、暂停菜单那一项的说明
     chart: {
       label: "克制表",
@@ -424,7 +425,7 @@
     if (top) top.innerHTML = topHtml(v);
     if (board) board.innerHTML = boardHtml(v);
     if (actions) actions.innerHTML = actionsHtml(v);
-    if (side) side.innerHTML = sideHtml(v);
+    if (side) { const was = logScroll(side); side.innerHTML = sideHtml(v); stickLog(side, was); }
     if (banner) {
       const h = S.banner ? bannerHtml(S.banner, v) : v.over ? finalHtml(v) : "";
       banner.innerHTML = h;
@@ -633,11 +634,22 @@
       const o = outcomeOf(r, S.human);
       return `<li class="cc-res ${o.cls}"><b>第 ${r.r} 轮</b><span>${esc(o.text)}</span><span class="cc-wxname">${esc(CC().weatherName(r.weather))}</span><span class="cc-delta">${signed(r.delta[S.human])}</span></li>`;
     }).join("");
-    const log = v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
+    // 记录按时间顺序，最新的在最下面（和战斗记录一样；以前最新的在最上面）
+    const log = v.log.slice(-UI_CONFIG.logLines).map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
     // 克制表的入口放在最上面（以前这里是折叠的「克制速查」小表，换成打开完整克制表的按钮）
     return `${MU() ? chartBtn(v) : ""}<h3>每轮结算</h3><ol class="cc-results">${rows || "<li class=\"cc-empty\">还没有结算</li>"}</ol>
       ${rulesHtml()}
       <h3>记录</h3><ul class="cc-log">${log}</ul>`;
+  }
+  /** 侧栏的记录滚到了哪（整块重画之前看一眼）：null = 还没画过；bottom = 在底部（离底不到 logStick 像素，或者根本不用滚） */
+  function logScroll(side) {
+    const el = side.querySelector(".cc-log");
+    return el ? { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop - el.clientHeight <= UI_CONFIG.logStick } : null;
+  }
+  /** 重画之后：原来在底部（或第一次画）就滚到底看新记录；玩家往上翻着看旧的就停在原处，不强行拉回去（同联机的消息列表 online-ui.js · fillList） */
+  function stickLog(side, was) {
+    const el = side.querySelector(".cc-log");
+    if (el) el.scrollTop = !was || was.bottom ? el.scrollHeight : was.top;
   }
   /** 一轮的结果从 side 这一方看：只有胜负、分档 */
   function outcomeOf(r, side) {

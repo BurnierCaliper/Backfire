@@ -179,6 +179,62 @@ test("结算横幅只有胜负、分档和筹码变动，不亮牌；点「继�
   assert.ok(seen >= 1, "看到了结算横幅");
 });
 
+/** 小 DOM 不排版：给侧栏的记录列表一个假的高度（每条 30px、框高 100px），量滚动位置照浏览器的样子来；元素的类是所有页面共用的，用完一定要 stop() */
+function fakeLogBox(p) {
+  const proto = p.w.Element.prototype, log = (el) => el.classList.contains("cc-log");
+  const fake = { scrollHeight() { return log(this) ? this.children.length * 30 : 0; }, clientHeight() { return log(this) ? 100 : 0; } };
+  const saved = {};
+  Object.keys(fake).forEach(k => { saved[k] = Object.getOwnPropertyDescriptor(proto, k); Object.defineProperty(proto, k, { get: fake[k], configurable: true }); });
+  return { stop: () => Object.keys(saved).forEach(k => Object.defineProperty(proto, k, saved[k])) };
+}
+
+test("侧栏的记录（主人 10/30 试玩反馈，#499）：按时间顺序排，最新的一条在最下面（和战斗记录一样）；有新记录时滚到底，玩家往上翻着看旧的就停在原处；每轮结算第 1 轮在上面", (t) => {
+  const p = page();
+  const box = fakeLogBox(p);
+  t.after(box.stop);
+  const N = p.UI.UI_CONFIG.logLines;
+  const list = () => p.$("#cc-side .cc-log");
+  const texts = () => Array.from(list().querySelectorAll("li")).map(li => li.textContent);
+  const want = () => Array.from(p.UI.view().log.slice(-N), e => e.text);   // 页面里的数组先转成这边的
+  const atBottom = () => list().scrollHeight - list().scrollTop - list().clientHeight <= 0;
+  p.UI.start({ side: "player", level: "normal", seed: "记录顺序", fast: true });   // 庄家（AI）走完天气行动、暗出
+  assert.deepEqual(texts(), want(), "按时间顺序：先发生的在上面");
+  assert.match(texts()[0], /^第 1 轮：双方各下 1 枚底注/, "最早的一条在最上面");
+  assert.equal(texts()[texts().length - 1], "庄家暗出了一张牌。", "最新的一条在最下面");
+  assert.ok(atBottom(), "一开始就贴底");
+  // 人出牌：新记录接在最下面，滚到底
+  click(p.$('#cc-board button.cc-can[data-card="fire"]'));
+  assert.deepEqual(texts(), want());
+  assert.equal(texts()[texts().length - 1], "你暗出了〔火〕。", "新记录在最下面");
+  assert.ok(list().lastElementChild.classList.contains("cc-private"), "只给自己看的照旧标出来");
+  assert.ok(list().scrollHeight > list().clientHeight + 24, "记录多到要滚动了：" + texts().length + " 条");
+  assert.ok(atBottom(), "有新记录：滚到底");
+  // 玩家往上翻着看旧的：重画、来了新记录都停在原处，不强行拉回去
+  list().scrollTop = 20;
+  p.UI.render();
+  assert.equal(list().scrollTop, 20, "重画：停在原处");
+  const before = p.UI.view().log.length;
+  click(p.$('#cc-actions [data-cc="check"]'));   // 人过牌，庄家（AI）接着下注 / 过牌
+  assert.ok(p.UI.view().log.length > before, "来了新记录");
+  assert.deepEqual(texts(), want());
+  assert.equal(list().scrollTop, 20, "往上翻着：不拉回最底下");
+  // 翻回最底下：再来新记录就接着贴底
+  list().scrollTop = list().scrollHeight - list().clientHeight;
+  for (let i = 0; i < 10 && p.UI.state().game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.deepEqual(texts(), want());
+  assert.ok(atBottom(), "在底部：新记录来了接着贴底");
+  assert.ok(texts().length <= N, `最多显示最近 ${N} 条`);
+  // 打完一局：每轮结算第 1 轮在上面；记录照旧按时间顺序、最后一条是对局结束
+  playThrough(p, p.CC.makeRng("记录顺序"));
+  const rounds = Array.from(p.$$("#cc-side .cc-results .cc-res > b")).map(b => b.textContent);
+  assert.deepEqual(rounds, Array.from(p.UI.state().game.results, r => `第 ${r.r} 轮`), "每轮结算：第 1 轮在上面");
+  assert.equal(rounds[0], "第 1 轮");
+  assert.deepEqual(texts(), want());
+  assert.match(texts()[texts().length - 1], /^对局结束/, "最后一条是对局结束");
+  assert.ok(atBottom());
+  assert.match(read("counter-cards.css"), /\.cc-log\s*\{[^}]*overflow-y:\s*auto/, "记录自己带滚动条");
+});
+
 test("AI 平时等一会儿再走（开局等发牌动画放完）；setFast(true) 把正在等的那一步马上走掉", () => {
   const p = page();
   p.UI.start({ side: "player", level: "normal", seed: "等一等" });

@@ -370,6 +370,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **High Flux 界面：右侧「记录」改成最新的在最下面（和战斗记录一致）**（主人 10/30 试玩反馈，#499；只改界面，规则不动；counter-cards-ui.js · `UI_CONFIG.logStick`（新）、`logScroll` / `stickLog`（新）、`sideHtml` / `render`；counter-cards.css · `.cc-log`；测试：tests/counter-cards-ui.test.js 加一条「侧栏的记录」）
+  - **以前**：牌桌右侧侧栏的「记录」是最新的在最上面（最近 14 条倒过来排），和战斗画面的记录（最新的在最下面）顺序相反；记录跟着侧栏一起变长，没有自己的滚动条。
+  - **现在**：按时间顺序排，最新的在最下面（还是显示最近 14 条，只给自己看的照旧标黄）；记录自己带滚动条（最高 22em，电脑和手机一样），有新记录时自动滚到最底下；玩家自己往上翻着看旧的（离底部超过 24 像素，`UI_CONFIG.logStick`）就停在原处，整块重画、来了新记录都不强行拉回去，翻回底部后接着贴底。「往上翻了不拉回去」的做法照联机的消息列表（online-ui.js · `fillList`：重画前看一眼在不在底部）；战斗记录（game.js）每来一条都直接滚到底，没有这一层。侧栏的「每轮结算」本来就是第 1 轮在上面，没动。
 - **High Flux 分档赔付只留两档：删掉「差 ±3 及以上」**（主人 10/30 在 PR #486 的评论；counter-cards.js · `CC_CONFIG.tierExtra` / `tierOf` / `extraOf` / `settle` / `resultText`；counter-cards-ui.js · `rulesHtml` / `outcomeOf` / `bannerHtml`；测试：tests/counter-cards.test.js、tests/counter-cards-ui.test.js）
   - **以前**：三档：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额的 0.5 倍；差 3 及以上再赔 1 倍。但单轮分差最多 ±2，第 3 档永远打不出来。
   - **现在**：只有差 1、差 2 两档（`tierExtra` 改成 `[0, 0, 0.5]`）。万一分差超过 2，按差 2 算。界面上的规则说明、结算文字不再写「差 3」。细节见下面 High Flux 那一条的「分档赔付只留两档」。
