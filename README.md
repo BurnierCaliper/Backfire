@@ -371,6 +371,11 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **High Flux 系列跟着 #497（酸雨也豁免谐波的 −25%）变的数**（合并旧 PR 时一起处理；规则没有另改，计分照旧直接读 engine.js；测试：tests/counter-cards-guess.test.js、tests/counter-cards-ui.test.js、tests/flux-holdem.test.js）
+  - **以前**：酸雨下谐波记 −1。
+  - **现在**：酸雨下谐波记 0（酸、冰以外打装甲那 +1 照旧）。跟着变的：
+    - 猜大猜小：第一轮 245 种组合的分布从 −2 / −1 / 0 / +1 / +2 = 27 / 62 / 95 / 49 / 12，变成 25 / 62 / 96 / 50 / 12；第一轮赔率 +1 那一格从 4.5 倍变 4 倍；第二轮谐波那一行从 6 / 2 / 4.5 / 4.5 / 32 变成 10 / 2 / 4 / 4 / 32；第一轮押 0 的实际抽水约 21.6%（以前约 22.5%）。其余格子不变。
+    - 庄家偷看出来的酸雨牌、克制表、悬停预览：不再写「谐波 −1」。
 - **新状态效果「目盲」（通用状态，可以叠加）：1 / 2 / 3 层攻击 25% / 50% / 100% 落空，被格挡下来的概率 +25% / 50% / 100%；一次攻击只掷一次落空骰，范围攻击也会落空，落空就整次攻击作废；落空一次或者被格挡下来一次卸一层**（#405；engine.js · `BLIND`（新，每层的数值都在这里）、`unitOf`；effects.js · `blindMaxStacks` / `blindStacksOf` / `blindStacks` / `isBlind` / `blindPct` / `dropBlind` / `blindActionRolls` / `blindRollApplies` / `blindRoll` / `blindNewAttack` / `blindMissedThisAction` / `blindBlockBonus` / `blindOnBlocked`（新）；app.js · `dealToInner`、`finalBlockChance`、`performAssistBlock`、`tryOxAutoBlock`、`finishBlockInner`、`flushAoePulse`、`runSkillInner`（音爆）、`statusLine`、`renderEditor`、`resetBattleFlags`、`hasAnyStatus`、`STATUS_POP`；codex.js · `CODEX_EFFECTS`；hud-icons.js（图标、层数角标）；online-view.js · `statusKeys` / `popupWords`；online-ui.js、online-gm-ui.js、gm-commands.js · `STATUS_NUM`、trpg-commands.js · `CalcCommands`、game.js · `defaultStatuses` / 状态字音效、online-sfx.js、hd2d/hd2d-layout.js · `STATUS_LABELS`；测试 tests/blind.test.js（新）、tests/codex.test.js）
   - **以前**：没有这个状态。攻击不会落空（打不出去的除外：射程不够、目标躲藏、隔着危墙……），只能靠协助格挡挡下来。
   - **现在**：单位身上可以挂「目盲」（通用状态，不占效果位）：

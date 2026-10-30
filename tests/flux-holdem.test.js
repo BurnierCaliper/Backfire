@@ -514,19 +514,19 @@ test("相位全押后同分：底池不分，留在桌上滚到下一轮——�
 });
 
 test("相位全押后同分、最后一轮：同分的人平分（不再滚存）", () => {
-  // 前 4 轮天气都不是相位；第 5 轮第 1 张是相位
-  const g = game3({ weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "phase", "acid"] });
+  // 前 4 轮天气都不是相位；第 5 轮第 1 张是相位、第 2 张酷暑（#497 以后酸雨也豁免谐波，原来那张酸雨让三个人都 +1，改成酷暑）
+  const g = game3({ weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "phase", "heat"] });
   [{ p1: "fire", p2: "physical", p3: "ice" }, { p1: "ice", p2: "fire", p3: "physical" }, { p1: "physical", p2: "ice", p3: "fire" },
     { p1: "harmonic", p2: "harmonic", p3: "acid" }].forEach(cards => quietRound(g, cards));
   assert.equal(g.round, 5);
   assert.ok(!g.results.some(r => r.allIn), "前 4 轮没有相位");
   const before = J(g.order.map(id => g.sides[id].chips));
-  toBet1(g, { p1: "energy", p2: "acid", p3: "harmonic" });
+  toBet1(g, { p1: "energy", p2: "acid", p3: "electric" });
   settleStreet(g);
   assert.equal(g.over, true);
   const r = g.results[4];
   assert.equal(r.allIn, true);
-  // 沙尘 + 星灵，相位 + 酸雨：能量 +1、酸 +1、谐波 −1——甲、乙同分最高
+  // 沙尘 + 星灵，相位 + 酷暑：能量 +1、酸 +1、电 −1——甲、乙同分最高
   assert.deepEqual(J(Object.keys(r.shown).map(id => r.shown[id].score)), [1, 1, -1]);
   assert.ok(!r.carry, "最后一轮不滚存");
   assert.equal(r.split, true);
