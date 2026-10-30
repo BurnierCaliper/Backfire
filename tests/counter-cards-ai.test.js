@@ -452,7 +452,7 @@ test("普通 / 困难用上看过的情报（#502）：偷看后放回原位还�
   assert.equal(easy.size, 2, "简单随手放");
 });
 
-test("困难庄家用上看过的情报（#502）：三张压到了牌堆底、堆里只剩一张没看过——推得出堆顶就是那张（微光），出牌和亲眼看过堆顶时一样", () => {
+test("困难庄家用上看过的情报（#502）：三张压到了牌堆底、堆里只剩一张没看过——推得出堆顶就是那张（微光），出牌和亲眼看过堆顶时一样（出每张牌的概率一样，#521 起出牌按概率抽）", () => {
   const deck = ["heat", "snow", "acid", "sand", "phase", "thunder", "glow"];
   const mk = (look) => {
     const g = CC.newGame({ seed: "推出堆顶", deck });
@@ -476,7 +476,87 @@ test("困难庄家用上看过的情报（#502）：三张压到了牌堆底、�
   const a = AI.decide(inferred, "hard", CC.makeRng("x")), b = AI.decide(looked, "hard", CC.makeRng("x"));
   assert.equal(a.type, "play");
   assert.equal(a.card, b.card, "推出来的堆顶和亲眼看过的一样用");
-  assert.equal(a.card, "shield");
+  const oa = AI.cardOdds(inferred, "hard"), ob = AI.cardOdds(looked, "hard");
+  assert.deepEqual(J(oa), J(ob), "出每张牌的概率一样");
+  assert.equal(Object.keys(oa).sort((x, y) => oa[y] - oa[x])[0], "shield", "最可能出护盾：" + JSON.stringify(oa));
+});
+
+/* ---------- 出牌改成混合策略（#521，主人 10/30：庄家几乎每局都是装甲开局、第二轮护盾） ---------- */
+
+const UTIL = (s) => (!s ? 0 : Math.sign(s) * (1 + (CC.CC_CONFIG.tierExtra[CC.tierOf(s)] || 0)));
+/** 一张牌平时（没有天气）对对方每张牌的平均分量：层牌按庄家算、元素牌按玩家算——「平时多强」 */
+const STRENGTH = {};
+CC.CC_CONFIG.layers.forEach(l => { STRENGTH[l] = -CC.CC_CONFIG.elements.reduce((s, e) => s + UTIL(CC.score(e, l, null)), 0) / CC.CC_CONFIG.elements.length; });
+CC.CC_CONFIG.elements.forEach(e => { STRENGTH[e] = CC.CC_CONFIG.layers.reduce((s, l) => s + UTIL(CC.score(e, l, null)), 0) / CC.CC_CONFIG.layers.length; });
+/** 两边都是 level，自己打 n 局（种子各不相同） */
+function selfPlay(level, n, tag) {
+  return Array.from({ length: n }, (_, i) => AI.playOut(CC.newGame({ seed: `${tag}-${level}-${i}` }), { dealer: level, player: level }));
+}
+const tallyOf = (list) => { const m = {}; list.forEach(k => { m[k] = (m[k] || 0) + 1; }); return m; };
+
+test("出牌是混合策略（#521）：普通、困难 AI 当庄家自己打 200 局——第 1 轮出得最多的那张层牌不超过 60%、至少出现 3 种；玩家方第 1 轮的元素牌也一样；普通出得最多的还是期望最高的装甲", () => {
+  for (const level of ["normal", "hard"]) {
+    const games = selfPlay(level, 200, "混合");
+    for (const side of ["dealer", "player"]) {
+      const first = tallyOf(games.map(g => g.sides[side].history[0].card));
+      const top = Math.max(...Object.values(first));
+      const msg = `${level} ${side} 第 1 轮：${JSON.stringify(first)}`;
+      assert.ok(top <= 200 * 0.6, msg);
+      assert.ok(Object.keys(first).length >= 3, msg);
+      if (level === "normal" && side === "dealer") assert.equal(Object.keys(first).find(k => first[k] === top), "armor", msg);
+    }
+  }
+});
+
+test("出牌的概率（#521）：期望越高越容易出、但不是 100%（CounterCardsAI.cardOdds，decide 就按它抽）；困难的温度比普通低；简单照旧平均", () => {
+  const g = CC.newGame({ seed: "出牌概率", deck: DECK });
+  A(g, "dealer", "weather", { op: "pass" });
+  const dv = CC.view(g, "dealer"), pv = CC.view(g, "player");
+  assert.ok(AI.AI_CONFIG.hard.playTemp > 0 && AI.AI_CONFIG.hard.playTemp < AI.AI_CONFIG.normal.playTemp, "困难温度较低，但不是 0");
+  for (const level of LEVELS) for (const v of [dv, pv]) {
+    const odds = AI.cardOdds(v, level);
+    assert.deepEqual(Object.keys(odds).sort(), J(v.legal.map(o => o.card)).sort());
+    assert.ok(Math.abs(Object.values(odds).reduce((a, b) => a + b, 0) - 1) < 1e-9);
+    assert.ok(Object.values(odds).every(p => p > 0 && p < 0.6), `${level} ${v.side}：${JSON.stringify(odds)}`);
+  }
+  // 普通（只看期望）：第 1 轮没有天气，庄家期望 装甲 > 护盾 > 沙尘 = 星灵 > 肉体，概率也是这个顺序
+  const n = AI.cardOdds(dv, "normal");
+  assert.ok(n.armor > n.shield && n.shield > n.sand && Math.abs(n.sand - n.spirit) < 1e-12 && n.spirit > n.flesh, JSON.stringify(n));
+  // 简单：平均
+  Object.values(AI.cardOdds(dv, "easy")).forEach(p => assert.ok(Math.abs(p - 0.2) < 1e-12));
+  // 抽出来的分布和概率对得上（同一个局面，不同的随机数）
+  const seen = tallyOf(Array.from({ length: 400 }, (_, i) => AI.decide(dv, "normal", CC.makeRng("抽" + i)).card));
+  Object.keys(n).forEach(k => assert.ok(Math.abs((seen[k] || 0) / 400 - n[k]) < 0.08, `${k}：抽中 ${seen[k]} 次，概率 ${n[k]}`));
+  assert.equal(AI.cardOdds(CC.view(CC.newGame({ seed: "x" }), "dealer"), "hard"), null, "不是出牌的时候");
+});
+
+test("困难「别被摸透」（#521）：同一局里不按「先强后弱」的固定顺序出牌——200 局里庄家按平时强弱从强到弱出牌的局不超过 20%，出牌顺序五花八门；第 1 轮最强的装甲被压一压（比普通出得少）", () => {
+  const games = selfPlay("hard", 200, "摸透");
+  const orders = games.map(g => g.sides.dealer.history.map(h => h.card));
+  const strongFirst = orders.filter(o => o.length >= 3 && o.every((c, i) => !i || STRENGTH[o[i - 1]] >= STRENGTH[c] - 1e-9)).length;
+  const kinds = new Set(orders.map(o => o.join(">"))).size;
+  assert.ok(strongFirst <= 200 * 0.2, `先强后弱 ${strongFirst} 局`);
+  assert.ok(kinds >= 40, `出牌顺序 ${kinds} 种`);
+  const g = CC.newGame({ seed: "出牌概率", deck: DECK });
+  A(g, "dealer", "weather", { op: "pass" });
+  const dv = CC.view(g, "dealer");
+  assert.ok(AI.cardOdds(dv, "hard").armor < AI.cardOdds(dv, "normal").armor);
+});
+
+test("同一个种子打两次，结果完全一样（#521：随机数只用传进来的 rng）；换个种子就不一样", () => {
+  const run = (seed, dl, pl) => { const g = CC.newGame({ seed }); AI.playOut(g, { dealer: dl, player: pl }); return JSON.stringify([g.log, g.results, g.final, g.sides]); };
+  for (const [dl, pl] of [["normal", "normal"], ["hard", "hard"], ["hard", "easy"], ["easy", "normal"]]) {
+    for (let i = 0; i < 4; i++) assert.equal(run("复现" + i, dl, pl), run("复现" + i, dl, pl), `${dl}/${pl}/${i}`);
+  }
+  const all = new Set(Array.from({ length: 8 }, (_, i) => run("不同" + i, "hard", "hard")));
+  assert.ok(all.size > 1);
+  // 同一个局面、同一个种子的随机数：决定一样
+  const g = CC.newGame({ seed: "复现局面", deck: DECK });
+  A(g, "dealer", "weather", { op: "pass" });
+  for (const level of LEVELS) for (const side of ["dealer", "player"]) {
+    const v = CC.view(g, side);
+    assert.deepEqual(J(AI.decide(v, level, CC.makeRng("同" + level))), J(AI.decide(v, level, CC.makeRng("同" + level))));
+  }
 });
 
 test("玩家方从公开记录推出庄家知道堆顶往下几张（#502）：偷看后放回原位 +1、压到牌堆底不变、翻开一张 −1——庄家第 3 轮往下看了第 2 张、压到牌堆底，堆顶还是庄家看过、留着的那张（困难的玩家方照样认为它多半对庄家有利）", () => {

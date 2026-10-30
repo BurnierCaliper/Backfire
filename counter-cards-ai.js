@@ -11,6 +11,11 @@
  *         借贷和普通一样，另外先估一下：借了以后剩下几轮全赢还追不追得上，追不上就不借，免得白欠；
  *         跟不起时按胜率算借来跟划不划算（借的利息也算进去：每借 3 枚多还 1 枚）。
  * 玩家方 AI 会决定什么时候翻天气、什么时候暗弃跳过（弃哪张）、要不要用常态清掉天气。
+ * 出牌是混合策略（#521，主人 10/30：以前普通 / 困难只出期望最高的那张，庄家几乎每局都是装甲开局、第二轮护盾）：
+ *   普通 / 困难按期望加权抽签（softOdds，温度 playTemp：普通高、困难低但不是 0）——期望越高越容易出，但不是 100%；
+ *   困难再「别被摸透」（readBack）：假设对手看穿了自己出牌的概率、拿克制的牌来打，把这个可能掺进推理里重新算一遍，和原来的取平均，
+ *   最容易被猜到的那张（多半是平时最强的）被压一压，同一局里不会按「先强后弱」的固定顺序出。
+ *   随机数只用传进来的 rng：同一个种子打出同样的一局。
  * 所有阈值都在 AI_CONFIG。
  *
  *   CounterCardsAI.decide(view, "hard", rng)          → 一个操作（交给 CounterCards.act）
@@ -18,6 +23,9 @@
  *   CounterCardsAI.belief(view, "hard")                → 推理出的「对方这一轮出的是哪张」的概率
  *   CounterCardsAI.decideBet(view, "hard", rng, edge)  → 借贷 / 下注 / 追加窗口的决定，胜率由 edge 给（Flux Duel 借用，#488）
  *   CounterCardsAI.dealerKnownTop(view)                → 从公开记录推出庄家知道堆顶往下几张（偷看按顺序往下看，#502）
+ *   CounterCardsAI.cardOdds(view, "hard")              → 出牌那一步每张牌会被抽中的概率 { 牌: 概率 }（decide 就按它抽，#521）
+ *   CounterCardsAI.softOdds(分[], 温度)                → 按温度加权抽签的概率（#521；softPick(项[], 项 → 分, 温度, rng) / draw(项[], 概率[], rng) 按它抽）——
+ *                                                        Flux Duel / Flux Hold'em 的 AI 也用这一份
  */
 (function (root) {
   "use strict";
@@ -52,7 +60,8 @@
       normalKeep: 0.3,       // 留着常态的价值
       elementKeep: 0.15, elementFv: 0.5,  // 留着一张元素牌的价值：基础 + 它平时的期望 × 系数
       loanEdge: 0.4,         // 下注时筹码不够：胜率差（赢 − 输）到这里、而且想下注 / 加注才借
-      loanCallEdge: 0.1      // 对方押得比自己手上的还多（跟不起）：胜率差到这里才借来跟，不然弃牌
+      loanCallEdge: 0.1,     // 对方押得比自己手上的还多（跟不起）：胜率差到这里才借来跟，不然弃牌
+      playTemp: 0.3          // 出牌按期望加权抽签的温度（#521）：越高越随机，0 = 只出期望最高的那张
     },
     hard: {
       betEdge: 0.2, bigEdge: 0.5, raiseEdge: 0.4, callEdge: -0.1, cheapCall: 0.3,
@@ -66,7 +75,9 @@
       normalKeep: 0.35, elementKeep: 0.15, elementFv: 0.6,
       sizePot: 0.8,          // 下注额 ≈ 最低额 + 底池 × 胜率差 × 这个系数
       loanEdge: 0.3,         // 同普通
-      loanGrowth: 2.5        // 借贷：一轮最多能把筹码翻几倍（全押赢差 2 = 2.5 倍），估算借了还追不追得上
+      loanGrowth: 2.5,       // 借贷：一轮最多能把筹码翻几倍（全押赢差 2 = 2.5 倍），估算借了还追不追得上
+      playTemp: 0.15,        // 出牌的温度（#521）：比普通低（更常出期望高的），但不是 0
+      readBack: 0.5          // 别被摸透（#521）：假设对手看穿了自己出牌的概率、拿克制的牌来打，这个可能掺进推理的分量（再和没掺的取平均）
     }
   };
   const LEVELS = ["easy", "normal", "hard"];
@@ -83,6 +94,33 @@
     return out;
   }
   function uniform(list) { const m = {}; list.forEach(k => { m[k] = (m[k] || 0) + 1; }); return normalize(m); }
+
+  /* ---------- 按温度加权抽签（#521：High Flux / Flux Duel / Flux Hold'em 的 AI 共用这一份） ---------- */
+  /** 每一项被抽中的概率（softmax）：按 exp((分 − 最高分) ÷ 温度) 加权、归一——分越高越容易抽中，但不是 100%。
+   *  分差比温度大得多时几乎总是分最高的那项，分差接近时差不多平分；温度越高越平均。
+   *  温度 ≤ 0 = 只取分最高的（一样高时取前面的）。分不是有限数的那项不抽（都不是就平均抽） */
+  function softOdds(vals, temp) {
+    const ok = vals.map(x => (Number.isFinite(x) ? x : null));
+    const live = ok.filter(x => x != null);
+    if (!live.length) return vals.map(() => 1 / vals.length);
+    const top = Math.max(...live);
+    if (!(temp > 0)) { const i = ok.indexOf(top); return ok.map((_, j) => (j === i ? 1 : 0)); }
+    const w = ok.map(x => (x == null ? 0 : Math.exp((x - top) / temp)));
+    const s = w.reduce((a, b) => a + b, 0);
+    return w.map(x => x / s);
+  }
+  /** 按概率 odds（和 items 一一对应）抽一项：只用一次 rng——同一个种子抽出来一样 */
+  function draw(items, odds, rng) {
+    let u = rng();
+    for (let i = 0; i < items.length; i++) { u -= odds[i]; if (u < 0) return items[i]; }
+    for (let i = items.length - 1; i >= 0; i--) if (odds[i] > 0) return items[i];   // 浮点误差：落到最后一个抽得到的
+    return items[items.length - 1];
+  }
+  /** 按温度加权抽签：score(项) = 这一项的分（期望），按 softOdds 的概率抽一项 */
+  function softPick(items, score, temp, rng) {
+    if (!items.length) return null;
+    return draw(items, softOdds(items.map(score), temp), rng);
+  }
   /** 这一方的得分（> 0 对自己有利） */
   function myScore(v, mine, opp, w) {
     return v.side === "player" ? CC().score(mine, opp, w) : -CC().score(opp, mine, w);
@@ -326,20 +364,53 @@
     const avg = next.reduce((s, w) => s + weatherValue(ctx, w), 0) / next.length;
     return { type: "place", where: weatherValue(ctx, card) >= avg - ctx.cfg.weatherMargin ? "top" : "bottom" };
   }
+  /** 出牌（#521 改成混合策略）：简单随手出；普通 / 困难按 playOdds 的概率抽一张——期望越高越容易出，但不是 100% */
   function playCard(ctx) {
-    const v = ctx.v, cards = ctx.opts.map(o => o.card);
+    const cards = ctx.opts.map(o => o.card);
     if (ctx.level === "easy") return { type: "play", card: pick(cards, ctx.rng) };
-    let best = null, bestVal = -Infinity;
-    cards.forEach(m => {
-      let val;
-      if (ctx.level === "normal") val = evaluate(ctx, m, { [wKey(v.weather)]: 1 }).ev;
-      else if (v.side === "player") val = playerOptionValue(ctx, m);
-      else val = evaluate(ctx, m, finalWeather(ctx)).ev;
-      val -= ctx.cfg.futureWeight * futureValue(ctx, m);
-      val += ctx.rng() * 1e-6;                     // 一样好时随便挑一张
-      if (val > bestVal) { bestVal = val; best = m; }
+    return { type: "play", card: draw(cards, playOdds(ctx, cards), ctx.rng) };
+  }
+  /** 出这张牌的分：普通看现在的天气；困难的玩家方算上之后翻天气 / 暗弃跳过里好的那个，困难的庄家按结算时可能的天气；
+   *  再扣掉这张牌留到以后的价值（futureWeight） */
+  function cardValue(ctx, m) {
+    const v = ctx.v;
+    let val;
+    if (ctx.level === "normal") val = evaluate(ctx, m, { [wKey(v.weather)]: 1 }).ev;
+    else if (v.side === "player") val = playerOptionValue(ctx, m);
+    else val = evaluate(ctx, m, finalWeather(ctx)).ev;
+    return val - ctx.cfg.futureWeight * futureValue(ctx, m);
+  }
+  /** 出每张牌的概率（#521）：按 cardValue 加权抽签（softOdds，温度 playTemp）。
+   *  困难再「别被摸透」（readBack）：假设对手看穿了自己这样出牌的概率、拿克制的牌来打（counterBelief），
+   *  按 readBack 的分量掺进「对方出哪张」的推理里，重新算一遍分再加权，和没掺的取平均——
+   *  最容易被猜到的那张（多半是平时最强的）会被压一压，同一局里不会一直按「先强后弱」的顺序出 */
+  function playOdds(ctx, cards) {
+    const cfg = ctx.cfg, vals = (c) => cards.map(m => cardValue(c, m));
+    const odds = softOdds(vals(ctx), cfg.playTemp);
+    if (!(cfg.readBack > 0)) return odds;
+    const read = softOdds(vals(Object.assign({}, ctx, { belief: counterBelief(ctx, cards, odds) })), cfg.playTemp);
+    return odds.map((x, i) => (x + read[i]) / 2);
+  }
+  /** 困难「别被摸透」：对手要是猜中了自己出每张牌的概率（odds），它手里可能有的每张牌（ctx.belief 里不为 0 的）打过来的期望，
+   *  按温度加权（再乘上它手里有这张的可能）——这就是「被看穿以后对手会出什么」；和原来的推理按 readBack 掺在一起 */
+  function counterBelief(ctx, cards, odds) {
+    const v = ctx.v, bel = ctx.belief, Q = finalWeather(ctx), lam = ctx.cfg.readBack;
+    const opp = Object.keys(bel).filter(o => bel[o] > 0);
+    if (!opp.length) return bel;
+    const oppEv = opp.map(o => {
+      let s = 0;
+      cards.forEach((m, i) => {
+        if (!odds[i]) return;
+        Object.keys(Q).forEach(k => { s -= odds[i] * Q[k] * util(myScore(v, m, o, wVal(k))) * (k === conf().allInWeather ? ctx.cfg.allInWeight || 1 : 1); });
+      });
+      return s;
     });
-    return { type: "play", card: best };
+    const q = softOdds(oppEv, ctx.cfg.playTemp).map((x, i) => x * bel[opp[i]]);
+    const qs = q.reduce((a, b) => a + b, 0);
+    const out = {};
+    Object.keys(bel).forEach(o => { out[o] = (1 - lam) * bel[o]; });
+    if (qs > 0) opp.forEach((o, i) => { out[o] += lam * q[i] / qs; });
+    return out;
   }
   /** 玩家（困难）：出这张牌之后，翻天气 / 暗弃跳过里更好的那个 */
   function playerOptionValue(ctx, m) {
@@ -589,6 +660,17 @@
     else return null;
     return safe(view, a, rng);
   }
+  /** 出牌那一步每张牌会被抽中的概率 { 牌: 概率 }（#521，测试 / 调参用；decide 就是按它抽的）：简单是平均的；不是出牌的时候返回 null */
+  function cardOdds(view, level) {
+    if (!view || view.stage !== "play" || !view.legal || !view.legal.length) return null;
+    level = LEVELS.indexOf(level) >= 0 ? level : "normal";
+    const ctx = { v: view, level, rng: Math.random, cfg: AI_CONFIG[level], opts: view.legal, belief: belief(view, level) };
+    const cards = ctx.opts.map(o => o.card);
+    const p = level === "easy" ? cards.map(() => 1 / cards.length) : playOdds(ctx, cards);
+    const out = {};
+    cards.forEach((c, i) => { out[c] = p[i]; });
+    return out;
+  }
   /** 让 side 这一方（AI）走一步；不是它的回合返回 null */
   function step(g, side, level, rng) {
     if (CC().toAct(g).indexOf(side) < 0) return null;
@@ -608,7 +690,7 @@
     return g;
   }
 
-  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates, dealerKnownTop };
+  const api = { AI_CONFIG, LEVELS, LEVEL_NAMES, decide, decideBet, step, playOut, belief, candidates, dealerKnownTop, cardOdds, softOdds, softPick, draw };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCardsAI = api;
 })(typeof window !== "undefined" ? window : globalThis);
