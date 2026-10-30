@@ -370,7 +370,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
-- **新玩法：High Flux 黑市「猜大猜小」**（#489，规则 Burnier；分阶段下注、防白看、相位翻倍按主人 10/30 在 #489 的「规则更新」，赔率公式按同一天的「规则勘误和补充」（正文写的「抽水一成」改成 32/35）；新文件 counter-cards-guess.js（规则：`GUESS_CONFIG`（加载时挂到 `CounterCards.CC_CONFIG.guess`）/ `outcome` / `tally` / `oddsOf` / `payoutOf` / `board` / `tables` / `dealOf` / `newHand` / `toAct` / `legal` / `act` / `view`）；测试 tests/counter-cards-guess.test.js（新））
+- **新玩法：High Flux 黑市「猜大猜小」**（#489，规则 Burnier；分阶段下注、防白看、相位翻倍按主人 10/30 在 #489 的「规则更新」，赔率公式按同一天的「规则勘误和补充」（正文写的「抽水一成」改成 32/35）；新文件 counter-cards-guess.js（规则：`GUESS_CONFIG`（加载时挂到 `CounterCards.CC_CONFIG.guess`）/ `outcome` / `tally` / `oddsOf` / `payoutOf` / `board` / `tables` / `dealOf` / `newHand` / `toAct` / `legal` / `act` / `view`）、counter-cards-guess-ui.js + counter-cards-guess.css（牌桌界面：`UI_CONFIG` / `open` / `start`）；game.html：标题「本地玩法」加入口 `#t-ccg`、页面骨架 `#scr-ccg`、加载这几个文件；测试 tests/counter-cards-guess.test.js、tests/counter-cards-guess-ui.test.js（都是新的））
   - **以前**：High Flux 只有庄家对玩家的 5 轮暗牌，没有猜大猜小。
   - **现在**（规则层，不碰网页）：
     - **玩法**：庄家（AI / 黑市 NPC / 跑团主持人；筹码无限，不用做决定）随机抽 1 张攻击元素（7 选 1）、1 张天气（7 选 1）、1 张层牌（5 选 1）盖在桌上，玩家猜这一手的得分：−2 / −1 / 0 / +1 / +2（超出 ±2 按 ±2）。
@@ -381,7 +381,8 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - **不开盘**：k = 0（不可能）、k = N（必中），以及算出来 ≤ 1 倍的格子（猜中也只拿回本金：第三轮 k = 4 照公式是 1 倍，照规则表不开）。不开盘的格子押不进去；一轮里没有开盘的格子（结果已定）或者没人能押，直接翻下一张。
     - **看不到的**：没翻开的牌和种子不在玩家的画面（`view`）里；押注、赔率表、翻开的牌、记录是公开的。
     - 数值都在 `GUESS_CONFIG`（`odds` / `halfBelow` / `closeAtOrBelow` / `phase` / `entry` / `minBet` / `tables` / `order`）。
-  - **测试**：tests/counter-cards-guess.test.js（新，11 条，在没改的代码上都失败）：计分照 `CounterCards.score`、相位只翻倍克制分（换掉 `CounterCards.score` 结果跟着变）；245 / 35 / 5 种组合的分布；三张赔率表逐格对上（改了系数跟着变）；取整和半枚向下取整；抽水不低于名义、两个例子；不开盘（k = 0、k = N、≤ 1 倍，押不进去；全部必中时直接结算、入场费照收）；整手流程和赔率锁定、结算连本带利；防白看（入场费不退、最低注、第一轮没押的后两轮押不了、第二轮不押照样押第三轮、交不起入场费）；桌子倍率和 `CC_CONFIG.guess`；画面里没有没翻开的牌和种子；发牌按种子可复现、三张各自均匀。
+    - **界面**：标题 → 本地玩法 → High Flux · 猜大猜小 → 选桌（写入场费、每格最低注）→ 坐下。本地试玩坐下拿 50 枚筹码（`UI_CONFIG.startChips`，`null` = 和 High Flux 的开局筹码一样），一手接一手，筹码带到下一手；交不起入场费只能重新坐下。牌面、筹码堆、按钮、结算横幅借用 High Flux 的（counter-cards-ui.js / counter-cards.css），画面只拿 `view`：庄家的三张牌盖着是牌背（画面里没有牌面），翻开一张亮一张（翻牌动画，天气翻开有天气特效）；赔率表 5 格写赔率（连本带利）和「k / N 种」，不开盘的格子灰掉写「不开」、点不了；轮到你时点开盘的格子加进这一轮的押注（默认最低注，− / + 调，✕ 去掉），「押注」一次交上去；押过的注摆在格子上，写锁定的赔率。第一轮的「不押」按钮写「不押（这一手不玩了）」。相位的天气牌写「克制分 ×2、不加天气修正」（不是 High Flux 的「双方全押」）。结算横幅：结果、三张牌、押中几格拿回多少、这一手净输赢（含入场费）、手上还有多少；侧栏有每手结算、规则和记录。手机 390px 下赔率表 5 格挤在一行、牌缩小。
+  - **测试**：tests/counter-cards-guess-ui.test.js（新，7 条，在没改的代码上都失败）：本地玩法的入口和选桌（倍率）；三张盖着、画面里没有牌面、第一轮赔率和 k / N、入场费；点格子攒押注、− / + / ✕、交上去翻元素、锁定的赔率摆在格子上、第二轮最低注；不开盘的格子点不了；第一轮不押直接结算、横幅（相位写克制分 ×2）、再来一手；随便押几十手筹码和规则层一致、交不起入场费只能重新坐下；回到标题。tests/counter-cards-guess.test.js（新，11 条，在没改的代码上都失败）：计分照 `CounterCards.score`、相位只翻倍克制分（换掉 `CounterCards.score` 结果跟着变）；245 / 35 / 5 种组合的分布；三张赔率表逐格对上（改了系数跟着变）；取整和半枚向下取整；抽水不低于名义、两个例子；不开盘（k = 0、k = N、≤ 1 倍，押不进去；全部必中时直接结算、入场费照收）；整手流程和赔率锁定、结算连本带利；防白看（入场费不退、最低注、第一轮没押的后两轮押不了、第二轮不押照样押第三轮、交不起入场费）；桌子倍率和 `CC_CONFIG.guess`；画面里没有没翻开的牌和种子；发牌按种子可复现、三张各自均匀。
 - **High Flux 分档赔付只留两档：删掉「差 ±3 及以上」**（主人 10/30 在 PR #486 的评论；counter-cards.js · `CC_CONFIG.tierExtra` / `tierOf` / `extraOf` / `settle` / `resultText`；counter-cards-ui.js · `rulesHtml` / `outcomeOf` / `bannerHtml`；测试：tests/counter-cards.test.js、tests/counter-cards-ui.test.js）
   - **以前**：三档：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额的 0.5 倍；差 3 及以上再赔 1 倍。但单轮分差最多 ±2，第 3 档永远打不出来。
   - **现在**：只有差 1、差 2 两档（`tierExtra` 改成 `[0, 0, 0.5]`）。万一分差超过 2，按差 2 算。界面上的规则说明、结算文字不再写「差 3」。细节见下面 High Flux 那一条的「分档赔付只留两档」。
