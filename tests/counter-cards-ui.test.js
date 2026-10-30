@@ -1,8 +1,9 @@
 // High Flux（#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、游戏名、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
 // 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌；
-// 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）。
+// 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）；
+// 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
-// 克制表的 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
+// 克制表、悬停预览的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -574,6 +575,215 @@ test("克制表：Esc——牌局中打开暂停菜单（里面有克制表）�
   assert.equal(p.doc.body.dataset.screen, "title");
 });
 
+/* ---------- 悬停预览：手里的元素牌（作者 10/29 在 PR #486 的评论）——电脑上鼠标停上去、手机上长按 ---------- */
+/** 在 el 上发一个会冒泡的事件（pointerover / pointerout / touchstart / contextmenu……），返回这个事件（看 defaultPrevented） */
+const fireEv = (p, el, type, o) => { assert.ok(el, "要碰的东西不在：" + type); const ev = new p.w.Event(type, Object.assign({ bubbles: true }, o || {})); el.dispatchEvent(ev); return ev; };
+const hover = (p, el) => fireEv(p, el, "pointerover", { pointerType: "mouse" });
+const leaveTo = (p, el, to) => fireEv(p, el, "pointerout", { pointerType: "mouse", relatedTarget: to || null });
+const finger = (p, el, type, x, y) => fireEv(p, el, type, { touches: /end|cancel/.test(type) ? [] : [{ clientX: x || 0, clientY: y || 0 }] });
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+const handCard = (p, face) => p.$(`#cc-board .cc-me [data-face="${face}"]`);
+const tipScores = (p) => Array.from(p.$$("#cc-tip [data-layer] b")).map(b => b.textContent);
+const chartRow = (p, el, w) => J(p.CC.chart(w).cells[p.CC.CC_CONFIG.elements.indexOf(el)].map(x => fmt(x.value)));   // 克制表里这张牌的一行（页面里的数组先转成这边的）
+
+test("悬停预览（作者 10/29 在 PR #486 的评论）：鼠标停在手里的元素牌上弹出小预览——这张牌按场上天气打血肉、装甲、护盾、沙、灵体各得几分（+1 / 0 / −1，就是克制表里这张牌的一行，配色同克制表），移开就收起，不动牌局", () => {
+  const p = page();
+  const game = heatGame(p, "悬停");
+  const tip = p.$("#cc-tip"), before = JSON.stringify(game);
+  assert.ok(tip, "页面骨架里有预览");
+  assert.equal(tip.getAttribute("role"), "tooltip");
+  assert.ok(!visible(tip), "平时不显示");
+  hover(p, handCard(p, "fire").querySelector(".cc-name"));   // 停在牌上的字上也算
+  assert.ok(visible(tip), "鼠标停上去弹出预览");
+  assert.equal(tip.dataset.card, "fire");
+  assert.match(tip.querySelector(".cc-tip-head").textContent, /火/);
+  assert.match(tip.textContent, /天气 常态/);
+  const cells = Array.from(tip.querySelectorAll("[data-layer]"));
+  assert.deepEqual(cells.map(x => x.dataset.layer), ["flesh", "armor", "shield", "sand", "spirit"]);
+  assert.deepEqual(cells.map(x => x.querySelector(".cc-tip-name").textContent), ["血肉", "装甲", "护盾", "沙", "灵体"]);
+  assert.ok(cells.every(x => x.querySelector("svg.eicon")), "每一层带层的图标");
+  assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
+  assert.deepEqual(tipScores(p), chartRow(p, "fire", null), "就是克制表里火这一行");
+  assert.deepEqual(cells.map(x => x.dataset.kind), ["adv", "dis", "neu", "neu", "dis"], "上色同克制表：正分红、负分蓝、0 灰");
+  assert.equal(handCard(p, "fire").getAttribute("aria-describedby"), "cc-tip");
+  assert.ok(!handCard(p, "fire").hasAttribute("title"), "不再另弹浏览器自己的小字提示（会和预览叠在一起）");
+  // 换到另一张：写那一张
+  leaveTo(p, handCard(p, "fire"), handCard(p, "ice"));
+  hover(p, handCard(p, "ice"));
+  assert.equal(tip.dataset.card, "ice");
+  assert.deepEqual(tipScores(p), ["0", "0", "0", "0", "−1"]);
+  // 在这张牌里面挪（图标 → 字）不收起
+  leaveTo(p, handCard(p, "ice").querySelector(".cc-ico"), handCard(p, "ice").querySelector(".cc-name"));
+  assert.ok(visible(tip));
+  // 移开：收起
+  leaveTo(p, handCard(p, "ice"), p.$("#cc-board"));
+  assert.ok(!visible(tip), "移开就收起");
+  assert.ok(!handCard(p, "ice").hasAttribute("aria-describedby"));
+  // 停在牌桌别处不弹；手指碰到时浏览器发的 pointerover（pointerType = touch）不算悬停（手机走长按）
+  hover(p, p.$("#cc-board .cc-deck"));
+  assert.ok(!visible(tip));
+  fireEv(p, handCard(p, "fire"), "pointerover", { pointerType: "touch" });
+  assert.ok(!visible(tip), "手指碰一下不弹");
+  assert.equal(JSON.stringify(game), before, "看预览不动牌局");
+});
+
+test("悬停预览：开着的时候场上的天气变了，预览跟着变（翻开酷暑：火打血肉 +1 → +2；微光反转、酸雨打装甲另 +1 也对），整块重画后照旧挂在这张牌上", () => {
+  const p = page();
+  const game = heatGame(p, "预览跟着变");
+  click(p.$('#cc-board button.cc-can[data-card="ice"]'));
+  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.equal(game.stage, "weather");
+  const tip = p.$("#cc-tip");
+  hover(p, handCard(p, "fire"));
+  assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
+  click(p.$('#cc-actions [data-cc="reveal"]'));
+  assert.equal(game.weather, "heat");
+  assert.ok(visible(tip), "还开着");
+  assert.equal(tip.dataset.weather, "heat");
+  assert.match(tip.textContent, /天气 酷暑/);
+  assert.deepEqual(tipScores(p), ["+2", "0", "+1", "+1", "0"], "酷暑：火 +1");
+  assert.equal(handCard(p, "fire").getAttribute("aria-describedby"), "cc-tip", "整块重画后照旧挂在这张牌上");
+  game.weather = "glow"; p.UI.render();
+  assert.match(tip.textContent, /天气 微光/);
+  assert.deepEqual(tipScores(p), ["−1", "+1", "0", "0", "+1"], "微光：克制关系反转");
+  hover(p, handCard(p, "energy"));
+  assert.deepEqual(tipScores(p), ["+1", "0", "+1", "+1", "+2"], "微光：能量不反转，另 +1");
+  game.weather = "acid"; p.UI.render();
+  hover(p, handCard(p, "electric"));
+  assert.deepEqual(tipScores(p), ["+1", "+1", "+2", "0", "+1"], "酸雨：电 +1，打装甲另 +1");
+  for (const w of [null].concat(p.CC.CC_CONFIG.weathers)) {
+    game.weather = w; p.UI.render();
+    for (const el of ["fire", "acid", "electric", "energy", "physical", "harmonic"]) {   // 冰已经出掉了
+      hover(p, handCard(p, el));
+      assert.equal(tip.dataset.weather, w || "none");
+      assert.deepEqual(tipScores(p), chartRow(p, el, w), `${el} / ${w || "没有天气"}：和克制表一致`);
+    }
+  }
+});
+
+test("悬停预览：只写这张牌自己的数，不透露庄家暗出的层牌——庄家出哪一张，预览都一模一样，也不标出哪一层", () => {
+  const seen = new Set();
+  for (const ly of ["flesh", "armor", "shield", "sand", "spirit"]) {
+    const p = page();
+    const game = p.CC.newGame({ seed: "不透露", deck: ["heat", "glow", "acid", "thunder", "snow", "sand", "phase"] });
+    p.CC.act(game, "dealer", { type: "weather", op: "pass" });
+    p.CC.act(game, "dealer", { type: "play", card: ly });
+    p.UI.start({ side: "player", level: "normal", game, fast: true });
+    for (const el of ["fire", "harmonic"]) {
+      hover(p, handCard(p, el));
+      const tip = p.$("#cc-tip");
+      assert.equal(tip.querySelectorAll("[data-layer]").length, 5, "五种层都写");
+      assert.ok(!tip.querySelector(".sel, .on, [aria-current]"), "没有哪一层特别标出来");
+      seen.add(el + "|" + tip.outerHTML);
+    }
+  }
+  assert.equal(seen.size, 2, "庄家出哪张层牌，预览都一样");
+});
+
+test("悬停预览：只有玩家手里的元素牌有——常态、对方的牌背、桌上暗出的牌没有；人当庄家时手里的层牌也没有", () => {
+  const p = page();
+  heatGame(p, "只有元素牌");
+  assert.deepEqual(Array.from(p.$$("#cc-board [data-cc-tip]")).map(x => x.dataset.ccTip), ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"]);
+  for (const el of [handCard(p, "normal"), p.$("#cc-board .cc-opp .cc-card"), p.$("#cc-board .cc-slot .cc-back")]) {
+    hover(p, el);
+    assert.ok(!visible(p.$("#cc-tip")));
+  }
+  const q = page();
+  q.UI.start({ side: "dealer", level: "normal", seed: "庄家没有", fast: true });
+  assert.ok(!q.$("#cc-board [data-cc-tip]"));
+  hover(q, q.$('#cc-board .cc-me [data-face="flesh"]'));
+  assert.ok(!visible(q.$("#cc-tip")));
+});
+
+test("悬停预览：不挡出牌——预览不接鼠标，开着时照样点这张牌出牌，出掉就收起；不是出牌的时候（下注、翻天气）手里的牌也能看、操作栏照常；克制表、结算横幅盖上来、离开牌桌时收起", () => {
+  const p = page();
+  const game = heatGame(p, "不挡出牌");
+  const tip = p.$("#cc-tip");
+  assert.match(read("counter-cards.css"), /\.cc-tip\s*\{[^}]*pointer-events:\s*none/, "预览不接鼠标：点到的还是底下的牌和按钮");
+  hover(p, handCard(p, "fire"));
+  assert.ok(visible(tip));
+  click(handCard(p, "fire"));
+  assert.equal(game.sides.player.card, "fire", "照常出牌");
+  assert.ok(!visible(tip), "这张牌出掉了，预览收起");
+  // 下注的时候：手里的牌点不了，也能看；开着时照常下注
+  assert.equal(game.stage, "bet1");
+  assert.ok(!handCard(p, "ice").matches("button"));
+  hover(p, handCard(p, "ice"));
+  assert.ok(visible(tip) && tip.dataset.card === "ice");
+  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.equal(game.stage, "weather", "下注栏照常");
+  assert.ok(visible(tip), "还开着");
+  // 克制表盖上来：收起
+  click(p.$('#cc-side [data-cc="chart"]'));
+  assert.ok(p.UI.chartOpen());
+  assert.ok(!visible(tip), "开克制表时收起");
+  click(p.$("#mu-overlay [data-mu-close]"));
+  // 结算横幅盖上来：收起
+  hover(p, handCard(p, "ice"));
+  assert.ok(visible(tip));
+  click(p.$('#cc-actions [data-cc="reveal"]'));
+  if (game.stage === "normal") click(p.$('#cc-actions [data-cc="noNormal"]'));
+  for (let i = 0; i < 10 && game.stage === "bet2"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  assert.ok(visible(p.$("#cc-banner")), "这一轮结算了");
+  assert.ok(!visible(tip), "结算横幅盖上来就收起");
+  // 离开牌桌：收起
+  click(p.$('#cc-banner [data-cc="dismiss"]'));
+  hover(p, handCard(p, "ice"));
+  assert.ok(visible(tip));
+  click(p.$('#cc-top [data-cc="title"]'));
+  assert.ok(!visible(tip), "回到标题就收起");
+});
+
+test("手机长按：按住手里的元素牌一会儿弹出预览，松手不会把牌出掉（这一下不算点击）；预览留着看，手指碰别处就收起；再点一下这张牌照常出牌；系统的长按菜单不弹", async () => {
+  const p = page();
+  const game = heatGame(p, "长按");
+  const tip = p.$("#cc-tip"), ms = p.UI.UI_CONFIG.tip.pressMs;
+  assert.ok(ms >= 300 && ms <= 700, "按住多久算长按：" + ms);
+  finger(p, handCard(p, "fire"), "touchstart", 50, 50);
+  assert.ok(!visible(tip), "刚按下去不弹");
+  await wait(ms + 80);
+  assert.ok(visible(tip), "按住一会儿弹出预览");
+  assert.equal(tip.dataset.card, "fire");
+  assert.deepEqual(tipScores(p), ["+1", "−1", "0", "0", "−1"]);
+  assert.ok(fireEv(p, handCard(p, "fire"), "contextmenu").defaultPrevented, "不弹系统的长按菜单");
+  const up = finger(p, handCard(p, "fire"), "touchend");
+  assert.ok(up.defaultPrevented, "长按松手：取消默认动作，浏览器就不会再补一下点击");
+  click(handCard(p, "fire"));   // 万一浏览器还是补了一下点击
+  assert.equal(game.sides.player.card, null, "长按不会把牌出掉");
+  assert.ok(visible(tip), "松手以后预览留着");
+  // 手指碰别处：收起
+  finger(p, p.$("#cc-board .cc-deck"), "touchstart", 10, 10);
+  assert.ok(!visible(tip), "手指碰别处就收起");
+  finger(p, p.$("#cc-board .cc-deck"), "touchend");
+  // 再长按一下，松手后轻点这张牌：照常出牌
+  finger(p, handCard(p, "fire"), "touchstart", 50, 50);
+  await wait(ms + 80);
+  finger(p, handCard(p, "fire"), "touchend");
+  assert.ok(visible(tip));
+  finger(p, handCard(p, "fire"), "touchstart", 50, 50);
+  assert.ok(!finger(p, handCard(p, "fire"), "touchend").defaultPrevented, "轻点不拦");
+  click(handCard(p, "fire"));
+  assert.equal(game.sides.player.card, "fire", "预览开着也照常出牌");
+  assert.ok(!visible(tip), "出掉了就收起");
+});
+
+test("手机长按：轻点照常出牌、不弹预览；按住时手指挪开（在滑动页面）不算长按", async () => {
+  const p = page();
+  const game = heatGame(p, "轻点");
+  const tip = p.$("#cc-tip"), ms = p.UI.UI_CONFIG.tip.pressMs;
+  finger(p, handCard(p, "acid"), "touchstart", 50, 50);
+  finger(p, handCard(p, "acid"), "touchmove", 50, 90);
+  await wait(ms + 80);
+  assert.ok(!visible(tip), "手指挪开了：不算长按");
+  finger(p, handCard(p, "acid"), "touchend");
+  finger(p, handCard(p, "ice"), "touchstart", 50, 50);
+  assert.ok(!finger(p, handCard(p, "ice"), "touchend").defaultPrevented);
+  click(handCard(p, "ice"));
+  assert.equal(game.sides.player.card, "ice", "轻点照常出牌");
+  await wait(ms + 80);
+  assert.ok(!visible(tip), "轻点不弹预览");
+});
+
 /* ---------- 真浏览器（没装 Playwright 时跳过） ---------- */
 function findPlaywright() {
   try { return require("playwright"); } catch (e) {}
@@ -713,6 +923,84 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     assert.equal(await game(), before2, "开关克制表不动牌局");
     const overflow = await page.evaluate(() => document.getElementById("scr-cc").scrollWidth - innerWidth);
     assert.ok(overflow <= 1, "牌桌没有横向溢出（顶栏多了「菜单」）：" + overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 悬停预览（真浏览器）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
+/** 手指按下 / 抬起：Playwright 没有长按，直接发 Chrome 调试协议的触摸事件（备用浏览器 tests/cdp-browser.js 有 page.send；Playwright 开一个 CDP 会话） */
+async function touchAt(page, type, x, y) {
+  const params = { type, touchPoints: type === "touchEnd" ? [] : [{ x, y, radiusX: 1, radiusY: 1, force: 1, id: 1 }] };
+  if (typeof page.send === "function") return page.send("Input.dispatchTouchEvent", params);
+  if (!page.__ccCdp) page.__ccCdp = await page.context().newCDPSession(page);
+  return page.__ccCdp.send("Input.dispatchTouchEvent", params);
+}
+/** 量一下预览（在页面里跑）：开没开、写的哪张牌、分数（和规则层的 cardChart 对照）、在不在屏幕里、盖没盖住手牌、牌的中心点到的是不是这张牌 */
+function measureTip(face) {
+  const tip = document.getElementById("cc-tip"), card = document.querySelector(`#cc-board .cc-me [data-face="${face}"]`);
+  if (!tip || !card) return null;
+  const r = tip.getBoundingClientRect(), c = card.getBoundingClientRect(), h = card.parentNode.getBoundingClientRect();
+  const hit = document.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2);
+  return { shown: !tip.hidden && r.width > 0 && r.height > 0, card: tip.dataset.card, weather: tip.dataset.weather,
+    scores: [...tip.querySelectorAll("[data-layer] b")].map(b => b.textContent),
+    want: CounterCards.cardChart(face, CounterCardsUI.view().weather).cells.map(x => (x.value > 0 ? "+" + x.value : x.value < 0 ? "−" + -x.value : "0")),
+    left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: innerWidth, vh: innerHeight, handTop: h.top, handBottom: h.bottom,
+    hit: !!hit && card.contains(hit), pe: getComputedStyle(tip).pointerEvents };
+}
+function checkTip(m, where) {
+  assert.ok(m && m.shown, where + "：预览开着");
+  assert.equal(m.card, "fire", where);
+  assert.deepEqual(m.scores, m.want, where + "：和规则层（克制表那一行）同一份数");
+  assert.ok(m.left >= 0 && m.right <= m.vw && m.top >= 0 && m.bottom <= m.vh, `${where}：在屏幕里 ${JSON.stringify(m)}`);
+  assert.ok(m.bottom <= m.handTop + 1, `${where}：摆在手牌上面，不盖住手牌 ${JSON.stringify(m)}`);
+  assert.ok(m.hit, where + "：牌的中心点到的还是这张牌");
+  assert.equal(m.pe, "none", where + "：预览不接鼠标");
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px", mobile: true }]) {
+  test(`真浏览器（${vp.tag}）：${vp.mobile ? "长按" : "鼠标停在"}手里的元素牌上弹出得分预览——在屏幕里、摆在手牌上面，不挡出牌（${vp.mobile ? "松手不出牌，再点一下照常出牌" : "移开收起；停着照样点得到这张牌，出掉就收起；天气变了跟着变"}）`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext(Object.assign({ viewport: { width: vp.width, height: vp.height } }, vp.mobile ? { isMobile: true, hasTouch: true } : {}));
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    await page.emulateMedia({ reducedMotion: "reduce" });   // 不放发牌动画：量位置时牌已经在手里
+    await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCardsUI.start({ side: "player", level: "normal", seed: "预览", fast: true }); });   // 庄家（AI）走完，轮到人出牌
+    const sel = '#cc-board .cc-me [data-face="fire"]', played = () => page.evaluate(() => CounterCardsUI.state().game.sides.player.card);
+    await page.waitForSelector('#cc-board button.cc-can[data-card="fire"]', T);
+    if (vp.mobile) {
+      const c = await page.evaluate(s => { const el = document.querySelector(s); el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+      await page.waitForTimeout(150);
+      await touchAt(page, "touchStart", c.x, c.y);   // 「刚按下去不弹」在上面 Node 里那条查（这里机器忙时等的时间不准）
+      await page.waitForTimeout(900);
+      checkTip(await page.evaluate(measureTip, "fire"), "按住");
+      await touchAt(page, "touchEnd");
+      await page.waitForTimeout(500);
+      assert.equal(await played(), null, "长按松手不出牌");
+      checkTip(await page.evaluate(measureTip, "fire"), "松手以后预览留着");
+      await page.tap(sel, T);
+      await page.waitForFunction(() => CounterCardsUI.state().game.sides.player.card === "fire", null, T);
+    } else {
+      await page.hover(sel, T);
+      await page.waitForSelector("#cc-tip", Object.assign({ state: "visible" }, T));
+      checkTip(await page.evaluate(measureTip, "fire"), "鼠标停着");
+      await page.evaluate(() => { CounterCardsUI.state().game.weather = "glow"; CounterCardsUI.render(); });
+      const g = await page.evaluate(measureTip, "fire");
+      checkTip(g, "天气变成微光");
+      assert.deepEqual([g.weather, g.scores], ["glow", ["−1", "+1", "0", "0", "+1"]], "微光：克制关系反转");
+      await page.mouse.move(4, 4);
+      await page.waitForSelector("#cc-tip", Object.assign({ state: "hidden" }, T));
+      await page.hover(sel, T);
+      await page.waitForSelector("#cc-tip", Object.assign({ state: "visible" }, T));
+      await page.click(sel, T);
+      await page.waitForFunction(() => CounterCardsUI.state().game.sides.player.card === "fire", null, T);
+    }
+    await page.waitForSelector("#cc-tip", Object.assign({ state: "hidden" }, T));
+    const overflow = await page.evaluate(() => document.getElementById("scr-cc").scrollWidth - innerWidth);
+    assert.ok(overflow <= 1, "牌桌没有横向溢出：" + overflow + "px");
     assert.deepEqual(errors, []);
   });
 }

@@ -1,6 +1,6 @@
 // High Flux（#485）· 规则引擎 counter-cards.js：计分（克制表 + 天气，特别是微光、酸雨对装甲）、每轮流程、
 // 庄家天气行动 / 偷看、暗出、下注（最低额 = 轮数、最多加注 2 次、过牌 / 弃牌）、玩家翻天气 / 暗弃跳过 / 常态、
-// 相位全押封顶、平局滚存、分档赔付、看不到对方的牌、赌场接口
+// 相位全押封顶、平局滚存、分档赔付、看不到对方的牌、赌场接口；克制表（得分）和手里元素牌的悬停预览
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -206,6 +206,33 @@ test("克制表（得分）：格子的原因写这一分怎么来的——酷�
   assert.ok(acid.notes.includes("酸雨：火、电、能量、物理、谐波打装甲另 +1"));
   assert.ok(acid.notes.includes("酸雨天气修正：火、冰、物理、谐波 −1；酸、电 +1"));
   assert.ok(CC.chart("phase").notes.some(n => /^相位：不改得分；翻到相位的那一轮双方全押/.test(n)));
+});
+
+test("悬停预览（作者 10/29 在 PR #486 的评论）：cardChart(元素牌, 天气) 就是克制表 chart(天气) 里这张牌的那一行——打血肉、装甲、护盾、沙、灵体的得分和计分 score()、克制表完全一致（微光反转、酸雨打装甲也是）；常态、层牌没有", () => {
+  for (const w of ALL_WEATHER) {
+    const ch = CC.chart(w);
+    C.elements.forEach((el, i) => {
+      const p = CC.cardChart(el, w);
+      assert.deepEqual([p.card, p.name, p.weather, p.weatherName], [el, CC.cardName(el), w || "none", ch.weatherName], `${el}/${w}`);
+      assert.deepEqual(J(p.cells.map(x => [x.layer, x.name])), J(C.layers.map(ly => [ly, CC.cardName(ly)])), "五种层，次序同克制表的列");
+      p.cells.forEach((x, j) => {
+        const cell = ch.cells[i][j];
+        assert.equal(x.value, CC.score(el, C.layers[j], w), `${el}/${C.layers[j]}/${w}：和计分一致`);
+        assert.deepEqual([x.value, x.kindId, x.kind, x.base, x.changed, x.reason], [cell.value, cell.kindId, cell.kind, cell.base, cell.changed, cell.reason], `${el}/${C.layers[j]}/${w}：和克制表那一格一致`);
+      });
+    });
+  }
+  const row = (el, w) => J(CC.cardChart(el, w).cells.map(x => x.value));
+  assert.deepEqual(row("fire", null), [1, -1, 0, 0, -1], "没有天气：火克血肉、被装甲和灵体克");
+  assert.deepEqual(row("fire", "heat"), [2, 0, 1, 1, 0], "酷暑：火 +1");
+  assert.deepEqual(row("fire", "glow"), [-1, 1, 0, 0, 1], "微光：克制关系反转");
+  assert.deepEqual(row("energy", "glow"), [1, 0, 1, 1, 2], "微光：能量不反转，另 +1");
+  assert.deepEqual(row("electric", "acid"), [1, 1, 2, 0, 1], "酸雨：电 +1，打装甲另 +1");
+  assert.deepEqual(row("ice", "acid"), [-1, -1, -1, -1, -2], "酸雨：冰 −1，打装甲不另加");
+  assert.deepEqual(row("fire", "phase"), row("fire", null), "相位不改得分");
+  assert.equal(CC.cardChart("normal", "heat"), null, "常态不是元素牌");
+  assert.equal(CC.cardChart("flesh", null), null, "层牌没有");
+  assert.equal(CC.cardChart("fire", "没有这种天气").weather, "none");
 });
 
 /* ---------- 开局 ---------- */

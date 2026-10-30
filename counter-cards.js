@@ -30,6 +30,7 @@
  *   CounterCards.view(g, "player")           → 这一方能看到的东西（对方的手牌、暗出的牌、暗弃的牌、庄家偷看到的天气都不在里面）
  *   CounterCards.chart(g.weather)            → 克制表（得分）：这个天气下每张元素牌打每张层牌的得分，格式同 matchup.js · matchupChart，
  *                                              牌局中随时能开（counter-cards-ui.js 交给 matchup-ui.js 照平时克制表的样子画）
+ *   CounterCards.cardChart("fire", g.weather) → 悬停预览：这张元素牌在这个天气下打五种层各得几分（就是上面克制表里这张牌的一行）
  */
 (function (root) {
   "use strict";
@@ -167,6 +168,18 @@
       cells, changed, notes,
       legend: { adv: `${T.kinds.adv}（正分）`, dis: `${T.kinds.dis}（负分）`, neu: `${T.kinds.neu}（0）` },
       corner: T.corner, tag: `${C.name} 得分`
+    };
+  }
+  /** 悬停预览（手里的元素牌，作者 10/29 在 PR #486 的评论）：这张元素牌在这个天气下打每张层牌的得分——就是 chart(天气) 里这张牌的那一行，
+   *  同一份数（和计分 score()、克制表一致：克制 + 天气修正，微光反转、酸雨打装甲都在里面）。
+   *  cells[层]：layer / name / value（得分）/ kindId（adv 玩家赢 / dis 庄家赢 / neu 平局）/ kind / base（没有天气时的得分）/ changed / reason。
+   *  只用这张牌和场上的天气，不碰对方出的牌；不是元素牌（常态、层牌）→ null */
+  function cardChart(card, weather) {
+    if (!isElement(card)) return null;
+    const c = chart(weather), row = c.cells[CC_CONFIG.elements.indexOf(card)];
+    return {
+      card, name: cardName(card), weather: c.weather, weatherName: c.weatherName,
+      cells: row.map(x => ({ layer: x.col, name: cardName(x.col), value: x.value, kindId: x.kindId, kind: x.kind, base: x.base, changed: x.changed, reason: x.reason }))
     };
   }
 
@@ -762,7 +775,7 @@
 
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
-    chartScore, weatherScore, score, scoreParts, chart, tierOf, extraOf, minBetOf, settle, repayOf,
+    chartScore, weatherScore, score, scoreParts, chart, cardChart, tierOf, extraOf, minBetOf, settle, repayOf,
     newGame, toAct, legal, act, view, spareElements, resultText, casino, makeRng, hashSeed
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

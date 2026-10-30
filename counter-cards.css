@@ -84,6 +84,7 @@
 .cc-who small { color: #b9c8b8; font-size: 12px; }
 .cc-who .cc-loan { color: #ffb38a; }
 .cc-hand { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.cc-hand .cc-card { -webkit-touch-callout: none; }   /* 手机长按手里的牌看预览：不弹系统的长按菜单 */
 .cc-hand-back .cc-card + .cc-card { margin-left: -34px; }
 .cc-empty { color: rgba(236, 224, 198, .5); font-size: 13px; font-style: italic; }
 
@@ -211,6 +212,33 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-chartbtn b { font-size: 16px; color: var(--sk-hazard, #f2c230); }
 .cc-chartbtn small { font: 400 12px/1.3 var(--sk-body, var(--ui)); color: var(--sk-muted, #a8977b); }
 
+/* ---------- 悬停预览：手里的元素牌（counter-cards-ui.js · tipHtml / showTip）----------
+ * 电脑上鼠标停上去、手机上长按弹出；摆在手牌上面，不接鼠标（pointer-events: none），不挡出牌和操作栏；结算横幅（60）盖得住它。
+ * 格子上色同克制表（matchup.css · .mu-cell）：正分红、负分蓝、0 灰；层名用层的颜色（同克制表的列头） */
+.cc-tip {
+  position: fixed; z-index: 50; left: 8px; top: 8px; pointer-events: none;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 7px;
+  background: linear-gradient(170deg, var(--sk-steel-hi, #3b342c), var(--sk-oil-2, #1a1511) 85%);
+  border: 2px solid #0b0806; box-shadow: 4px 5px 0 rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(201, 154, 70, .35);
+  color: var(--sk-canvas, #ece0c6); animation: ccTip .12s ease-out both;
+}
+.cc-tip[hidden] { display: none; }
+@keyframes ccTip { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.cc-tip-head { display: flex; align-items: center; gap: 6px; }
+.cc-tip-head b { font-size: 15px; }
+.cc-tip-head small { font-size: 12px; color: var(--sk-muted, #a8977b); }
+.cc-tip-ico { display: inline-block; line-height: 0; color: var(--c); }
+.cc-tip-ico .eicon { --eo: #0b0806; width: 20px; height: 20px; margin: 0; }
+.cc-tip-row { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, 46px); gap: 4px; }
+.cc-tip-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 2px 4px; border-radius: 4px; background: rgba(255, 255, 255, .05); }
+.cc-tip-cell.adv { background: rgba(200, 68, 58, .38); }
+.cc-tip-cell.dis { background: rgba(61, 126, 196, .36); }
+.cc-tip-cell .cc-tip-ico .eicon { width: 18px; height: 18px; }
+.cc-tip-name { font-style: normal; font-size: 11px; color: var(--c); }
+.cc-tip-cell b { font: 800 16px var(--num, var(--ui)); }
+.cc-tip-cell.neu b { opacity: .65; font-weight: 400; }
+.cc-tip-foot { margin: 0; font-size: 11px; color: var(--sk-muted, #a8977b); }
+
 /* ---------- 结算横幅：只有胜负、分档和筹码变动 ---------- */
 .cc-banner { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(8, 6, 4, .55); }
 .cc-banner-card {
@@ -231,7 +259,7 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-banner-card .cc-btns { justify-content: center; }
 
 @media (prefers-reduced-motion: reduce) {
-  .cc-deal, .cc-thrown, .cc-flip, .cc-flash, .cc-stack i, .cc-banner-card, .cc-peekcard { animation: none !important; }
+  .cc-deal, .cc-thrown, .cc-flip, .cc-flash, .cc-stack i, .cc-banner-card, .cc-peekcard, .cc-tip { animation: none !important; }
 }
 
 /* ---------- 手机 ---------- */

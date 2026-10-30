@@ -10,6 +10,9 @@
  * 克制表：牌局中随时能开（作者 10/29 在 PR #486 的评论）——和平时一样，顶栏最前面的「菜单」（Esc 也行）→「克制表」；
  *   侧栏、结算横幅上也有直接打开的按钮。用平时的克制表浮层（matchup-ui.js），格子是按场上天气算好的得分（counter-cards.js · chart）；
  *   只读，不碰对局和操作栏的状态（出牌、下注、选着的暗弃 / 常态、下注额），AI 照常走；场上天气变了表跟着变。
+ * 悬停预览（作者 10/29 在 PR #486 的评论）：人当玩家时，鼠标停在手里的元素牌上（手机上长按）弹出一个小预览，写这张牌按场上天气
+ *   打五种层各得几分（counter-cards.js · cardChart，就是克制表里这张牌的一行）；天气变了跟着变；只写这张牌自己的数，不碰庄家出的牌；
+ *   预览不接鼠标、摆在手牌上面，不挡出牌；长按松手不算点击（不会把牌出掉）。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
@@ -29,6 +32,16 @@
       label: "克制表",
       sub: "按场上天气的得分 +1 / 0 / −1",
       hint: "元素牌 × 层牌，按场上天气算好的得分（+1 / 0 / −1），随时能看，不影响出牌和下注"
+    },
+    // 悬停预览（手里的元素牌）：电脑上鼠标停上去、手机上长按弹出，写这张牌按场上天气打五种层各得几分
+    tip: {
+      pressMs: 450,        // 手机上按住多久算长按（毫秒）
+      slop: 10,            // 按着时手指挪动超过这么多像素算在滑动页面，不算长按
+      swallowMs: 600,      // 长按松手后这么久之内，浏览器要是还补一下点击，不算出牌
+      gap: 12,             // 预览底边离手牌多少像素（鼠标停着时能出的牌会往上抬 8px）
+      margin: 8,           // 离屏幕边至少多少像素
+      head: "打五种层",
+      foot: "正分你赢 · 负分庄家赢 · 0 平局"
     }
   };
   const CC = () => root.CounterCards;
@@ -69,14 +82,16 @@
     if (k === "el") return root.Icons ? root.Icons.element(card) : "";
     return glyphSvg(NORMAL_GLYPH, name);
   }
-  /** 一张正面朝上的牌。o.act：点了做什么（data-cc），o.cls：额外的类，o.note：牌底的小字，o.disabled，o.delay：发牌动画的先后 */
+  /** 一张正面朝上的牌。o.act：点了做什么（data-cc），o.cls：额外的类，o.note：牌底的小字，o.disabled，o.delay：发牌动画的先后，
+   *  o.tip：能看悬停预览（手里的元素牌，data-cc-tip；不写 title，免得浏览器自己的小字提示和预览叠在一起） */
   function cardHtml(card, o) {
     o = o || {};
     const name = CC().cardName(card), k = kindOf(card);
     const tag = o.act ? "button" : "span";
-    const attrs = o.act ? ` type="button" data-cc="${o.act}" data-card="${card}"${o.disabled ? " disabled" : ""}` : "";
+    const attrs = (o.act ? ` type="button" data-cc="${o.act}" data-card="${card}"${o.disabled ? " disabled" : ""}` : "")
+      + (o.tip ? ` data-cc-tip="${card}"` : ` title="${esc(o.title || name)}"`);
     const style = `--c:${cardColor(card)}${o.delay != null ? `;--d:${o.delay}` : ""}`;
-    return `<${tag} class="cc-card cc-${k}${o.cls ? " " + o.cls : ""}" style="${style}" data-face="${card}"${attrs} title="${esc(o.title || name)}">`
+    return `<${tag} class="cc-card cc-${k}${o.cls ? " " + o.cls : ""}" style="${style}" data-face="${card}"${attrs}>`
       + `<i class="cc-corner">${esc(name)}</i><span class="cc-ico">${cardIcon(card)}</span><b class="cc-name">${esc(name)}</b>`
       + `${o.note ? `<small class="cc-note">${esc(o.note)}</small>` : ""}</${tag}>`;
   }
@@ -124,7 +139,8 @@
 
   /* ---------- 状态 ---------- */
   const SETUP = { side: "player", level: "normal" };
-  let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的） }
+  let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的），
+                          //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击） }
   let bound = false;
 
   function show(name) {
@@ -148,6 +164,7 @@
     bind();
     stopTimer();
     closeChart();
+    stopTip();
     enterScreen();
     renderSetup();
     show("setup");
@@ -156,6 +173,7 @@
     opt = opt || {};
     bind();
     stopTimer();
+    stopTip();
     const side = opt.side === "dealer" ? "dealer" : "player";
     const level = AI().LEVELS.indexOf(opt.level) >= 0 ? opt.level : "normal";
     const seed = String(opt.seed || ("cc" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
@@ -173,6 +191,7 @@
   function leave() {
     stopTimer();
     closeChart();
+    stopTip();
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: "none" });
   }
   function toTitle() {
@@ -203,6 +222,7 @@
   function openChart() {
     const m = MU();
     if (!m || !S) return false;
+    stopTip();   // 克制表盖住整个牌桌：开着的悬停预览收起
     S.chartWeather = chartWeather();
     m.open(() => CC().chart(chartWeather()), { mount: $("cc-game") });
     const close = $("mu-overlay") && $("mu-overlay").querySelector("[data-mu-close]");
@@ -227,6 +247,99 @@
     PM().register({ id: "matchupCC", config: "matchup", hint: UI_CONFIG.chart.hint, visible: () => !!MU() && gameShown(), run: openChart });
     PM().addBlocker(() => screenNow() === "counter" && !gameShown());
   }
+
+  /* ---------- 悬停预览：手里的元素牌（作者 10/29 在 PR #486 的评论）——电脑上鼠标停上去、手机上长按 ---------- */
+  // 写这张牌按场上天气打五种层各得几分（counter-cards.js · cardChart：克制表里这张牌的一行，和计分同一份数）；只用这张牌和场上的天气，不碰庄家出的牌。
+  // 预览是牌桌上的一个浮框（game.html 的 #cc-tip）：不接鼠标、摆在手牌上面，不挡出牌；整块重画后按牌面找回这张牌重新摆，天气变了跟着重写。
+  // S.tip = { card, via }：hover = 鼠标停着（移开就收起）；press = 长按弹出（松手留着看，手指再碰一下就收起）
+  const scoreText = (n) => (n > 0 ? "+" + n : n < 0 ? "−" + Math.abs(n) : "0");
+  /** 预览的内容：这张牌、场上的天气，五种层各一格（图标、层名、得分；上色同克制表：正分红、负分蓝、0 灰） */
+  function tipHtml(card, weather) {
+    const c = CC().cardChart(card, weather), T = UI_CONFIG.tip;
+    if (!c) return "";
+    const cells = c.cells.map(x => `<li class="cc-tip-cell ${x.kindId}" data-layer="${x.layer}" data-kind="${x.kindId}" style="--c:${cardColor(x.layer)}">`
+      + `<span class="cc-tip-ico">${cardIcon(x.layer)}</span><i class="cc-tip-name">${esc(x.name)}</i><b>${scoreText(x.value)}</b></li>`).join("");
+    return `<div class="cc-tip-head" style="--c:${cardColor(card)}"><span class="cc-tip-ico">${cardIcon(card)}</span><b>${esc(c.name)}</b><small>${esc(T.head)} · 天气 ${esc(c.weatherName)}</small></div>`
+      + `<ol class="cc-tip-row">${cells}</ol><p class="cc-tip-foot">${esc(T.foot)}</p>`;
+  }
+  const tipBox = () => $("cc-tip");
+  /** t 在不在一张能看预览的牌里（人当玩家时手里的元素牌，带 data-cc-tip） */
+  const tipCard = (t) => (t && t.closest ? t.closest("[data-cc-tip]") : null);
+  const tipAnchor = (card) => { const b = $("cc-board"); return b ? b.querySelector(`.cc-me [data-cc-tip="${card}"]`) : null; };
+  /** 打开 / 重画预览：按现在场上的天气写，摆到这张牌上面。牌不在手里了（出掉、弃掉）、结算横幅或克制表盖着、不在牌桌上就收起 */
+  function showTip(card, via) {
+    const box = tipBox(), el = tipAnchor(card);
+    if (!S || !box || !el || S.banner || S.game.over || !gameShown() || chartOpen()) { hideTip(); return; }
+    const w = chartWeather();
+    S.tip = { card, via };
+    box.innerHTML = tipHtml(card, w);
+    box.dataset.card = card;
+    box.dataset.weather = w || "none";
+    box.hidden = false;
+    const was = $("cc-board").querySelector('[aria-describedby="cc-tip"]');
+    if (was && was !== el) was.removeAttribute("aria-describedby");
+    el.setAttribute("aria-describedby", "cc-tip");
+    placeTip();
+  }
+  function hideTip() {
+    if (S) S.tip = null;
+    const box = tipBox(), b = $("cc-board"), was = b && b.querySelector('[aria-describedby="cc-tip"]');
+    if (box && !box.hidden) box.hidden = true;
+    if (was) was.removeAttribute("aria-describedby");
+  }
+  /** 摆在手牌上面（不盖住手牌、操作栏），横向对着这张牌、不出屏幕；上面放不下才放到手牌下面 */
+  function placeTip() {
+    const box = tipBox(), el = S && S.tip ? tipAnchor(S.tip.card) : null;
+    if (!box || box.hidden || !el) return;
+    const T = UI_CONFIG.tip, r = el.getBoundingClientRect(), hand = el.parentNode.getBoundingClientRect();
+    const w = box.offsetWidth, h = box.offsetHeight;
+    const left = Math.max(T.margin, Math.min((root.innerWidth || 0) - w - T.margin, r.left + r.width / 2 - w / 2));
+    let top = Math.min(r.top, hand.top) - h - T.gap;
+    if (top < T.margin) top = Math.max(r.bottom, hand.bottom) + T.gap;
+    box.style.left = Math.round(left) + "px";
+    box.style.top = Math.round(top) + "px";
+  }
+  // 电脑：鼠标（笔）停到手里的元素牌上弹出，移开收起。手指碰到时浏览器发的 pointerover（pointerType = touch）不算，手机走下面的长按
+  function onTipOver(e) {
+    if (!S || e.pointerType === "touch") return;
+    const card = tipCard(e.target);
+    if (card) { if (!S.tip || S.tip.card !== card.dataset.ccTip) showTip(card.dataset.ccTip, "hover"); }
+    else if (S.tip && S.tip.via === "hover") hideTip();
+  }
+  function onTipOut(e) {
+    if (!S || !S.tip || S.tip.via !== "hover" || e.pointerType === "touch") return;
+    const card = tipCard(e.target);
+    if (!card || (e.relatedTarget && card.contains(e.relatedTarget))) return;   // 还在这张牌里（牌上的图标、字）
+    hideTip();
+  }
+  // 手机：按住手里的元素牌 pressMs 弹出（手指挪动超过 slop 算在滑动页面，不弹）；松手不算点击（不会把牌出掉），预览留着，手指再碰一下就收起
+  let press = null;   // 手指按着：{ card, x, y, timer, fired }
+  function endPress() { if (press && press.timer) clearTimeout(press.timer); press = null; }
+  function onTipTouch(e) {
+    endPress();
+    if (!S) return;
+    S.tipSwallow = null;
+    if (S.tip) hideTip();
+    const card = tipCard(e.target), t = e.touches && e.touches[0];
+    if (!card || !t || e.touches.length > 1) return;
+    const p = press = { card: card.dataset.ccTip, x: t.clientX, y: t.clientY, fired: false, timer: null };
+    p.timer = setTimeout(() => { p.timer = null; if (press !== p) return; p.fired = true; showTip(p.card, "press"); }, UI_CONFIG.tip.pressMs);
+  }
+  function onTipMove(e) {
+    const t = e.touches && e.touches[0];
+    if (press && !press.fired && (!t || Math.hypot(t.clientX - press.x, t.clientY - press.y) > UI_CONFIG.tip.slop)) endPress();
+  }
+  function onTipEnd(e) {
+    if (press && press.fired) {
+      if (e.cancelable) e.preventDefault();   // 长按松手：浏览器就不会再补一下点击，牌不会被出掉
+      if (S) S.tipSwallow = { card: press.card, until: Date.now() + UI_CONFIG.tip.swallowMs };   // 万一还是补了，也不算（onClick 里拦）
+    }
+    endPress();
+  }
+  /** 长按时系统的菜单（Android 的长按菜单）：能看预览的牌上不弹 */
+  function onTipMenu(e) { if (tipCard(e.target)) e.preventDefault(); }
+  /** 收起预览，按着没到时间的长按也不算了（离开牌桌、换一局、开克制表） */
+  function stopTip() { endPress(); hideTip(); }
 
   /* ---------- 推进：人做一步 → 看有没有新的结算 / 新翻的天气 → AI 接着走 ---------- */
   function humanAct(a) {
@@ -319,6 +432,8 @@
     if (root.WeatherFx && $("cc-fx")) root.WeatherFx.sync({ field: $("cc-fx"), weather: v.weather || "none" });
     // 克制表开着：场上的天气变了才重画（AI 照常走，别的变化不动它，免得点开的格子、键盘焦点被打断）
     if (chartOpen() && S.chartWeather !== (v.weather || null)) { S.chartWeather = v.weather || null; MU().refresh(); }
+    // 悬停预览开着：手牌整块重画了，按牌面找回这张牌，按现在场上的天气重写、重新摆（牌出掉了、结算横幅盖上来就收起）
+    if (S.tip) showTip(S.tip.card, S.tip.via);
     S.anim = {};
   }
   function topHtml(v) {
@@ -340,6 +455,7 @@
       const can = myPlayable.has(c);
       const note = c === CC().CC_CONFIG.normal ? "每局一次" : "";
       return cardHtml(c, { act: can ? actName(v) : null, cls: (deal ? "cc-deal " : "") + (can ? "cc-can" : ""), delay: deal ? i + opp.handCount : null, note,
+        tip: S.human === "player" && kindOf(c) === "el",   // 玩家手里的元素牌：悬停 / 长按看得分预览
         title: c === CC().CC_CONFIG.normal ? "常态：不能当出牌；翻天气那一步可以用来清除天气（再暗弃一张元素牌），也可以拿去暗弃跳过" : null });
     }).join("");
     const deck = Array.from({ length: Math.min(v.deckCount, 7) }, (_, i) => `<i style="--i:${i}"></i>`).join("");
@@ -572,6 +688,9 @@
   function onClick(e) {
     const b = e.target && e.target.closest ? e.target.closest("[data-cc]") : null;
     if (!b || b.disabled) return;
+    // 长按看预览、松手后浏览器要是还补了一下点击：不算出牌（只拦长按的那一张、只拦一下）
+    const sw = S && S.tipSwallow;
+    if (sw) { S.tipSwallow = null; if (b.dataset.card === sw.card && Date.now() < sw.until) return; }
     const d = b.dataset, act = d.cc;
     switch (act) {
       case "set": SETUP[d.key] = d.val; renderSetup(); return;
@@ -607,6 +726,16 @@
     const scr = $("scr-cc");
     if (!scr) return;
     scr.addEventListener("click", onClick);
+    // 悬停预览：电脑上鼠标停上去、手机上长按（见上面「悬停预览」）；#scr-cc 自己滚动、窗口变了，预览跟着牌挪
+    scr.addEventListener("pointerover", onTipOver);
+    scr.addEventListener("pointerout", onTipOut);
+    scr.addEventListener("touchstart", onTipTouch, { passive: true });
+    scr.addEventListener("touchmove", onTipMove, { passive: true });
+    scr.addEventListener("touchend", onTipEnd);
+    scr.addEventListener("touchcancel", endPress);
+    scr.addEventListener("contextmenu", onTipMenu);
+    scr.addEventListener("scroll", placeTip, { passive: true });
+    if (root.addEventListener) root.addEventListener("resize", placeTip);
     bound = true;
   }
   function boot() {
@@ -623,7 +752,7 @@
 
   root.CounterCardsUI = {
     UI_CONFIG, open, start, render, stop: stopTimer, setFast, cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods,
-    openChart, closeChart, chartOpen,
+    openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
 })(typeof window !== "undefined" ? window : globalThis);
