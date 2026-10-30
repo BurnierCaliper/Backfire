@@ -310,7 +310,7 @@ const RULEBOOK_CHAPTERS = [
       ];
     } },
   { id: "layers", group: "combat", name: "血量层与克制", blurb: "从外往里一层层打；七种属性对五种血量层有克制和劣势。",
-    keywords: ["克制表", "肉体", "装甲", "护盾", "沙尘", "星灵"],
+    keywords: ["克制表"].concat(typeof LAYER !== "undefined" ? Object.values(LAYER) : []),   // 层名读 engine.js · LAYER（#510：全项目只留一份）
     build() {
       const layers = Object.keys(LAYER);
       return [

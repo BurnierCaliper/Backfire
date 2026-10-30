@@ -514,10 +514,10 @@ test("#510 单位卡的层条：层名读 engine.js · LAYER（肉体 / 装甲 /
   const o = await open(t); if (!o) return; const { page } = o;
   await player(page, { screen: "exploration" });
   await page.evaluate(() => { fixture.view.state.units[0].layers = ["flesh", "armor", "shield", "sand", "spirit", "unknown"].map(type => ({ type, current: 5, max: 10 })); fixture.emit(); });
-  const card = page.locator('#online-stage .ol-unit[data-unit-id="a"]');
+  const card = '#online-stage .ol-unit[data-unit-id="a"]';
   const names = ["肉体", "装甲", "护盾", "沙尘", "星灵", "肉体"];
-  assert.deepEqual(await card.locator(".ol-layer > span").allTextContents(), names);
-  assert.deepEqual(await card.locator(".ol-layer > meter").evaluateAll(els => els.map(e => e.getAttribute("aria-label"))), names);
+  assert.deepEqual(await page.locator(card + " .ol-layer > span").evaluateAll(els => els.map(e => e.textContent)), names);
+  assert.deepEqual(await page.locator(card + " .ol-layer > meter").evaluateAll(els => els.map(e => e.getAttribute("aria-label"))), names);
   assert.deepEqual(o.errors, []);
 });
 

@@ -17,7 +17,7 @@
   const DUMMY_DEF = 1e6;
   const REFILL_AT = 0.5;
   const TURNS = 8;
-  const LAYER_CN = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  // 假人的血量层：层 id 和层名都读 engine.js · LAYER（#510：全项目只留一份层名，这里不另写）
   const WEATHERS = [["none", "常态"], ["heat", "酷暑"], ["snow", "雪天"], ["acid", "酸雨"], ["thunder", "雷鸣"], ["glow", "微光"], ["sand", "沙暴"], ["phase", "相位"]];
   const FIELDS = [["", "无"], ["fire", "火场"], ["electric", "高压场地"], ["acid", "酸液地面"], ["ice", "冻土"], ["energy", "能量场"], ["harmonic", "干涉场地"], ["heal", "治愈场地"]];
   /** 默认布置（和自动搜索一样） */
@@ -26,7 +26,7 @@
     o = Object.assign({}, DEFAULT_OPTS, o || {});
     o.fields = Object.assign({ 1: "", 2: "" }, o.fields || {});
     o.high = Object.assign({ 1: false, 2: false }, o.high || {});
-    if (o.layers !== "ox") o.layers = (Array.isArray(o.layers) ? o.layers : ["flesh"]).filter(t => LAYER_CN[t]).slice(0, 3);
+    if (o.layers !== "ox") o.layers = (Array.isArray(o.layers) ? o.layers : ["flesh"]).filter(t => LAYER[t]).slice(0, 3);
     if (Array.isArray(o.layers) && !o.layers.length) o.layers = ["flesh"];
     if (!WEATHERS.some(w => w[0] === o.weather)) o.weather = "none";
     return o;
@@ -34,7 +34,7 @@
   /** 一行字说明这次的布置（面板和战斗记录用） */
   function optsText(o) {
     o = normOpts(o);
-    const layers = o.layers === "ox" ? "血量层照精英牛" : "血量层 " + o.layers.map(t => LAYER_CN[t]).join(" → ");
+    const layers = o.layers === "ox" ? "血量层照精英牛" : "血量层 " + o.layers.map(t => LAYER[t]).join(" → ");
     const wName = (WEATHERS.find(w => w[0] === o.weather) || [])[1];
     const zone = z => [(FIELDS.find(f => f[0] === o.fields[z]) || [])[1], o.high[z] ? "高地" : ""].filter(x => x && x !== "无").join("+") || "无场地";
     return `${layers} · ${wName} · 1 区 ${zone(1)} · 2 区 ${zone(2)} · ${o.chart ? "算属性克制" : "不算属性克制"}`;
@@ -229,7 +229,7 @@
     }
     const o = normOpts(Training.opts);
     const sel = (id, list, cur) => `<select id="${id}">${list.map(([v, n]) => `<option value="${v}"${v === cur ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
-    const layerList = [["", "无"]].concat(Object.keys(LAYER_CN).map(k => [k, LAYER_CN[k]]));
+    const layerList = [["", "无"]].concat(Object.keys(LAYER).map(k => [k, LAYER[k]]));
     const lay = o.layers === "ox" ? [] : o.layers;
     const lvOpts = Array.from({ length: 15 }, (_, i) => i + 1).map(l => `<option value="${l}"${l === (Training.level || 10) ? " selected" : ""}>${l} 级</option>`).join("");
     dlg.innerHTML = `<form method="dialog" style="display:grid;gap:10px">

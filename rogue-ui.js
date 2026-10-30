@@ -558,7 +558,7 @@
         <div class="cl-cyber">
           <div class="r-hint">义体改造：改造率 ${Math.round(info.rate * 100)}%，最多换掉 ${info.limit} 点肉体（共 ${info.fleshMax}）。
             换算 肉体 8 : 装甲 7 : 护盾 6 : 沙尘 6；也可以把剩下的肉体按 8 : 7 全部换成星灵。最多 3 种血量。</div>
-          <div class="cl-inputs">${input("armor", "→ 装甲")}${input("shield", "→ 护盾")}${input("sand", "→ 沙尘")}
+          <div class="cl-inputs">${["armor", "shield", "sand"].map(t => input(t, "→ " + LAYER[t])).join("")}
             <label class="cl-spirit"><input type="checkbox" data-cy="${esc(h.kit)}" data-t="spirit" ${cur.spirit ? "checked" : ""}> 内层换成星灵</label></div>
           <div class="cl-preview" id="cy-pv-${esc(h.kit)}"></div>
           <button class="g-btn" data-cyber="${esc(h.kit)}">改造</button>
