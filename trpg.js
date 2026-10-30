@@ -358,7 +358,9 @@ function trpgBlackMarketSettle(kit, bill) {
  *   wallets[角色 kit] = 联机玩家各自的钱包（按操控的角色记：换了房间、玩家 id 变了也认得）；
  *   tables = 联机玩家对赌的桌子（两边的钱包都坐在同一张桌子上，牌局只存一份）；seq = 对赌桌编号。
  * 买筹码由谁付、卖筹码的钱进谁的钱包：队伍公账或某名角色的私人钱包（trpgPurse；联机玩家只能用自己角色的）。
- * 赌场桌（AI / 主持人坐庄）打到一半的牌局在钱包里（seat.game）。 */
+ * 赌场桌（AI / 主持人坐庄）打到一半的牌局在钱包里（seat.game）。
+ * 牌局里桌上不够时先从钱包补（#520，casino.js · topUp）：赌场桌从坐着的那个钱包补（读钱包时登记），
+ * 联机对赌由 trpgCasinoPvpBind 登记两边各从哪补（押筹码补普通筹码，押奎支补那名角色的私人钱包）。 */
 const TRPG_CASINO_LOCAL = "party";
 function trpgCasinoBook() {
   if (typeof Casino === "undefined") throw new Error("没有加载赌场（casino.js）");
@@ -433,14 +435,21 @@ function trpgCasinoLeave(key) {
  *  （长线养成、本机跑团），联机包里不放、联机也坐不上 */
 const TRPG_CASINO_ONLINE_GAMES = ["highflux"];
 const trpgCasinoOnlineTables = () => Casino.tables().filter(t => TRPG_CASINO_ONLINE_GAMES.indexOf(t.game || "highflux") >= 0);
-/** kit 这名角色坐着的牌局：{ kind: "ai" | "gm" | "pvp", side（人坐哪一方）, game（对赌还没开局是 null）, table, level（AI 庄家的难度）} 或 null */
+/** kit 这名角色坐着的牌局：{ kind: "ai" | "gm" | "pvp", side（人坐哪一方）, game（对赌还没开局是 null）, table, level（AI 庄家的难度）,
+ *  topUp（牌局里从钱包补了几枚，#520）} 或 null。读钱包时 casino.js 登记了「赌场桌不够时从这个钱包补」 */
 function trpgCasinoSeatOf(kit) {
   const c = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};   // 只读：联机包每一包都要看，不往存档里加东西
   const w = c.wallets && c.wallets[kit] ? Casino.wallet(c.wallets[kit]) : null, s = w && w.seat;
   if (!s) return null;
-  if (s.kind === "pvp") { const t = c.tables && c.tables[s.table]; return t ? { kind: "pvp", side: s.side, game: t.game, table: t } : null; }
+  if (s.kind === "pvp") { const t = c.tables && c.tables[s.table]; return t ? { kind: "pvp", side: s.side, game: t.game, table: t, topUp: s.topUp || 0 } : null; }
   const cfg = Casino.tables().find(x => x.id === s.table) || {};
-  return { kind: s.kind, side: "player", game: s.game, table: cfg, level: cfg.difficulty || "normal" };
+  return { kind: s.kind, side: "player", game: s.game, table: cfg, level: cfg.difficulty || "normal", topUp: s.topUp || 0 };
+}
+/** 对赌桌不够时两边各从自己的钱包补（#520，Casino.pvpBind）：押筹码的补这名角色钱包里的普通筹码，
+ *  押奎支的从这名角色的私人钱包补奎支（1 枚 = 200 奎支） */
+function trpgCasinoPvpBind(t) {
+  Casino.pvpBind(t, side => trpgCasinoWallet(t.seats[side]),
+    side => ({ have: () => trpgPurse(t.seats[side]), spend: n => trpgPurseSet(t.seats[side], trpgPurse(t.seats[side]) - n) }));
 }
 /** 牌局里走一步：kit 坐着的那一局、他那一方（opt.asDealer：主持人替主持人坐庄的那一桌出庄家那一方）。
  *  AI 当庄的桌子接着让 AI 走到轮到人；主持人坐庄的桌子等主持人 */
@@ -453,6 +462,7 @@ function trpgCasinoAct(kit, action, opt) {
     if (seat.kind !== "gm") throw new Error("这一桌不是主持人坐庄");
     side = "dealer";
   }
+  if (seat.kind === "pvp") trpgCasinoPvpBind(seat.table);
   CounterCards.act(seat.game, side, action);
   if (seat.kind === "ai") Casino.runAi(seat.game, seat.level);
   return [];
@@ -498,12 +508,13 @@ function trpgCasinoPacket(kits, isGM) {
   const raw = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};
   const wallets = raw.wallets && typeof raw.wallets === "object" ? raw.wallets : {}, tables = raw.tables && typeof raw.tables === "object" ? raw.tables : {};
   const nameOf = (k) => (k ? trpgPurseName(k) : null);
+  // buyIn = 总买入、topUp = 牌局里从钱包补了几枚（#520；对赌：开局押的 start 不含补的）
   const meta = (kit, seat) => {
     if (seat.kind === "pvp") {
       const t = seat.table, opp = t.seats[seat.side === "dealer" ? "player" : "dealer"];
-      return { kind: "pvp", table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp) };
+      return { kind: "pvp", table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp), topUp: seat.topUp };
     }
-    return { kind: seat.kind, table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level };
+    return { kind: seat.kind, table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level, topUp: seat.topUp };
   };
   const out = {
     config: { buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, face: Casino.CONFIG.face, gift: Casino.CONFIG.gift },

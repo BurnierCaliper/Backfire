@@ -115,6 +115,30 @@ test("长线养成：打到一半的牌局写进长线存档，读档以后接�
   assert.deepEqual([R.casinoView(loaded).chips.gift, R.casinoView(loaded).chips.normal], [49.5, 11]);
 });
 
+test("长线养成：牌局里桌上不够时先从长线存档的钱包补（不问借贷），读档以后接着打也从读进来的钱包补；离桌按总买入结算（#520）", () => {
+  const { c, run, R, CC } = fresh("CASINO-G8");
+  R.casinoOpen(run);                                    // 赠送 50 枚
+  const { game } = R.casinoSit(run, "hall", 40, { deck: PHASE_FIRST });   // 买入 10 枚 + 入场费 0.5 枚：钱包剩 39.5 枚
+  A(CC, game, "dealer", "weather", { op: "pass" });
+  A(CC, game, "dealer", "play", { card: "armor" }); A(CC, game, "player", "play", { card: "fire" });
+  A(CC, game, "player", "check"); A(CC, game, "dealer", "check");
+  R.save(run);                                          // 界面每走一步就存档
+  const loaded = c.SaveStore.loadGrowth();
+  const g = R.casinoView(loaded).game;                  // 读档：钱包读进来时登记这一局
+  A(CC, g, "player", "reveal");                         // 相位全押：火打装甲，玩家输光
+  assert.equal(g.round, 2);
+  assert.equal(g.loanAsk, null, "钱包里有筹码：不问借贷");
+  assert.ok(g.log.some(e => e.text === "玩家从钱包补了 3 枚到桌上。"), "牌局的记录里写着");
+  const v = R.casinoView(loaded);
+  assert.equal(v.chips.gift, 39.5 - 0.75, "桌上 3 枚 = 钱包 0.75 枚，先拿赠送的");
+  assert.deepEqual([v.chips.seat.buyIn, v.chips.seat.topUp], [43, 3], "座位上的买入加上");
+  assert.equal(R.casinoView(run).chips.gift, 39.5, "补的是读进来的钱包");
+  const notes = R.casinoLeave(loaded);                  // 打到一半离桌：第 2 轮的底注押进去了，不退
+  assert.match(notes.join(""), /离开大厅：桌上剩 2 枚（买入 43 枚，含从钱包补的 3 枚，输 41 枚）/);
+  assert.ok(loaded.log.some(l => /含从钱包补的 3 枚/.test(l.text)), "写进长线的记录");
+  assert.deepEqual([R.casinoView(loaded).chips.gift, R.casinoView(loaded).chips.normal], [39.25, 0], "桌上剩的 2 枚（0.5 枚）回到赠送筹码");
+});
+
 test("只有长线养成、而且在任务板前才能去赌场：普通单局、任务中途都不行", () => {
   const normal = fresh("CASINO-G5", { growth: false });
   assert.throws(() => normal.R.casinoOpen(normal.run), /只有长线养成/);
