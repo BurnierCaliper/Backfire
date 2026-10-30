@@ -164,6 +164,46 @@ test("AI 对 AI：开过追加窗口、窗口里加注过，AI 在窗口里从�
   assert.ok(loans > 0);
 });
 
+/* ---------- 出牌改成混合策略（#521，同 High Flux 的 AI：按温度加权抽签用 counter-cards-ai.js 的同一份） ---------- */
+
+const tallyOf = (list) => { const m = {}; list.forEach(k => { m[k] = (m[k] || 0) + 1; }); return m; };
+
+test("出牌是混合策略（#521）：普通、困难自己打 200 局——甲第 1 轮出得最多的那张层牌不超过 60%、至少出现 3 种；元素牌也一样", () => {
+  for (const level of ["normal", "hard"]) {
+    const games = Array.from({ length: 200 }, (_, i) => AI.playOut(D.newGame({ seed: `混合-${level}-${i}` }), { a: level, b: level }));
+    for (const part of ["layer", "element"]) {
+      const first = tallyOf(games.map(g => g.sides.a.history[0][part]));
+      const msg = `${level} 第 1 轮${part}：${JSON.stringify(first)}`;
+      assert.ok(Math.max(...Object.values(first)) <= 200 * 0.6, msg);
+      assert.ok(Object.keys(first).length >= 3, msg);
+    }
+  }
+});
+
+test("出每一对的概率（#521，FluxDuelAI.pairOdds，decide 就按它抽）：期望越高越容易出、但不是 100%；困难的温度比普通低；简单平均；抽出来的分布对得上", () => {
+  const g = D.newGame({ seed: "出牌概率", deck: DECK });
+  const v = D.view(g, "a");
+  assert.ok(AI.AI_CONFIG.hard.playTemp > 0 && AI.AI_CONFIG.hard.playTemp < AI.AI_CONFIG.normal.playTemp, "困难温度较低，但不是 0");
+  for (const level of LEVELS) {
+    const odds = AI.pairOdds(v, level);
+    assert.equal(Object.keys(odds).length, 35);
+    assert.ok(Math.abs(Object.values(odds).reduce((a, b) => a + b, 0) - 1) < 1e-9);
+    assert.ok(Object.values(odds).every(p => p > 0 && p < 0.6), level + "：" + JSON.stringify(odds));
+  }
+  // 普通（只看期望）：第 1 轮装甲 + 能量的期望最高，概率也最高
+  const n = AI.pairOdds(v, "normal");
+  assert.equal(Object.keys(n).sort((x, y) => n[y] - n[x])[0], "armor|energy");
+  const seen = tallyOf(Array.from({ length: 400 }, (_, i) => { const a = AI.decide(v, "normal", CC.makeRng("抽" + i)); return a.layer + "|" + a.element; }));
+  assert.ok(Math.abs((seen["armor|energy"] || 0) / 400 - n["armor|energy"]) < 0.08, JSON.stringify(seen));
+  Object.values(AI.pairOdds(v, "easy")).forEach(p => assert.ok(Math.abs(p - 1 / 35) < 1e-12));
+  assert.equal(AI.pairOdds(D.view(D.newGame({ seed: "x", chipsBy: { a: 0, b: 50 } }), "a"), "hard"), null, "不是出牌的时候");
+});
+
+test("同一个种子打两次，结果完全一样（#521：随机数只用传进来的 rng）", () => {
+  const run = (seed, x, y) => JSON.stringify((g => [g.log, g.results, g.final])(AI.playOut(D.newGame({ seed }), { a: x, b: y })));
+  for (const [x, y] of [["normal", "normal"], ["hard", "hard"], ["hard", "easy"]]) for (let i = 0; i < 3; i++) assert.equal(run("复现" + i, x, y), run("复现" + i, x, y), `${x}/${y}/${i}`);
+});
+
 test("困难比简单强：同样的种子、两边都坐一遍，困难平均赢筹码", () => {
   let net = 0;
   for (let n = 0; n < 12; n++) {
