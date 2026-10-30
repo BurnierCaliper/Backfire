@@ -115,20 +115,21 @@ test("微光：能量以外的元素克制关系全部反转，能量 +1 且不�
   assert.deepEqual(J(CC.scoreParts("energy", "armor", "glow")), { chart: -1, weather: 1, total: 0 });
 });
 
-test("酸雨：酸、电 +1，能量 0，其余 −1；酸、冰以外的元素打装甲额外 +1", () => {
+test("酸雨：酸、电 +1，能量、谐波 0（主人 10/30：谐波也豁免酸雨削弱），其余 −1；酸、冰以外的元素打装甲额外 +1", () => {
   // 打装甲
   assert.deepEqual(J(CC.scoreParts("fire", "armor", "acid")), { chart: -1, weather: 0, total: -1 });       // −1 酸雨 +1 装甲
   assert.deepEqual(J(CC.scoreParts("electric", "armor", "acid")), { chart: -1, weather: 2, total: 1 });    // +1 酸雨 +1 装甲
   assert.deepEqual(J(CC.scoreParts("energy", "armor", "acid")), { chart: -1, weather: 1, total: 0 });      // 0 酸雨 +1 装甲
   assert.deepEqual(J(CC.scoreParts("physical", "armor", "acid")), { chart: -1, weather: 0, total: -1 });
-  assert.deepEqual(J(CC.scoreParts("harmonic", "armor", "acid")), { chart: -1, weather: 0, total: -1 });
+  assert.deepEqual(J(CC.scoreParts("harmonic", "armor", "acid")), { chart: -1, weather: 1, total: 0 });      // 0 酸雨 +1 装甲
   assert.deepEqual(J(CC.scoreParts("acid", "armor", "acid")), { chart: 1, weather: 1, total: 2 });         // 酸不吃装甲那一项
   assert.deepEqual(J(CC.scoreParts("ice", "armor", "acid")), { chart: 0, weather: -1, total: -1 });        // 冰也不吃
   // 打别的层没有装甲那一项
   assert.equal(CC.score("fire", "flesh", "acid"), 0);
   assert.equal(CC.score("electric", "shield", "acid"), 2);
   assert.equal(CC.score("energy", "spirit", "acid"), 1);
-  assert.equal(CC.score("harmonic", "sand", "acid"), 0);
+  assert.equal(CC.score("harmonic", "sand", "acid"), 1);
+  assert.equal(CC.score("harmonic", "flesh", "acid"), CC.score("harmonic", "flesh", null));   // 谐波不吃酸雨的 −25%
 });
 
 test("酷暑 / 雪天 / 雷鸣 / 沙暴 / 相位的天气修正", () => {
@@ -208,7 +209,7 @@ test("克制表（得分）：格子的原因写这一分怎么来的——酷�
   assert.equal(elec.reason, "被克制 −1；酸雨：电 +1；酸雨：打装甲另 +1");
   assert.deepEqual([cellOf(acid, "ice", "armor").value, cellOf(acid, "acid", "armor").value], [-1, 2], "酸、冰打装甲不另加");
   assert.ok(acid.notes.includes("酸雨：火、电、能量、物理、谐波打装甲另 +1"));
-  assert.ok(acid.notes.includes("酸雨天气修正：火、冰、物理、谐波 −1；酸、电 +1"));
+  assert.ok(acid.notes.includes("酸雨天气修正：火、冰、物理 −1；酸、电 +1"));
   assert.ok(CC.chart("phase").notes.some(n => /^相位：不改得分；翻到相位的那一轮双方全押/.test(n)));
 });
 

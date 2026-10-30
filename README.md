@@ -370,6 +370,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **酸雨也豁免谐波的 −25%**（主人 10/30：谐波是后来加的属性，酸雨的豁免当时漏了它；engine.js · `weatherDamagePct`；codex.js 酸雨词条；测试 tests/counter-cards.test.js）
+  - **以前**：酸雨里除酸液、闪电、能量外所有伤害 −25%，谐波也吃这 −25%。
+  - **现在**：只有火焰、物理、冰冻伤害 −25%（图鉴词条改成直接列这三种）。谐波在酸雨里和能量一样不增不减（打装甲照旧另 +25%）。克制表、High Flux 计分直接调 `weatherDamagePct`，一起变。
 - **赌场桌：桌上筹码不够时先从钱包补，钱包空了才借**（#520，主人 10/30 手机试玩反馈。counter-cards.js · `bet.topUp`（新）/ `bet.setTopUp`（新）/ `turnTo`（新）/ `startRound` / `openBetting` / `betAction`；flux-duel.js · `startRound`；flux-holdem.js · `turnTo`（新）/ `startRound` / `openStreet` / `advance`；casino.js · `topUp`（新）/ `refill`（新）/ `pvpBind`（新）/ `bind`（新）/ `wallet` / `chips` / `sit` / `leave` / `pvpSettle`；trpg.js · `trpgCasinoPvpBind`（新）/ `trpgCasinoSeatOf` / `trpgCasinoAct` / `trpgCasinoPacket`；online-view.js · `projectCasinoSeat`（白名单放行 `topUp`）；casino-ui.js · `UI_CONFIG.rule` / `seatHtml` / `play`；casino-online-ui.js · `walletHtml` / `playerHtml`；测试 tests/casino-topup.test.js（新，14 条）、tests/casino-growth.test.js / casino-trpg.test.js / casino-ui.test.js 各新 1 条、tests/casino-online.test.js 新 3 条，tests/casino.test.js 改 2 条、tests/casino-flux.test.js 改 4 条）
   - **以前**：坐上赌场桌时只把「买入」那部分筹码从钱包拿到桌上，剩下的留在钱包里；牌局里桌上筹码不够——每轮开始不够「底注 + 最低注」，或者轮到自己下注时不够「要跟的 + 最低注」——就直接问借不借（3 借 4 还），完全不看钱包里还剩多少。
   - **现在**：赌场桌（AI 坐庄、主持人坐庄；High Flux、Flux Duel、Flux Hold'em 的赌场桌都一样；长线养成、本机跑团、联机跑团都一样——联机赌场现在只有 High Flux 的桌子）上，桌上筹码不够时先自动从钱包补，钱包空了才借：
