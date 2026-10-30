@@ -605,7 +605,9 @@
     }
     function resultMarkup() {
       const result = view.packet?.result || {}, grade = result.grade || {}, duel = result.duel || null;
-      const heading = duel ? (duel.winner ? `${DUEL_TEAM_NAMES[duel.winner] || ""}获胜` : "平局") : { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
+      // 主持人分阵营按阵营分出的胜负（#490）：写哪几个阵营获胜（和主持人的结算面板一样），输的阵营的人不会看到「战斗胜利」
+      const winners = Array.isArray(result.winners) ? result.winners.map(w => w && w.name).filter(Boolean) : [];
+      const heading = duel ? (duel.winner ? `${DUEL_TEAM_NAMES[duel.winner] || ""}获胜` : "平局") : winners.length ? `${winners.join("、")} 获胜` : { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
       const d = result.drops, dropText = d ? [d.kuizhi ? `${d.kuizhi} 奎支` : "", ...(d.items || []).map(x => `${x.name} ×${x.qty}`)].filter(Boolean).join("、") : "";
       return `<section class="ol-result" aria-label="战斗结算"><h2>${esc(heading)}</h2>${duel ? duelResultLine(duel) : ""}${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}${dropText ? `<p class="ol-drops">战斗掉落：<b>${esc(dropText)}</b>（已放进队伍背包）</p>` : ""}${teamScoresMarkup(result.teams)}<div class="ol-info-tools">${button("查看这场的战斗记录", "showLog")}${button("最近 10 场战绩", "info", 'data-info="record"', pending)}</div><p class="ol-muted">${view.packet?.mode === "rogue" ? "等房主点「继续」回到单局。" : "等待主持人返回探索。"}</p></section>`;
     }

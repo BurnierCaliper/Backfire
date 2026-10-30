@@ -493,6 +493,11 @@
         else if (ev === "end") out.text = (get(row, "why") === "rounds" ? "回合上限到了，按剩余血量百分比：" : "") + (win ? `${win}获胜` : "平局");
         else return [];
       }
+      // 按阵营分出的胜负（主持人分阵营，#490）：写哪几个阵营获胜（阵营名字），不是人人都「战斗胜利」
+      if (out.kind === "victory") {
+        const names = arr(get(row, "winners")).slice(0, 8).map(n => text(n, 16)).filter(Boolean);
+        if (names.length) out.text = `${names.join("、")} 获胜`;
+      }
       if (out.kind === "transfer") {
         const hero = text(get(row, "heroName"), 60), to = text(get(row, "toName"), 60);
         out.text = get(row, "toGM") === true ? `主持人收回了 ${hero || "一名角色"}` : `主持人把 ${hero || "一名角色"} 交给 ${to || "一名玩家"} 操作`;
@@ -526,7 +531,16 @@
     const drops = projectDrops(get(result, "drops")); if (drops) out.drops = drops;
     const duel = projectDuelResult(get(result, "duel")); if (duel) out.duel = duel;
     const teams = projectTeamScores(get(result, "teams")); if (teams.length) out.teams = teams;
+    const winners = projectWinners(get(result, "winners")); if (winners.length) out.winners = winners;
     return out;
+  }
+  /** 按阵营分出的胜负（主持人分阵营，#445 / #490，app.js · pvpWinnersPublic）：获胜的玩家阵营，只有阵营 id / 名字 */
+  function projectWinners(list) {
+    return arr(list).slice(0, 8).flatMap(w => {
+      if (!obj(w)) return [];
+      const name = text(get(w, "name"), 16), fid = text(get(w, "id"), 16);
+      return name && fid ? [{ id: fid, name }] : [];
+    });
   }
   const DUEL_TEAMS = ["1队", "2队"];
   /** 决斗分出的胜负（#472，enemies.js · pvpDuelPublic 的 result）：哪一队赢 / 平局、怎么分出来的（全倒 / 回合上限），

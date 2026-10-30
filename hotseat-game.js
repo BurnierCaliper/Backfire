@@ -160,7 +160,8 @@
   /** 决斗只能在探索环节：房主在战斗画面（打着、打完还没回去）时不行 */
   function duelExploring() {
     if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能决斗");
-    if (root.Screens && Screens.is("battle")) fail("先回到探索环节再决斗");
+    // screens.js 的 Screens 是顶层 const，不挂在 window 上：按名字找（以前写 root.Screens，浏览器里永远找不到，这一条从来没拦过，#490）
+    if (typeof Screens !== "undefined" && Screens && typeof Screens.is === "function" && Screens.is("battle")) fail("先回到探索环节再决斗");
     if (typeof TRPG === "undefined" || !TRPG.active) fail("只有联机跑团的探索环节能决斗");
   }
   function duelHero(kit) {
@@ -400,7 +401,8 @@
     duelRequest: () => { duelExploring(); return session.requestDuel(sender); },
     duelDecide: c => { duelExploring(); if (!["approve", "reject", "cancel"].includes(c.decision)) fail("没有这种处理"); return session.decideDuel(sender, c.decision); },
     duelOpen: () => { duelExploring(); return session.openDuel(sender); },
-    duelPick: c => { duelExploring(); const u = duelHero(c.kit); return session.pickDuel(sender, u.kit, c.team == null ? null : String(c.team), ownerByKit[u.kit] || gm()); },
+    // 每队的人数只数现在还能参加的角色（duelHeroes）：选了队以后死亡 / 被移出队伍的不占名额（#490）
+    duelPick: c => { duelExploring(); const u = duelHero(c.kit); return session.pickDuel(sender, u.kit, c.team == null ? null : String(c.team), ownerByKit[u.kit] || gm(), duelHeroes().map(x => x.kit)); },
     duelOptions: c => { duelExploring(); const opt = {}; if ("stand" in c) opt.stand = c.stand; if ("rounds" in c) opt.rounds = c.rounds; return session.setDuelOptions(sender, opt); },
     // 跑团私人钱包（trpg.js）：玩家只能从自己角色的钱包转出；主持人哪个钱包都能动。转完写进小队频道，大家看得到
     // 跑团商人（trpg-merchants.js）：只能在主持人开着的那家店买；钱从自己角色的钱包出（主持人可以替任何人付）
