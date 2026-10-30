@@ -155,16 +155,16 @@ test("High Flux 的得分表：同一个浮层、同样的表头 / 图标 / 配�
     assert.doesNotMatch(cell(html, i, j), /%|±/, `格子 ${i}:${j} 不写百分比`);
     assert.match(cell(html, i, j), /<b>(\+[12]|0|−[12])<\/b><\/td>$/);
   }
-  assert.match(cell(html, 0, 0), /mu-cell mu-adv changed[\s\S]*<s>\+1<\/s><span class="mu-arrow">→<\/span><b>\+2<\/b>/, "火 → 血肉：+1 → +2");
-  assert.match(cell(html, 0, 0), /title="火 → 血肉：玩家赢 \+2（原 \+1） · 克制 \+1；酷暑：火 \+1"/);
+  assert.match(cell(html, 0, 0), /mu-cell mu-adv changed[\s\S]*<s>\+1<\/s><span class="mu-arrow">→<\/span><b>\+2<\/b>/, "火 → 肉体：+1 → +2");
+  assert.match(cell(html, 0, 0), /title="火 → 肉体：玩家赢 \+2（原 \+1） · 克制 \+1；酷暑：火 \+1"/);
   assert.match(cell(html, 4, 1), /mu-cell mu-dis"[\s\S]*<b>−1<\/b>/, "能量 → 装甲 −1，酷暑没改");
-  assert.match(cell(html, 5, 0), /mu-cell mu-neu"[\s\S]*<b>0<\/b>/, "物理 → 血肉 0");
-  assert.match(html, /<th class="mu-corner">元素 \\ 层<\/th><th class="mu-col mu-l-flesh">血肉<\/th><th class="mu-col mu-l-armor">装甲<\/th>/, "列是层牌（层的配色），左上角写元素 \\ 层");
+  assert.match(cell(html, 5, 0), /mu-cell mu-neu"[\s\S]*<b>0<\/b>/, "物理 → 肉体 0");
+  assert.match(html, /<th class="mu-corner">元素 \\ 层<\/th><th class="mu-col mu-l-flesh">肉体<\/th><th class="mu-col mu-l-armor">装甲<\/th>/, "列是层牌（层的配色），左上角写元素 \\ 层");
   assert.match(html, /<th class="mu-row mu-e-fire"><svg class="eicon"[^>]*aria-label="火"/, "行头带属性图标、属性色，和平时一样");
   assert.match(html, /<p class="mu-legend"><span class="mu-adv">玩家赢（正分）<\/span><span class="mu-dis">庄家赢（负分）<\/span><span class="mu-neu">平局（0）<\/span><\/p>/);
   assert.match(html, /<ul class="mu-notes"><li>得分 = 克制[\s\S]*<li>酷暑天气修正：火、酸 \+1；冰 −1<\/li>/);
   // 点开一格看原因（和平时一样）
-  assert.match(M.html(CC.chart("glow"), { cell: [0, 0] }), /<p class="mu-detail"><b>火 → 血肉<\/b>：庄家赢 −1（原来 玩家赢 \+1） · 被克制 −1（微光：克制关系反转）<\/p>/);
+  assert.match(M.html(CC.chart("glow"), { cell: [0, 0] }), /<p class="mu-detail"><b>火 → 肉体<\/b>：庄家赢 −1（原来 玩家赢 \+1） · 被克制 −1（微光：克制关系反转）<\/p>/);
   // 平时的克制表照旧：百分比、「属性 \ 血量」、图例「克制 / 被克制 / 普通」，没有得分表的标签
   const usual = M.html(M.chartWith("heat", {}));
   assert.match(usual, /<div class="mu-card ovl-card" role="dialog"/);

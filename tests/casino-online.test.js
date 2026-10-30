@@ -118,7 +118,7 @@ test("主持人坐庄：主持人的包里有这一桌（庄家那一方：偷�
   const top = book().wallets.ruby.seat.game.deck[0], topName = c.CounterCards.weatherName(top);
   assert.equal(casino("host").dealing[0].game.peek.card, top, "主持人看得到偷看的那张");
   assert.ok(casino("host").dealing[0].game.log.some(e => e.mine && e.text.includes(topName)), "主持人的记录里写着偷看到什么");
-  // 天气名用中文查（酸、沙既是天气也是牌的 id）；玩家那一方根本没有偷看的字段
+  // 天气名用中文查（acid、sand 既是天气也是牌的 id）；玩家那一方根本没有偷看的字段
   assert.ok(!has(casino("p2"), topName), "玩家的包里没有偷看到的天气");
   const pg = mine("p2", "ruby").seat.game;
   assert.ok(!("peek" in pg) && !("deckTop" in pg) && !("deckBottom" in pg) && !("deckSeen" in pg));
@@ -246,12 +246,12 @@ test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌�
   const playable = [...h.matchAll(/data-cso="act" data-cso-key="ruby" data-type="play" data-card="(\w+)"/g)].map(m => m[1]);
   assert.equal(playable.length, 7, "7 张元素牌能出（常态不能当出牌）");
   assert.ok(!/data-card="normal"/.test(h), "常态不能点");
-  assert.ok(!/血肉|"flesh"/.test(h), "主持人暗出的层牌不画");
+  assert.ok(!/肉体|"flesh"/.test(h), "主持人暗出的层牌不画");
   assert.match(h, /离桌（打到一半算认输）/);
   const g = UI.gmHtml(model("host"));
   assert.match(g, /你给 瑞比 坐庄/);
   assert.match(g, /data-cso-game="gm:ruby"/);
-  assert.match(g, /你暗出了〔血肉〕/, "主持人看得到自己（庄家）暗出的牌");
+  assert.match(g, /你暗出了〔肉体〕/, "主持人看得到自己（庄家）暗出的牌");
   assert.ok(!/data-type="play"/.test(g), "庄家已经出过牌了：主持人这边没有出牌按钮");
   assert.match(g, /等瑞比/);
   assert.match(g, /让他离桌/);
