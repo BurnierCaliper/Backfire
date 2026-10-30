@@ -116,6 +116,17 @@ test("这一局从哪个钱包补：坐下时、钱包每次读进来（存档�
   // 没接钱包的对局（本地玩法里的普通对局）：补不到
   assert.equal(K.refill(CC.newGame({ seed: "本地" }), "player", 3), 0);
   assert.equal(K.refill(null, "player", 3), 0);
+  // 钱包离开了这一局（离桌、又坐了别的桌）：旧的那一局不再从这个钱包补
+  const g2 = w2.seat.game;
+  K.leave(w2);
+  assert.equal(K.refill(g2, "player", 1), 0, "离桌以后不补");
+  const w3 = K.wallet({ gifted: true, gift: 0, normal: 60 * FACE });
+  const old = K.sit(w3, "vip", 50);
+  K.leave(w3);
+  K.sit(w3, "vip", 50);
+  const before = K.chips(w3).normal;
+  assert.equal(K.refill(old, "player", 1), 0, "又坐了别的桌：旧的那一局补不到");
+  assert.deepEqual([K.chips(w3).normal, w3.seat.buyIn], [before, 50], "钱包、新的这一局都不动");
 });
 
 test("Flux Duel、Flux Hold'em 的赌场桌也一样：只补人坐的那一方（Duel 的 a、Hold'em 的 p1），赌场的 AI 座位不补", () => {

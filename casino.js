@@ -270,10 +270,11 @@
   const SOURCE = new WeakMap();        // 对局 → (一方, 还差几枚) → 补了几枚
   /** 人坐赌场桌的哪一方：High Flux 是玩家，Flux 记在对局的 casino.side */
   const humanOf = (g) => (gameOf(g) === "highflux" ? "player" : g.casino && g.casino.side);
-  /** 登记：这个钱包坐着的赌场桌（AI / 主持人坐庄），人那一方不够时从这个钱包补 */
+  /** 登记：这个钱包坐着的赌场桌（AI / 主持人坐庄），人那一方不够时从这个钱包补。
+   *  这个钱包已经离开这一局（离桌了、又坐了别的桌）就不补 */
   function bind(w) {
-    const s = w.seat;
-    if (s && s.kind !== "pvp" && s.game && typeof s.game === "object") SOURCE.set(s.game, (side, gap) => (side === humanOf(s.game) ? topUp(w, gap) : 0));
+    const s = w.seat, g = s && s.kind !== "pvp" ? s.game : null;
+    if (g && typeof g === "object") SOURCE.set(g, (side, gap) => (w.seat && w.seat.game === g && side === humanOf(g) ? topUp(w, gap) : 0));
   }
   /** 从钱包补 gap 枚（桌上的枚数）到坐着的这一桌：补到够用为止，钱包不够就有多少补多少。返回补了几枚（钱包空了 = 0）。
    *  purse（对赌押奎支时）：{ have() 那个人现有多少奎支, spend(奎支) 扣掉 }，由模式给 */
