@@ -14,10 +14,11 @@
   const DEVICE = ["button", "lever"];
 
   const ELE_NAME = { fire: "火", acid: "酸", electric: "电", ice: "冰", energy: "能量", physical: "物理", harmonic: "谐波" };
-  const LAYER_NAME = { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" };
+  // 层名只读规则文件里的那一份（engine.js · LAYER，#510：全项目只留一份，这里不另写）；规则文件没加载时写层的 id
+  const layerName = (t) => (typeof LAYER !== "undefined" && LAYER[t]) || t;
   /** 聚焦：和本地卡片一样写「聚焦装甲 火→[冰]→电」（方括号是下一步要的属性） */
   function focusText(u) {
-    return (u.focuses || []).map(f => "聚焦" + (LAYER_NAME[f.layerType] || f.layerType) + " " +
+    return (u.focuses || []).map(f => "聚焦" + layerName(f.layerType) + " " +
       (f.seq || []).map((e, i) => i === f.step ? "[" + (ELE_NAME[e] || e) + "]" : (ELE_NAME[e] || e)).join("→")).join(" · ");
   }
   /** 阵营标记（PvP 第二步 #464，unit-card.js · factionMarks）：主机发来的阵营 id / 名字，场上有两个以上玩家阵营时才有 */

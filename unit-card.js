@@ -15,7 +15,8 @@
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const sumCur = (s) => (s.layers || []).reduce((a, l) => a + l.cur, 0);
   const sumMax = (s) => (s.layers || []).reduce((a, l) => a + l.max, 0);
-  const LAYER_NAME = (function () { try { if (typeof LAYER !== "undefined") return LAYER; } catch (e) {} return { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" }; })();
+  // 层名只读规则文件里的那一份（engine.js · LAYER，#510：全项目只留一份，这里不另写）；规则文件没加载时写层的 id
+  const layerName = (t) => (typeof LAYER !== "undefined" && LAYER[t]) || t;
 
   // 首领机制的图标（FF14 式的头顶标记）：每种机制一个一眼能分清的形状（色弱也认得出，不只靠颜色）。
   // 画法照 art/style-guide.html 的贴纸图标：一圈墨线 + 白边贴纸 + 机制色的底，48×48 的图形先描粗墨线、再描一层白；
@@ -559,7 +560,7 @@
         const seg = el("div", "seg t-" + l.type, `<div class="ghost"></div><div class="fill"></div><div class="pv maybe"></div><div class="pv sure"></div><div class="pv heal"></div>`);
         seg.style.flex = `${Math.max(1, l.max)} 1 0`;
         seg.style.minWidth = "10px";
-        seg.title = (LAYER_NAME[l.type] || l.type);
+        seg.title = layerName(l.type);
         hp.appendChild(seg);
         c.segs[i] = {
           el: seg, fill: seg.querySelector(".fill"), ghost: seg.querySelector(".ghost"),
