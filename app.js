@@ -1799,6 +1799,8 @@ function beginRound(notes) {
   if (typeof syncBpAll === "function") syncBpAll();
   state.units.forEach(u => {
     const own = !lateTurn(u);
+    // 夕夏的引擎：先看上一回合攻击过没有、清零，再自动碾压——回合开始的自动碾压算新一回合的攻击（#386）
+    if (own) xiaEngineCheck(u, notes);
     if (own) xiaAutoCrush(u, notes);
     if (own) noraRoundStart(u, notes);
     // 黄金时间：被延长的即时效果这一次回合开始不结束，多保留一回合（敌人回合里施加的到敌人回合开始才算，#476 / #482）
@@ -1814,7 +1816,6 @@ function beginRound(notes) {
       u.resources.giantTurns = (u.resources.giantTurns || 0) + 1;
     }
     if (u.resources) u.resources.blockUsedThisTurn = false;
-    if (own) xiaEngineCheck(u, notes);
   });
   state.units.forEach(u => {
     if (u.kit === "watchcrow" && !u.dead && !u.hidden) {
@@ -2470,12 +2471,13 @@ function lateRoundStart(notes) {
   });
   late.forEach(u => { if (u.kit === "hiaki" && u.resources && u.resources.powder) { u.resources.powder = false; notes.push("粉落汤气结束。"); } });
   if (typeof featHook === "function") late.forEach(u => { if (u.isPlayer && !u.dead && !u.hidden) featHook(u, "roundStart", undefined, notes); });
-  // 每个单位和 beginRound 同一个先后：碾压、诺拉 → C：敌人回合里施加的即时效果（放在谁身上、谁施加的都一样）→ 霜结的免疫、引擎；
+  // 每个单位和 beginRound 同一个先后：引擎、碾压、诺拉（#386：引擎先判）→ C：敌人回合里施加的即时效果（放在谁身上、谁施加的都一样）→ 霜结的免疫；
   // D 要等过载清零护盾之后再判
   const noRefill = new Set();
   (state.units || []).forEach(u => {
     if (!u) return;
     const own = late.indexOf(u) >= 0;
+    if (own) xiaEngineCheck(u, notes);   // 先判引擎、再自动碾压（#386）
     if (own) xiaAutoCrush(u, notes);
     if (own) noraRoundStart(u, notes);
     if (u.lateFx) {
@@ -2484,7 +2486,6 @@ function lateRoundStart(notes) {
       instantTurnStartB(u, notes, held, true);
     }
     if (own && u.resources && u.resources.frostShell) { u.resources.frostShell = false; notes.push(`${u.name} 再次霜结的完全免疫结束。`); }
-    if (own) xiaEngineCheck(u, notes);
   });
   late.forEach(u => {
     if (offField(u)) return;   // 和整轮开始一样：不在场上的不吃自我效果、不回护盾
@@ -12239,6 +12240,9 @@ function takeFuel() {
 function crushOnce(a, t, auto) {
   const lines = [];
   if (!a || !t) return lines;
+  // 用了狂怒碾压就算夕夏攻击过（引擎不熄火）：被废铁墙挡下也算（#386）。
+  // 以前回合开始的自动碾压只靠 dealTo 里记，被屏障挡下时 dealTo 先返回、没记上；手动用的 runSkill 里本来就记
+  markXiaAttack(a);
   const atk = effectiveAtk(a, state.units);
   a.zone = Number(t.zone);
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
