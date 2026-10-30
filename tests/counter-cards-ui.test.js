@@ -290,7 +290,7 @@ test("下注栏：最低额 = 轮数、加减按钮不越界；常态不能点�
 });
 function CCturn(p) { const t = p.CC.toAct(p.UI.state().game); return t.length === 1 ? t[0] : t.join(","); }
 
-test("设置页：普通难度写「只看单轮结果」（以前是「看上一轮」）；开局说明和规则里写了借贷、按最终筹码数定胜负", () => {
+test("设置页：普通难度写「只看单轮结果」（以前是「看上一轮」）；开局说明和规则里写了借贷（一局里总共借多少不设上限，#496）、按最终筹码数定胜负", () => {
   const p = page();
   click(p.$("#t-cc"));
   const normal = p.$('[data-cc="set"][data-key="level"][data-val="normal"]');
@@ -300,6 +300,7 @@ test("设置页：普通难度写「只看单轮结果」（以前是「看上�
   assert.match(setup, /筹码不够时可以向主持方借（每借 3 枚，结束时还 4 枚）/);
   assert.match(setup, /借贷：筹码不够时可以向主持方借/);
   assert.match(setup, /3→4、6→8/);
+  assert.match(setup, /一局里总共借多少不设上限，借几次都行/, "借贷不设上限（#496 第 3 条）");
   assert.match(setup, /按最终筹码数（扣还借款之后）比/);
 });
 

@@ -63,7 +63,8 @@
     extraRound: "floor",               // 额外赔付出现半枚时：floor 向下取整（ceil 向上取整）
     // 借贷：筹码不够时可以向主持方借，unit 枚一份、最少借一份；每借 unit 枚，对局结束时还 repay 枚（3→4、6→8），结算时从筹码里扣。
     // 「不够」= 每轮开始时不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。
-    // maxUnits：每次最多借几份；null = 借到补上缺口为止（规则里没写上限）
+    // maxUnits：每次最多借几份；null = 借到补上缺口为止（规则里没写上限）。
+    // 一局里总共能借多少不设上限（#496 第 3 条，主人 10/30）：借几次都行，下注不封顶以后对方押得再多也能借到补上缺口再跟；还不上的记成负数
     loan: { unit: 3, repay: 4, maxUnits: null },
     layers: ["flesh", "armor", "shield", "sand", "spirit"],
     elements: ["fire", "acid", "electric", "ice", "energy", "physical", "harmonic"],

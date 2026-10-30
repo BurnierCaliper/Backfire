@@ -353,6 +353,31 @@ test("AI 对 AI：跟注后的追加窗口照常打完——开过窗口、窗�
   assert.ok(windows > 0 && raises > 0, `开过窗口 ${windows} 次，窗口里加注 ${raises} 次`);
 });
 
+test("借贷不设上限（#496 第 3 条）：AI 对 AI（开局 50 对 20）也会押得比对方手上的还多，对方借来跟（借够跟）或者弃牌；整局筹码守恒，还不上的记成负数", () => {
+  let shorts = 0, borrowed = 0, folded = 0, negative = 0;
+  for (const dl of LEVELS) for (const pl of LEVELS) for (let n = 0; n < 12; n++) {
+    for (const big of ["dealer", "player"]) {
+      const g = CC.newGame({ seed: `借来跟-${dl}-${pl}-${big}-${n}`, dealerChips: big === "dealer" ? 50 : 20, playerChips: big === "dealer" ? 20 : 50 });
+      const levels = { dealer: dl, player: pl }, rngs = { dealer: CC.makeRng(g.seed + "|d"), player: CC.makeRng(g.seed + "|p") };
+      for (let guard = 0; !g.over; guard++) {
+        assert.ok(guard < 1000, "卡住了：" + g.stage);
+        const side = CC.toAct(g)[0], v = CC.view(g, side);
+        const short = !!v.betting && !v.betting.window && v.betting.toCall > v.me.chips;   // 跟不起
+        const a = AI.step(g, side, levels[side], rngs[side]);
+        if (!short) continue;
+        shorts++;
+        if (a.type === "borrow") { borrowed++; assert.ok(v.me.chips + a.amount >= v.betting.toCall, "借就借够跟：" + JSON.stringify(a)); }
+        else { assert.equal(a.type, "fold", `${dl}/${pl}：跟不起时只会借或者弃牌`); folded++; }
+      }
+      const d = g.sides.dealer, p = g.sides.player;
+      assert.equal(d.chips + p.chips, 70 + d.loan + p.loan - d.owe - p.owe, g.seed);
+      if (g.final.chips.dealer < 0 || g.final.chips.player < 0) negative++;
+    }
+  }
+  assert.ok(shorts > 0 && borrowed > 0 && folded > 0, `跟不起 ${shorts} 次：借来跟 ${borrowed} 次、弃牌 ${folded} 次`);
+  assert.ok(negative > 0, "有还不上、最后记成负数的：" + negative);
+});
+
 test("AI 对 AI：三档难度都借过筹码；借贷不会让对局卡住", () => {
   const loans = { easy: 0, normal: 0, hard: 0 };
   for (const level of LEVELS) for (const other of LEVELS) for (let n = 0; n < 20; n++) {

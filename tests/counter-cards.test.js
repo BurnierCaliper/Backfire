@@ -888,6 +888,42 @@ test("借贷：赌场里庄家筹码无限，从来不用借；玩家借了，�
   assert.equal(out.net, -2 - t.minBuyIn);
 });
 
+test("借贷不设上限（#496 第 3 条）：一局里总共能借多少没有上限（CC_CONFIG.loan.maxUnits 是 null：每次最多借到补上缺口，借几次都行）——对方押很大时借到补上缺口再跟，一局借了 96 枚（开局才 10 枚）；还不上的照样记成负数", () => {
+  assert.equal(C.loan.maxUnits, null);
+  const g = CC.newGame({ seed: "借不封顶", deck: DECK, playerChips: 10 });
+  // 第 1 轮：玩家手上 9 枚，庄家押 45 枚——缺口 45 + 1 − 9 = 37，最多借 39 枚；借 36 枚正好够跟
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "armor" }); A(g, "player", "play", { card: "fire" });
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 45 });
+  assert.deepEqual(J(CC.legal(g, "player")), [{ type: "fold" }, { type: "borrow", min: 3, max: 39, step: 3, need: 46 }]);
+  A(g, "player", "borrow", { amount: 36 });
+  call(g, "player");
+  A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);   // 雷鸣：火打装甲 −1，庄家赢
+  assert.deepEqual([g.results[0].winner, g.results[0].pot], ["dealer", 92]);
+  assert.deepEqual([g.sides.player.chips, g.sides.player.loan, g.sides.player.owe], [0, 36, 48]);
+  // 第 2 轮：输光了，开局先借 3 枚；庄家又押 59 枚——再借 57 枚跟（这一局第三次借）
+  assert.deepEqual(J(CC.toAct(g)), ["player"]);
+  A(g, "player", "borrow", { amount: 3 });
+  A(g, "dealer", "weather", { op: "keep" });
+  A(g, "dealer", "play", { card: "spirit" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 59 });
+  assert.deepEqual(J(CC.legal(g, "player")), [{ type: "fold" }, { type: "borrow", min: 3, max: 60, step: 3, need: 61 }]);
+  A(g, "player", "borrow", { amount: 57 });
+  call(g, "player");
+  A(g, "player", "reveal"); A(g, "player", "noNormal"); checks(g);   // 沙暴：冰打灵体 −1，庄家又赢
+  assert.equal(g.results[1].winner, "dealer");
+  // 一局借了 36 + 3 + 57 = 96 枚，每借 3 枚还 4 枚：要还 128 枚
+  assert.deepEqual([g.sides.player.loan, g.sides.player.owe], [96, 128]);
+  A(g, "player", "noLoan");                                           // 又输光了，不借：对局结束
+  assert.equal(g.over, true);
+  assert.deepEqual(J(g.final.held), { dealer: 156, player: 0 });
+  assert.deepEqual(J(g.final.chips), { dealer: 156, player: -128 }, "还不上的记成负数");
+  assert.deepEqual(J(g.final.loans.player), { loan: 96, owe: 128 });
+  assert.equal(g.final.winner, "dealer");
+  assert.equal(g.sides.dealer.chips + g.sides.player.chips, 10 + 50 + 96 - 128, "筹码守恒：开局的加上借来的，减去要还的");
+  assert.match(g.log[g.log.length - 1].text, /玩家 -128 枚（已扣还借款 128 枚），庄家 156 枚——按最终筹码数，庄家赢/);
+});
+
 /* ---------- 最终胜负：按最终筹码数（扣还借款之后） ---------- */
 
 test("最终胜负按最终筹码数比，不按相对开局的变化量：庄家 30、玩家 60 开局，五轮都打平 → 玩家赢", () => {
@@ -954,9 +990,9 @@ test("view：对方的手牌、暗出的牌、暗弃的牌都不在里面；自�
 
 /* ---------- 整局 ---------- */
 
-test("随便合法地乱打 300 局（借贷也乱借；跟注后的追加窗口里乱加注 / 弃牌 / 放弃追加，也会到时间）：都能打完，筹码守恒（算上借的、还的），打满 5 轮时庄家 5 张层牌各出一次", () => {
+test("随便合法地乱打 300 局（借贷也乱借，押得比对方手上的还多时对方借来跟；跟注后的追加窗口里乱加注 / 弃牌 / 放弃追加，也会到时间）：都能打完，筹码守恒（算上借的、还的），打满 5 轮时庄家 5 张层牌各出一次", () => {
   const rng = CC.makeRng("乱打");
-  let loans = 0, windows = 0, timeouts = 0, windowRaises = 0;
+  let loans = 0, windows = 0, timeouts = 0, windowRaises = 0, shortLoans = 0, negative = 0, maxLoan = 0;
   for (let n = 0; n < 300; n++) {
     const g = CC.newGame({ seed: "R" + n });
     let steps = 0;
@@ -972,11 +1008,15 @@ test("随便合法地乱打 300 局（借贷也乱借；跟注后的追加窗口
       if (o.type === "bet" || o.type === "raise") a.amount = o.min + Math.floor(rng() * (o.max - o.min + 1));
       if (o.type === "borrow") a.amount = o.min + o.step * Math.floor(rng() * ((o.max - o.min) / o.step + 1));
       if (o.type === "raise" && g.betting.window) windowRaises++;
+      // 下注不封顶：对方押得比自己手上的还多（跟不起）时借——借贷不设上限
+      if (o.type === "borrow" && g.betting && !opts.some(x => x.type === "call") && g.sides[CC.other(side)].st > g.sides[side].st) shortLoans++;
       CC.act(g, side, a);
       assert.ok(++steps < 400);
     }
     const d = g.sides.dealer, p = g.sides.player;
     loans += d.loan + p.loan;
+    maxLoan = Math.max(maxLoan, d.loan, p.loan);
+    if (g.final.chips.dealer < 0 || g.final.chips.player < 0) negative++;
     windows += g.log.filter(e => e.t === "window" && e.op === "open").length;
     // 借来的筹码进了桌上，对局结束时扣还（每 3 枚还 4 枚）
     assert.equal(d.chips + p.chips, 100 + d.loan + p.loan - d.owe - p.owe, "种子 R" + n);
@@ -989,6 +1029,9 @@ test("随便合法地乱打 300 局（借贷也乱借；跟注后的追加窗口
   }
   assert.ok(loans > 0, "乱打里借过筹码");
   assert.ok(windows > 0 && timeouts > 0 && windowRaises > 0, `乱打里开过追加窗口 ${windows} 次、到时间 ${timeouts} 次、窗口里加注 ${windowRaises} 次`);
+  assert.ok(shortLoans > 0, "乱打里有过跟不起、借来跟的时候：" + shortLoans);
+  assert.ok(maxLoan > C.startChips, `一局借得比开局筹码还多（最多一方借了 ${maxLoan} 枚）：借贷不设上限`);
+  assert.ok(negative > 0, "乱打里有还不上、最后记成负数的：" + negative);
 });
 
 test("不合法的操作会被拒绝：不是自己的回合、对局结束后", () => {
