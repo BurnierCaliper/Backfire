@@ -142,7 +142,7 @@ test("酷暑 / 雪天 / 雷鸣 / 沙暴 / 相位的天气修正", () => {
   for (const el of C.elements) for (const ly of C.layers) assert.equal(CC.score(el, ly, "phase"), CC.score(el, ly, null));
 });
 
-test("现在的克制表和天气数值下单轮分差只在 −2…+2（「差 3 及以上」那一档暂时打不出来）", () => {
+test("现在的克制表和天气数值下单轮分差只在 −2…+2（所以分档赔付只有差 1、差 2 两档：主人 10/30 删掉了打不出来的「差 3 及以上」）", () => {
   const all = [];
   for (const w of ALL_WEATHER) for (const el of C.elements) for (const ly of C.layers) all.push(CC.score(el, ly, w));
   assert.equal(Math.max(...all), 2);
@@ -546,7 +546,7 @@ test("相位轮打平：各自退回自己下的筹码（含滚存的那一份�
 
 /* ---------- 分档赔付 ---------- */
 
-test("分档赔付（结算函数）：差 1 只拿底池；差 2 输家再赔自己下注额的 0.5 倍（半枚向下取整）；差 3 及以上再赔 1 倍", () => {
+test("分档赔付（结算函数）：差 1 只拿底池；差 2 输家再赔自己下注额的 0.5 倍（半枚向下取整）；差 3 及以上按差 2 赔（主人 10/30 删掉了「再赔 1 倍」那一档）", () => {
   const s = (dBet, pBet, extra) => Object.assign({ dealer: { bet: dBet, pot: 2, chips: 30, infinite: false }, player: { bet: pBet, pot: 2, chips: 30, infinite: false } }, extra || {});
   const t1 = CC.settle(1, s(7, 7));
   assert.equal(t1.winner, "player"); assert.equal(t1.tier, 1); assert.equal(t1.pot, 18); assert.equal(t1.extra, 0);
@@ -555,22 +555,39 @@ test("分档赔付（结算函数）：差 1 只拿底池；差 2 输家再赔�
   assert.equal(t2.winner, "dealer"); assert.equal(t2.tier, 2); assert.equal(t2.extra, 3);      // 7 × 0.5 = 3.5 → 3
   assert.deepEqual(J(t2.after), { dealer: { chips: 30 + 18 + 3, pot: 0 }, player: { chips: 27, pot: 0 } });
   const t3 = CC.settle(3, s(8, 8));
-  assert.equal(t3.tier, 3); assert.equal(t3.extra, 8);
-  assert.equal(CC.settle(5, s(8, 8)).extra, 8);       // 3 及以上都按 1 倍
-  assert.equal(CC.settle(-4, s(6, 6)).extra, 6);
-  // 额外赔付最多赔光剩下的筹码
+  assert.equal(t3.tier, 2); assert.equal(t3.extra, 4);    // 按差 2：8 × 0.5 = 4
+  assert.equal(CC.settle(5, s(8, 8)).extra, 4);       // 超过 2 都按差 2 的 0.5 倍
+  assert.equal(CC.settle(-4, s(6, 6)).extra, 3);
+  // 额外赔付最多赔光剩下的筹码（差 3 按差 2：该赔 10 × 0.5 = 5，手上只剩 4）
   const poor = CC.settle(3, { dealer: { bet: 10, pot: 0, chips: 4, infinite: false }, player: { bet: 10, pot: 0, chips: 0, infinite: false } });
   assert.equal(poor.extra, 4); assert.equal(poor.after.dealer.chips, 0); assert.equal(poor.after.player.chips, 24);
-  // 庄家筹码无限：照赔
+  // 庄家筹码无限：照赔（差 3 按差 2：10 × 0.5 = 5）
   const inf = CC.settle(3, { dealer: { bet: 10, pot: 0, chips: -5, infinite: true }, player: { bet: 10, pot: 0, chips: 0, infinite: false } });
-  assert.equal(inf.extra, 10);
+  assert.equal(inf.extra, 5);
   // 平局：滚存 / 相位、最后一轮退回
   const tie = CC.settle(0, s(3, 3));
   assert.equal(tie.rollover, true); assert.equal(tie.after.player.pot, 5); assert.equal(tie.after.player.chips, 30);
   const back = CC.settle(0, s(3, 3), { allIn: true });
   assert.equal(back.refund, true); assert.equal(back.after.player.chips, 35); assert.equal(back.after.player.pot, 0);
-  assert.deepEqual(J([CC.tierOf(0), CC.tierOf(1), CC.tierOf(-2), CC.tierOf(3), CC.tierOf(-7)]), [0, 1, 2, 3, 3]);
-  assert.deepEqual(J([CC.extraOf(1, 9), CC.extraOf(2, 9), CC.extraOf(3, 9)]), [0, 4, 9]);
+  assert.deepEqual(J([CC.tierOf(0), CC.tierOf(1), CC.tierOf(-2), CC.tierOf(3), CC.tierOf(-7)]), [0, 1, 2, 2, 2]);
+  assert.deepEqual(J([CC.extraOf(1, 9), CC.extraOf(2, 9), CC.extraOf(3, 9)]), [0, 4, 4]);
+});
+
+test("分档赔付只有两档（主人 10/30 删掉「差 3 及以上」）：tierExtra 只到差 2；分差超过 2（照现在的数值打不出来）赔付和差 2 一模一样，结算写「差 2」", () => {
+  assert.deepEqual(J(C.tierExtra), [0, 0, 0.5], "下标 = 分差：差 1 只拿底池，差 2 再赔 0.5 倍，没有第 3 档");
+  const s = (bet) => ({ dealer: { bet, pot: 3, chips: 40, infinite: false }, player: { bet, pot: 3, chips: 40, infinite: false } });
+  for (const bet of [1, 5, 9, 12]) for (const sign of [1, -1]) {
+    const two = J(CC.settle(sign * 2, s(bet)));
+    for (const d of [3, 4, 5, 9]) {
+      const out = J(CC.settle(sign * d, s(bet)));
+      assert.equal(out.tier, 2, `差 ${d} 按差 2`);
+      assert.deepEqual(out, two, `${sign > 0 ? "玩家" : "庄家"}赢、输家下了 ${bet} 枚、差 ${d}：和差 2 一样（再赔 ${Math.floor(bet * 0.5)} 枚）`);
+    }
+  }
+  // 结算的公开说明：分差超过 2 也写「差 2」，不再有「差 3 及以上」
+  const text = CC.resultText({ r: 1, outcome: "player", winner: "player", tier: CC.tierOf(4), extra: 2, pot: 10, delta: { dealer: -7, player: 7 } });
+  assert.match(text, /玩家赢（差 2）/);
+  assert.doesNotMatch(text, /差 3/);
 });
 
 test("分档赔付（整局里）：酷暑下火打血肉差 2，庄家这一轮下了 5 枚 → 再赔 2 枚", () => {

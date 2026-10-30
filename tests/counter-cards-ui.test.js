@@ -160,7 +160,7 @@ test("结算横幅只有胜负、分档和筹码变动，不亮牌；点「继�
     if (visible(banner) && banner.querySelector('[data-cc="dismiss"]')) {
       const t = banner.textContent;
       assert.match(t, /你赢了|你输了|平局/);
-      assert.match(t, /差 1|差 2|差 3|滚存|退回|拿回|弃牌/);
+      assert.match(t, /差 1|差 2|滚存|退回|拿回|弃牌/);
       assert.match(t, /你 [+-]?\d+ 枚/);
       assert.match(t, /不亮牌/);
       const g = p.UI.state().game;
@@ -295,6 +295,18 @@ test("设置页：普通难度写「只看单轮结果」（以前是「看上�
   assert.match(setup, /借贷：筹码不够时可以向主持方借/);
   assert.match(setup, /3→4、6→8/);
   assert.match(setup, /按最终筹码数（扣还借款之后）比/);
+});
+
+test("规则说明的分档赔付只有两档（主人 10/30 删掉「差 3 及以上」）：差 1 拿底池、差 2 再赔 0.5 倍；设置页和对局中的侧栏都是", () => {
+  const p = page();
+  click(p.$("#t-cc"));
+  const tierLine = (where) => Array.from(p.$$(where + " .cc-rules li")).map(li => li.textContent).find(t => t.startsWith("分档赔付"));
+  const want = "分档赔付：差 1 赢家拿走底池；差 2 赢家拿走底池，输家再赔自己这一轮下注额的 0.5 倍（半枚向下取整）。";
+  assert.equal(tierLine("#cc-setup"), want, "设置页");
+  click(p.$('[data-cc="start"]'));
+  p.UI.stop();   // 人当玩家：庄家（AI）在等发牌动画，这里不用它走
+  assert.equal(tierLine("#cc-side"), want, "对局中的侧栏");
+  assert.ok(!p.$("#scr-cc").textContent.includes("差 3"), "界面上没有「差 3」");
 });
 
 test("牌背只有花纹、不写字：庄家的手牌叠在一起、每张只露出左边一截时，也不会被遮成别的字（以前的「AB」露出来像「AI」）", () => {

@@ -44,7 +44,9 @@
     minBet: [1, 2, 3, 4, 5],           // 第 1–5 轮的最低下注额（= 轮数）；加注每次也至少加这么多（筹码不够时可以押上剩下的全部）
     maxRaises: 2,                      // 每个下注回合最多加注 2 次
     pctStep: 0.25,                     // 天气修正每 25% 记 ±1
-    tierExtra: [0, 0, 0.5, 1],         // 分档赔付（下标 = 分差，3 及以上按 3）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5；差 3+ × 1
+    // 分档赔付（下标 = 分差）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5。只有这两档：
+    // 主人 10/30 删掉了「差 3 及以上 × 1」（单轮分差最多 ±2，打不出来）；万一分差超过 2，按差 2 算
+    tierExtra: [0, 0, 0.5],
     extraRound: "floor",               // 额外赔付出现半枚时：floor 向下取整（ceil 向上取整）
     // 借贷：筹码不够时可以向主持方借，unit 枚一份、最少借一份；每借 unit 枚，对局结束时还 repay 枚（3→4、6→8），结算时从筹码里扣。
     // 「不够」= 每轮开始时不够「底注 + 本轮最低下注额」，或者轮到自己下注时不够「要跟的 + 本轮最低下注额」。
@@ -183,11 +185,11 @@
     };
   }
 
-  /** 分差 → 分档（1 / 2 / 3 = 「3 及以上」；0 = 平局） */
+  /** 分差 → 分档（1 / 2；0 = 平局）：只有两档，分差超过 2 按差 2（tierExtra 的最后一档）算 */
   function tierOf(diff) { return Math.min(Math.abs(Number(diff) || 0), CC_CONFIG.tierExtra.length - 1); }
-  /** 输家额外赔出的筹码（不含底池）：自己这一轮的下注额 × 分档倍率，半枚按 extraRound 取整 */
+  /** 输家额外赔出的筹码（不含底池）：自己这一轮的下注额 × 分档倍率，半枚按 extraRound 取整；分档超过 2 也按差 2 */
   function extraOf(tier, loserBet) {
-    const x = (CC_CONFIG.tierExtra[tier] || 0) * Math.max(0, Number(loserBet) || 0);
+    const x = (CC_CONFIG.tierExtra[tierOf(tier)] || 0) * Math.max(0, Number(loserBet) || 0);
     return CC_CONFIG.extraRound === "ceil" ? Math.ceil(x - 1e-9) : Math.floor(x + 1e-9);
   }
   function minBetOf(round) {
@@ -607,7 +609,8 @@
    *  diff：这一轮的得分（> 0 玩家赢，< 0 庄家赢，0 平局）；
    *  s：{ dealer: { bet, pot, chips, infinite }, player: {…} }——bet 是这一轮下的（含底注），pot 是自己在滚存底池里的那一份；
    *  o：{ allIn: 相位轮, last: 最后一轮 }。
-   *  赢：赢家拿走整个底池（双方滚存的 + 这一轮下的），输家再按分档额外赔出自己这一轮下注额的 0 / 0.5 / 1 倍（最多赔光剩下的筹码）；
+   *  赢：赢家拿走整个底池（双方滚存的 + 这一轮下的），输家再按分档额外赔出自己这一轮下注额的 0 倍（差 1）/ 0.5 倍（差 2，分差超过 2 也按差 2）
+   *  （最多赔光剩下的筹码）；
    *  平：相位轮、最后一轮各自拿回自己下的筹码（含滚存的那一份），其余滚存到下一轮。 */
   function settle(diff, s, o) {
     o = o || {};
@@ -675,9 +678,8 @@
       if (res.refund) return `第 ${res.r} 轮：平局，${res.allIn ? "相位轮" : "最后一轮"}打平，各自拿回自己下的筹码${chips}。`;
       return `第 ${res.r} 轮：平局，底池 ${res.pot} 枚滚存到下一轮${chips}。`;
     }
-    const tierText = res.tier >= 3 ? "差 3 及以上" : `差 ${res.tier}`;
     const extra = res.extra ? `，输家再赔 ${res.extra} 枚` : "";
-    return `第 ${res.r} 轮：${sideName(res.winner)}赢（${tierText}${res.allIn ? "，相位全押" : ""}），拿走底池 ${res.pot} 枚${extra}${chips}。`;
+    return `第 ${res.r} 轮：${sideName(res.winner)}赢（差 ${res.tier}${res.allIn ? "，相位全押" : ""}），拿走底池 ${res.pot} 枚${extra}${chips}。`;
   }
   function finish(g) {
     g.over = true; g.stage = "over"; g.betting = null; g.loanAsk = null;
