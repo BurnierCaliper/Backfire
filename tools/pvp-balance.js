@@ -340,6 +340,14 @@ function diff(a, b) {
   return { d, ci: [d - 1.959963984540054 * se, d + 1.959963984540054 * se] };
 }
 
+/** 只改 AI 的对照（单独的报告 cp）里，哪几种人数和现在的打法（S 里的 base）差得明显（差值区间不含 0） */
+function holdSig(cp, S, sizes) {
+  return sizes.map(s => {
+    const a = S && S[["base", "random", s, "all"].join("|")], b = cp.summary[["hold", "random", s, "all"].join("|")], d = diff(b, a);
+    return d && (d.ci[0] > 0 || d.ci[1] < 0) ? `${s}v${s} ${pp(d.d)} 个百分点（${pct(a.firstRate)} → ${pct(b.firstRate)}）` : null;
+  }).filter(Boolean);
+}
+
 /* ---------- 报告 ---------- */
 const pct = x => (x == null ? "—" : (x * 100).toFixed(1) + "%");
 const pp = x => (x == null ? "—" : (x >= 0 ? "+" : "") + (x * 100).toFixed(1));
@@ -384,8 +392,11 @@ function markdown(report) {
   if (has("rounds") && base) { const x = get("rounds"); if (x) l.push(`- **回合上限 10**：${pct(x.drawRate)} 平局，${pct((x.n - x.errors) ? report.rows.filter(r => r.v === "rounds" && r.k === "random" && r.why === "rounds").length / (x.n - x.errors) : null)} 的场次打满 10 回合按剩余血量判；先手胜率 ${pct(x.firstRate)}（${ciText(x.ci)}）。`); }
   if (has("noRoll") && base) { const x = get("noRoll"), d = diff(base, x); if (x && d) l.push(`- **起身翻滚**：关掉翻滚时先手胜率 ${pct(x.firstRate)}，有翻滚 ${pct(base.firstRate)}（差 ${pp(d.d)} 个百分点，95% 区间 ${pp(d.ci[0])} ~ ${pp(d.ci[1])}）；平均回合 ${f1(x.rounds)} → ${f1(base.rounds)}。`); }
   if (base) l.push(`- **失衡滚雪球**：先打出第一次失衡的一方最后赢了 ${pct(base.stag.rate)}（${ciText(base.stag.ci)}）；先打倒对方第一个人的一方赢了 ${pct(base.down.rate)}（${ciText(base.down.ci)}）；全员倒地后又起身的一队最后翻盘 ${base.wipes.n ? pct(base.wipes.won / base.wipes.n) : "—"}。`);
-  const holdTop = (report.companions || []).map(cp => cp.summary["hold|random|all|all"]).find(Boolean);
-  if (base && holdTop) { const dh = diff(holdTop, base); l.push(`- **只改 AI：先手第一回合原地等**（不走过去，等对面过来）：先手胜率 ${pct(holdTop.firstRate)}（${ciText(holdTop.ci)}），和现在的打法比 ${pp(dh.d)} 个百分点——「谁先走过去」对胜负的影响${Math.abs(dh.d) > 0.05 ? "很大" : "不大"}（见第 9 节）。`); }
+  const holdCp = (report.companions || []).find(cp => cp.summary["hold|random|all|all"]);
+  if (base && holdCp) {
+    const h = holdCp.summary["hold|random|all|all"], dh = diff(h, base), sig = holdSig(holdCp, base ? S : null, sizes);
+    l.push(`- **只改 AI：先手第一回合原地等**（不走过去，等对面过来）：先手胜率 ${pct(h.firstRate)}（${ciText(h.ci)}），和现在的打法比 ${pp(dh.d)} 个百分点（${pp(dh.ci[0])} ~ ${pp(dh.ci[1])}）——「谁先走过去」${dh.ci[0] <= 0 && dh.ci[1] >= 0 ? "合计看不出影响" : "有影响"}${sig.length ? `，${sig.join("、")}` : ""}（见第 9 节）。`);
+  }
   l.push("");
   // ---- 怎么测的 ----
   l.push("## 怎么测的", "");
@@ -416,16 +427,18 @@ function markdown(report) {
       const first = r.f === "a" ? lu.a : lu.b, second = r.f === "a" ? lu.b : lu.a, d = first.filter(melee).length - second.filter(melee).length;
       return d > 0 ? "more" : d < 0 ? "less" : "same";
     };
-    const TAGS = [["more", "先手队近战比后手多"], ["same", "两队近战一样多"], ["less", "先手队近战比后手少"]];
-    l.push("**1b. 先手胜率和两队的近战人数**（近战 / 远程按普攻射程分，见第 8 节；只看分出胜负的场次）", "");
-    l.push("|人数|" + TAGS.map(t => t[1] + "：场数 / 先手胜率（95% 区间）").join("|") + "|");
-    l.push("|---|" + TAGS.map(() => "---").join("|") + "|");
+    // 近战多的一方：先手时（tag more，赢 = 先手赢）、后手时（tag less，赢 = 后手赢）——同一批阵容对调先后手，阵容强弱抵消，只剩先后手的差别
+    const part = (xs, t, w) => { const g = xs.filter(r => tag(r) === t), n = g.filter(r => r.w === w).length; return { n: g.length, won: n, rate: g.length ? n / g.length : null, ci: B.wilson(n, g.length) }; };
+    l.push("**1b. 近战多的一方当先手 / 后手**（近战 / 远程按普攻射程分，见第 8 节；同一对阵容先后手对调，只看分出胜负的场次）", "");
+    l.push("|人数|近战多的一方当先手：场数 / 这一方胜率|近战多的一方当后手：场数 / 这一方胜率|差（先手 − 后手，百分点）|两队近战一样多：场数 / 先手胜率|");
+    l.push("|---|---|---|---:|---|");
     sizes.concat(["all"]).forEach(s => {
-      const xs = rows.filter(r => s === "all" || r.s === s);
-      l.push(`|${SIZE_NAME(s)}|` + TAGS.map(([t]) => { const g = xs.filter(r => tag(r) === t), w = g.filter(r => r.w === "F").length; return g.length ? `${g.length} / **${pct(w / g.length)}**（${ciText(B.wilson(w, g.length))}）` : "—"; }).join("|") + "|");
+      const xs = rows.filter(r => s === "all" || r.s === s), a = part(xs, "more", "F"), b = part(xs, "less", "S"), e = part(xs, "same", "F");
+      const cell = x => (x.n ? `${x.n} / **${pct(x.rate)}**（${ciText(x.ci)}）` : "—");
+      l.push(`|${SIZE_NAME(s)}|${cell(a)}|${cell(b)}|${a.n && b.n ? pp(a.rate - b.rate) : "—"}|${cell(e)}|`);
     });
-    const g = t => { const xs = rows.filter(r => tag(r) === t); return xs.length ? xs.filter(r => r.w === "F").length / xs.length : null; };
-    l.push("", `一句话：先手队的近战比后手多时先手胜率 ${pct(g("more"))}，比后手少时 ${pct(g("less"))}——近战第一回合打不到人，先走过去的近战要先挨打（见「建议」「注意」）。`, "");
+    const all = { a: part(rows, "more", "F"), b: part(rows, "less", "S") };
+    l.push("", `一句话：这套打法下近战多的一方本来就占优（当先手赢 ${pct(all.a.rate)}、当后手赢 ${pct(all.b.rate)}），阵容的影响比先后手大得多；近战多的一方当后手${all.a.rate < all.b.rate ? "略好" : "并不更好"}（差 ${pp(all.a.rate - all.b.rate)} 个百分点，各人数见上表）。`, "");
   }
   if (has("base")) {
     const fixedRows = FIXED.filter(f => sizes.includes(f.a.length));
@@ -585,8 +598,7 @@ function notesFor(report) {
     } else if (side(base) === "后手") {
       const small = base.firstRate > 0.45;
       suggest.push(`- **先后手**：${head}，后手${small ? "略" : "明显"}占优${lean.length ? "（分人数：" + lean.join("、") + "）" : ""}${small ? "，差得不多（不到 5 个百分点，比阵容强弱的影响小得多，见第 2 节），可以先不动，等真人对局再看" : ""}。如果要调，可以考虑：`);
-      suggest.push(`  - 补偿稍微减一点：${d ? `关掉补偿时先手胜率 ${pct(noLate.firstRate)}（先手占优），有补偿 ${pct(base.firstRate)}，1 个附赠的补偿略多了一点；` : ""}例如补偿的附赠只在先手的第一回合里有效（只能拿来协助格挡，不留到后手自己的回合），或者 4 人队以下才给；`);
-      suggest.push("  - 或者减轻「先走过去」的吃亏（见下面「先走过去」那一条）。");
+      suggest.push(`  - 补偿稍微减一点：${d ? `关掉补偿时先手胜率 ${pct(noLate.firstRate)}（先手占优），有补偿 ${pct(base.firstRate)}，1 个附赠的补偿略多了一点；` : ""}例如补偿的附赠只在先手的第一回合里有效（只能拿来协助格挡，不留到后手自己的回合），或者人多（3v3、4v4）时补偿的作用更大，可以只在 1v1、2v2 给。`);
     } else suggest.push(`- **先后手**：${head}，整体看不出明显的先后手优势，暂时不用为先后手调数值${lean.length ? `；分人数看 ${lean.join("、")}，可以等真人对局再确认` : ""}。`);
     if (d) {
       const how = d.ci[1] < 0 ? "明显把先手胜率往下拉" : d.ci[0] > 0 ? "反而把先手胜率往上推" : "作用不明显（区间包含 0）";
@@ -594,7 +606,8 @@ function notesFor(report) {
         (side(noLate) === "先手" && !side(base) ? "补偿正好把先手的优势抹平，现在的 1 个附赠合适，不用改。" : side(noLate) === "先手" && side(base) === "后手" ? "方向对，但力度略大：从先手占优变成了后手略占优。" : ""));
     }
     if (noStand && side(noStand) && (side(noStand) !== side(base) || Math.abs(noStand.firstRate - base.firstRate) > 0.05)) {
-      suggest.push(`- **不允许起身**：这个选项下先手胜率 ${pct(noStand.firstRate)}（${ciText(noStand.ci)}），${side(noStand)}明显占优（允许起身时 ${pct(base.firstRate)}）。倒地就再也起不来时，谁先打倒人更值钱，而第一回合先打到人的多半是后手（先手要先走过去）。如果这个选项常用，可以考虑选了「不允许起身」时${side(noStand) === "后手" ? "不给后手补偿，或者补偿只在先手的第一回合里有效" : "加大后手补偿"}，定之前可以先用这个工具跑一下。`);
+      const share = base.down.n ? base.down.bySecond.n / base.down.n : null;
+      suggest.push(`- **不允许起身**：这个选项下先手胜率 ${pct(noStand.firstRate)}（${ciText(noStand.ci)}），${side(noStand)}明显占优（允许起身时 ${pct(base.firstRate)}）。倒地就再也起不来时，谁先打倒人更值钱，而先打倒对方第一个人的多半是后手（现在的规则下 ${pct(share)} 的「第一次打倒」是后手打出的：先手第一回合走到 2 区后没有附赠协助格挡，后手的补偿附赠又能挡）。如果这个选项常用，可以考虑选了「不允许起身」时${side(noStand) === "后手" ? "不给后手补偿，或者补偿只在先手的第一回合里有效" : "加大后手补偿"}，定之前可以先用这个工具跑一下（这里没有跑「不允许起身 + 关掉补偿」的组合）。`);
     }
     const rows = (report.rows || []).filter(r => r.v === "rounds" && r.k === "random" && r.w !== "E");
     const limit = rows.filter(r => r.why === "rounds"), zero = limit.filter(r => r.pct && r.pct[0] === 0 && r.pct[1] === 0);
@@ -604,12 +617,15 @@ function notesFor(report) {
       ? `- **失衡滚雪球**：先打出第一次失衡的一方赢了 ${pct(stag.rate)}（${ciText(stag.ci)}；1v1 里 ${pct((get("base", 1) || {}).stag ? get("base", 1).stag.rate : null)}），第一次失衡和胜负关系很强（不过先打出失衡往往也说明这一方本来就占上风，不全是失衡本身的作用）；先打倒对方第一个人的一方赢了 ${pct(down.rate)}。如果想减弱：PvP 里失衡只跳过行动点、保留附赠（还能协助格挡），或者 PvP 里协助攻击不回满协助者的架势，或者每回合每队只能接一次协助攻击。`
       : `- **失衡滚雪球**：先打出第一次失衡的一方赢了 ${pct(stag.rate)}，关系不算特别强，暂时不用专门调。`);
     if (hold) {
-      const dh = diff(hold, base);
-      suggest.push(`- **先走过去的吃亏**：只改 AI、让先手第一回合原地等对面过来时，先手胜率变成 ${pct(hold.firstRate)}（${ciText(hold.ci)}；和现在的打法比 ${pp(dh.d)} 个百分点，见第 9 节）。开局两队隔着一个区，谁先走过去谁吃亏（走过去要用附赠、近战还打不到人、也没有附赠协助格挡），${d && Math.abs(dh.d) > Math.abs(d.d) ? "这比补偿的影响还大。" : "影响和补偿差不多大。"}真人对局里可能出现「谁都不愿先过去」：开了回合上限时就是平局。如果不希望这样，可以考虑开局只隔一个区（1 区对 2 区）、2 区制，或者给先手第一回合一个只能移动的附赠。`);
+      const cp = report.companions.find(x => x.summary["hold|random|all|all"]), dh = diff(hold, base), sig = holdSig(cp, S, sizes), none = dh.ci[0] <= 0 && dh.ci[1] >= 0;
+      suggest.push(`- **先走过去吃不吃亏**：只改 AI、让先手第一回合原地等对面过来时，先手胜率 ${pct(hold.firstRate)}（${ciText(hold.ci)}；和现在的打法比 ${pp(dh.d)} 个百分点，${pp(dh.ci[0])} ~ ${pp(dh.ci[1])}，见第 9 节）${sig.length ? `；分人数看 ${sig.join("、")}` : ""}。` +
+        (none ? "合计看不出影响：后手略占优主要来自补偿，不是「先走过去」。" : "") + (sig.length ? "人多时先走过去的一方会先被集火，真人先手可以选择原地等。" : "") +
+        "真人对局里如果双方都不愿先过去，开了回合上限时就是平局；这套打法下「先走过去」的影响不大，暂时不用为它改开局站位。");
     }
   }
   caveats.push("- **自动打法和真人差很多**：两队都是 `BASIC_POLICY`，只会普攻血量最少的对手、打不到就用附赠走一格，**不用任何技能、道具，不召唤武器人**。真人会用技能（很多技能的击破比普攻高，失衡会来得更早、更多）、集火、走位、留附赠格挡、故意拖回合等，先后手的差别可能更大也可能更小。");
-  caveats.push("- **AI 总是主动走过去**：3 区开局两队隔一个区，先手第一回合会用附赠走到 2 区（近战还打不到人，也没有附赠协助格挡），后手接着就能打到它。真人先手可能原地等（第 9 节的对照就是这样），对面也可以等——这时结果取决于谁先忍不住，这里测不到。");
+  caveats.push("- **AI 总是主动走过去**：3 区开局两队隔一个区，先手第一回合会用附赠走到 2 区（近战还打不到人，也没有附赠协助格挡），后手接着就能打到它。第 9 节有只改 AI 的对照（先手第一回合原地等）；真人如果双方都等，结果取决于谁先忍不住，这里测不到。");
+  caveats.push("- **这套打法下近战占便宜**：AI 不会拉开距离放风筝，远程角色（血量、架势普遍低一些）被近战贴上就吃亏，所以近战多的阵容胜率很高（第 1b 节）。先手胜率用镜像对局把阵容抵消了，但「哪个角色强」不要从这份报告里下结论。");
   caveats.push("- **协助格挡 / 协助攻击总是用**：AI 能挡就挡、能协助攻击就打，不会为了留附赠移动而不挡；真人会权衡。后手补偿的价值主要在协助格挡上，所以这里测出来的补偿作用依赖这一点。");
   caveats.push("- **起身翻滚的用法是简单规则**：远程翻离同区的对手、近战翻到有对手的区；真人可能用得更好（例如翻到对手够不着、自己又能打到的地方），所以翻滚的影响可能被低估。");
   caveats.push("- **角色培养是固定的**：升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6，没有义体、图纸、改装件；真实的 PvP 里两边的养成差别可能比先后手的影响大得多（第 2 节固定阵容里，阵容强弱能把一方的胜率拉到 90% 以上）。");
