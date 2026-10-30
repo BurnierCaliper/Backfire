@@ -1874,11 +1874,14 @@ function playerTauntTarget(u) {
   return attackFoe(u, t) ? t : null;
 }
 /** 被嘲讽的玩家单位对嘲讽它的那个单位出了手（技能 / 道具，app.js · runSkill、battle-commands.js · 用道具）：这次嘲讽用掉了（「下次攻击必须打你」）。
- *  武器人和持有者共用持有者的那一次：谁先打了嘲讽者都算 */
+ *  武器人和持有者共用持有者的那一次：谁先打了嘲讽者，两个都解除（docs/pvp.md 第 5 节）——武器人自己也挂着同一个人的嘲讽时
+ *  （柯尔特「过度自信」同时打到灯和年糕……），持有者打了嘲讽者也一起解除（#490：以前只有武器人先打才两个都解除） */
 function playerTauntDone(u, t) {
   if (!u || !t) return;
   const holder = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
-  [u, holder].forEach(x => { if (x && x.tauntTo === t.id) x.tauntTo = null; });
+  const owner = holder || u;
+  const weapons = (state.units || []).filter(x => x && x !== u && x.weaponOf && owner.kit && x.weaponOf === owner.kit && x.isPlayer);
+  [u, holder].concat(weapons).forEach(x => { if (x && x.tauntTo === t.id) x.tauntTo = null; });
 }
 /** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
  *   { reset: true }                    清空配置：回到默认（全部在「我方」，一切照旧）
@@ -1917,6 +1920,17 @@ function setPlayerFaction(cmd) {
     const u = typeof unitById === "function" ? unitById(cmd.unit) : null;
     if (!u) throw new Error("没有这个单位：" + cmd.unit);
     if (id === PVP_CFG.defaultFaction) delete next.members[u.id]; else next.members[u.id] = id;
+  }
+  // 一次分好几个人（主持人面板「应用分配」，#490）：一起改、一起生效。一个一个改的话，中间那一刻会被当成真的局面判胜负、推回合——
+  // 例：两个人互换阵营，先改的那一个和对面成了同一个阵营，场上只剩一个玩家阵营、又没有敌人，战斗就以胜利结束了
+  if (cmd.members != null) {
+    Object.keys(cmd.members).forEach(uid => {
+      const u = typeof unitById === "function" ? unitById(uid) : null;
+      if (!u) throw new Error("没有这个单位：" + uid);
+      const f = String(cmd.members[uid]);
+      if (!next.list.some(x => x.id === f)) throw new Error("没有这个玩家阵营：" + f);
+      if (f === PVP_CFG.defaultFaction) delete next.members[u.id]; else next.members[u.id] = f;
+    });
   }
   if (cmd.other != null) {
     const other = String(cmd.other);

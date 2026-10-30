@@ -69,9 +69,14 @@
       });
       return out;
     }
-    /** 「应用分配」：只发换了阵营的人 */
+    /** 「应用分配」：只发换了阵营的人。换好几个人时一条指令一起改（members，#490）——一条一条发的话，房主每改一条就判一次胜负、推一次回合，
+     *  中间那一刻（例：两个人互换阵营，先改的那个和对面成了同一个阵营）会被当成真的局面：战斗直接以胜利结束、这一段的人被跳过 */
     function memberChanges() {
-      return members().filter(u => { const v = value("ogm-member-" + u.id); return v && v !== heroFaction(u); }).map(u => ({ type: "battle.playerFaction", faction: value("ogm-member-" + u.id), unit: u.id }));
+      const list = members().filter(u => { const v = value("ogm-member-" + u.id); return v && v !== heroFaction(u); }).map(u => ({ unit: u.id, faction: value("ogm-member-" + u.id) }));
+      if (list.length <= 1) return list.map(x => ({ type: "battle.playerFaction", faction: x.faction, unit: x.unit }));
+      const all = {};
+      list.forEach(x => { all[x.unit] = x.faction; });
+      return [{ type: "battle.playerFaction", faction: list[0].faction, members: all }];
     }
     const zones = () => Array.from({ length: Number(state().zoneMode) || 2 }, (_, i) => i + 1);
     // 「生成敌人」的等级默认填队伍平均等级（作者 10/20 定；trpg-tasks.js · trpgPartyLevel，四舍五入），主持人照样可以改

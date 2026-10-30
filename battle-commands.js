@@ -54,7 +54,7 @@
    *  这时 hostile 只收 true（敌对）/ false（友好）/ null（回到默认） */
   function playerFactionCheck(c) {
     const C = root.PVP_CFG || (typeof PVP_CFG !== "undefined" ? PVP_CFG : { idMax: 16, nameMax: 16, enemyMax: 24, phases: ["player", "enemy"] });
-    const known = ["type", "reset", "faction", "name", "phase", "remove", "unit", "other", "enemy", "hostile"];
+    const known = ["type", "reset", "faction", "name", "phase", "remove", "unit", "members", "other", "enemy", "hostile"];
     Object.keys(c).forEach(k => { if (!known.includes(k)) throw new Error("Unknown player faction field: " + k); });
     const has = k => Object.prototype.hasOwnProperty.call(c, k);
     if (has("reset")) {
@@ -74,9 +74,17 @@
       if (c.remove !== true) throw new Error("player faction remove must be true");
       if (Object.keys(c).some(k => !["type", "faction", "remove"].includes(k))) throw new Error("player faction remove takes no other fields");
     }
-    if (has("unit")) {
-      const u = actor(c.unit);
+    const heroUnit = id => {
+      const u = actor(id);
       if (!u.isPlayer || (typeof isWeaponUnit === "function" && isWeaponUnit(u) && !u.escort)) throw new Error("player faction unit must be a player character (weapon units follow their holder)");
+    };
+    if (has("unit")) heroUnit(c.unit);
+    // 一次分好几个人（主持人面板「应用分配」，#490）：{ 单位 id: 阵营 id }，一起生效
+    if (has("members")) {
+      if (has("unit")) throw new Error("player faction: give unit or members, not both");
+      const m = c.members;
+      if (!m || typeof m !== "object" || Array.isArray(m) || !Object.keys(m).length || Object.keys(m).length > 64) throw new Error("player faction members must be an object of unit id → faction id");
+      Object.keys(m).forEach(id => { heroUnit(id); label(m[id], "id", C.idMax); });
     }
     if (has("other") && has("enemy")) throw new Error("player faction relation: give other or enemy, not both");
     if (has("other")) { label(c.other, "other", C.idMax); if (c.other === c.faction) throw new Error("player faction other must be a different faction"); }
