@@ -1,7 +1,8 @@
 // High Flux（#485）· 界面 counter-cards-ui.js：标题「本地玩法」里的入口、游戏名、选边 / 难度、牌桌（牌背、筹码、天气堆、天气特效）、
 // 用点按钮的方式以任意一方 × 任意难度和 AI 打完一局、结算只显示胜负 / 分档 / 筹码变动、画面里看不到对方的牌；
 // 牌局中随时打开完整的克制表（顶栏「菜单」→「克制表」、Esc、侧栏 / 结算横幅的按钮；格子是得分，不动牌局）；
-// 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）。
+// 手里的元素牌悬停（手机长按）弹出得分预览（打五种层各得几分，和克制表同一份数；天气变了跟着变；不透露庄家的牌；不挡出牌）；
+// 下注不封顶时跟不起的下注栏、跟注后追加窗口的倒计时（#496，真浏览器的 2 条同克制表，没装 Playwright 时用机器自带的 Chrome）。
 // Node 里用 tests/mini-dom.js 跑 game.html 的真页面结构；另有真浏览器测试（打完一局的 2 条没装 Playwright 时跳过；
 // 克制表、悬停预览的各 2 条没装 Playwright 时用机器自带的 Chrome（tests/cdp-browser.js），都没有才跳过）
 "use strict";
@@ -30,6 +31,12 @@ function page() {
 }
 const click = (el) => { assert.ok(el, "要点的东西不在"); el.click(); };
 const visible = (el) => !!el && !el.hidden;
+/** 下注时一直点「过牌」/「跟注」/ 跟注后追加窗口（#496）里的「不加注」，直到这个下注回合结束（最多点 10 下） */
+function betThrough(p, game, stage) {
+  for (let i = 0; i < 10 && game.stage === stage; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]') || p.$('#cc-actions [data-cc="pass"]'));
+}
+/** 规则层直接跟注后开了追加窗口：双方都放弃追加 */
+const passWindow = (CC, g) => { if (g.betting && g.betting.window) CC.toAct(g).forEach(s => CC.act(g, s, { type: "pass" })); };
 
 /** 一直点到这一局结束：有结算横幅就点「继续」；轮到自己就点主按钮 / 第一张能点的牌；下注时随机换着点 */
 function playThrough(p, rng) {
@@ -47,7 +54,7 @@ function playThrough(p, rng) {
     if (card) { click(card); continue; }
     const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && b.dataset.cc !== "amt");
     assert.ok(btns.length, "没有能点的按钮：" + st.game.stage);
-    const bet = btns.filter(b => ["check", "call", "bet", "raise", "fold"].includes(b.dataset.cc));
+    const bet = btns.filter(b => ["check", "call", "bet", "raise", "fold", "pass"].includes(b.dataset.cc));
     const mode = btns.find(b => b.dataset.cc === "mode" && b.dataset.mode);
     let pick;
     if (bet.length) pick = rng() < 0.1 ? bet.find(b => b.dataset.cc === "fold") : bet[Math.floor(rng() * bet.length)];
@@ -241,8 +248,7 @@ test("翻开天气：桌上换成那张天气牌、闪一下，放对应的天�
   CC.act(game, "dealer", { type: "play", card: "flesh" });
   p.UI.start({ side: "player", level: "normal", game, fast: true });
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
-  if (game.stage === "bet1") click(p.$('#cc-actions [data-cc="check"]'));
-  while (game.stage === "bet1") click(p.$('#cc-actions [data-cc="call"]') || p.$('#cc-actions [data-cc="check"]'));
+  betThrough(p, game, "bet1");
   assert.equal(game.stage, "weather");
   click(p.$('#cc-actions [data-cc="reveal"]'));
   assert.equal(game.weather, "thunder");
@@ -375,7 +381,7 @@ test("借贷（下注时）：轮到人下注、筹码不够时下注栏里有�
   const g = CC.newGame({ seed: "下注栏借", deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"], playerChips: 8 });
   A(g, "dealer", "weather", { op: "pass" });
   A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
-  A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call");
+  A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call"); passWindow(CC, g);
   A(g, "player", "reveal"); A(g, "player", "noNormal");
   A(g, "dealer", "check"); A(g, "player", "check");
   A(g, "dealer", "weather", { op: "keep" });
@@ -414,7 +420,7 @@ test("下注不封顶（#496）：人能押过对方的全部筹码（「最大�
   const h = CC.newGame({ seed: "跟不起栏", deck: DECK, playerChips: 8 });
   A(h, "dealer", "weather", { op: "pass" });
   A(h, "dealer", "play", { card: "flesh" }); A(h, "player", "play", { card: "ice" });
-  A(h, "player", "bet", { amount: 4 }); A(h, "dealer", "call");
+  A(h, "player", "bet", { amount: 4 }); A(h, "dealer", "call"); passWindow(CC, h);
   A(h, "player", "reveal"); A(h, "player", "noNormal");
   A(h, "dealer", "check"); A(h, "player", "check");
   A(h, "dealer", "weather", { op: "keep" });
@@ -438,6 +444,94 @@ test("下注不封顶（#496）：人能押过对方的全部筹码（「最大�
   assert.ok(bar().querySelector('[data-cc="call"]'), "借够了，可以跟注");
   click(bar().querySelector('[data-cc="call"]'));
   assert.equal(h.sides.player.bet, 11);
+});
+
+/* ---------- 跟注后的追加窗口（#496 第 2 条）：倒计时、「加注」「弃牌」「不加注」，到时间自动进入下一步 ---------- */
+/** 人当玩家；庄家（测试替它走）不动天气、暗出血肉，玩家暗出冰、过牌，庄家下注 1 枚——轮到人跟注 */
+function windowGame(p, seed) {
+  const CC = p.CC, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed, deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"] });
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 1 });
+  p.UI.start({ side: "player", level: "normal", game: g, seed, fast: true });
+  return g;
+}
+
+test("跟注后的追加窗口（#496）：人跟注后操作栏出现倒计时（从 3 秒数起，秒数读 CC_CONFIG.callWindowSec）、「加注」「弃牌」「不加注」；AI 马上决定、人有完整的 3 秒；倒计时到了自动进入下一步（翻天气）", async () => {
+  const p = page();
+  const g = windowGame(p, "窗口栏");
+  assert.equal(p.CC.CC_CONFIG.callWindowSec, 3);
+  click(p.$('#cc-actions [data-cc="call"]'));
+  assert.ok(g.betting && g.betting.window, "跟注后开了追加窗口（庄家 AI 马上决定：不追加）");
+  assert.equal(g.betting.window.passed.dealer, true, "AI 不等倒计时，马上放弃追加");
+  const bar = p.$("#cc-actions");
+  assert.equal(bar.querySelector(".cc-count").textContent, "3");
+  assert.equal(bar.querySelector(".cc-clock").getAttribute("role"), "timer");
+  assert.ok(bar.querySelector(".cc-winbar i"), "倒计时的进度条");
+  assert.match(bar.querySelector(".cc-prompt").textContent, /^你跟注了。3 秒追加窗口：双方都还可以加注或弃牌，没人动作就进入翻天气。/);
+  const raise = bar.querySelector('[data-cc="raise"]'), fold = bar.querySelector('[data-cc="fold"]'), pass = bar.querySelector('[data-cc="pass"]');
+  assert.ok(raise && fold && pass);
+  assert.match(raise.textContent, /^加注 1$/);
+  assert.ok(bar.querySelector(".cc-amount .cc-amt"), "加注额照平时能加减");
+  assert.equal(pass.textContent, "不加注");
+  assert.ok(pass.classList.contains("primary"), "不动作是默认的");
+  assert.ok(!bar.querySelector('[data-cc="call"], [data-cc="check"], [data-cc="borrow"]'), "窗口里没有跟注、过牌、借贷");
+  assert.match(p.$("#cc-side .cc-log").textContent, /庄家下注 1 枚。|玩家跟注 1 枚。/);
+  assert.match(p.$("#cc-side .cc-log").textContent, /玩家跟注，开 3 秒追加窗口/);
+  // 改加注额会整块重画：倒计时不重新数
+  await wait(1100);
+  assert.equal(p.$("#cc-actions .cc-count").textContent, "2", "每秒少一");
+  click(p.$('#cc-actions [data-cc="amt"][data-d="1"]'));
+  assert.equal(p.$("#cc-actions .cc-amt").textContent, "2");
+  assert.equal(p.$("#cc-actions .cc-count").textContent, "2", "重画后接着数，不从 3 重来");
+  await wait(2100);
+  assert.equal(g.stage, "weather", "倒计时到了：自动进入下一步（翻天气）");
+  assert.ok(g.log.some(e => e.t === "window" && e.why === "timeout"));
+  assert.ok(!p.$("#cc-actions .cc-count"), "倒计时收起");
+  assert.match(p.$("#cc-actions").textContent, /翻开一张新天气/);
+  assert.equal(p.UI.state().win, null);
+});
+
+test("追加窗口里：点「加注」关窗、照常轮到 AI 应对（算进加注次数）；点「弃牌」立即判负；点「不加注」——AI 也不追加，就直接进入下一步，不用等倒计时；离开牌桌时倒计时停掉", () => {
+  // 不加注：AI 已经放弃追加，直接进入翻天气
+  const a = page();
+  const g1 = windowGame(a, "窗口栏");
+  click(a.$('#cc-actions [data-cc="call"]'));
+  click(a.$('#cc-actions [data-cc="pass"]'));
+  assert.equal(g1.stage, "weather");
+  assert.equal(a.UI.state().win, null, "窗口关了，倒计时停掉");
+  // 加注：关窗，AI（马上）跟注 / 加注 / 弃牌
+  const b = page();
+  const g2 = windowGame(b, "窗口栏");
+  click(b.$('#cc-actions [data-cc="call"]'));
+  click(b.$('#cc-actions [data-cc="amt"][data-d="1"]'));
+  click(b.$('#cc-actions [data-cc="raise"]'));
+  const r = g2.log.find(e => e.t === "bet" && e.op === "raise" && e.by === "player");
+  assert.ok(r && r.window && r.amount === 2, "人在追加窗口里加注 2 枚");
+  assert.match(b.$("#cc-side .cc-log").textContent, /玩家在追加窗口里加注 2 枚/);
+  const after = g2.log.slice(g2.log.indexOf(r) + 1).find(e => e.t === "bet" && e.by === "dealer");
+  assert.ok(after && ["call", "raise", "fold"].includes(after.op), "AI 接着应对：" + JSON.stringify(after));
+  if (after.op === "call" && g2.betting && g2.betting.window) {
+    assert.equal(g2.betting.raises, 1);
+    assert.equal(b.$("#cc-actions .cc-count").textContent, "3", "AI 跟注后又开一个窗口，倒计时从 3 秒重新数");
+  }
+  // 弃牌：立即判负
+  const c = page();
+  const g3 = windowGame(c, "窗口栏");
+  click(c.$('#cc-actions [data-cc="call"]'));
+  click(c.$('#cc-actions [data-cc="fold"]'));
+  assert.deepEqual([g3.results[0].outcome, g3.results[0].folded], ["fold", "player"]);
+  assert.ok(visible(c.$("#cc-banner")), "结算横幅");
+  assert.equal(c.UI.state().win, null);
+  // 离开牌桌：倒计时停掉
+  const d = page();
+  const g4 = windowGame(d, "窗口栏");
+  click(d.$('#cc-actions [data-cc="call"]'));
+  assert.ok(d.UI.state().win && d.UI.state().win.timer, "倒计时在走");
+  click(d.$('#cc-top [data-cc="title"]'));
+  assert.equal(d.UI.state().win, null, "回到标题：倒计时停掉");
+  assert.ok(g4.betting.window, "对局停在窗口里，不会自己往下走");
 });
 
 test("总结算：庄家借过筹码——写清楚扣还了多少，胜负按扣还之后的筹码数", () => {
@@ -536,7 +630,7 @@ test("克制表：开着时牌局照常（人出牌、下注，AI 照常走）�
   assert.match(box.querySelector(".mu-detail").textContent, /火 → 血肉：玩家赢 \+1 · 克制 \+1/, "点开一格看原因");
   const td = fireFlesh();
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
-  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  betThrough(p, game, "bet1");
   assert.equal(game.stage, "weather", "人出了牌、下完注，庄家（AI）也走了");
   assert.equal(fireFlesh(), td, "天气没变：表没重画");
   assert.ok(box.querySelector(".mu-detail"), "点开的格子还在");
@@ -602,7 +696,7 @@ for (const side of ["player", "dealer"]) {
       if (card) { click(card); continue; }
       const btns = Array.from(p.$$("#cc-actions button[data-cc]")).filter(b => !b.disabled && b.dataset.cc !== "amt" && b.dataset.cc !== "mode");
       assert.ok(btns.length, "没有能点的按钮：" + g.stage);
-      const bet = btns.filter(b => ["check", "call", "bet", "raise"].includes(b.dataset.cc));
+      const bet = btns.filter(b => ["check", "call", "bet", "raise", "pass"].includes(b.dataset.cc));
       click(bet.length ? bet[Math.floor(rng() * bet.length)] : btns.find(b => b.classList.contains("primary")) || btns[0]);
     }
     assert.ok(st().game.over, "打完了");
@@ -691,7 +785,7 @@ test("悬停预览：开着的时候场上的天气变了，预览跟着变（�
   const p = page();
   const game = heatGame(p, "预览跟着变");
   click(p.$('#cc-board button.cc-can[data-card="ice"]'));
-  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  betThrough(p, game, "bet1");
   assert.equal(game.stage, "weather");
   const tip = p.$("#cc-tip");
   hover(p, handCard(p, "fire"));
@@ -770,7 +864,7 @@ test("悬停预览：不挡出牌——预览不接鼠标，开着时照样点�
   assert.ok(!handCard(p, "ice").matches("button"));
   hover(p, handCard(p, "ice"));
   assert.ok(visible(tip) && tip.dataset.card === "ice");
-  for (let i = 0; i < 10 && game.stage === "bet1"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  betThrough(p, game, "bet1");
   assert.equal(game.stage, "weather", "下注栏照常");
   assert.ok(visible(tip), "还开着");
   // 克制表盖上来：收起
@@ -783,7 +877,7 @@ test("悬停预览：不挡出牌——预览不接鼠标，开着时照样点�
   assert.ok(visible(tip));
   click(p.$('#cc-actions [data-cc="reveal"]'));
   if (game.stage === "normal") click(p.$('#cc-actions [data-cc="noNormal"]'));
-  for (let i = 0; i < 10 && game.stage === "bet2"; i++) click(p.$('#cc-actions [data-cc="check"]') || p.$('#cc-actions [data-cc="call"]'));
+  betThrough(p, game, "bet2");
   assert.ok(visible(p.$("#cc-banner")), "这一轮结算了");
   assert.ok(!visible(tip), "结算横幅盖上来就收起");
   // 离开牌桌：收起
@@ -1068,6 +1162,62 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     await page.waitForSelector("#cc-tip", Object.assign({ state: "hidden" }, T));
     const overflow = await page.evaluate(() => document.getElementById("scr-cc").scrollWidth - innerWidth);
     assert.ok(overflow <= 1, "牌桌没有横向溢出：" + overflow + "px");
+    assert.deepEqual(errors, []);
+  });
+}
+
+/* 跟注后的追加窗口（#496，真浏览器）：同上，没装 Playwright 时用机器自带的 Chrome，都没有才跳过 */
+/** 量一下操作栏（在页面里跑）：窗口开没开、倒计时的数字、倒计时 / 进度条 / 「加注」「弃牌」「不加注」的位置，牌桌有没有横向溢出 */
+function measureWindow() {
+  const bar = document.getElementById("cc-actions"), g = CounterCardsUI.state().game;
+  const box = (sel) => { const el = bar.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height }; };
+  const count = bar.querySelector(".cc-count");
+  return { stage: g.stage, open: !!(g.betting && g.betting.window), count: count ? count.textContent : null,
+    clock: box(".cc-clock"), bar: box(".cc-winbar i"), raise: box('[data-cc="raise"]'), fold: box('[data-cc="fold"]'), pass: box('[data-cc="pass"]'),
+    vw: innerWidth, overflow: document.getElementById("scr-cc").scrollWidth - innerWidth };
+}
+/** 人当玩家，轮到人跟注庄家的 1 枚（同上面 Node 里的 windowGame，庄家 AI 在窗口里不追加） */
+function windowSetup() {
+  const CC = CounterCards, A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+  const g = CC.newGame({ seed: "窗口栏", deck: ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"] });
+  A(g, "dealer", "weather", { op: "pass" });
+  A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
+  A(g, "player", "check"); A(g, "dealer", "bet", { amount: 1 });
+  CounterCardsUI.start({ side: "player", level: "normal", game: g, seed: "窗口栏", fast: true });
+}
+
+for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, height: 844, tag: "手机 390px", mobile: true }]) {
+  test(`真浏览器（${vp.tag}）：跟注后的追加窗口——倒计时从 3 秒数起、进度条在缩短，「加注」「弃牌」「不加注」都在屏幕里${vp.mobile ? "点得到（点「加注」照常加注）" : ""}，不横向溢出；倒计时结束自动进入下一步`, { timeout: 120000 }, async (t) => {
+    const b = await chartBrowser();
+    if (!b) { t.skip(cdpWhy || skipWhy); return; }
+    const context = await b.newContext(Object.assign({ viewport: { width: vp.width, height: vp.height } }, vp.mobile ? { isMobile: true, hasTouch: true } : {}));
+    await require("./old-screen")(context);
+    t.after(() => context.close());
+    const page = await context.newPage(), errors = [], T = { timeout: 20000 };
+    page.on("pageerror", e => errors.push(e.message));
+    const press = (sel) => (vp.mobile ? page.tap(sel, T) : page.click(sel, T));
+    await page.goto(GAME_URL);
+    await page.evaluate(windowSetup);
+    await press('#cc-actions [data-cc="call"]');
+    await page.waitForSelector("#cc-actions .cc-count", T);
+    const m = await page.evaluate(measureWindow);
+    assert.ok(m.open && m.count === "3", "跟注后开了窗口，从 3 秒数起：" + JSON.stringify(m));
+    for (const k of ["clock", "raise", "fold", "pass"]) assert.ok(m[k] && m[k].width > 0 && m[k].left >= 0 && m[k].right <= m.vw, `${k} 在屏幕里：${JSON.stringify(m[k])} / ${m.vw}`);
+    assert.ok(m.overflow <= 1, "牌桌没有横向溢出：" + m.overflow + "px");
+    await page.waitForTimeout(1200);
+    const m2 = await page.evaluate(measureWindow);
+    assert.ok(m2.open && Number(m2.count) < 3, "数字在少：" + m2.count);
+    assert.ok(m2.bar.width < m.bar.width - 1, `进度条在缩短：${m.bar.width} → ${m2.bar.width}`);
+    await page.waitForFunction(() => CounterCardsUI.state().game.stage === "weather", null, T);
+    assert.equal(await page.evaluate(() => !!document.querySelector("#cc-actions .cc-count")), false, "到时间：自动进入翻天气，倒计时收起");
+    if (vp.mobile) {
+      // 再开一局：窗口里点「加注」
+      await page.evaluate(windowSetup);
+      await press('#cc-actions [data-cc="call"]');
+      await page.waitForSelector('#cc-actions [data-cc="raise"]', T);
+      await press('#cc-actions [data-cc="raise"]');
+      await page.waitForFunction(() => CounterCardsUI.state().game.log.some(e => e.t === "bet" && e.op === "raise" && e.by === "player" && e.window), null, T);
+    }
     assert.deepEqual(errors, []);
   });
 }

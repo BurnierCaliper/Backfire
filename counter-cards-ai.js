@@ -353,20 +353,13 @@
       if (r && rng() < cfg.raiseChance) return amount(r, r.min + rng() * (Math.min(r.max, r.min * cfg.maxBetMult) - r.min));
       return { type: "call" };
     }
-    let bel = ctx.belief;
-    let st = null;
-    if (ctx.level === "hard") { st = oppStats(v); bel = readOpponent(ctx, bel, st); }
-    const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
-    const e = evaluate(ctx, v.me.card, Q, bel);
+    const { e, st, bluffP, size } = betRead(ctx);
     // 跟不起时借来跟要多付的利息（借 n 枚还 repayOf(n) 枚）
     const interest = short && lo ? CC().repayOf(loanToCall(v, lo)) - loanToCall(v, lo) : 0;
     const callOk = toCall > 0 && worthCall(ctx, e, st, interest);
     const lb = loanForBet(ctx, e, short, callOk);
     if (lb) return lb;
     if (short) return { type: "fold" };                // 不值得借来跟
-    const pot = v.pot;
-    const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
-    const size = (o) => (ctx.level === "hard" ? o.min + pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
     if (toCall <= 0) {
       const b = has("bet");
       if (b && e.edge >= cfg.betEdge) return amount(b, size(b));
@@ -378,6 +371,31 @@
     if (callOk) return { type: "call" };
     if (r && rng() < bluffP / 2) return amount(r, r.min);
     return { type: "fold" };
+  }
+  /** 下注时看牌（普通 / 困难）：对方出的是哪张（困难按对手这一轮的下注当信号修正）、结算时的天气 → 胜率 e；
+   *  诈唬率 bluffP（困难按对手面对下注时的弃牌率加减）；下注额 size(可选项)（困难按底池 × 胜率差，普通牌很好时下双倍最低额） */
+  function betRead(ctx) {
+    const v = ctx.v, cfg = ctx.cfg;
+    let bel = ctx.belief, st = null;
+    if (ctx.level === "hard") { st = oppStats(v); bel = readOpponent(ctx, bel, st); }
+    const Q = v.side === "player" && v.stage === "bet1" && v.deckCount ? playerPlannedWeather(ctx) : finalWeather(ctx);
+    const e = evaluate(ctx, v.me.card, Q, bel);
+    const bluffP = ctx.level === "hard" ? clampN(cfg.bluffBase + cfg.bluffFold * st.foldRate, cfg.bluffMin, cfg.bluffMax) : cfg.bluff;
+    const size = (o) => (ctx.level === "hard" ? o.min + v.pot * Math.max(0, e.edge) * cfg.sizePot : o.min * (e.edge >= cfg.bigEdge ? 2 : 1));
+    return { e, st, bluffP, size };
+  }
+  /** 跟注后的追加窗口（#496）：马上决定加注还是不动作（pass），不用等倒计时（人当对手时界面照样给人留足秒数）。
+   *  简单：偶尔随手加注；普通 / 困难：牌好到 raiseEdge 才加注（和面对下注时加注一样），偶尔诈唬加注最低额，不然不动作。
+   *  已经跟平了，弃牌只会白丢自己已下的筹码，所以窗口里不弃牌 */
+  function windowAct(ctx) {
+    const rng = ctx.rng, cfg = ctx.cfg, r = ctx.opts.find(o => o.type === "raise");
+    if (!r) return { type: "pass" };
+    const amount = (x) => ({ type: "raise", amount: clampN(Math.round(x), r.min, r.max) });
+    if (ctx.level === "easy") return rng() < cfg.raiseChance ? amount(r.min + rng() * (Math.min(r.max, r.min * cfg.maxBetMult) - r.min)) : { type: "pass" };
+    const { e, bluffP, size } = betRead(ctx);
+    if (e.edge >= cfg.raiseEdge) return amount(size(r));
+    if (rng() < bluffP / 2) return amount(r.min);
+    return { type: "pass" };
   }
   /** 面对下注值不值得跟：普通看牌好不好（跟注额不超过底池的 cheapCall 也照跟）；困难按胜率算划不划算，并按对手的诈唬率放宽。
    *  cost：借来跟注要多付的利息（跟不起时，#496）——普通要胜率差到 loanCallEdge 才借来跟，困难把利息算进跟注的期望 */
@@ -513,7 +531,7 @@
       case "dealerWeather": a = dealerWeather(ctx); break;
       case "dealerPeek": a = dealerPlace(ctx); break;
       case "play": a = playCard(ctx); break;
-      case "bet1": case "bet2": a = bet(ctx); break;
+      case "bet1": case "bet2": a = view.betting && view.betting.window ? windowAct(ctx) : bet(ctx); break;
       case "weather": a = playerWeather(ctx); break;
       case "normal": a = playerNormal(ctx); break;
     }

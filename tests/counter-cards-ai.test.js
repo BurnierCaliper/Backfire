@@ -1,5 +1,6 @@
 // High Flux（#485）· AI counter-cards-ai.js：简单 / 普通 / 困难 × 庄家 / 玩家都能完整打完一局、只按自己能看到的东西做决定、
-// 推理（困难记住整局、普通只看单轮结果）、玩家方会决定翻天气还是暗弃跳过、借贷（每轮开始 / 下注时 / 跟不起时，#496）、困难比简单强
+// 推理（困难记住整局、普通只看单轮结果）、玩家方会决定翻天气还是暗弃跳过、借贷（每轮开始 / 下注时 / 跟不起时，#496）、
+// 跟注后的追加窗口里马上决定（#496）、困难比简单强
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
@@ -17,6 +18,8 @@ const CC = c.CounterCards;
 const AI = c.CounterCardsAI;
 const J = v => JSON.parse(JSON.stringify(v));
 const A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));
+/** 跟注，跟完开了追加窗口（#496）就双方都放弃追加 */
+const call = (g, side) => { A(g, side, "call"); if (g.betting && g.betting.window) CC.toAct(g).forEach(s => A(g, s, "pass")); };
 const DECK = ["thunder", "sand", "glow", "heat", "snow", "acid", "phase"];
 const LEVELS = ["easy", "normal", "hard"];
 
@@ -221,7 +224,7 @@ test("AI 也会借（下注时）：筹码不够、牌又好到想加注才借�
     const g = CC.newGame({ seed: "下注借", deck: DECK, playerChips: 8 });
     A(g, "dealer", "weather", { op: "pass" });
     A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
-    A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call");
+    A(g, "player", "bet", { amount: 4 }); call(g, "dealer");
     A(g, "player", "reveal"); A(g, "player", "noNormal");
     A(g, "dealer", "check"); A(g, "player", "check");
     A(g, "dealer", "weather", { op: "keep" });
@@ -250,7 +253,7 @@ test("下注不封顶（#496）：对方押得比自己手上的还多、跟不�
     const g = CC.newGame({ seed: "跟不起", deck: DECK, playerChips: 8 });
     A(g, "dealer", "weather", { op: "pass" });
     A(g, "dealer", "play", { card: "flesh" }); A(g, "player", "play", { card: "ice" });
-    A(g, "player", "bet", { amount: 4 }); A(g, "dealer", "call");
+    A(g, "player", "bet", { amount: 4 }); call(g, "dealer");
     A(g, "player", "reveal"); A(g, "player", "noNormal");
     A(g, "dealer", "check"); A(g, "player", "check");
     A(g, "dealer", "weather", { op: "keep" });
@@ -289,6 +292,65 @@ test("下注不封顶（#496）：对方押得比自己手上的还多、跟不�
     assert.ok(!fallback(x), `${level}/${pc}/${bet}：${JSON.stringify(x)}`);
     if (x.type === "borrow") assert.ok(2 + x.amount >= bet, `${level}/${pc}/${bet}：借了就够跟`);
   }
+});
+
+test("跟注后的追加窗口（#496）：AI 马上决定，不等倒计时——牌好就加注（算进加注次数，关窗后轮到对方），牌差不动作（pass），偶尔诈唬只加最低额；已经跟平了，窗口里从不弃牌；简单偶尔随手加注", () => {
+  // 第 1 轮平局（雷鸣）；第 2 轮庄家出沙、玩家出 playerCard，玩家下 2 枚、庄家跟注 → 开窗口
+  const mk = (playerCard) => {
+    const g = afterTie("窗口AI", DECK);
+    A(g, "dealer", "weather", { op: "keep" });
+    A(g, "dealer", "play", { card: "sand" }); A(g, "player", "play", { card: playerCard });
+    A(g, "player", "bet", { amount: 2 }); A(g, "dealer", "call");
+    assert.ok(g.betting.window);
+    return g;
+  };
+  for (const level of ["normal", "hard"]) {
+    // 雷鸣里出能量：牌好，马上加注；关窗，轮到庄家应对
+    const g = mk("energy");
+    const a = AI.decide(CC.view(g, "player"), level, CC.makeRng("s"));
+    assert.equal(a.type, "raise", level);
+    CC.act(g, "player", a);
+    assert.equal(g.betting.window, null);
+    assert.equal(g.betting.raises, 1, "窗口里的加注算进加注次数");
+    assert.deepEqual(J(CC.toAct(g)), ["dealer"]);
+    assert.ok(["call", "raise", "fold"].includes(AI.decide(CC.view(g, "dealer"), level, CC.makeRng("s")).type));
+    // 雷鸣里出谐波：牌差，不动作；偶尔诈唬也只加最低额；从不弃牌
+    const weak = CC.view(mk("harmonic"), "player");
+    const acts = Array.from({ length: 30 }, (_, i) => AI.decide(weak, level, CC.makeRng("w" + i)));
+    assert.ok(acts.every(x => x.type === "pass" || (x.type === "raise" && x.amount === 2)), level + "：" + JSON.stringify(acts));
+    assert.ok(acts.filter(x => x.type === "pass").length >= 20, level + "：牌差大多不动作");
+  }
+  // 简单：大多不动作，偶尔随手加注，从不弃牌
+  const easy = Array.from({ length: 60 }, (_, i) => AI.decide(CC.view(mk("fire"), "player"), "easy", CC.makeRng("e" + i)).type);
+  assert.ok(easy.includes("pass") && easy.includes("raise") && !easy.includes("fold"), easy.join());
+  // 跟注的一方（庄家）在窗口里也是马上决定：不动作或者加注，不弃牌
+  for (const level of ["easy", "normal", "hard"]) {
+    const t = AI.decide(CC.view(mk("fire"), "dealer"), level, CC.makeRng("d")).type;
+    assert.ok(t === "pass" || t === "raise", level + "：" + t);
+  }
+});
+
+test("AI 对 AI：跟注后的追加窗口照常打完——开过窗口、窗口里加注过，AI 在窗口里从不弃牌，一个下注回合最多加注 2 次", () => {
+  let windows = 0, raises = 0;
+  for (const dl of LEVELS) for (const pl of LEVELS) for (let n = 0; n < 12; n++) {
+    const g = CC.newGame({ seed: `窗口-${dl}-${pl}-${n}` });
+    AI.playOut(g, { dealer: dl, player: pl });
+    let inWindow = false;
+    const perStreet = {};
+    g.log.forEach(e => {
+      if (e.t === "window") { inWindow = e.op === "open"; if (inWindow) windows++; return; }
+      if (e.t !== "bet") return;
+      if (e.op === "raise") {
+        const k = e.r + ":" + e.street;
+        perStreet[k] = (perStreet[k] || 0) + 1;
+        assert.ok(perStreet[k] <= 2, "一个下注回合最多加注 2 次");
+        if (e.window) { assert.ok(inWindow); raises++; }
+      }
+      if (inWindow) assert.notEqual(e.op, "fold", `${dl}/${pl}/${n}：窗口里弃牌了`);
+      inWindow = false;
+    });
+  }
+  assert.ok(windows > 0 && raises > 0, `开过窗口 ${windows} 次，窗口里加注 ${raises} 次`);
 });
 
 test("AI 对 AI：三档难度都借过筹码；借贷不会让对局卡住", () => {
