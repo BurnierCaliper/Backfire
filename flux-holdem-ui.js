@@ -8,6 +8,8 @@
  * 结算横幅：亮牌——每人出的牌和得分、主池 / 边池归谁（平分写清楚）、自己的筹码变动；翻到相位写没弃牌的人全押、押到多少，
  *   全押后同分写底池滚到下一轮（主人 10/30：相位 = 全押）。下一轮底池旁边写「含滚存 N 枚」，提示行也写。
  * 克制表（侧栏、横幅上的按钮）和手里元素牌的悬停预览都按场上的天气（两张都翻开时叠加）算实际得分；预览另写对已翻开的公共层牌的得分合计。
+ * 结算前的过渡（主人 10/30 试玩反馈，#525；计时同 High Flux，flux-ui.js）：最后一步 → 规则层自己翻的牌一张一步（第 1 张天气、第 2 张层牌、第 2 张天气；
+ *   相位全押一口气翻完的也一张一张翻）→ 亮牌（没弃牌的人盖下的牌翻过来）→ 判定中 → 结算横幅；其他人都弃牌直接赢的只有最后一步。
  *
  *   FluxHoldemUI.open()                                         打开设置页
  *   FluxHoldemUI.start({ players: 3, level: "hard", seed, fast })   直接开一局（你坐 p1，其余是 AI；fast：AI 不等，测试用）
@@ -19,7 +21,9 @@
   const UI_CONFIG = {
     aiNames: ["乙", "丙", "丁"],       // AI 座位的称呼（你坐第一个座位）
     tip: { head: "打五种层", foot: "正分加分 · 负分扣分 · 亮牌时对 2 张公共层牌求和", unrevealed: "天气还没翻开，按没有天气算" },
-    levelNames: { easy: "简单", normal: "普通", hard: "困难" }
+    levelNames: { easy: "简单", normal: "普通", hard: "困难" },
+    // 结算前的过渡（#525）：时长读 High Flux 的 CounterCardsUI.UI_CONFIG.settle，这里是 Hold'em 自己的字（判定中那一行的说明）
+    settle: { judgeNote: "每人的元素牌对 2 张公共层牌计分求和（两张天气叠加），最高分拿走底池" }
   };
   const FH = () => root.FluxHoldem;
   const AI = () => root.FluxHoldemAI;
@@ -99,20 +103,29 @@
     const S = T.state(), turn = !v.over && v.waiting.indexOf(s.id) >= 0 && !(v.betting && v.betting.window);
     const status = s.out ? "出局" : s.folded ? "弃牌" : s.allIn ? "全押" : "";
     const backs = Array.from({ length: Math.min(s.handCount, 4) }, () => T.back({ cls: "fh-small" })).join("");
+    // 结算前的过渡里亮牌（s.shown）：盖下的那张翻过来
+    const flip = T.bump("shown:" + s.id, s.shown ? v.round + ":" + s.shown : "") && !!s.shown;
+    const played = s.shown ? T.handCard(s.shown, { cls: "fh-small fh-face" + (flip ? " cc-flip" : "") })
+      : s.played ? T.back({ cls: "fh-small cc-down" + (T.bump("thrown:" + s.id, v.round) ? " cc-thrown" : "") }) : `<span class="cc-empty">${s.out ? "" : "还没盖牌"}</span>`;
     return `<div class="fh-seat${turn ? " turn" : ""}${s.folded ? " folded" : ""}${s.out ? " out" : ""}" data-seat="${s.id}">
       <div class="fh-name"><b>${esc(s.name)}</b><small>${esc(levelName(S.levels[s.id]))} AI</small>${badges(s)}</div>
-      ${T.chips(s.chips, { title: s.name + "的筹码", anim: T.bump("chips:" + s.id, s.chips) })}
+      ${T.chips(s.chips, { title: s.name + "的筹码", anim: T.bump("chips:" + s.id, s.chips), cls: T.collecting(s.id) ? "cc-collect" : "" })}
       <small class="fh-bet">本轮押 ${s.bet}${status ? ` · ${status}` : ""}</small>
       <div class="cc-hand cc-hand-back fh-backs" title="手牌 ${s.handCount} 张">${backs}</div>
-      <div class="fh-played">${s.played ? T.back({ cls: "fh-small cc-down" + (T.bump("thrown:" + s.id, v.round) ? " cc-thrown" : "") }) : `<span class="cc-empty">${s.out ? "" : "还没盖牌"}</span>`}</div>
-      ${T.loanTag(s, s.name)}
+      <div class="fh-played">${played}</div>
+      ${T.actedTag(s.id)}${T.loanTag(s, s.name)}
     </div>`;
   }
   function boardHtml(T, v) {
     const S = T.state(), H = FH().HOLDEM_CONFIG, me = v.me, deal = !!S.anim.deal;
-    const anim = { me: T.bump("myChips", me.chips), pot: T.bump("pot", v.pot), wx: T.bump("wx", v.round + ":" + v.weathers.join("+")) && v.weathers.length > 0 && !deal };
+    // 结算前的过渡里又翻开一张（第 2 张层牌也翻牌）、亮牌时自己那张翻过来；判定中亮出来的牌轻轻抖、底池发光
+    const anim = { me: T.bump("myChips", me.chips), pot: T.bump("pot", v.pot), wx: T.bump("wx", v.round + ":" + v.weathers.join("+")) && v.weathers.length > 0 && !deal,
+      ly: T.bump("ly", v.round + ":" + v.layers.join("+")) && v.layers.length > 1 && !deal,
+      mine: T.bump("myShown", me.shown ? v.round + ":" + me.shown : "") && !!me.shown };
+    const J = T.judging() ? " cc-judging" : "";
     const opps = v.seats.filter(s => s.id !== v.side).map(s => seatHtml(T, v, s)).join("");
-    const layers = Array.from({ length: H.layersPerRound }, (_, i) => (v.layers[i] ? T.handCard(v.layers[i], { cls: "fh-layer" }) : T.back({ cls: "fh-hidden" }))).join("");
+    const layers = Array.from({ length: H.layersPerRound }, (_, i) => (v.layers[i]
+      ? T.handCard(v.layers[i], { cls: "fh-layer" + (anim.ly && i === v.layers.length - 1 ? " cc-flip" : "") }) : T.back({ cls: "fh-hidden" }))).join("");
     const weathers = Array.from({ length: H.weathersPerRound }, (_, i) => (v.weathers[i]
       ? T.weatherCard(v.weathers[i], { cls: anim.wx && i === v.weathers.length - 1 ? "cc-flip" : "" }) : T.back({ cls: "fh-hidden fd-wback" }))).join("");
     const deck = Array.from({ length: Math.min(v.deckCount, 7) }, (_, i) => `<i style="--i:${i}"></i>`).join("");
@@ -120,7 +133,9 @@
     const flash = anim.wx ? `<div class="cc-flash" style="--c:${T.weatherColor(last)}" aria-hidden="true"></div>` : "";
     const playing = v.stage === "play" && v.myTurn;
     const hand = me.hand.map((c, i) => T.handCard(c, { act: playing ? "play" : null, tip: true, cls: (deal ? "cc-deal " : "") + (playing ? "cc-can" : ""), delay: deal ? i : null })).join("");
-    return `${flash}<div class="fh-opps">${opps}</div>
+    const slot = me.shown ? T.handCard(me.shown, { cls: "cc-down" + (anim.mine ? " cc-flip" : "") })
+      : me.card ? T.back({ mine: me.card, cls: "cc-down" }) : `<span class="cc-empty">${me.out ? "出局了" : "还没盖牌"}</span>`;
+    return `${flash}<div class="fh-opps${J}">${opps}</div>
       <div class="cc-center fh-center">
         <div class="fh-community">
           <div class="fh-group"><small>公共层牌</small><div class="fh-cards">${layers}</div></div>
@@ -128,17 +143,18 @@
           <div class="cc-deck" title="天气堆还剩 ${v.deckCount} 张"><span class="cc-deckstack">${deck}</span><b>${v.deckCount}</b><small>天气堆</small></div>
           ${v.discards.length ? `<div class="cc-gone" title="弃掉的天气（天气堆抽完时洗回去）">${v.discards.map(T.miniWeather).join("")}</div>` : ""}
         </div>
-        <div class="cc-pot">
+        <div class="cc-pot${J}">
           ${T.chips(v.pot, { cls: "cc-potstack", title: "底池", label: "底池", anim: anim.pot })}
           ${v.carry ? `<small class="cc-roll">含滚存 ${v.carry.amount} 枚</small>` : ""}
           <span class="cc-bets"><span>你本轮 ${me.bet}</span>${v.betting && v.betting.toCall ? `<span>要跟 ${v.betting.toCall}</span>` : ""}</span>
+          ${J ? T.judgeTag() : ""}
         </div>
       </div>
       <div class="cc-seat cc-me">
-        ${T.chips(me.chips, { title: "你的筹码", anim: anim.me })}
+        ${T.chips(me.chips, { title: "你的筹码", anim: anim.me, cls: T.collecting(v.side) ? "cc-collect" : "" })}
         <div class="cc-hand">${hand || `<span class="cc-empty">手里没有牌</span>`}</div>
-        <div class="cc-slot">${me.card ? T.back({ mine: me.card, cls: "cc-down" }) : `<span class="cc-empty">${me.out ? "出局了" : "还没盖牌"}</span>`}</div>
-        <div class="cc-who"><b>你</b><span class="fh-badges">${badges(me)}</span>${me.folded ? "<small>弃牌了</small>" : me.allIn ? "<small>全押了</small>" : ""}${T.loanTag(me, "你")}</div>
+        <div class="cc-slot${J}">${slot}</div>
+        <div class="cc-who"><b>你</b><span class="fh-badges">${badges(me)}</span>${me.folded ? "<small>弃牌了</small>" : me.allIn ? "<small>全押了</small>" : ""}${T.loanTag(me, "你")}${T.actedTag(v.side)}</div>
       </div>`;
   }
   function stageControls(T, v) {
@@ -241,6 +257,87 @@
     return root.FluxUI.tipHtml(card, c, head, `${now}${U.foot}`);
   }
 
+  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#525）：最后一步 → 又翻开的牌一张一步 → 亮牌 → 判定中 → 结算横幅 ----------
+   * 记录里这一轮的结算在 from（做最后一步之前记录有几条）和结算那一条之间：先是最后一步（下注、关窗）那几条，后面是规则层自己翻的牌——
+   * 第一轮下注打完翻第 1 张天气（是相位：没弃牌的人全押），亮牌时同时翻第 2 张层牌和第 2 张天气（第 2 张是相位：补押到全押的数目）。
+   * 一张牌一步：最后一步做完马上翻的第一张和最后一步算同一步，之后每张另起一步，相位全押一口气翻完剩下的也一张一张翻；
+   * 亮牌：没弃牌的人盖下的牌翻过来（不写分，分在结算横幅上）。其他人都弃牌直接赢的只有最后一步，不判定。
+   * 每一步（frames）记下：翻到第几张层牌 / 天气（nL / nW）、天气堆剩几张（deck；抽完洗回去的那一下算在下一张天气那一步，wiped = 弃掉的那几张洗回去了）、
+   * 相位全押了没有（allIn）、记录写到哪（cut）、操作栏写什么（lines） */
+  const AUTO_LOG = ["weather", "reshuffle", "allIn", "reveal"];   // 规则层自己翻牌、全押的那几种记录
+  function settleBeats(T, pre, now, res) {
+    const CS = root.CounterCardsUI.settle, log = now.log, from = pre.log.length;
+    const end = log.findIndex((e, i) => i >= from && e.t === "result" && e.res && e.res.r === res.r);
+    const logEnd = end < 0 ? log.length : end;
+    let k = from;
+    while (k < logEnd && AUTO_LOG.indexOf(log[k].t) < 0) k++;
+    const steps = CS.lastSteps(log, from, k);   // 最后一步：追加窗口关了才结算的，从开窗的那一下跟注写起（同 High Flux）
+    let cur = { kind: "last", nL: pre.layers.length, nW: pre.weathers.length, deck: pre.deckCount, wiped: false, allIn: false, flipped: false, lines: steps.map(e => e.text), cut: k };
+    const frames = [cur];
+    let pend = null, pendAt = 0;   // 天气堆抽完、洗回去的那一条（和它在记录里的位置）：算在下一张天气那一步
+    const fresh = () => { if (cur.flipped) { cur = Object.assign({}, cur, { kind: "flip", flipped: false, lines: [] }); frames.push(cur); } };
+    const drawWeather = (text) => {
+      fresh();
+      if (pend) { cur.deck = pend.count; cur.wiped = true; cur.lines.push(pend.text); pend = null; }
+      cur.nW += 1; cur.deck -= 1; cur.flipped = true; cur.lines.push(text);
+    };
+    for (let i = k; i < logEnd; i++) {
+      const e = log[i];
+      if (e.t === "reshuffle") { pend = e; pendAt = i; continue; }
+      if (e.t === "weather" && e.weather) drawWeather(e.text);
+      else if (e.t === "reveal") {
+        // 规则上第 2 张层牌和第 2 张天气同时翻开（中间不下注），桌上一张一步：先层牌、再天气（这一条记录写着两张，等天气那一步才进记录）
+        if (e.layer) { fresh(); cur.nL += 1; cur.flipped = true; cur.lines.push(`翻开第 2 张公共层牌〔${cn(e.layer)}〕。`); cur.cut = pend ? pendAt : i; }
+        if (e.weather) drawWeather(`翻开第 2 张天气〔${wn(e.weather)}〕。`);
+        else if (!e.layer) cur.lines.push(e.text);
+      } else {
+        if (e.t === "allIn") cur.allIn = true;
+        cur.lines.push(e.text);
+      }
+      cur.cut = i + 1;
+    }
+    if (res.outcome === "showdown") {
+      const cards = Object.keys(res.shown).map(id => `${nameIn(now, id)}〔${cn(res.shown[id].card)}〕`).join("、");
+      frames.push(cur = Object.assign({}, cur, { kind: "show", flipped: false, lines: [`亮牌：${cards}。`], cut: logEnd }));
+    }
+    // 筹码：相位全押之前那几步照「最后一步做完」（做之前的画面 + 这一步跟注 / 全押推进底池的），之后照「结算之前」（这一轮下注额 res.bets、手上 = 结算后 − 分到的）。
+    // 这一段没有相位全押就都照「结算之前」（这时两样一样）
+    const paid = {};
+    log.slice(from, k).forEach(e => { if (e.t === "bet" && (e.op === "call" || e.op === "allIn") && e.amount) paid[e.by] = (paid[e.by] || 0) + e.amount; });
+    const won = (id) => res.pots.reduce((t, p) => t + ((p.shares && p.shares[id]) || 0), 0);
+    const before = { bet: {}, chips: {} }, after = { bet: {}, chips: {} };
+    pre.seats.forEach(s => {
+      before.bet[s.id] = s.bet + (paid[s.id] || 0); before.chips[s.id] = s.chips - (paid[s.id] || 0);
+      after.bet[s.id] = res.bets[s.id]; after.chips[s.id] = res.chips[s.id] - won(s.id);
+    });
+    const anyAllIn = frames.some(f => f.allIn);
+    frames.forEach(f => { f.money = !anyAllIn || f.allIn ? after : before; });
+    return { beats: frames.map(f => f.kind), frames, texts: frames.map(f => f.lines.join(" ")), judge: res.outcome !== "fold", acted: CS.actedOf(steps) };
+  }
+  /** 过渡中的画面（第 st.at 步；判定中照最后一步）：规则层已经结算完、开了下一轮，桌上停在结算之前——
+   *  这一轮的庄 / 盲注、手牌和盖下的牌、轮数照做最后一步之前的画面；公共层牌、天气翻到这一步；筹码照这一步（见 settleBeats）；
+   *  亮牌那一步起没弃牌的人的牌翻过来（shown）；记录、每轮结算里还没有这一轮的结果 */
+  function settleView(T, v, st) {
+    const f = st.frames[st.at], r = st.res, pre = st.pre, m = f.money, show = f.kind === "show";
+    const seat = (s) => {
+      const folded = r.folded.indexOf(s.id) >= 0, chips = m.chips[s.id], bet = m.bet[s.id];
+      return Object.assign({}, s, { chips, bet, st: 0, folded, allIn: s.allIn || (!folded && !s.out && chips <= 0 && bet > 0),
+        shown: show && r.shown && r.shown[s.id] ? r.shown[s.id].card : null });
+    };
+    const seats = pre.seats.map(seat);
+    return Object.assign({}, v, {
+      round: r.r, stage: "settle", over: false, waiting: [], myTurn: false, legal: [], betting: null, loanAsk: null, peek: null, final: null,
+      dealer: pre.dealer, sb: pre.sb, bb: pre.bb, blinds: pre.blinds, minBet: pre.minBet,
+      layers: r.layers.slice(0, f.nL), usedLayers: pre.usedLayers, layerDeckCount: pre.layerDeckCount, elementDeckCount: pre.elementDeckCount,
+      weathers: r.weathers.slice(0, f.nW), deckCount: f.deck, discards: f.wiped ? [] : pre.discards,
+      pot: seats.reduce((t, s) => t + s.bet, 0) + (r.carryIn || 0), carry: pre.carry,
+      me: seat(pre.me), seats,
+      results: v.results.slice(0, -1), log: v.log.slice(0, f.cut)
+    });
+  }
+  /** 弹横幅时筹码「收进来」的：分到池子的人（滚到下一轮的池子没人分） */
+  const settleCollect = (T, r) => (r.pots || []).reduce((out, p) => out.concat(Object.keys(p.shares || {}).filter(id => p.shares[id] > 0 && out.indexOf(id) < 0)), []);
+
   /* ---------- 自己的按钮 ---------- */
   function click(T, act, d) {
     const S = T.state();
@@ -259,6 +356,7 @@
     key: "fh", screen: "fluxHoldem", rules: FH, ai: AI, name: () => FH().HOLDEM_CONFIG.name,
     begin, setupHtml, topHtml, boardHtml, sideHtml, bannerHtml, finalHtml, stageControls, waitText, streetText, infoLine, seatName,
     weatherOf: (v) => v.weathers[v.weathers.length - 1] || null, chart, chartKey, tipHtml, click,
+    settle: { beats: settleBeats, view: settleView, collect: settleCollect, note: UI_CONFIG.settle.judgeNote },
     loanNeedText: () => "该下的盲注 + 最低下注额",
     bustText: "你已经输光了，不借就出局。", bustNoLoan: "不借（出局）",
     foldTitle: "弃牌：不参与这一轮比分，已经押下去的筹码留在底池"

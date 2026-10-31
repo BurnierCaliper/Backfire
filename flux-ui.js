@@ -4,7 +4,10 @@
  *   AI 排着走（人和 AI 看到的是同一份 view）、跟注后追加窗口的倒计时（秒数读 CC_CONFIG.callWindowSec，到时间调规则层的 closeWindow）、
  *   借贷和下注栏（过牌 / 跟注 / 下注 / 加注 / 全押 / 弃牌 / 借 3 枚（还 4）……，按规则给的 legal 出按钮）、
  *   克制表浮层（matchup-ui.js，格子是按场上天气——Hold'em 是两张叠加后——算好的实际得分）、
- *   手里元素牌的悬停预览（电脑上鼠标停上去、手机上长按；写这张牌按场上天气打五种层各得几分）。
+ *   手里元素牌的悬停预览（电脑上鼠标停上去、手机上长按；写这张牌按场上天气打五种层各得几分）、
+ *   结算前的过渡（#525，计时和操作栏用 High Flux 那一份 CounterCardsUI.settle，时长读它的 UI_CONFIG.settle）：规则层一结算就开了下一轮，
+ *   桌上先停在结算之前——最后一步、又翻开的牌一张一步、亮牌，每步停一下 → 判定中 → 结算横幅；过渡中 AI 不走、人没有按钮可点、追加窗口不计时，
+ *   点一下桌面（或「直接看结算」）直接看结算；每一步画成什么样由各玩法给（spec.settle）。
  * 每张牌桌的画面（设置页、桌面、结算横幅……）由各自的文件给（flux-duel-ui.js / flux-holdem-ui.js），交给 FluxUI.table(spec)。
  * 页面骨架在 game.html 的 #scr-fd / #scr-fh；没有 Screens（测试里）时自己切 hidden。
  *
@@ -45,11 +48,14 @@
    *   setupHtml(T)、topHtml(T, v)、boardHtml(T, v)、sideHtml(T, v)、bannerHtml(T, 结果, v)、finalHtml(T, v)、
    *   stageControls(T, v) → { p, b }（下注以外的步骤：出牌……）、waitText(T, v)、streetText(T, v)、infoLine(T, v)、
    *   weatherOf(v)（天气特效用哪张）、chart(v, 结算横幅的那一轮)（克制表数据）、chartKey(v, 结算横幅的那一轮)、tipHtml(T, 牌, v)、
- *   click(T, act, dataset)（自己的按钮，处理了返回 true） */
+ *   click(T, act, dataset)（自己的按钮，处理了返回 true）、
+ *   settle（结算前的过渡，#525；不给就照旧一结算就弹横幅）：{ beats(T, 做最后一步之前的画面, 现在的画面, 这一轮的结算) → st（{ beats, judge, texts, acted, … }），
+ *     view(T, 现在的画面, st)（第 st.at 步桌上停成什么样）, note（判定中那一行的说明）, collect(T, 结算) → 弹横幅时筹码「收进来」的那几方 } */
   function table(spec) {
     const K = spec.key, ATTR = "data-" + K, TIP = "data-" + K + "-tip", TIPKEY = K + "Tip";
     const el = (s) => $(K + "-" + s);
     const R = () => spec.rules(), AIm = () => spec.ai();
+    const CS = () => CUI().settle;   // 结算前的过渡：High Flux 那一份共用的计时、操作栏（counter-cards-ui.js）
     let S = null, bound = false;
 
     function btn(act, label, o) {
@@ -94,7 +100,7 @@
       bind(); stopAll();
       const seed = String(opt.seed || (K + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
       const s = spec.begin(Object.assign({}, opt, { seed }));
-      S = Object.assign({ seed, rng: {}, banner: null, amount: null, msg: "", sel: {}, fast: !!opt.fast, timer: null, win: null, tip: null,
+      S = Object.assign({ seed, rng: {}, banner: null, settle: null, amount: null, msg: "", sel: {}, fast: !!opt.fast, timer: null, win: null, tip: null,
         anim: { deal: true }, last: {}, casino: opt.casino || null, holdUntil: opt.fast ? 0 : Date.now() + UI_CONFIG.dealMs }, s);
       S.seen = S.game.results.length;
       enterScreen();
@@ -104,22 +110,62 @@
       return S.game;
     }
     function stopTimer() { if (S && S.timer) { clearTimeout(S.timer); S.timer = null; } }
-    function stopAll() { stopTimer(); stopWindow(); closeChart(); stopTip(); }
+    function stopAll() { stopTimer(); stopWindow(); dropSettle(); closeChart(); stopTip(); }
 
-    /* ---------- 推进：人做一步 → 看有没有新的结算 → AI 接着走 ---------- */
+    /* ---------- 推进：人做一步 → 看有没有新的结算（有就先放结算前的过渡）→ AI 接着走 ---------- */
     function humanAct(a) {
-      if (!S || S.game.over) return;
+      if (!S || S.game.over || S.settle) return;
+      const pre = R().view(S.game, S.human);   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
       try { R().act(S.game, S.human, a); } catch (e) { S.msg = e.message; render(); return; }
       S.amount = null; S.msg = ""; S.sel = {};
-      afterChange();
+      afterChange(pre);
     }
-    function afterChange() {
+    function afterChange(pre) {
       const g = S.game;
-      if (g.results.length > S.seen) { S.seen = g.results.length; S.banner = g.results[g.results.length - 1]; }
+      if (g.results.length > S.seen) { S.seen = g.results.length; settleStart(g.results[g.results.length - 1], pre); }
       render();
       schedule();
       // 赌场桌：牌局走了一步（人或 AI），交给模式存档
       if (S.casino && S.casino.onChange) S.casino.onChange(g);
+    }
+
+    /* ---------- 结算前的过渡（#525）：最后一步、又翻开的牌一张一步、亮牌（每步停一下）→ 判定中 → 结算横幅 ----------
+     * 规则层那一步已经结算完、开了下一轮，过渡中桌上停在结算之前（spec.settle.view 按 S.settle.at 画）；计时是 High Flux 那一份（CounterCardsUI.settle）。
+     * fast（测试用）、没给 spec.settle 的玩法不停，直接弹横幅 */
+    const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
+    function settleStart(res, pre) {
+      const st = !S.fast && pre && spec.settle ? spec.settle.beats(api, pre, R().view(S.game, S.human), res) : null;
+      if (!st) { S.banner = res; return; }
+      S.settle = Object.assign(st, { res, pre });
+      CS().begin(S.settle, settleHost);
+    }
+    /** 过渡放完（或点了跳过）：弹出结算横幅，拿到筹码的那几方的筹码堆「收进来」 */
+    function settleEnd() {
+      const st = S && S.settle;
+      if (!st) return;
+      CS().stop(st);
+      S.settle = null;
+      S.banner = st.res;
+      S.anim.collect = spec.settle.collect ? spec.settle.collect(api, st.res) : [];
+      render();
+      schedule();
+    }
+    /** 不放了（回设置页、换一局、离开牌桌）：停掉计时，当成已经弹出横幅（不画） */
+    function dropSettle() {
+      if (!S || !S.settle) return;
+      CS().stop(S.settle);
+      S.banner = S.settle.res;
+      S.settle = null;
+    }
+    /** 现在桌上画的那一份：过渡中是停在结算之前的那一步，平时就是规则给的 view */
+    function shownView() {
+      const v = R().view(S.game, S.human);
+      return S.settle ? spec.settle.view(api, v, S.settle) : v;
+    }
+    /** 过渡中的操作栏（High Flux 那一份）：这一步做了什么 / 判定中，「直接看结算」 */
+    function settleBar() {
+      const st = S.settle, T = CUI().UI_CONFIG.settle, i = Math.min(st.at, st.texts.length - 1);
+      return CS().bar(st, st.texts[i] || "这一轮的下注结束了。", spec.settle.note, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
     }
     function casinoHook(name) {
       if (!S || !S.casino || typeof S.casino[name] !== "function") return;
@@ -127,23 +173,26 @@
     }
     /** 现在轮到的 AI（人以外、有难度的那几方） */
     function aiSeats() { return S ? R().toAct(S.game).filter(k => k !== S.human && S.levels && S.levels[k]) : []; }
+    // 结算前的过渡、结算横幅开着时 AI 不走
     function schedule() {
       stopTimer();
-      if (!S || S.banner || S.game.over || !aiSeats().length) return;
+      if (!S || S.banner || S.settle || S.game.over || !aiSeats().length) return;
       if (S.fast) { aiStep(); return; }
       S.timer = setTimeout(aiStep, Math.max(UI_CONFIG.aiDelay, (S.holdUntil || 0) - Date.now()));
     }
     function aiStep() {
       if (!S) return;
       S.timer = null;
-      if (S.banner || S.game.over) return;
+      if (S.banner || S.settle || S.game.over) return;
       const who = aiSeats()[0];
       if (!who) return;
       const rng = S.rng[who] || (S.rng[who] = CC().makeRng(S.seed + "|ai|" + who));
+      const pre = R().view(S.game, S.human);
       if (!AIm().step(S.game, who, S.levels[who], rng)) { render(); return; }   // 没走成（不该发生）：别一直重排
-      afterChange();
+      afterChange(pre);
     }
-    function setFast(on) { if (!S) return; S.fast = !!on; schedule(); }
+    /** fast：AI 不等、马上走（测试用）；打开时正在放的结算前的过渡也不等了 */
+    function setFast(on) { if (!S) return; S.fast = !!on; if (S.fast && S.settle) { settleEnd(); return; } schedule(); }
     function dismiss() { if (S) { S.banner = null; render(); schedule(); } }
 
     /* ---------- 跟注后的追加窗口：倒计时（同 High Flux 的牌桌：同一个窗口只计一次时，整块重画接着数） ---------- */
@@ -167,11 +216,14 @@
       W.timer = setTimeout(tickWindow, ((left - 1) % 1000) + 1);
     }
     function stopWindow() { if (S && S.win) { if (S.win.timer) clearTimeout(S.win.timer); S.win = null; } }
+    /** 倒计时到了：关窗，进入下一步；关窗就结算的，结算前的过渡从关窗之前的画面接着画 */
     function expireWindow() {
       stopWindow();
-      if (!S || !R().closeWindow(S.game)) return;
+      if (!S || S.settle) return;
+      const pre = R().view(S.game, S.human);
+      if (!R().closeWindow(S.game)) return;
       S.amount = null; S.msg = "";
-      afterChange();
+      afterChange(pre);
     }
     function windowClock() {
       if (!S || !S.win) return "";
@@ -246,6 +298,7 @@
     }
     function actionsHtml(v) {
       const msg = S.msg ? `<p class="cc-msg" role="alert">${esc(S.msg)}</p>` : "";
+      if (S.settle) return settleBar() + msg;
       if (v.over) return `<p class="cc-prompt">对局结束。</p>${msg}`;
       if (S.banner) return `<p class="cc-prompt">看一下这一轮的结算。</p>${msg}`;
       const info = spec.infoLine ? spec.infoLine(api, v) : "";
@@ -265,11 +318,11 @@
     /* ---------- 画面 ---------- */
     function render() {
       if (!S) return;
-      const v = R().view(S.game, S.human);
+      const v = shownView();   // 结算前的过渡：桌上停在结算之前
       const app = el("game");
       if (!app) return;
       app.dataset.weather = spec.weatherOf(v) || "none";
-      syncWindow(v);
+      syncWindow(v);   // 过渡中的画面没有下注回合：追加窗口不计时，过渡放完才开
       const top = el("top"), board = el("board"), actions = el("actions"), side = el("side"), banner = el("banner");
       if (top) top.innerHTML = spec.topHtml(api, v);
       if (board) board.innerHTML = spec.boardHtml(api, v);
@@ -317,13 +370,14 @@
       const m = MU(), box = $("mu-overlay"), scr = $("scr-" + K);
       return !!(m && m.isOpen() && box && scr && scr.contains(box));
     }
-    /** 打开克制表：按场上的天气算；结算横幅开着时按刚结算的那一轮的天气（Hold'em 两张天气要到亮牌时才都翻开，横幅上看的就是叠加后的） */
+    /** 打开克制表：按场上的天气算；结算横幅开着时按刚结算的那一轮的天气（Hold'em 两张天气要到亮牌时才都翻开，横幅上看的就是叠加后的）；
+     *  结算前的过渡中按桌上停着的那一步 */
     function openChart() {
       const m = MU();
       if (!m || !S) return false;
       stopTip();
-      S.chartKey = spec.chartKey(R().view(S.game, S.human), S.banner);
-      m.open(() => spec.chart(R().view(S.game, S.human), S.banner), { mount: el("game") });
+      S.chartKey = spec.chartKey(shownView(), S.banner);
+      m.open(() => spec.chart(shownView(), S.banner), { mount: el("game") });
       const close = $("mu-overlay") && $("mu-overlay").querySelector("[data-mu-close]");
       if (close && typeof close.focus === "function") close.focus();
       return true;
@@ -342,7 +396,7 @@
     function showTip(card, via) {
       const box = tipBox(), a = tipAnchor(card);
       if (!S || !box || !a || S.banner || S.game.over || !gameShown() || chartOpen()) { hideTip(); return; }
-      const v = R().view(S.game, S.human);
+      const v = shownView();
       S.tip = { card, via };
       box.innerHTML = spec.tipHtml(api, card, v);
       box.dataset.card = card;
@@ -411,6 +465,8 @@
     /* ---------- 点击 ---------- */
     function onClick(e) {
       const b = e.target && e.target.closest ? e.target.closest(`[${ATTR}]`) : null;
+      // 结算前的过渡：点一下桌面（牌桌、操作栏里按钮以外的地方）直接看结算；顶栏、侧栏照常
+      if (S && S.settle && !b && e.target && e.target.closest && e.target.closest(`.cc-table, #${K}-actions`)) { settleEnd(); return; }
       if (!b || b.disabled) return;
       // 长按看预览、松手后浏览器要是还补了一下点击：不算（只拦长按的那一张、只拦一下）
       const sw = S && S.tipSwallow;
@@ -420,6 +476,7 @@
         case "title": toTitle(); return;
         case "setup": open(); return;
         case "dismiss": dismiss(); return;
+        case "skipSettle": settleEnd(); return;   // 结算前的过渡：直接看结算
         case "chart": openChart(); return;
         case "leave": casinoHook("onLeave"); return;
         case "casinoAgain": casinoHook("onAgain"); return;
@@ -468,8 +525,17 @@
       }
     }
 
+    /* ---------- 结算前的过渡：桌面上要的几样（各玩法的 boardHtml 用） ---------- */
+    /** 正在「判定中」 */
+    const judging = () => !!(S && S.settle && S.settle.phase === "judge");
+    /** 刚走的最后一步标在这一方的座位上（同 High Flux：「跟注 2 枚」「过牌」「弃牌」……） */
+    const actedTag = (side) => { const a = S && S.settle && S.settle.acted; return a && a.side === side ? `<small class="cc-acted">${esc(a.label)}</small>` : ""; };
+    /** 弹横幅的这一下，这一方的筹码堆「收进来」 */
+    const collecting = (side) => !!(S && S.anim.collect && S.anim.collect.indexOf(side) >= 0);
+
     const api = {
       spec, UI_CONFIG, btn, esc, signed, bump, loanTag, logHtml, chartBtn, bannerChartBtn, windowLeft, handCard, weatherColor, miniWeather,
+      judging, actedTag, collecting, judgeTag: (cls) => CS().tag(cls),
       open, start, render, renderSetup, toTitle, act: humanAct, dismiss, setFast,
       openChart, closeChart, chartOpen, showTip, hideTip,
       // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用）

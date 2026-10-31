@@ -275,8 +275,8 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 .cc-tip-foot { margin: 0; font-size: 11px; color: var(--sk-muted, #a8977b); }
 
 /* ---------- 结算前的过渡（counter-cards-ui.js · settleStart / settleView / settleHtml，#499）：① 最后一步 → ② 判定中 → 结算横幅 ---------- */
-/* ① 刚走的这一步：标在这一方的座位上（AI 走的也停一下） */
-.cc-who .cc-acted {
+/* ① 刚走的这一步：标在这一方的座位上（AI 走的也停一下；Flux Hold'em 上面一排对手的座位 .fh-seat 也用，#525） */
+.cc-who .cc-acted, .fh-seat .cc-acted {
   margin-top: 3px; padding: 1px 9px; font: 800 13px/1.35 var(--sk-name, var(--ui)); color: var(--sk-ink, #0b0806);
   background: var(--sk-hazard, #f2c230); border: 2px solid #0b0806; box-shadow: 2px 2px 0 rgba(0, 0, 0, .5); rotate: -2deg;   /* 歪一点用 rotate：弹出动画动的是 transform */
   animation: ccPop .3s cubic-bezier(.2, .8, .3, 1.3) both;
@@ -326,7 +326,7 @@ button.cc-card.cc-can:hover { transform: translateY(-8px); box-shadow: 0 3px 0 #
 @media (prefers-reduced-motion: reduce) {
   .cc-deal, .cc-thrown, .cc-flip, .cc-flash, .cc-stack i, .cc-banner-card, .cc-peekcard, .cc-tip { animation: none !important; }
   /* 结算前的过渡：不抖、不发光、不滑（判定中也缩短，见 UI_CONFIG.settle.reducedJudgeMs）；最后一步的文字照样停 */
-  .cc-who .cc-acted, .cc-prompt.cc-judging::after, .cc-slots.cc-judging .cc-back, .cc-pot.cc-judging .cc-potstack, .cc-chips.cc-collect b { animation: none !important; }
+  .cc-who .cc-acted, .fh-seat .cc-acted, .cc-prompt.cc-judging::after, .cc-slots.cc-judging .cc-back, .cc-pot.cc-judging .cc-potstack, .cc-chips.cc-collect b { animation: none !important; }
 }
 
 /* ---------- 手机 ---------- */

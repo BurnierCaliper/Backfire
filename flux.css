@@ -42,6 +42,19 @@
 .fh-shown { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
 .fh-shown li.win { color: #ffe08a; font-weight: 700; }
 .fh-final { flex-direction: column; gap: 2px; }
+/* 结算前的过渡（#525，样子同 High Flux：counter-cards.css 的 .cc-acted / .cc-judge / .cc-judging / .cc-collect）：
+ * 亮牌时对手盖下的那张翻过来（小一号的牌面，只要图标和名字）；判定中亮出来的牌轻轻抖、底池发光，「判定中」胶带贴在底池上沿 */
+.cc-card.fh-small.fh-face { gap: 1px; }
+.cc-card.fh-small.fh-face .cc-ico { font-size: 22px; }
+.cc-card.fh-small.fh-face .cc-name { font-size: 11px; }
+.cc-card.fh-small.fh-face .cc-corner { display: none; }
+.fh-center .cc-pot { position: relative; }
+.fh-opps.cc-judging .fh-played .cc-card, .cc-me .cc-slot.cc-judging .cc-card { animation: ccJudge .8s ease-in-out infinite; }
+.fh-seat .cc-chips.cc-collect { --from: 46px; }   /* 对手坐在上面一排：筹码从下面的底池收进来 */
+
+@media (prefers-reduced-motion: reduce) {
+  .fh-opps.cc-judging .fh-played .cc-card, .cc-me .cc-slot.cc-judging .cc-card { animation: none !important; }
+}
 
 @media (max-width: 760px) {
   .fd-slot { width: 128px; gap: 4px; }
