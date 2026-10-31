@@ -16,6 +16,8 @@
   const weatherName = w => (CC() ? CC().weatherName(w) : w || "常态");
   const sideName = s => (CC() ? CC().sideName(s) : s === "dealer" ? "庄家" : "玩家");
   const LEVEL = { easy: "简单", normal: "普通", hard: "困难" };
+  // 对赌桌两方的称呼（#526）：High Flux 庄家 / 玩家；Flux Duel 甲 / 乙（第 1 轮甲先手）
+  const PVP_SIDES = { highflux: [["dealer", "庄家"], ["player", "玩家"]], duel: [["a", "甲（第 1 轮先手）"], ["b", "乙"]] };
   const signed = n => (n > 0 ? "+" + n : String(n));
   const num = n => String(Math.round((Number(n) || 0) * 1000) / 1000);
   // 规则给的操作 → 按钮上的字（没见过的操作照样出按钮，写操作名）
@@ -27,9 +29,11 @@
   };
   const btn = (attrs, label, o) => `<button type="button" class="g-btn ol-button crq-btn${o && o.primary ? " ol-primary" : ""}" ${attrs}${o && o.disabled ? " disabled" : ""}${o && o.title ? ` title="${esc(o.title)}"` : ""}>${label}</button>`;
 
-  /** 一局（自己那一方的 view）：局面、手牌、能做的操作、每轮结算、记录。asDealer：主持人替主持人坐庄的那一桌出牌 */
+  /** 一局（自己那一方的 view）：局面、手牌、能做的操作、每轮结算、记录。asDealer：主持人替主持人坐庄的那一桌出牌。
+   *  这里只画 High Flux 的文字版；Flux Duel（#526）的对局只写一句局面 */
   function gameHtml(g, m, key) {
     if (!g) return "";
+    if (g.mode === "duel") return `<div class="cso-game" data-cso-game="${esc(key)}"><p class="cso-line"><b>${g.over ? "对局结束" : `第 ${g.round} / ${g.rounds} 轮`}</b> · Flux Duel · 你是${esc((g.names || {})[g.side] || g.side)} · 底池 <b>${g.pot || 0}</b></p></div>`;
     const me = g.me || {}, opp = g.opp || {};
     const chips = s => (s.chips == null ? "∞" : s.chips);
     const loan = s => (s.loan ? `（借 ${s.loan} 还 ${s.owe}）` : "");
@@ -85,12 +89,18 @@
       const v = Math.max(t.minBuyIn, Number(m.draft.buyIn[t.id]) || t.minBuyIn);
       return `<li class="crq-row cso-table"><div><b>${esc(t.name)}</b><small class="ol-muted"> · 桌上每枚 ${t.rate} 奎支 · 最低买入 ${t.minBuyIn} 枚（${num(t.minBuyInChips)} 枚筹码）· 入场费 ${t.entryFee} 枚（${num(t.entryFeeChips)} 枚筹码，每局一次）· AI 是${esc(LEVEL[t.difficulty] || "")}</small></div>
         <div class="crq-state"><label>买入 <input type="number" min="${t.minBuyIn}" step="1" value="${v}" data-cso-buyin="${esc(t.id)}"> 枚</label>
-        ${btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="ai"`, "坐下（AI 坐庄）", { primary: true })}${btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="gm"`, "坐下（主持人坐庄）")}</div></li>`;
+        ${btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="ai"`, "坐下（AI 坐庄）", { primary: true })}${t.gm === false ? "" : btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="gm"`, "坐下（主持人坐庄）")}</div></li>`;
     }).join("");
-    const open = (c.open || []).map(t => `<li class="crq-row"><div><b>${esc(t.dealer || t.player || "")}</b> 开的对赌 · ${t.stakeKind === "chips" ? "押筹码" : "押奎支"} · 开局各 ${t.start} 枚 · 空着${t.dealer ? "玩家" : "庄家"}</div>
-      <div class="crq-state">${btn(`data-cso="join" ${data} data-table="${esc(t.id)}"`, "坐下对赌")}</div></li>`).join("");
-    const side = m.draft.side, stake = m.draft.stake;
-    const pvp = `<div class="crq-state cso-pvp"><label>坐 <select data-cso-in="side"><option value="dealer"${side === "dealer" ? " selected" : ""}>庄家</option><option value="player"${side === "player" ? " selected" : ""}>玩家</option></select></label>
+    // 对赌（#526：High Flux 坐庄家 / 玩家，Flux Duel 坐甲 / 乙）：等人坐的桌子写开桌的人、空着哪一方
+    const open = (c.open || []).map(t => {
+      const sides = PVP_SIDES[t.mode] || PVP_SIDES.highflux, by = sides.map(([k]) => t[k]).find(Boolean) || "", free = sides.find(([k]) => !t[k]);
+      return `<li class="crq-row"><div><b>${esc(by)}</b> 开的${t.mode === "duel" ? "Flux Duel " : ""}对赌 · ${t.stakeKind === "chips" ? "押筹码" : "押奎支"} · 开局各 ${t.start} 枚 · 空着${esc(free ? free[1] : "")}</div>
+      <div class="crq-state">${btn(`data-cso="join" ${data} data-table="${esc(t.id)}"`, "坐下对赌")}</div></li>`;
+    }).join("");
+    const mode = PVP_SIDES[m.draft.mode] ? m.draft.mode : "highflux", sides = PVP_SIDES[mode];
+    const side = sides.some(([k]) => k === m.draft.side) ? m.draft.side : sides[sides.length - 1][0], stake = m.draft.stake;
+    const pvp = `<div class="crq-state cso-pvp"><label>玩法 <select data-cso-in="mode"><option value="highflux"${mode === "highflux" ? " selected" : ""}>High Flux</option><option value="duel"${mode === "duel" ? " selected" : ""}>Flux Duel</option></select></label>
+      <label>坐 <select data-cso-in="side">${sides.map(([k, n]) => `<option value="${k}"${side === k ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label>
       <label>押 <select data-cso-in="stake"><option value="chips"${stake === "chips" ? " selected" : ""}>筹码（只能押普通筹码）</option><option value="kuizhi"${stake === "kuizhi" ? " selected" : ""}>奎支（1 枚 = ${cfg.face} 奎支）</option></select></label>
       ${btn(`data-cso="pvpOpen" ${data}`, "开一桌对赌")}</div>`;
     return `${wallet}${ex}<h3>赌场桌（收入场费）</h3><ul class="crq-list">${tables}</ul>
@@ -127,7 +137,7 @@
     doc.body.appendChild(box);
     let open = false, busy = false, last = "", error = "", kit = null;
     const opened = new Set();   // 已经替哪些角色领过赠送筹码（第一次打开时发一次 open）
-    const draft = { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips" }, amount = {};
+    const draft = { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips", mode: "highflux" }, amount = {};
     const v = () => o.view() || {}, hs = () => (v().packet && v().packet.view) || {};
     const casino = () => hs().casino || null;
     const enabled = () => !!(v().active && v().packet && v().packet.mode !== "rogue" && v().screen === "exploration" && casino());
@@ -186,7 +196,10 @@
       if (a === "buy") { draft.buy = numIn('[data-cso-in="buy"]', 1); return void submit({ type: "casino", op: "buy", kit: d.kit, n: draft.buy }); }
       if (a === "sell") { draft.sell = numIn('[data-cso-in="sell"]', 1); return void submit({ type: "casino", op: "sell", kit: d.kit, n: draft.sell }); }
       if (a === "sit") { draft.buyIn[d.table] = numIn(`[data-cso-buyin="${d.table}"]`, 0); return void submit({ type: "casino", op: "sit", kit: d.kit, table: d.table, buyIn: draft.buyIn[d.table], dealer: d.dealer }); }
-      if (a === "pvpOpen") return void submit({ type: "casino", op: "pvpOpen", kit: d.kit, side: draft.side, stakeKind: draft.stake });
+      if (a === "pvpOpen") {
+        const mode = PVP_SIDES[draft.mode] ? draft.mode : "highflux", sides = PVP_SIDES[mode].map(([k]) => k);
+        return void submit({ type: "casino", op: "pvpOpen", kit: d.kit, mode, side: sides.includes(draft.side) ? draft.side : sides[sides.length - 1], stakeKind: draft.stake });
+      }
       if (a === "join") return void submit({ type: "casino", op: "pvpJoin", kit: d.kit, table: d.table });
       if (a === "leave") return void submit({ type: "casino", op: "leave", kit: d.kit });
       if (a === "act") {
@@ -200,7 +213,8 @@
     }
     function onChange(e) {
       const t = e.target;
-      if (t.dataset.csoIn === "side") draft.side = t.value === "dealer" ? "dealer" : "player";
+      if (t.dataset.csoIn === "side") draft.side = ["dealer", "player", "a", "b"].includes(t.value) ? t.value : "player";
+      else if (t.dataset.csoIn === "mode") { draft.mode = t.value === "duel" ? "duel" : "highflux"; last = ""; paint(); }
       else if (t.dataset.csoIn === "stake") draft.stake = t.value === "kuizhi" ? "kuizhi" : "chips";
       else if (t.dataset.csoIn) draft[t.dataset.csoIn] = t.value;
       else if (t.dataset.csoBuyin) draft.buyIn[t.dataset.csoBuyin] = t.value;

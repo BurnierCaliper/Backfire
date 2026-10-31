@@ -373,8 +373,8 @@
     if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
     return u;
   }
-  /* ---------- 赌场（#487）：联机跑团的探索环节里去赌场打 High Flux ----------
-   * 规则在 trpg.js · trpgCasino…（钱在 casino.js，牌局在 counter-cards.js）。每位玩家的筹码钱包按操控的角色记（LEDGER.casino.wallets[kit]），
+  /* ---------- 赌场（#487）：联机跑团的探索环节里去赌场打 High Flux、Flux Duel（#526） ----------
+   * 规则在 trpg.js · trpgCasino…（钱在 casino.js，牌局在 counter-cards.js / flux-duel.js）。每位玩家的筹码钱包按操控的角色记（LEDGER.casino.wallets[kit]），
    * 买筹码 / 卖筹码、押奎支都走这名角色的私人钱包。三种桌子：AI 坐庄、主持人坐庄（赌场桌，收入场费）、玩家对赌（不收入场费）。
    * 玩家只能动自己角色的钱包、自己坐着的那一局；主持人替主持人坐庄的那几桌出庄家那一方，也能让任何人离桌（卡住的桌子）。
    * 每一步都写进存档（rememberCampaign）；不进小队聊天——谁赢谁输、钱包剩多少只给自己看。 */
@@ -389,11 +389,11 @@
     if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能去赌场");
     if (typeof Screens !== "undefined" && Screens && typeof Screens.is === "function" && Screens.is("battle")) fail("先回到探索环节再去赌场");
   }
-  /** 牌局里的一步：只拷规则认的字段（counter-cards.js · act 再查合不合法） */
+  /** 牌局里的一步：只拷规则认的字段（各玩法的 act 再查合不合法；Flux Duel 暗出要 layer + element，#526） */
   function casinoAction(a) {
     const out = {};
     if (!a || typeof a !== "object") return out;
-    for (const k of ["type", "op", "where", "card"]) if (typeof a[k] === "string") out[k] = a[k];
+    for (const k of ["type", "op", "where", "card", "layer", "element"]) if (typeof a[k] === "string") out[k] = a[k];
     if (a.amount != null && Number.isFinite(Number(a.amount))) out.amount = Number(a.amount);
     return out;
   }
@@ -412,7 +412,14 @@
         case "buy": own(); notes = trpgCasinoBuy(c.n, kit, kit); break;
         case "sell": own(); notes = trpgCasinoSell(c.n, kit, kit); break;
         case "sit": own(); notes = trpgCasinoSitAt(kit, String(c.table || ""), c.buyIn, { dealer: c.dealer === "gm" ? "gm" : "ai" }); break;
-        case "pvpOpen": own(); notes = trpgCasinoPvpOpen(kit, c.side === "dealer" ? "dealer" : "player", String(c.stakeKind || "")); break;
+        // 对赌：High Flux 坐庄家 / 玩家；Flux Duel（mode "duel"，#526）坐甲 / 乙（第 1 轮甲先手）
+        case "pvpOpen": {
+          own();
+          const duel = c.mode === "duel";
+          const side = duel ? (c.side === "b" ? "b" : "a") : (c.side === "dealer" ? "dealer" : "player");
+          notes = trpgCasinoPvpOpen(kit, side, String(c.stakeKind || ""), { mode: duel ? "duel" : "highflux" });
+          break;
+        }
         case "pvpJoin": own(); notes = trpgCasinoPvpJoin(kit, String(c.table || "")); break;
         case "act":
           if (c.asDealer) { if (!isGM) fail("只有主持人能替主持人坐庄的那一桌出牌"); }

@@ -402,10 +402,10 @@ function trpgCasinoSell(n, payee, key) {
   trpgPurseSet(p, trpgPurse(p) + r.gain);
   return [`赌场：${r.text.replace(/。$/, "")}（进 ${trpgPurseName(p)}）。`];
 }
-/** 坐上一张赌场桌开一局（先收入场费）；opt：dealer（"ai" / "gm"）、deck（测试用） */
+/** 坐上一张赌场桌开一局（先收入场费）；opt：dealer（"ai" / "gm"）、deck（测试用）、names（Flux Duel 记录里两方的称呼，联机按角色名，#526） */
 function trpgCasinoSit(table, buyIn, key, opt) {
   const w = trpgCasinoWallet(key);
-  Casino.sit(w, table, buyIn, { dealer: opt && opt.dealer, deck: opt && opt.deck });
+  Casino.sit(w, table, buyIn, { dealer: opt && opt.dealer, deck: opt && opt.deck, names: opt && opt.names });
   return [`赌场：坐上${w.seat.name}，买入 ${w.seat.buyIn} 枚，交入场费 ${w.seat.fee} 枚（不退）。`];
 }
 /** 离桌：赌场桌桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退）；
@@ -425,16 +425,26 @@ function trpgCasinoLeave(key) {
     notes.push(`赌场：${trpgPurseName(who)}${leaver === side ? "离桌认输，" : ""}${r.text}`);
   };
   settle(s.side);
-  if (t.game) settle(s.side === "dealer" ? "player" : "dealer");
-  if (!t.seats.dealer && !t.seats.player) delete c.tables[t.id];
+  if (t.game) settle(Casino.pvpOther(t, s.side));   // 对面那一方（High Flux：庄家 / 玩家；Flux Duel：甲 / 乙，#526）
+  if (Casino.pvpSides(t).every(k => !t.seats[k])) delete c.tables[t.id];
   return notes;
 }
 
 /* ---------- 赌场 · 联机（hotseat-game.js 的 casino 指令；谁能动哪个钱包在那边查）---------- */
-/** 联机浮层（casino-online-ui.js）现在只画得出 High Flux 的牌局：Flux Duel / Flux Hold'em 的赌场桌（#488）先只在本机开
- *  （长线养成、本机跑团），联机包里不放、联机也坐不上 */
-const TRPG_CASINO_ONLINE_GAMES = ["highflux"];
+/** 联机能开的玩法（#526）：High Flux 和 Flux Duel 都有三种坐法——AI 坐庄 / 主持人坐庄的赌场桌、玩家之间对赌（押筹码或押奎支） */
+const TRPG_CASINO_ONLINE_GAMES = ["highflux", "duel"];
 const trpgCasinoOnlineTables = () => Casino.tables().filter(t => TRPG_CASINO_ONLINE_GAMES.indexOf(t.game || "highflux") >= 0);
+/** 对局按玩法用哪一份规则（High Flux 的对局没有 mode） */
+function trpgCasinoRules(g) {
+  const m = Casino.gameOf(g);
+  return m === "duel" ? FluxDuel : m === "holdem" ? FluxHoldem : CounterCards;
+}
+/** 赌场桌上赌场（庄家）坐哪一方：High Flux 是庄家，Flux Duel 是人对面那一方 */
+function trpgCasinoHouseSide(g) {
+  return Casino.gameOf(g) === "highflux" ? "dealer" : FluxDuel.other(g.casino.side);
+}
+/** 这一方能看到的牌局（各玩法自己的 view：对方的手牌、暗出 / 盖下的牌、牌堆的顺序都不在里面） */
+function trpgCasinoGameView(g, side) { return trpgCasinoRules(g).view(g, side); }
 /** kit 这名角色坐着的牌局：{ kind: "ai" | "gm" | "pvp", side（人坐哪一方）, game（对赌还没开局是 null）, table, level（AI 庄家的难度）,
  *  topUp（牌局里从钱包补了几枚，#520）} 或 null。读钱包时 casino.js 登记了「赌场桌不够时从这个钱包补」 */
 function trpgCasinoSeatOf(kit) {
@@ -443,7 +453,9 @@ function trpgCasinoSeatOf(kit) {
   if (!s) return null;
   if (s.kind === "pvp") { const t = c.tables && c.tables[s.table]; return t ? { kind: "pvp", side: s.side, game: t.game, table: t, topUp: s.topUp || 0 } : null; }
   const cfg = Casino.tables().find(x => x.id === s.table) || {};
-  return { kind: s.kind, side: "player", game: s.game, table: cfg, level: cfg.difficulty || "normal", topUp: s.topUp || 0 };
+  // 人坐哪一方：High Flux 是玩家，Flux 的记在对局的 casino.side（Flux Duel 是甲）
+  const side = s.game && s.game.casino && s.game.casino.side ? s.game.casino.side : "player";
+  return { kind: s.kind, side, game: s.game, table: cfg, level: cfg.difficulty || "normal", topUp: s.topUp || 0 };
 }
 /** 对赌桌不够时两边各从自己的钱包补（#520，Casino.pvpBind）：押筹码的补这名角色钱包里的普通筹码，
  *  押奎支的从这名角色的私人钱包补奎支（1 枚 = 200 奎支） */
@@ -451,8 +463,8 @@ function trpgCasinoPvpBind(t) {
   Casino.pvpBind(t, side => trpgCasinoWallet(t.seats[side]),
     side => ({ have: () => trpgPurse(t.seats[side]), spend: n => trpgPurseSet(t.seats[side], trpgPurse(t.seats[side]) - n) }));
 }
-/** 牌局里走一步：kit 坐着的那一局、他那一方（opt.asDealer：主持人替主持人坐庄的那一桌出庄家那一方）。
- *  AI 当庄的桌子接着让 AI 走到轮到人；主持人坐庄的桌子等主持人 */
+/** 牌局里走一步：kit 坐着的那一局、他那一方（opt.asDealer：主持人替主持人坐庄的那一桌出庄家那一方——High Flux 的庄家、Flux Duel 人对面那一方）。
+ *  AI 当庄的桌子接着让 AI 走到轮到人；主持人坐庄的桌子等主持人。规则按这一局的玩法（trpgCasinoRules） */
 function trpgCasinoAct(kit, action, opt) {
   const seat = trpgCasinoSeatOf(kit);
   if (!seat) throw new Error("没坐在桌上");
@@ -460,49 +472,69 @@ function trpgCasinoAct(kit, action, opt) {
   let side = seat.side;
   if (opt && opt.asDealer) {
     if (seat.kind !== "gm") throw new Error("这一桌不是主持人坐庄");
-    side = "dealer";
+    side = trpgCasinoHouseSide(seat.game);
   }
   if (seat.kind === "pvp") trpgCasinoPvpBind(seat.table);
-  CounterCards.act(seat.game, side, action);
+  trpgCasinoRules(seat.game).act(seat.game, side, action);
   if (seat.kind === "ai") Casino.runAi(seat.game, seat.level);
   return [];
 }
-/** 坐上赌场桌（opt.dealer = "ai" / "gm"）；AI 坐庄的先走到轮到人。联机只有 High Flux 的桌子（TRPG_CASINO_ONLINE_GAMES） */
+/** 坐上赌场桌（opt.dealer = "ai" / "gm"）；AI 坐庄的先走到轮到人。联机能坐的玩法见 TRPG_CASINO_ONLINE_GAMES。
+ *  Flux Duel 的记录按角色名写（主持人坐庄的那一方写「主持人」），主持人、玩家看到的是同一份记录 */
 function trpgCasinoSitAt(kit, table, buyIn, opt) {
+  opt = opt || {};
   const t = Casino.tables().find(x => x.id === table);
-  if (t && !trpgCasinoOnlineTables().some(x => x.id === table)) throw new Error(`联机赌场暂时只有 ${CounterCards.CC_CONFIG.name} 的桌子：${t.gameName} 先在本机（长线养成、本机跑团）玩`);
+  if (t && !trpgCasinoOnlineTables().some(x => x.id === table)) throw new Error(`${t.gameName} 的赌场桌联机还不能坐`);
+  if (t && t.game === "duel") {
+    const D = FluxDuel.DUEL_CONFIG, me = D.casino.seat;
+    opt = Object.assign({}, opt, { names: { [me]: trpgPurseName(kit), [FluxDuel.other(me)]: opt.dealer === "gm" ? "主持人" : D.casino.names[FluxDuel.other(me)] } });
+  }
   const notes = trpgCasinoSit(table, buyIn, kit, opt);
   const seat = trpgCasinoSeatOf(kit);
   if (seat && seat.kind === "ai") Casino.runAi(seat.game, seat.level);
   return notes;
 }
-/** 开一张对赌桌：kit 先坐 side 那一方，押筹码（只能押普通筹码）或押奎支（从这名角色的钱包扣） */
+/** 对赌桌的一方怎么称呼：High Flux「庄家 / 玩家」，Flux Duel「甲 / 乙」（第 1 轮甲先手） */
+function trpgCasinoSideLabel(t, side) {
+  return Casino.pvpMode(t) === "duel" ? `${Casino.pvpSideName(t, side)}（第 1 轮${side === FluxDuel.SEATS[0] ? "先手" : "后手"}）` : Casino.pvpSideName(t, side);
+}
+/** 对赌桌两边都坐下时开局：Flux Duel 的记录按两边的角色名写 */
+function trpgCasinoPvpNames(t, kit, side, opt) {
+  if (Casino.pvpMode(t) !== "duel") return opt;
+  const names = {};
+  Casino.pvpSides(t).forEach(k => { const who = k === side ? kit : t.seats[k]; if (who) names[k] = trpgPurseName(who); });
+  return Object.assign({}, opt || {}, { names });
+}
+/** 开一张对赌桌：kit 先坐 side 那一方，押筹码（只能押普通筹码）或押奎支（从这名角色的钱包扣）；opt.mode：打哪种玩法（"highflux" 默认 / "duel"，#526） */
 function trpgCasinoPvpOpen(kit, side, stakeKind, opt) {
+  opt = opt || {};
+  const mode = opt.mode && TRPG_CASINO_ONLINE_GAMES.indexOf(opt.mode) >= 0 ? opt.mode : "highflux";
   const c = trpgCasinoBook(), w = trpgCasinoWallet(kit);
-  const t = Casino.pvpTable("t" + (c.seq + 1), stakeKind);
+  const t = Casino.pvpTable("t" + (c.seq + 1), stakeKind, mode);
   const pay = Casino.pvpSit(t, side, kit, w, trpgPurse(kit), opt);
   if (pay) trpgPurseSet(kit, trpgPurse(kit) - pay);
   c.seq += 1;
   c.tables[t.id] = t;
-  return [`赌场：${trpgPurseName(kit)} 开了一桌对赌（坐${CounterCards.sideName(side)}，${stakeKind === "chips" ? "押筹码" : "押奎支"}），等对手坐下。`];
+  const game = mode === "duel" ? FluxDuel.DUEL_CONFIG.name + " " : "";
+  return [`赌场：${trpgPurseName(kit)} 开了一桌${game}对赌（坐${trpgCasinoSideLabel(t, side)}，${stakeKind === "chips" ? "押筹码" : "押奎支"}），等对手坐下。`];
 }
 /** 坐上别人开的对赌桌（空着的那一方），两边都坐下就开局 */
 function trpgCasinoPvpJoin(kit, tableId, opt) {
   const c = trpgCasinoBook(), t = c.tables[tableId];
-  if (!t) throw new Error("没有这一桌");
-  const side = !t.seats.dealer ? "dealer" : !t.seats.player ? "player" : null;
+  if (!t || !t.seats) throw new Error("没有这一桌");
+  const side = Casino.pvpSides(t).find(k => !t.seats[k]) || null;
   if (!side || t.game) throw new Error("这一桌已经满了");
-  const pay = Casino.pvpSit(t, side, kit, trpgCasinoWallet(kit), trpgPurse(kit), opt);
+  const pay = Casino.pvpSit(t, side, kit, trpgCasinoWallet(kit), trpgPurse(kit), trpgCasinoPvpNames(t, kit, side, opt));
   if (pay) trpgPurseSet(kit, trpgPurse(kit) - pay);
-  return [`赌场：${trpgPurseName(kit)} 坐上了对赌桌（${CounterCards.sideName(side)}），开局。`];
+  return [`赌场：${trpgPurseName(kit)} 坐上了对赌桌（${trpgCasinoSideLabel(t, side)}），开局。`];
 }
 /** 联机包：这个人能看到的赌场（hotseat-game.js · getViewFor 按收件人造，online-view.js · projectCasino 再按白名单拷）。
  *  kits = 他操控的角色；isGM = 主持人。只读，不往存档里加东西。
  *   - 人人都有：桌子（倍率、最低买入、入场费）、兑换价、等人坐的对赌桌（谁开的、押什么、空着哪一方）；
  *   - mine：自己每名角色的钱包（筹码、能卖几枚、角色钱包里的奎支、上一局的结算）和坐着的那一局——只有自己这一方的 view
- *     （CounterCards.view：对方的手牌、暗出 / 暗弃的牌、庄家偷看到的天气都不在里面）；
- *   - 主持人另有 dealing：主持人坐庄的那几桌（庄家那一方的 view）；seated：谁坐在哪桌、第几轮（公开的，没有牌）。
- *   别人的钱包、别人那一方的 view 都不放。 */
+ *     （各玩法的 view：对方的手牌、暗出 / 暗弃 / 盖下的牌、牌堆的顺序、庄家偷看到的天气都不在里面）；
+ *   - 主持人另有 dealing：主持人坐庄的那几桌（庄家那一方的 view：High Flux 的庄家、Flux Duel 人对面那一方）；seated：谁坐在哪桌、第几轮（公开的，没有牌）。
+ *   别人的钱包、别人那一方的 view 都不放。mode = 这一桌打哪种玩法（highflux / duel，#526） */
 function trpgCasinoPacket(kits, isGM) {
   if (typeof Casino === "undefined" || typeof CounterCards === "undefined") return null;
   const raw = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};
@@ -511,31 +543,37 @@ function trpgCasinoPacket(kits, isGM) {
   // buyIn = 总买入、topUp = 牌局里从钱包补了几枚（#520；对赌：开局押的 start 不含补的）
   const meta = (kit, seat) => {
     if (seat.kind === "pvp") {
-      const t = seat.table, opp = t.seats[seat.side === "dealer" ? "player" : "dealer"];
-      return { kind: "pvp", table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp), topUp: seat.topUp };
+      const t = seat.table, opp = t.seats[Casino.pvpOther(t, seat.side)];
+      return { kind: "pvp", mode: Casino.pvpMode(t), table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp), topUp: seat.topUp };
     }
-    return { kind: seat.kind, table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level, topUp: seat.topUp };
+    return { kind: seat.kind, mode: Casino.gameOf(seat.game), table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level, topUp: seat.topUp };
+  };
+  // 等人坐的对赌桌：每一方坐着谁（High Flux 是 dealer / player，Flux Duel 是 a / b；空着的是 null）
+  const openRow = (t) => {
+    const row = { id: t.id, mode: Casino.pvpMode(t), stakeKind: t.stakeKind, start: t.start };
+    Casino.pvpSides(t).forEach(k => { row[k] = nameOf(t.seats[k]); });
+    return row;
   };
   const out = {
     config: { buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, face: Casino.CONFIG.face, gift: Casino.CONFIG.gift },
-    tables: trpgCasinoOnlineTables(),
-    open: Object.keys(tables).map(k => tables[k]).filter(t => t && !t.game).map(t => ({ id: t.id, stakeKind: t.stakeKind, start: t.start, dealer: nameOf(t.seats.dealer), player: nameOf(t.seats.player) })),
+    tables: trpgCasinoOnlineTables().map(t => Object.assign(t, { gm: Casino.gmDealer(t.game) })),
+    open: Object.keys(tables).map(k => tables[k]).filter(t => t && t.seats && !t.game).map(openRow),
     mine: [], dealing: [], seated: []
   };
   (kits || []).forEach(kit => {
     const w = Casino.wallet(JSON.parse(JSON.stringify(wallets[kit] || null)));   // 拷一份看：没来过赌场的角色不往存档里加钱包
     const seat = trpgCasinoSeatOf(kit);
     const row = { kit, name: nameOf(kit), purse: trpgPurse(kit), chips: Casino.chips(w), sellable: Casino.sellable(w), last: typeof w.last === "string" ? w.last : "" };
-    if (seat) row.seat = Object.assign(meta(kit, seat), { side: seat.side, game: seat.game ? CounterCards.view(seat.game, seat.side) : null });
+    if (seat) row.seat = Object.assign(meta(kit, seat), { side: seat.side, game: seat.game ? trpgCasinoGameView(seat.game, seat.side) : null });
     out.mine.push(row);
   });
   if (isGM) Object.keys(wallets).forEach(kit => {
     if (kit === TRPG_CASINO_LOCAL) return;
     const seat = trpgCasinoSeatOf(kit);
-    if (!seat || (seat.kind === "pvp" && seat.side !== "player")) return;   // 对赌桌只列一次（按坐玩家那一方的人）
+    if (!seat || (seat.kind === "pvp" && seat.side !== Casino.pvpSides(seat.table)[1])) return;   // 对赌桌只列一次（按坐后一方——玩家 / 乙——的人）
     const m = meta(kit, seat), g = seat.game;
     out.seated.push(Object.assign({ kit, name: nameOf(kit), round: g ? g.round : 0, over: !!(g && g.over) }, m));
-    if (seat.kind === "gm" && g) out.dealing.push(Object.assign({ kit, name: nameOf(kit), game: CounterCards.view(g, "dealer") }, m));
+    if (seat.kind === "gm" && g) out.dealing.push(Object.assign({ kit, name: nameOf(kit), game: trpgCasinoGameView(g, trpgCasinoHouseSide(g)) }, m));
   });
   return out;
 }

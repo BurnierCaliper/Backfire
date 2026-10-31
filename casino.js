@@ -56,7 +56,7 @@
    *   High Flux：人坐玩家，庄家是赌场（筹码无限）；
    *   Flux Duel：人坐 DUEL_CONFIG.casino.seat（a，第 1 轮先手），另一方是赌场（筹码无限，flux-duel.js · newGame 的 house）；
    *   Flux Hold'em：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），没有主持人坐庄。
-   * 玩家对赌（pvp*）现在只有 High Flux。 */
+   * 玩家对赌（pvp*）：High Flux 和 Flux Duel（#526，见下面 PVP_MODES）。 */
   const GAMES = {
     highflux: {
       has: () => !!root.CounterCards,
@@ -70,9 +70,10 @@
       name: () => root.FluxDuel.DUEL_CONFIG.name,
       tables: () => clone(root.FluxDuel.DUEL_CONFIG.casino.tables),
       gm: true,
+      // opt.names：记录里两方的称呼（联机跑团按角色名、主持人坐庄写「主持人」，#526；不给就是配置里的「你 / 赌场」）
       start(t, n, opt) {
         const D = root.FluxDuel, c = D.DUEL_CONFIG.casino;
-        return D.newGame({ seed: opt.seed, deck: opt.deck, first: c.seat, chipsBy: { [c.seat]: n }, house: D.other(c.seat), names: c.names });
+        return D.newGame({ seed: opt.seed, deck: opt.deck, first: c.seat, chipsBy: { [c.seat]: n }, house: D.other(c.seat), names: Object.assign({}, c.names, opt.names || {}) });
       },
       side: () => root.FluxDuel.DUEL_CONFIG.casino.seat,
       ai: (g) => [root.FluxDuel.other(g.casino.side)]
@@ -345,23 +346,52 @@
    *   还不上的借款也只扣普通筹码。
    * 押奎支（stakeKind "kuizhi"）：桌上 1 枚 = CASINO_CONFIG.face（200）奎支，底注 200 奎支、最低下注 = 轮数 × 200……；
    *   奎支由模式自己从钱包里扣、加（pvpSit 返回要扣多少，pvpLeave 返回要加多少，负数 = 还不上的借款）。
-   * 桌子：{ id, stakeKind, start, seats: { dealer, player }（坐着的是谁：模式自己的 key，跑团是角色 kit）, game（两边都坐下才开局） } */
+   * 桌子：{ id, stakeKind, start, seats: { dealer, player }（坐着的是谁：模式自己的 key，跑团是角色 kit）, game（两边都坐下才开局） }
+   * Flux Duel 也能对赌（#526）：桌子另记 mode: "duel"，两方是甲 / 乙（seats: { a, b }，第 1 轮甲先手），开局各 start 枚、没有庄（两边都是人），
+   *   钱的算法和 High Flux 的对赌一模一样（押筹码 / 押奎支、不收入场费、打到一半离桌算认输）；没有 mode 的旧桌子是 High Flux */
   const STAKE_KINDS = ["chips", "kuizhi"];
   const SIDES = ["dealer", "player"];
-  const pvpStart = () => Math.max(1, Math.floor(Number(CASINO_CONFIG.pvpStart || CC().CC_CONFIG.startChips) || 1));
-  /** 开一张对赌桌（还没人坐） */
-  function pvpTable(id, stakeKind) {
+  /** 对赌能打的玩法：两方叫什么（sides）、开局几枚（没设 CASINO_CONFIG.pvpStart 时）、结算说明里怎么称呼一方（name）、怎么开局（newGame） */
+  const PVP_MODES = {
+    highflux: {
+      has: () => !!root.CounterCards, sides: () => SIDES, start: () => CC().CC_CONFIG.startChips, name: (side) => CC().sideName(side),
+      newGame: (t, opt) => CC().newGame({ seed: opt.seed, deck: opt.deck, dealerChips: t.start, playerChips: t.start })
+    },
+    duel: {
+      has: () => !!root.FluxDuel, sides: () => root.FluxDuel.SEATS, name: (side) => root.FluxDuel.DUEL_CONFIG.seatNames[side] || side,
+      start: () => (root.FluxDuel.DUEL_CONFIG.startChips != null ? root.FluxDuel.DUEL_CONFIG.startChips : CC().CC_CONFIG.startChips),
+      // opt.names：记录里两方的称呼（跑团按角色名）；天气堆照样按种子洗
+      newGame: (t, opt) => root.FluxDuel.newGame({ seed: opt.seed, deck: opt.deck, chipsBy: { a: t.start, b: t.start }, names: opt.names })
+    }
+  };
+  /** 这张对赌桌打哪种玩法（旧桌子没有 mode = High Flux） */
+  const pvpMode = (t) => (t && t.mode && PVP_MODES[t.mode] ? t.mode : "highflux");
+  /** 这张对赌桌的两方（High Flux：庄家 / 玩家；Flux Duel：甲 / 乙） */
+  const pvpSides = (t) => PVP_MODES[pvpMode(t)].sides().slice();
+  const pvpOther = (t, side) => { const s = pvpSides(t); return side === s[0] ? s[1] : s[0]; };
+  /** 结算说明里怎么称呼这一方 */
+  const pvpSideName = (t, side) => PVP_MODES[pvpMode(t)].name(side);
+  const pvpStart = (mode) => Math.max(1, Math.floor(Number(CASINO_CONFIG.pvpStart || PVP_MODES[mode || "highflux"].start()) || 1));
+  /** 开一张对赌桌（还没人坐）。mode：打哪种玩法（"highflux" 默认 / "duel"，#526） */
+  function pvpTable(id, stakeKind, mode) {
     if (STAKE_KINDS.indexOf(stakeKind) < 0) fail("开桌要选押筹码还是押奎支");
-    return { id: String(id), stakeKind, start: pvpStart(), seats: { dealer: null, player: null }, game: null };
+    const m = mode || "highflux";
+    if (!PVP_MODES[m] || !PVP_MODES[m].has()) fail("没有这种对赌玩法：" + m);
+    const seats = {};
+    PVP_MODES[m].sides().forEach(k => { seats[k] = null; });
+    const t = { id: String(id), stakeKind, start: pvpStart(m), seats, game: null };
+    if (m !== "highflux") t.mode = m;
+    return t;
   }
   /** 坐上对赌桌的一方：押筹码从钱包的普通筹码里拿；押奎支要 kuizhi（这一方现在有多少奎支）够，返回要从奎支里扣多少（押筹码返回 0）。
-   *  两边都坐下就开局（opt.seed / opt.deck 测试用） */
+   *  两边都坐下就开局（opt.seed / opt.deck 测试用；opt.names：Flux Duel 记录里两方的称呼） */
   function pvpSit(t, side, key, w, kuizhi, opt) {
     opt = opt || {};
     wallet(w);
-    if (SIDES.indexOf(side) < 0) fail("没有这一方：" + side);
+    const sides = pvpSides(t);
+    if (sides.indexOf(side) < 0) fail("没有这一方：" + side);
     if (t.game || t.seats[side]) fail("这个位置已经有人了");
-    if (SIDES.some(k => t.seats[k] === key)) fail("已经坐在这张桌子上了");
+    if (sides.some(k => t.seats[k] === key)) fail("已经坐在这张桌子上了");
     if (w.seat) fail("已经坐在桌上了，先离桌");
     const v = t.start * CASINO_CONFIG.face;
     let pay = 0;
@@ -377,7 +407,7 @@
     }
     t.seats[side] = key;
     // 天气堆按种子洗：带上开局的时刻，同一个编号的桌子每次洗出来不一样（猜不到天气的顺序）
-    if (t.seats.dealer && t.seats.player) t.game = CC().newGame({ seed: opt.seed != null ? opt.seed : `pvp|${t.id}|${Date.now()}`, deck: opt.deck, dealerChips: t.start, playerChips: t.start });
+    if (sides.every(k => t.seats[k])) t.game = PVP_MODES[pvpMode(t)].newGame(t, { seed: opt.seed != null ? opt.seed : `pvp|${t.id}|${Date.now()}`, deck: opt.deck, names: opt.names });
     return pay;
   }
   /** 对赌这一方离桌时桌上剩多少枚：打完了 = 最终筹码（扣还借款之后）；还没开局 = 原样退回；
@@ -386,7 +416,7 @@
     const g = t.game;
     if (!g) return t.start;
     if (g.over) return g.final.chips[side];
-    const s = g.sides[side], o = g.sides[side === "dealer" ? "player" : "dealer"];
+    const s = g.sides[side], o = g.sides[pvpOther(t, side)];
     const hand = s.chips - s.owe;
     return side === leaver ? hand : hand + s.bet + s.pot + o.bet + o.pot;
   }
@@ -408,13 +438,15 @@
     const unit = s.stakeKind === "chips" ? "枚筹码" : "奎支";
     const amount = (n) => (s.stakeKind === "chips" ? fmt(Math.abs(n) * CASINO_CONFIG.face) : String(Math.abs(n) * CASINO_CONFIG.face));
     res.text = !t.game ? `对赌还没开局就离桌，押的原样退回。`
-      : `对赌结算（${CC().sideName(side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚${topUp ? `，中途从钱包补了 ${topUp} 枚` : ""}），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
+      : `对赌结算（${pvpSideName(t, side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚${topUp ? `，中途从钱包补了 ${topUp} 枚` : ""}），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
     return res;
   }
+  /** 这种玩法的赌场桌能不能由主持人坐庄（High Flux、Flux Duel 能；Flux Hold'em 只有 AI） */
+  const gmDealer = (game) => !!(GAMES[game] && GAMES[game].gm);
 
   const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, games, gameOf, tables, sit, cashOut, leave, payBack, runAi,
-    topUp, refill, pvpBind,
-    STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle };
+    topUp, refill, pvpBind, gmDealer,
+    STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle, pvpMode, pvpSides, pvpOther, pvpSideName };
   // 桌上不够时先从钱包补（#520）：把 refill 注入三种玩法共用的下注 / 借贷代码（counter-cards.js · bet.setTopUp）
   if (root.CounterCards && root.CounterCards.bet && root.CounterCards.bet.setTopUp) root.CounterCards.bet.setTopUp(refill);
   if (typeof module !== "undefined" && module.exports) module.exports = api;

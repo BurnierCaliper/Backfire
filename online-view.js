@@ -598,13 +598,108 @@
   /* 赌场（#487）：hotseat-game.js · casinoView 按收件人造好（trpg.js · trpgCasinoPacket：自己角色的钱包、自己那一方的牌局；
    * 主持人另有自己坐庄的那几桌——庄家那一方），这里只按白名单一项项拷。牌局照 counter-cards.js · view 的字段拷：
    * 对方的手牌、暗出 / 暗弃的牌、庄家偷看到的天气本来就只在那一方的 view 里；记录只拷文字。没登记的字段一律丢掉 */
-  const CASINO_CAP = { tables: 8, open: 20, mine: 6, dealing: 12, seated: 24, hand: 12, history: 8, log: 60, results: 8, legal: 40, gone: 10 };
+  const CASINO_CAP = { tables: 12, open: 20, mine: 6, dealing: 12, seated: 24, hand: 12, history: 8, log: 60, results: 8, legal: 40, gone: 10 };
   const CC_SIDES = ["dealer", "player"];
   const sideOf = v => (CC_SIDES.includes(v) ? v : null);
   const nullableNum = v => (v === null ? null : number(v));
-  function projectSidePair(o, fn) { if (!obj(o)) return null; const out = {}; CC_SIDES.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
+  function projectSidePair(o, fn, sides = CC_SIDES) { if (!obj(o)) return null; const out = {}; sides.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
+  /** 牌局按玩法投影（#526）：High Flux 的对局没有 mode；Flux Duel 是 "duel" */
   function projectCasinoGame(g) {
     if (!obj(g)) return null;
+    if (get(g, "mode") === "duel") return projectDuelGame(g);
+    return projectFluxHigh(g);
+  }
+  /** 牌局的记录（各玩法 view 里已经只剩这一方看得到的）：文字、第几轮，另带结算前的过渡要用的几项——
+   *  t（哪种记录）、by（谁做的）、op、amount（筹码数）、street；公开的那几条另带翻开的天气 / 层牌（weather / layer）、洗回几张（count）、
+   *  结算那一条的轮数（res.r）。只给自己看的（to = 自己那一方）只带文字，牌名都不另拷。
+   *  logFrom：前面丢掉了几条（记录只发最后 CASINO_CAP.log 条；界面按它对齐两包之间新加的记录） */
+  function projectCasinoLog(list, sides, out) {
+    const all = arr(list), from = Math.max(0, all.length - CASINO_CAP.log);
+    out.logFrom = from;
+    out.log = all.slice(from).flatMap(e => {
+      const t = obj(e) && text(get(e, "text"), 160); if (!t) return [];
+      const d = { r: number(get(e, "r")) || 0, text: t };
+      const kind = id(get(e, "t")); if (kind) d.t = kind;
+      const by = get(e, "by"); if (sides.includes(by)) d.by = by;
+      const to = get(e, "to");
+      // 只给某一方看的：只留给这个收件人那一方的（规则层的 view 已经滤过，这里再查一次，拿错了也漏不出别人的牌）
+      if (to != null) { if (to !== out.side) return []; d.mine = true; d.to = to; return [d]; }
+      d.mine = false;
+      const op = id(get(e, "op")); if (op) d.op = op;
+      for (const k of ["amount", "street", "count"]) { const v = number(get(e, k)); if (v !== undefined) d[k] = v; }
+      for (const k of ["weather", "layer"]) { const v = id(get(e, k)); if (v) d[k] = v; }
+      const res = get(e, "res"); if (obj(res) && number(get(res, "r")) !== undefined) d.res = { r: get(res, "r") };
+      return [d];
+    });
+  }
+  /** 一方的筹码这几项（各玩法都一样，都是公开的）：筹码（赌场那一方无限 = null）、开局、本轮下注、滚存、借了多少 / 要还多少 */
+  function projectPurseSide(s) {
+    const d = selected(s, ["infinite", "bet", "pot", "st", "loan", "owe"]);
+    d.chips = nullableNum(get(s, "chips")); if (d.chips === undefined) d.chips = null;
+    d.start = nullableNum(get(s, "start")); if (d.start === undefined) d.start = null;
+    return d;
+  }
+  /** 下注回合里能做的（各玩法的 legal）：类型、额度，另带牌 / 位置（暗出、偷看后放哪） */
+  function projectLegal(list) {
+    return arr(list).slice(0, CASINO_CAP.legal).flatMap(o => {
+      if (!obj(o) || !id(get(o, "type"))) return [];
+      const d = Object.assign({ type: get(o, "type") }, selected(o, ["min", "max", "step", "need", "amount", "round"]));
+      for (const k of ["op", "where", "card", "layer", "element"]) { const v = id(get(o, k)); if (v) d[k] = v; }
+      return [d];
+    });
+  }
+  /* Flux Duel（#526，flux-duel.js · view）：两方 a / b。对方的层牌、元素牌只有张数，暗出了没有只写一句 played；
+   * 这一轮背面朝上的天气只写有没有（facedown），天气堆只有张数（顺序不发）；unseen 是还没公开过的天气（集合，不是顺序）。
+   * 不亮牌时结算里没有牌；亮牌开关打开时（DUEL_CONFIG.reveal）结算的 shown 是两边公开的牌和得分 */
+  const DUEL_SIDES = ["a", "b"];
+  const duelSide = v => (DUEL_SIDES.includes(v) ? v : null);
+  function projectDuelGame(g) {
+    const out = copyFields(g, { mode: "duel" }, ["stage"], ["round", "rounds", "deckCount", "buried", "ante", "minBet", "maxRaises", "pot"], ["over", "myTurn", "facedown", "allIn", "reveal"]);
+    out.side = duelSide(get(g, "side")); out.opponent = duelSide(get(g, "opponent"));
+    if (!out.side || !out.opponent || out.side === out.opponent) return null;
+    out.lead = duelSide(get(g, "lead"));
+    const names = get(g, "names"); out.names = {};
+    DUEL_SIDES.forEach(k => { const t = text(get(names, k), 40); if (t) out.names[k] = t; });
+    out.waiting = arr(get(g, "waiting")).filter(s => DUEL_SIDES.includes(s));
+    out.weather = id(get(g, "weather"));
+    out.gone = arr(get(g, "gone")).map(id).filter(Boolean).slice(0, CASINO_CAP.gone);
+    out.unseen = arr(get(g, "unseen")).map(id).filter(Boolean).slice(0, CASINO_CAP.gone);
+    const loan = get(g, "loan"); out.loan = obj(loan) ? selected(loan, ["unit", "repay"]) : null;
+    const ask = get(g, "loanAsk"); out.loanAsk = Array.isArray(ask) ? ask.filter(s => DUEL_SIDES.includes(s)) : null;
+    const cards = (list) => arr(list).map(id).filter(Boolean).slice(0, CASINO_CAP.hand);
+    const me = get(g, "me"), opp = get(g, "opp");
+    if (!obj(me) || !obj(opp)) return null;
+    out.me = Object.assign(projectPurseSide(me), { layers: cards(get(me, "layers")), elements: cards(get(me, "elements")), layer: id(get(me, "layer")), element: id(get(me, "element")),
+      history: arr(get(me, "history")).slice(0, CASINO_CAP.history).flatMap(h => obj(h) ? [{ r: number(get(h, "r")) || 0, layer: id(get(h, "layer")), element: id(get(h, "element")) }] : []) });
+    out.opp = Object.assign(projectPurseSide(opp), selected(opp, ["layerCount", "elementCount", "played"]));
+    const b = get(g, "betting");
+    if (obj(b)) {
+      out.betting = Object.assign(selected(b, ["street", "raises", "toCall"]), { toAct: duelSide(get(b, "toAct")) });
+      const w = get(b, "window");
+      out.betting.window = obj(w) ? Object.assign(selected(w, ["n", "sec", "passed"]), { by: duelSide(get(w, "by")) }) : null;
+    } else out.betting = null;
+    const pair = (o, fn) => projectSidePair(o, fn, DUEL_SIDES);
+    out.results = arr(get(g, "results")).slice(-CASINO_CAP.results).flatMap(r => {
+      if (!obj(r)) return [];
+      const d = copyFields(r, {}, [], ["r", "tier", "extra", "pot"], ["allIn", "refund", "rollover", "split", "buried"]);
+      d.weather = id(get(r, "weather"));
+      enumField(r, d, "outcome", ["a", "b", "tie", "fold"]);
+      d.winner = duelSide(get(r, "winner")); const folded = duelSide(get(r, "folded")); if (folded) d.folded = folded;
+      d.bets = pair(get(r, "bets"), number); d.delta = pair(get(r, "delta"), number); d.chips = pair(get(r, "chips"), nullableNum);
+      // 亮牌（DUEL_CONFIG.reveal 打开时才有）：两边结算时公开的牌和得分
+      const shown = get(r, "shown");
+      if (obj(shown)) d.shown = pair(shown, s => (obj(s) ? Object.assign({ layer: id(get(s, "layer")), element: id(get(s, "element")) }, selected(s, ["score"])) : undefined));
+      return [d];
+    });
+    projectCasinoLog(get(g, "log"), DUEL_SIDES, out);
+    out.legal = projectLegal(get(g, "legal"));
+    const f = get(g, "final");
+    out.final = obj(f) ? { rounds: number(get(f, "rounds")) || 0, winner: duelSide(get(f, "winner")), chips: pair(get(f, "chips"), nullableNum), net: pair(get(f, "net"), nullableNum),
+      held: pair(get(f, "held"), nullableNum), loans: pair(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined)), busted: arr(get(f, "busted")).filter(s => DUEL_SIDES.includes(s)) } : null;
+    return out;
+  }
+  /** High Flux（counter-cards.js · view）的对局 */
+  function projectFluxHigh(g) {
     const out = copyFields(g, {}, ["stage"], ["round", "rounds", "deckCount", "minBet", "ante", "maxRaises", "pot"], ["over", "myTurn", "allIn", "normalUsed"]);
     out.side = sideOf(get(g, "side")); out.opponent = sideOf(get(g, "opponent"));
     if (!out.side) return null;
@@ -660,13 +755,15 @@
     return out;
   }
   /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局。
-   *  buyIn = 总买入、topUp = 牌局里桌上不够时从钱包补了几枚（#520） */
+   *  buyIn = 总买入、topUp = 牌局里桌上不够时从钱包补了几枚（#520）；mode = 哪种玩法（#526） */
+  const CASINO_MODES = ["highflux", "duel"];
+  const SEAT_SIDES = [...CC_SIDES, ...DUEL_SIDES];
   function projectCasinoSeat(s, withGame) {
     if (!obj(s)) return null;
     const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round", "topUp"], ["over"]), ["table", "level"]);
-    enumField(s, out, "kind", ["ai", "gm", "pvp"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]);
+    enumField(s, out, "kind", ["ai", "gm", "pvp"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]); enumField(s, out, "mode", CASINO_MODES);
     if (!out.kind) return null;
-    const side = sideOf(get(s, "side")); if (side) out.side = side;
+    const side = get(s, "side"); if (SEAT_SIDES.includes(side)) out.side = side;
     if (withGame) out.game = projectCasinoGame(get(s, "game"));
     return out;
   }
@@ -674,17 +771,21 @@
     if (!obj(c)) return null;
     const cfg = get(c, "config");
     const out = { config: obj(cfg) ? selected(cfg, ["buy", "sell", "face", "gift"]) : {} };
+    // 桌子：game = 哪种玩法、gameName 玩法名、short 配置里的桌名、gm = 能不能由主持人坐庄（#526）
     out.tables = arr(get(c, "tables")).slice(0, CASINO_CAP.tables).flatMap(t => {
       if (!obj(t) || !id(get(t, "id"))) return [];
-      const d = identifiers(t, copyFields(t, {}, ["name"], ["rate", "minBuyIn", "entryFee", "minBuyInChips", "entryFeeChips", "perChip"]), ["id"]);
+      const d = identifiers(t, copyFields(t, {}, ["name", "gameName", "short"], ["rate", "minBuyIn", "entryFee", "minBuyInChips", "entryFeeChips", "perChip", "players"], ["gm"]), ["id"]);
       enumField(t, d, "difficulty", ["easy", "normal", "hard"]);
+      enumField(t, d, "game", CASINO_MODES);
       return [d];
     });
+    // 等人坐的对赌桌：每一方坐着谁的名字（High Flux：dealer / player；Flux Duel：a / b，空着的是 null）
     out.open = arr(get(c, "open")).slice(0, CASINO_CAP.open).flatMap(t => {
       if (!obj(t) || !id(get(t, "id"))) return [];
       const d = identifiers(t, copyFields(t, {}, [], ["start"]), ["id"]);
       enumField(t, d, "stakeKind", ["chips", "kuizhi"]);
-      d.dealer = text(get(t, "dealer"), 40); d.player = text(get(t, "player"), 40);
+      d.mode = get(t, "mode") === "duel" ? "duel" : "highflux";
+      (d.mode === "duel" ? DUEL_SIDES : CC_SIDES).forEach(k => { d[k] = text(get(t, k), 40); });
       return [d];
     });
     out.mine = arr(get(c, "mine")).slice(0, CASINO_CAP.mine).flatMap(m => {
