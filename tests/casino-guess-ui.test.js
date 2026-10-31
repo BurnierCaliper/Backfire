@@ -83,6 +83,7 @@ test("赌场面板：猜大猜小一组三张桌子（名字读配置），写�
   assert.ok(vip.disabled, "赠送的 50 枚不够贵宾室的最低买入 + 入场费");
   assert.match(vip.textContent, /筹码不够（要 52 枚）/);
   assert.match(m.box.textContent, /和赌场打牌：High Flux、Flux Duel、Flux Hold'em、猜大猜小。/);
+  assert.match(m.box.textContent, /钱包空了才问借不借（猜大猜小没有借贷：补不满只能不押）/, "面板的规则写明猜大猜小补不满只能不押");
   assert.ok(!/坚毅/.test(m.box.textContent), "赌场押的是筹码：面板上没有坚毅");
   assert.ok(!p.K.tables().some(t => t.id === p.G.GUESS_CONFIG.life.id), "黑市赌命桌不在赌场里");
   // 名字读配置
