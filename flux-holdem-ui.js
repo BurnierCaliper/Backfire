@@ -79,7 +79,7 @@
     const H = FH().HOLDEM_CONFIG, C = CC().CC_CONFIG;
     return `<details class="cc-rules"><summary>${esc(H.name)} 规则</summary><ul>
       <li><b>牌</b>：元素牌 ${H.elementSets} 组 × ${C.elements.length} 种洗混，每人开局 ${H.hand} 张、第 2–${H.rounds} 轮开始时各摸 ${H.draw} 张，每张只能用一次；玩家不出层牌——公共层牌 ${H.layerSets} 组 × ${C.layers.length} 张，每轮翻 ${H.layersPerRound} 张；天气每轮翻 ${H.weathersPerRound} 张，叠加。天气堆抽完时只把弃掉的洗回去。</li>
-      <li><b>每轮</b>：（筹码不够的先决定借不借）① 庄家偷看天气堆顶，留在顶上或压到堆底（放哪公开）② 翻开第 1 张公共层牌，庄家左边两位下小盲 ${H.blinds[0]} × 轮数、大盲 ${H.blinds[1]} × 轮数（两人局庄家下小盲）③ 每人盖下 1 张元素牌 ④ 第一轮下注 ⑤ 翻开第 1 张天气 ⑥ 第二轮下注 ⑦ 同时翻开第 2 张层牌和第 2 张天气，亮牌比分。两轮下注都从庄家左边开始；庄家每轮顺时针轮换。</li>
+      <li><b>每轮</b>：（筹码不够的先决定借不借）① 庄家偷看天气堆顶，留在顶上或压到堆底（放哪公开）② 翻开第 1 张公共层牌，庄家左边两位下小盲 ${H.blinds[0]} × 轮数、大盲 ${H.blinds[1]} × 轮数（两人局庄家下小盲）③ 每人盖下 1 张元素牌 ④ 第一轮下注 ⑤ 翻开第 1 张天气 ⑥ 第二轮下注 ⑦ 同时翻开第 2 张层牌和第 2 张天气，亮牌比分。${H.revealAll ? "结算时亮出每个人这一轮盖下的牌（弃牌的、其他人都弃牌直接赢的那一轮也亮，弃牌的不计分）。" : ""}两轮下注都从庄家左边开始；庄家每轮顺时针轮换。</li>
       <li><b>计分</b>：你的元素牌对 2 张公共层牌分别计分求和（克制 +1 / 劣势 −1 / 其余 0，加两张天气的修正，修正直接相加不设上限）；最高分拿走底池，同分平分。微光反转克制表（能量除外），也反转另一张天气的修正（含给能量的、酸雨打装甲那一项），微光自己给能量的 +1 保留。</li>
       <li><b>下注</b>：过牌 / 跟注 / 加注 / 弃牌；加注至少等于上一次加注额，每个下注回合最多加注 ${H.maxRaises} 次；想押多少押多少，跟不起可以先借、全押（多押的部分开边池），或者弃牌；跟注后有 ${C.callWindowSec} 秒追加窗口，还可以加注或弃牌。弃牌的不参与比分。只按底池结算，不用分档赔付。</li>
       <li><b>${esc(wn(C.allInWeather))}</b>：翻开时没弃牌的人全押（上限 = 没弃牌的人里筹码最少那位的全部筹码，这一轮已下的 + 手上的），不再下注，直接比分；第 2 张天气（亮牌时翻开）是${esc(wn(C.allInWeather))}：比分之前补押到这个数。全押后同分，底池留在桌上滚到下一轮；最后一轮同分的人平分。</li>
@@ -198,7 +198,7 @@
   /** 一轮的主池 / 边池归谁（横幅、和规则层的结算记录同一种说法） */
   function potsText(r, n) {
     const carryIn = r.carryIn ? `（含上一轮滚存的 ${r.carryIn} 枚）` : "";
-    if (r.outcome === "fold") return `其他人都弃牌，${n(r.winners[0])}拿走底池 ${r.pot} 枚${carryIn}（不亮牌）`;
+    if (r.outcome === "fold") return `其他人都弃牌，${n(r.winners[0])}拿走底池 ${r.pot} 枚${carryIn}${r.played ? "" : "（不亮牌）"}`;
     return r.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
       + (p.carried ? `：${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
         : p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分${r.allIn ? "（相位全押，最后一轮不再滚存）" : ""}` : `归${n(p.winners[0])}`)
@@ -218,7 +218,11 @@
     const big = o.carry ? o.text : { win: "你赢了", lose: o.text === "你弃牌" ? "你弃牌了" : "你输了", tie: "平分" }[o.cls];
     const n = (id) => nameIn(v, id);
     const main = r.pots[0] || { winners: [] };
-    const shown = r.shown ? `<ul class="fh-shown">${Object.keys(r.shown).map(id => `<li class="${main.winners.indexOf(id) >= 0 ? "win" : (main.tied || []).indexOf(id) >= 0 ? "tie" : ""}">${esc(n(id))}〔${esc(cn(r.shown[id].card))}〕得 ${signed(r.shown[id].score)}</li>`).join("")}</ul>` : "";
+    // 比分的人写得分；弃牌的人（和其他人都弃牌直接赢的那一轮）只亮牌（r.played，主人 10/31）
+    const rows = (r.shown ? Object.keys(r.shown).map(id => `<li class="${main.winners.indexOf(id) >= 0 ? "win" : (main.tied || []).indexOf(id) >= 0 ? "tie" : ""}">${esc(n(id))}〔${esc(cn(r.shown[id].card))}〕得 ${signed(r.shown[id].score)}</li>`) : [])
+      .concat(r.played ? v.order.filter(id => r.played[id] && !(r.shown && r.shown[id])).map(id =>
+        `<li class="${r.folded.indexOf(id) >= 0 ? "folded" : main.winners.indexOf(id) >= 0 ? "win" : ""}">${esc(n(id))}〔${esc(cn(r.played[id]))}〕${r.folded.indexOf(id) >= 0 ? "弃牌" : ""}</li>`) : []);
+    const shown = rows.length ? `<ul class="fh-shown">${rows.join("")}</ul>` : "";
     const phase = r.allIn ? `<p class="cc-tier">翻到${esc(wn(CC().CC_CONFIG.allInWeather))}（第 ${r.phaseAt} 张天气）：没弃牌的人全押，各押到 ${r.cap} 枚</p>` : "";
     return `<div class="cc-banner-card ${o.cls}" role="dialog" aria-label="第 ${r.r} 轮结算">
       <small>第 ${r.r} 轮结算 · 层牌 ${esc(r.layers.map(x => `〔${cn(x)}〕`).join(""))} · 天气 ${esc(ws(r.weathers))}</small>
@@ -297,8 +301,11 @@
       }
       cur.cut = i + 1;
     }
-    if (res.outcome === "showdown") {
-      const cards = Object.keys(res.shown).map(id => `${nameIn(now, id)}〔${cn(res.shown[id].card)}〕`).join("、");
+    // 亮牌：比分的人；每轮亮出所有人这一轮盖下的牌时（res.played，主人 10/31）弃牌的、其他人都弃牌直接赢的那一轮也亮
+    const shownIds = res.played ? now.order.filter(id => res.played[id]) : res.outcome === "showdown" ? Object.keys(res.shown) : [];
+    if (shownIds.length) {
+      const cardOf = (id) => (res.played ? res.played[id] : res.shown[id].card);
+      const cards = shownIds.map(id => `${nameIn(now, id)}〔${cn(cardOf(id))}〕${res.folded.indexOf(id) >= 0 ? "（弃牌）" : ""}`).join("、");
       frames.push(cur = Object.assign({}, cur, { kind: "show", flipped: false, lines: [`亮牌：${cards}。`], cut: logEnd }));
     }
     // 筹码：相位全押之前那几步照「最后一步做完」（做之前的画面 + 这一步跟注 / 全押推进底池的），之后照「结算之前」（这一轮下注额 res.bets、手上 = 结算后 − 分到的）。
@@ -323,7 +330,7 @@
     const seat = (s) => {
       const folded = r.folded.indexOf(s.id) >= 0, chips = m.chips[s.id], bet = m.bet[s.id];
       return Object.assign({}, s, { chips, bet, st: 0, folded, allIn: s.allIn || (!folded && !s.out && chips <= 0 && bet > 0),
-        shown: show && r.shown && r.shown[s.id] ? r.shown[s.id].card : null });
+        shown: !show ? null : r.played ? r.played[s.id] || null : r.shown && r.shown[s.id] ? r.shown[s.id].card : null });
     };
     const seats = pre.seats.map(seat);
     return Object.assign({}, v, {

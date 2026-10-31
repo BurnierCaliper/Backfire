@@ -130,6 +130,8 @@
     function afterChange(pre) {
       const g = S.game;
       if (g.results.length > S.seen) { S.seen = g.results.length; settleStart(g.results[g.results.length - 1], pre); }
+      // 牌局里翻开了新的天气 / 层牌：AI 至少等 settle.flipMs 才接着走（主人 10/31：一张牌至少看清一秒）
+      else if (!S.fast) S.holdUntil = Math.max(S.holdUntil || 0, CS().holdAfterFlip(pre, R().view(S.game, S.human)));
       render();
       schedule();
       // 赌场桌：牌局走了一步（人或 AI），交给模式存档
