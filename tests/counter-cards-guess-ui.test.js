@@ -307,7 +307,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#525）：押完最后一
   assert.ok(motion.includes(".ccg-slots.cc-judging .cc-card"), "减少动态效果：三张牌不抖");
 });
 
-test("结算前的过渡：第一轮不押、三张一口气翻完——桌上一张一张翻：元素 → 天气 → 层牌，每张停 lastMs；没开减少动态效果时判定中停 judgeMs", (t) => {
+test("结算前的过渡：第一轮不押、三张一口气翻完——桌上一张一张翻：元素 → 天气 → 层牌，第一张停 lastMs、之后每张停 flipMs；没开减少动态效果时判定中停 judgeMs", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const p = page();
   p.w.matchMedia = () => ({ matches: false });   // 没开「减少动态效果」
@@ -325,11 +325,11 @@ test("结算前的过渡：第一轮不押、三张一口气翻完——桌上�
   assert.match(prompt(p), new RegExp(`翻开天气：${p.CC.weatherName("phase")}。$`));
   assert.ok(slotFace(p, "weather").classList.contains("cc-flip") && !slotFace(p, "layer"), "再翻天气，层牌还盖着");
   assert.equal(p.$("#ccg-game").dataset.weather, "phase", "天气特效换成刚翻开的这张");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.deepEqual([st.phase, st.at], ["flip", 2]);
   assert.equal(slotFace(p, "layer").dataset.face, "shield", "最后翻层牌");
   assert.ok(!visible(p.$("#ccg-banner")));
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.equal(st.phase, "judge");
   t.mock.timers.tick(T.judgeMs - 1);
   assert.ok(!visible(p.$("#ccg-banner")), "没开减少动态效果：判定中停 judgeMs");
@@ -352,7 +352,7 @@ test("结算前的过渡：点一下桌面直接看结算（翻牌那几步、�
   t.mock.timers.tick(10000);
   assert.ok(visible(p.$("#ccg-banner")), "跳过以后计时也停了，横幅留着");
   p = open("跳过2");
-  [1, 2, 3].forEach(() => t.mock.timers.tick(T.lastMs));
+  [T.lastMs, T.flipMs, T.flipMs].forEach(ms => t.mock.timers.tick(ms));
   assert.equal(settleOf(p).phase, "judge");
   click(p.$('#ccg-board .ccg-slot[data-slot="layer"] .cc-card'));
   assert.ok(visible(p.$("#ccg-banner")), "判定中点一下桌面也行");

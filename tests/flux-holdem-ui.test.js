@@ -336,7 +336,7 @@ const prompt = (p) => p.$("#fh-actions .cc-prompt").textContent;
 const settleOf = (p) => p.UI.state().settle;
 const barBtns = (p) => p.$$("#fh-actions button[data-fh]").map(b => b.dataset.fh);
 
-test("结算前的过渡（主人 10/30 试玩反馈，#525）：摊牌——人过牌以后横幅不马上出来：最后一步（连同翻开第 2 张层牌）→ 第 2 张天气 → 亮牌（盖下的牌翻过来，不写分）→ 判定中 → 结算横幅，每步停 UI_CONFIG.settle.lastMs、判定中停 reducedJudgeMs（开着减少动态效果）；过渡中桌上停在结算之前，AI 不走，记录、每轮结算里还没有这一轮", (t) => {
+test("结算前的过渡（主人 10/30 试玩反馈，#525）：摊牌——人过牌以后横幅不马上出来：最后一步（连同翻开第 2 张层牌）→ 第 2 张天气 → 亮牌（盖下的牌翻过来，不写分）→ 判定中 → 结算横幅，最后一步停 UI_CONFIG.settle.lastMs、之后每翻一张 / 亮牌停 flipMs（主人 10/31：一张牌至少一秒）、判定中停 reducedJudgeMs（开着减少动态效果）；过渡中桌上停在结算之前，AI 不走，记录、每轮结算里还没有这一轮", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const p = page(), T = p.w.CounterCardsUI.UI_CONFIG.settle;   // 页面开着「减少动态效果」
   const g = bet2Game(p, "过渡");
@@ -373,7 +373,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#525）：摊牌——人
   assert.ok(!p.$('#fh-board .fh-layer[data-face="armor"]').classList.contains("cc-flip"), "层牌的翻牌动画只放一次");
   assert.equal(p.$("#fh-game").dataset.weather, "glow", "天气特效换成刚翻开的这张");
   assert.match(p.$("#fh-side .cc-log").textContent, /同时翻开第 2 张公共层牌〔装甲〕和第 2 张天气〔微光〕/, "两张都翻开了，记录才写");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   // ③ 亮牌：盖下的牌翻过来（不写分，分在横幅上）
   assert.deepEqual([st.phase, st.at], ["show", 2]);
   assert.equal(prompt(p), "亮牌：你〔火〕、乙〔物理〕。");
@@ -381,7 +381,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#525）：摊牌——人
   assert.ok(p.$('#fh-board .cc-me .cc-slot [data-face="fire"]'), "自己那张也翻过来");
   assert.ok(!/得 [+−]?\d/.test(p.$("#fh-board").textContent), "桌上不写分");
   assert.ok(!visible(banner));
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   // ④ 判定中
   assert.equal(st.phase, "judge");
   assert.match(prompt(p), /^判定中/);
@@ -411,7 +411,7 @@ test("结算前的过渡（主人 10/30 试玩反馈，#525）：摊牌——人
   assert.ok(motion("counter-cards.css").includes(".fh-seat .cc-acted"), "减少动态效果：对手座位上的标签不弹");
 });
 
-test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌——桌上一张一张翻：最后一步连同第 1 张天气（相位，全押的筹码推进底池）→ 第 2 张层牌 → 第 2 张天气 → 亮牌，每张之间停 lastMs；没开减少动态效果时判定中停 judgeMs", (t) => {
+test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌——桌上一张一张翻：最后一步连同第 1 张天气（相位，全押的筹码推进底池）→ 第 2 张层牌 → 第 2 张天气 → 亮牌，每张之间停 flipMs；没开减少动态效果时判定中停 judgeMs", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const p = page();
   p.w.matchMedia = () => ({ matches: false });   // 没开「减少动态效果」
@@ -440,14 +440,14 @@ test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌—�
   assert.deepEqual([st.phase, st.at], ["flip", 1]);
   assert.deepEqual(J(faces(p)), { layers: ["flesh", "armor"], weathers: ["phase"] }, "一张一张翻：先第 2 张层牌，第 2 张天气还盖着");
   assert.equal(prompt(p), "翻开第 2 张公共层牌〔装甲〕。");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.deepEqual([st.phase, st.at], ["flip", 2]);
   assert.deepEqual(J(faces(p)), { layers: ["flesh", "armor"], weathers: ["phase", "heat"] }, "再翻第 2 张天气");
   assert.equal(prompt(p), "翻开第 2 张天气〔酷暑〕。");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.equal(st.phase, "show");
   assert.equal(prompt(p), "亮牌：你〔酸〕、乙〔酸〕。");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.equal(st.phase, "judge");
   t.mock.timers.tick(T.judgeMs - 1);
   assert.ok(!visible(p.$("#fh-banner")), "没开减少动态效果：判定中停 judgeMs");
@@ -457,7 +457,7 @@ test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌—�
   assert.ok(!p.$("#fh-board .cc-chips.cc-collect"), "底池滚到下一轮：谁的筹码都不收进来");
 });
 
-test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步（谁弃牌，标在座位上；AI 弃的也停一下）→ 亮牌（主人 10/31：每个人这一轮盖下的牌都亮，弃牌的也亮）各停 lastMs 就弹横幅，不判定、不翻牌；横幅写每人亮出来的牌；赢家的筹码收进来", (t) => {
+test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步（谁弃牌，标在座位上；AI 弃的也停一下）→ 亮牌（主人 10/31：每个人这一轮盖下的牌都亮，弃牌的也亮）（最后一步停 lastMs、亮牌停 flipMs） 就弹横幅，不判定、不翻牌；横幅写每人亮出来的牌；赢家的筹码收进来", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const T = page().w.CounterCardsUI.UI_CONFIG.settle;
   // 你弃牌
@@ -481,7 +481,7 @@ test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步�
   assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"] [data-face="physical"]'), "乙盖下的物理翻过来");
   assert.deepEqual(J(faces(p)), { layers: ["flesh"], weathers: ["heat"] }, "亮牌也不翻第 2 张层牌、天气");
   assert.ok(!visible(p.$("#fh-banner")));
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.ok(visible(p.$("#fh-banner")) && !settleOf(p), "弃牌：亮牌之后直接弹横幅（不判定）");
   assert.match(p.$("#fh-banner").textContent, /你弃牌了/);
   assert.match(p.$("#fh-banner .fh-shown").textContent, /你〔火〕弃牌/);
@@ -506,7 +506,7 @@ test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步�
   t.mock.timers.tick(T.lastMs);
   assert.equal(settleOf(p).phase, "show", "AI 弃牌也亮牌");
   assert.equal(prompt(p), "亮牌：你〔火〕、乙〔物理〕（弃牌）。");
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.ok(visible(p.$("#fh-banner")));
   assert.match(p.$("#fh-banner").textContent, /其他人都弃牌，你拿走底池/);
   assert.match(p.$("#fh-banner .fh-shown").textContent, /乙〔物理〕弃牌/);
@@ -522,7 +522,7 @@ test("结算前的过渡：点一下桌面直接看结算（翻牌那几步、�
     click(p.$('#fh-actions [data-fh="check"]'));
     return p;
   };
-  const steps = (n) => { for (let i = 0; i < n; i++) t.mock.timers.tick(T.lastMs); };   // 一步一步拨：下一步的计时是上一步到点时才排的
+  const steps = (n) => { for (let i = 0; i < n; i++) t.mock.timers.tick(settleOf(p).phase === "last" ? T.lastMs : T.flipMs); };   // 一步一步拨：下一步的计时是上一步到点时才排的
   // 最后一步的时候点牌桌
   let p = open("跳过1");
   assert.equal(settleOf(p).phase, "last");
@@ -579,7 +579,7 @@ test("结算前的过渡：不开 fast 和 3 个 AI 打完一局——每一轮�
       assert.match(p.$("#fh-top .cc-round").textContent, new RegExp(`第 ${res.r} / 5 轮`));
       assert.equal(p.$$("#fh-side .cc-results .cc-res").length, game.results.length - 1, "每轮结算里还没有这一轮");
       assert.equal(names[0], "last");
-      if (res.outcome === "fold") assert.deepEqual(names, ["last"], "弃牌直接赢：只有最后一步");
+      if (res.outcome === "fold") assert.deepEqual(names, ["last", "show"], "弃牌直接赢：最后一步 → 亮牌（主人 10/31：每轮亮出所有人的牌）");
       else assert.equal(names[names.length - 1], "show", "摊牌：最后一步是亮牌");
       names.forEach((name, i) => {
         assert.deepEqual([s.settle.phase, s.settle.at], [name, i]);
@@ -587,7 +587,7 @@ test("结算前的过渡：不开 fast 和 3 个 AI 打完一局——每一轮�
         assert.ok(!p.$("#fh-actions .cc-count") && !s.win, "过渡中追加窗口不计时");
         assert.ok(!p.$("#fh-board button.cc-can"), "点不了牌");
         assert.ok(!visible(banner));
-        t.mock.timers.tick(T.lastMs);
+        t.mock.timers.tick(name === "last" ? T.lastMs : T.flipMs);
         beats++;
       });
       if (res.outcome !== "fold") { assert.equal(s.settle.phase, "judge", `第 ${res.r} 轮：判定中`); t.mock.timers.tick(T.reducedJudgeMs); }
@@ -627,7 +627,7 @@ test("结算前的过渡：赌场桌（casino-ui.js 打开，带 casino）也一
   assert.equal(saves, 1, "这一步（结算了）照旧叫模式存档");
   assert.ok(settleOf(p) && !visible(p.$("#fh-banner")), "赌场桌也先放过渡");
   assert.match(p.$("#fh-top").textContent, /后巷小桌/);
-  [T.lastMs, T.lastMs, T.lastMs].forEach(ms => { t.mock.timers.tick(ms); assert.ok(!visible(p.$("#fh-banner"))); });   // 最后一步 → 第 2 张天气 → 亮牌 → 判定中
+  [T.lastMs, T.flipMs, T.flipMs].forEach(ms => { t.mock.timers.tick(ms); assert.ok(!visible(p.$("#fh-banner"))); });   // 最后一步 → 第 2 张天气 → 亮牌 → 判定中
   t.mock.timers.tick(T.reducedJudgeMs);
   assert.ok(visible(p.$("#fh-banner")) && !settleOf(p), "放完才弹横幅");
 });
@@ -702,4 +702,46 @@ test("真浏览器（手机 390×844）：不开 fast 和 3 个 AI 打完一局 
   assert.deepEqual(bad, [], "过渡中、平时都没有横向溢出");
   ["last", "show", "judge"].forEach(ph => assert.ok(phases.has(ph), `放过「${ph}」这一步：${[...phases].join("、")}`));
   assert.deepEqual(errors, []);
+});
+
+/* ---------- 翻牌的节奏（主人 10/31：翻牌还是太快，一张牌起码展示一秒钟） ---------- */
+test("翻牌的节奏（主人 10/31）：结算前的过渡里最后一步停 lastMs、之后每翻开一张 / 亮牌停 flipMs，都不少于 1 秒；判定中也不少于 1 秒", (t) => {
+  const T = page().w.CounterCardsUI.UI_CONFIG.settle;
+  assert.ok(T.lastMs >= 1000 && T.flipMs >= 1000 && T.judgeMs >= 1000, JSON.stringify(T));
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page(), g = bet2Game(p, "一秒");
+  p.UI.start({ game: g, human: "p1", levels: { p2: "easy" }, seed: "一秒" });
+  click(p.$('#fh-actions [data-fh="check"]'));
+  const st = settleOf(p);
+  assert.deepEqual(J(st.beats), ["last", "flip", "show"]);
+  t.mock.timers.tick(T.lastMs);
+  assert.equal(st.phase, "flip", "翻开第 2 张天气");
+  t.mock.timers.tick(999);
+  assert.equal(st.phase, "flip", "刚翻开的这张至少停 1 秒");
+  t.mock.timers.tick(T.flipMs - 999);
+  assert.equal(st.phase, "show");
+  t.mock.timers.tick(999);
+  assert.equal(st.phase, "show", "亮牌也至少停 1 秒");
+});
+
+test("翻牌的节奏（主人 10/31）：牌局里翻开新的天气（第一轮下注打完翻第 1 张天气），AI 至少等 flipMs 才接着下注，不是平时的 aiDelay", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page(), T = p.w.CounterCardsUI.UI_CONFIG.settle, U = p.w.FluxUI.UI_CONFIG;
+  assert.ok(T.flipMs > U.aiDelay);
+  const g = p.X.newGame({ seed: "翻天气", players: [{ id: "p1", name: "你" }, { id: "p2", name: "乙" }], layers: LAYERS.slice(), weathers: WEATHERS.slice(),
+    hands: { p1: ["fire", "ice", "acid"], p2: ["physical", "ice", "energy"] }, elements: [] });
+  const A = (id, type, extra) => p.X.act(g, id, Object.assign({ type }, extra || {}));
+  A("p1", "place", { where: "top" });
+  A("p2", "play", { card: "physical" }); A("p1", "play", { card: "fire" });
+  A("p2", "check"); A("p1", "call"); A("p2", "pass");
+  p.UI.start({ game: g, human: "p1", levels: { p2: "easy" }, seed: "翻天气" });
+  t.mock.timers.tick(U.dealMs);
+  click(p.$('#fh-actions [data-fh="pass"]'));
+  assert.deepEqual(J(g.weathers), ["heat"], "关窗，翻开第 1 张天气");
+  assert.deepEqual(J(p.X.toAct(g)), ["p2"], "第二轮轮到乙（AI）");
+  const n = g.log.length;
+  t.mock.timers.tick(U.aiDelay);
+  assert.equal(g.log.length, n, "平时的 aiDelay 到了也还没走：刚翻开的天气要先看清");
+  t.mock.timers.tick(T.flipMs - U.aiDelay);
+  assert.ok(g.log.length > n, "停够 flipMs 以后 AI 接着走");
 });

@@ -459,7 +459,7 @@ test("结算前的过渡：亮牌开关打开时（DUEL_CONFIG.reveal）多一�
   assert.ok(slots[0].querySelector(".cc-flip"), "翻牌动画");
   assert.ok(!/得 [+−]?\d/.test(p.$("#fd-board").textContent), "桌上不写分");
   assert.ok(!visible(p.$("#fd-banner")));
-  t.mock.timers.tick(T.lastMs);
+  t.mock.timers.tick(T.flipMs);
   assert.equal(st.phase, "judge");
   assert.match(p.$("#fd-actions").textContent, /亮牌：你〔肉体〕〔火〕，对手〔肉体〕〔物理〕。 各自用自己的元素牌打对方的层牌算分，分高的赢。/);
   assert.ok(p.$("#fd-board .fd-slots.cc-judging [data-face]"), "判定中翻过来的牌也轻轻抖");

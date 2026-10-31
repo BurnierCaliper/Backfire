@@ -371,6 +371,12 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **卡牌小游戏翻牌的节奏调慢：一张牌至少看清一秒**（主人 10/31 试玩反馈：翻牌还是太快。只改界面，规则不动；counter-cards-ui.js · `UI_CONFIG.settle`（`lastMs` 900 → 1200，新 `flipMs` 1500，`judgeMs` 1200 → 1500）/ `beatMs`（新）/ `settleBegin` / `settleNext` / `holdAfterFlip`（新，导出在 `CounterCardsUI.settle`）/ `afterChange`；flux-ui.js · `afterChange`；测试：tests/flux-holdem-ui.test.js 新 2 条，flux-holdem-ui / flux-duel-ui / counter-cards-guess-ui 里按旧节奏拨时钟的几条改成翻牌那几步拨 `flipMs`）
+  - **以前**：结算前的过渡（#525）每一步都只停 0.9 秒（最后一步、之后每翻开一张、亮牌一样），「判定中」1.2 秒；牌局中途翻开天气（比如 Hold'em / Duel 第一轮下注打完翻天气）以后，AI 照平时的 0.65 秒就接着下注、画面跟着变。
+  - **现在**：
+    - 最后一步停 1.2 秒；之后每翻开一张牌、亮牌各停 **1.5 秒**（`flipMs`）；「判定中」1.5 秒。High Flux、Flux Duel、Flux Hold'em、猜大猜小（含赌场桌、赌命桌）共用这一份。
+    - 牌局中途翻开新的天气 / 公共层牌以后，AI 至少等 `flipMs`（1.5 秒）才接着走。
+    - 点一下桌面或「直接看结算」照旧能跳过；开着「减少动态效果」时判定中照旧缩短（`reducedJudgeMs`）。
 - **猜大猜小进赌场：长线养成、本机跑团的赌场能坐押筹码的猜大猜小（三张赌场桌，用筹码钱包）**（#528，主人 10/31：猜大猜小没有赌钱 / 筹码的版本很奇怪。只做本机，联机赌场在 #526；计分、赔率、开盘规则不动，黑市赌命桌不动。counter-cards-guess.js · `GUESS_CONFIG.casino`（新：三张赌场桌）/ `casinoTableInfo`（新）/ `tableOf` / `newHand`（`entryPaid`；这一手另记 `mode` / `rounds`）/ `setTopUp`（新）/ `topUp`（新）/ `openRound`；casino.js · `GAMES.guess`（新）/ `RULES` / `cashOut` / `runAi` / 加载时把 `refill` 注入猜大猜小；casino-ui.js · `UI_CONFIG.games.guess` / `UI_CONFIG.rule` / `TABLE_UI.guess`（新，`again`）/ `tableHtml` / `play`；counter-cards-guess-ui.js · `start` / `startCasino`（新）/ `casinoHook`（新）/ `meId` / `sync` / `humanAct` / `rulesHtml` / `topHtml` / `boardHtml` / `actionsHtml` / `bannerHtml` / `onClick`；测试 tests/casino-guess.test.js 新 7 条，tests/casino-guess-ui.test.js 新 5 条（含真浏览器手机 390×844））
   - **以前**：押筹码的猜大猜小只有标题「本地玩法」里的两张练习桌（街边桌 / 里屋，筹码不进任何钱包）；进了游戏世界（长线养成、本机跑团）只有黑市的赌命桌（押坚毅生命）。赌场（casino.js · `GAMES`）里只有 High Flux、Flux Duel、Flux Hold'em。
   - **现在**：
