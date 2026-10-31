@@ -111,7 +111,8 @@ test("High Flux · 联机牌桌的结算前的过渡、结算横幅、记录（�
   if (g.stage === "bet2") { host({ type: "check" }); }
   pull(); UI.remoteSync();
   const view = r.mine("p2", "ruby").seat.game;
-  if (view.results.length === 0) { me({ type: "check" }); }   // 第二轮下注：主持人过牌以后玩家也过牌，这一下结算
+  if (view.results.length === 0) { me({ type: "check" }); }   // 第二轮下注：主持人过牌以后玩家也过牌
+  if (r.mine("p2", "ruby").seat.game.stage === "dealerCall") host({ type: "noCall" });   // 庄家叫牌（#503，默认开）：主持人不叫，这一下结算
   const s0 = UI.state().seen;
   pull(); UI.remoteSync();
   const now = r.mine("p2", "ruby").seat.game;

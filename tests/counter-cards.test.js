@@ -14,6 +14,7 @@ const read = f => fs.readFileSync(path.join(ROOT, f), "utf8");
 const c = H.load();
 vm.runInContext(read("counter-cards.js"), c, { filename: "counter-cards.js" });
 const CC = c.CounterCards;
+CC.CC_CONFIG.dealerCall.enabled = false;   // 这里的测试按没有叫牌那一步（#503）的流程写：叫牌默认开以后单独关掉；叫牌另见 tests/counter-cards-dealer-call*.test.js
 const C = CC.CC_CONFIG;
 const J = v => JSON.parse(JSON.stringify(v));
 const A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));

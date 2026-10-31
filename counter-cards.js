@@ -16,6 +16,7 @@
  *      之后场上有天气（不是相位）时，玩家还可以用常态清除它，代价是暗弃一张元素牌；
  *   6. 第二轮下注，庄家先；本轮翻到相位就不下注，双方直接全押（上限 = 筹码较少一方的全部筹码）；
  *   7. 不亮牌，系统直接判胜负、结算，双方都看不到对方出了什么，只公开胜负、分档和筹码变动。
+ *      结算之前庄家可以叫牌（#503，整局一次，相位轮也可以）：叫玩家这一轮暗出的元素牌，叫对算庄家赢、层牌收回，叫错算玩家赢、层牌亮给玩家，都按差 1 结算。
  * 下注不封顶（#496，主人 10/30）：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比自己手上的还多时跟不起，
  *   要跟就得先借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方的全部筹码封顶。
  * 跟注后的追加窗口（#496，主人 10/30）：一方跟注后不马上结束这个下注回合，开 3 秒（CC_CONFIG.callWindowSec）追加窗口——
@@ -42,7 +43,7 @@
  *   CounterCards.chart(g.weather)            → 克制表（得分）：这个天气下每张元素牌打每张层牌的得分，格式同 matchup.js · matchupChart，
  *                                              牌局中随时能开（counter-cards-ui.js 交给 matchup-ui.js 照平时克制表的样子画）
  *   CounterCards.cardChart("fire", g.weather) → 悬停预览：这张元素牌在这个天气下打五种层各得几分（就是上面克制表里这张牌的一行）
- *   庄家叫牌（#503，主人 10/30，基础模式、整局一次，默认关、newGame({ dealerCall: true }) 打开，界面接好后再改 CC_CONFIG.dealerCall.enabled）：
+ *   庄家叫牌（#503，主人 10/30，基础模式、整局一次；默认开，newGame({ dealerCall: false }) 单独关掉，CC_CONFIG.dealerCall.enabled）：
  *     第二轮下注结束（或者相位全押）以后、结算以前进 stage "dealerCall"，等庄家叫牌或者不叫：
  *   CounterCards.canCall(g)                  → 庄家现在能不能叫牌
  *   CounterCards.callElement(g, "fire")      → 叫玩家这一轮暗出的元素牌（= act(g, "dealer", { type: "callElement", element })）
@@ -67,8 +68,8 @@
     // 跟注后的追加窗口（#496，主人 10/30）：一方跟注后双方还有这么多秒可以加注（照样算进 maxRaises）或弃牌，没人动作就结束这个下注回合。
     // 规则层不计时（pass = 这一方放弃追加，双方都放弃或者 closeWindow 到时间就关窗）；界面按这个秒数倒计时
     callWindowSec: 3,
-    // 庄家叫牌（#503）：enabled = 新开的对局默认开不开（界面还没接，先关；newGame({ dealerCall: true }) 单独打开）
-    dealerCall: { enabled: false },
+    // 庄家叫牌（#503）：enabled = 新开的对局默认开不开（界面接好了，默认开；newGame({ dealerCall: false }) 单独关掉）
+    dealerCall: { enabled: true },
     pctStep: 0.25,                     // 天气修正每 25% 记 ±1
     // 分档赔付（下标 = 分差）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5。只有这两档：
     // 主人 10/30 删掉了「差 3 及以上 × 1」（单轮分差最多 ±2，打不出来）；万一分差超过 2，按差 2 算
@@ -896,6 +897,8 @@
       return `第 ${res.r} 轮：平局，底池 ${res.pot} 枚滚存到下一轮${chips}。`;
     }
     const extra = res.extra ? `，输家再赔 ${res.extra} 枚` : "";
+    // 叫牌的一轮（#503）不比分：写清楚是叫牌定的胜负
+    if (res.call) return `第 ${res.r} 轮：庄家叫〔${cardName(res.call.element)}〕${res.call.correct ? "叫对了" : "叫错了"}，${sideName(res.winner)}赢（不比分，按差 1${res.allIn ? "，相位全押" : ""}），拿走底池 ${res.pot} 枚${chips}。`;
     return `第 ${res.r} 轮：${sideName(res.winner)}赢（差 ${res.tier}${res.allIn ? "，相位全押" : ""}），拿走底池 ${res.pot} 枚${extra}${chips}。`;
   }
   function finish(g) {
