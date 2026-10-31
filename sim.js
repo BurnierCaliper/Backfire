@@ -310,7 +310,7 @@ const BattleSim = (function () {
     opt = opt || {};
     const base = typeof SKILL_POLICY_CFG !== "undefined" ? SKILL_POLICY_CFG : {};
     const cfg = Object.assign({}, base, opt.cfg || {}, { w: Object.assign({}, base.w || {}, (opt.cfg && opt.cfg.w) || {}) });
-    const stats = { decisions: 0, tried: 0, ok: 0, actions: 0, skills: {}, summons: 0, items: 0, moves: 0 };
+    const stats = { decisions: 0, tried: 0, ok: 0, actions: 0, skills: {}, names: {}, summons: 0, items: 0, moves: 0 };
     const pol = Object.assign({}, BASIC_POLICY, {
       name: "skill",
       cfg, stats,
@@ -330,6 +330,9 @@ const BattleSim = (function () {
           else {
             stats.skills[cmd.skill] = (stats.skills[cmd.skill] || 0) + 1;
             if (/_summon$/.test(cmd.skill)) stats.summons++;
+            // 报告里写技能名用：谁用的、叫什么
+            const a = unitById(cmd.actor);
+            if (a && !stats.names[cmd.skill]) stats.names[cmd.skill] = { kit: a.kit, unit: a.name, name: typeof skillDisplayName === "function" ? skillDisplayName(a, cmd.skill) : cmd.skill };
           }
           BattleSearch.execute(cmd, pol);
         };

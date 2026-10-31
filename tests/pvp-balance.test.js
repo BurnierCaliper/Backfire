@@ -86,6 +86,44 @@ test("只改 AI 的对照「先手第一回合原地等」：先手的人第 1 �
   assert.equal(typeof hold.act(unit("kolt")), "function", "第 2 回合起照常走过去");
 });
 
+test("技能版（#538，--policy skill）：抽样计划带上打法；一场打完记下用了哪些技能、同一场重跑一样；沙盒里试跑的事不记进失衡 / 倒地 / 再起不能", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], policy: "skill" });
+  assert.ok(jobs.length === 2 && jobs.every(j => j.policy === "skill"));
+  assert.ok(P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"] }).every(j => !("policy" in j)), "普攻版的计划和以前一样");
+  const job = Object.assign({}, jobs[0], { seed: "T538-ROW" });
+  const a = P.runJob(job), b = P.runJob(job);
+  assert.deepEqual(a, b, "固定种子：结果一样");
+  assert.ok(["F", "S", "D"].includes(a.w) && !a.err && !a.bugs, JSON.stringify(a));
+  assert.equal(a.p, "skill");
+  assert.ok(a.dec > 0 && a.tr > 0 && Object.keys(a.use).length > 0, "记下了技能版做了什么：" + JSON.stringify(a.use));
+  assert.ok(Object.values(a.nm).every(n => n.name && n.unit), "技能名（汇总进 report.skillNames，不写进 rows）");
+  const { nm, ...kept } = a;
+  const noNull = o => Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(o))).filter(([, v]) => v != null));   // 解包本来就不留空的项
+  assert.deepEqual(P.unpackRow(JSON.parse(JSON.stringify(P.packRow(kept)))), noNull(kept), "新加的几项照样能打包 / 解包");
+  // 沙盒（BattleSearch.sandbox）里发生的再起不能不记；真的发生才记
+  const { c, S, rec } = P.prepare(Object.assign({}, job, { a: ["kolt"], b: ["ruby"] }));
+  c.startCombat();
+  const ruby = S.units.find(u => u.kit === "ruby");
+  c.BattleSearch.sandbox(() => { c.pvpDuelKnockOut(c.unitById(ruby.id)); });
+  assert.equal(rec.outs.length, 0, "试跑的不记");
+  assert.ok(!ruby.pvpOut, "试跑完局面还回去了");
+  c.pvpDuelKnockOut(ruby);
+  assert.equal(rec.outs.length, 1, "真的发生才记");
+});
+
+test("遭遇战对照（--pve）：两种打法同一个种子各打一场；汇总胜率、回合、剩余血量", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], pve: 1 }).filter(j => j.kind === "pve");
+  assert.equal(jobs.length, P.PVE_SCENARIOS.length * 2);
+  const [x, y] = jobs.filter(j => j.id === "P1");
+  assert.deepEqual([x.policy, y.policy, x.seed === y.seed], ["basic", "skill", true]);
+  const r = P.runJob(x);
+  assert.ok(["W", "L", "T"].includes(r.w) && r.k === "pve" && r.r >= 1 && r.hp >= 0 && r.hp <= 1, JSON.stringify(r));
+  const s = P.pveSummary([{ k: "pve", id: "P1", p: "skill", w: "W", r: 4, hp: 0.5 }, { k: "pve", id: "P1", p: "skill", w: "L", r: 6, hp: 0 }, { k: "pve", id: "P1", p: "basic", w: "E" }]);
+  assert.deepEqual([s["P1|skill"].n, s["P1|skill"].won, s["P1|skill"].rate, s["P1|skill"].rounds, s["all|skill"].n], [2, 1, 0.5, 5, 2]);
+  assert.equal(s["P1|basic"].err, 1);
+  assert.ok(!Object.keys(P.summarizeAll([{ k: "pve", id: "P1", p: "skill", w: "W" }])).length, "决斗的汇总不算遭遇战");
+});
+
 test("汇总：先手胜率只算分出胜负的场次，平局、超时、异常另列；差值带区间", () => {
   const row = (w, extra) => Object.assign({ v: "base", k: "random", s: 2, L: 10, i: 0, f: "a", w, r: 5 }, extra || {});
   const rows = [row("F", { st: "F", stR: 1, dn: "F", dnR: 2 }), row("F", { st: "S", stR: 2 }), row("S", { st: "S", stR: 1 }), row("D"), row("T"), row("E")];

@@ -35,9 +35,11 @@ const SKILL_POLICY_CFG = {
   items: true,       // 用背包里的道具（背包空着就没有：PvP 平衡模拟满状态、不带道具）
   summon: true,      // 召唤武器人
   freeSkills: false, // 不花行动点、附赠的技能（开关、换姿态）：BattleSim 的回合循环里做了它这个单位就停下了，默认不用
+  // 血量都按「一整条」= 场上角色（不含武器人）血量上限的平均数算：打首领一下和打角色一下按同样的点数算，
+  // 不然首领血太厚，打它几乎不得分，AI 会一直去放增益
   w: {
-    hp: 100,         // 对手掉的血：按它的血量上限算比例，一整条 = 100
-    shp: 60,         // 对手起身中（靠坚毅生命战斗）挨的伤害：按它的血量上限算比例
+    hp: 100,         // 对手掉的血：一整条 = 100
+    shp: 60,         // 对手起身中（靠坚毅生命战斗）挨的伤害：一整条 = 60
     down: 60,        // 打倒一名对手（倒地）
     out: 120,        // 一名对手再起不能 / 死亡 / 离场（再加上打倒的分）
     stagger: 40,     // 打出失衡
@@ -59,9 +61,9 @@ const SKILL_POLICY_CFG = {
     self: 5,         // 自己人的自我效果（自焚、超导……）；对手的算负
     high: 1,         // 对手每 1 点高能值
     focus: 4,        // 对手身上每个聚焦
-    // 状态效果：挂在对手身上加分、挂在自己人身上扣分（减益）；增益反过来
-    debuff: { burn: 8, shock: 8, corr: 8, frostbite: 8, shockwave: 8, high: 10, reso: 6, weak: 10, blind: 8, unstable: 6, chase: 4 },
-    buff: { inspire: 8, sturdy: 8, hide: 6, advantage: 8 }
+    // 状态效果：挂在对手身上加分、挂在自己人身上扣分（减益）；增益反过来。比一下普攻（一整条血的三分之一左右 ≈ 30 分）小，只拿来分高下
+    debuff: { burn: 10, shock: 8, corr: 10, frostbite: 8, shockwave: 6, high: 10, reso: 6, weak: 8, blind: 6, unstable: 6, chase: 4 },
+    buff: { inspire: 6, sturdy: 4, hide: 6, advantage: 6 }
   }
 };
 
@@ -325,15 +327,22 @@ const BattleSearch = (function () {
     const turn = Number(state.turnNo) || 1;
     const summonPts = W.summon * Math.max(W.summonMin, 1 - (turn - 1) * W.summonDecay);
     const melee = (r) => !!r && r.max === 0;
+    const maxHp = (x) => Math.max(1, typeof totalMaxHp === "function" ? totalMaxHp(x) : 1);
+    // 一整条血：场上角色（玩家这一边、不含武器人）血量上限的平均数
+    const heroes = state.units.filter(x => onField(x) && x.isPlayer && !isWeapon(x));
+    const bar = Math.max(1, heroes.length ? heroes.reduce((s, x) => s + maxHp(x), 0) / heroes.length : maxHp(me));
+    const maxOf = new Map();
     /** 一个单位对我方的好坏（x 不在了按离场算） */
     function unitValue(id, x) {
       const s = side.get(id);
       if (x && x.hidden && !x.dead && !x._removed && rootVal.has(id)) return rootVal.get(id);   // 收回手上的武器人、躲起来的：当作没变
       const imp = x && isWeapon(x) ? W.weapon : 1;
       const out = !x || x.dead || x._removed || x.pvpOut;
-      const max = x ? Math.max(1, typeof totalMaxHp === "function" ? totalMaxHp(x) : 1) : 1;
-      const hp = out || !x ? 0 : hpNow(x) / max;
-      const shp = out || !x || !x.upOnShp ? 0 : (Number(x.shp) || 0) / max;
+      if (x && !maxOf.has(id)) maxOf.set(id, maxHp(x));
+      const max = maxOf.get(id) || bar;
+      const lost = out || !x ? max / bar : Math.max(0, max - hpNow(x)) / bar;   // 掉了几整条
+      const hp = 1 - lost;                                                       // 下面照「剩下多少」写（只有差值有意义）
+      const shp = out || !x || !x.upOnShp ? 0 : (Number(x.shp) || 0) / bar;
       const down = out || downed(x);
       const defFrac = x && !out && !x.noPosture && Number(x.defMax) > 0 ? Math.max(0, Number(x.def) || 0) / Number(x.defMax) : 1;
       const stun = !!(x && !out && x.stunned);
