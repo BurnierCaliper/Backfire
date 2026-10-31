@@ -365,6 +365,49 @@ test("只剩一个人没弃牌：他拿走整个底池，不亮牌，第 2 张�
   assert.match(g.log.find(e => e.t === "result").text, /其他人都弃牌，丙拿走底池 7 枚/);
 });
 
+test("每轮结算时亮出每个人这一轮盖下的牌（主人 10/31，HOLDEM_CONFIG.revealAll）：比分的照旧写分；弃牌的人也亮（不计分、不参与比分）；结算之前别人盖下的牌照旧看不到", () => {
+  assert.equal(C.holdem.revealAll, true, "开关放在配置里");
+  const g = game3();
+  toBet1(g, { p1: "ice", p2: "fire", p3: "ice" });
+  A(g, "p2", "fold");
+  assert.equal(X.view(g, "p1").seats.find(s => s.id === "p2").card, undefined, "结算之前看不到乙盖下的牌（弃牌了也一样）");
+  A(g, "p3", "check");
+  A(g, "p1", "call");
+  X.toAct(g).forEach(id => A(g, id, "pass"));
+  A(g, "p3", "check"); A(g, "p1", "check");
+  const r = g.results[0];
+  assert.deepEqual(J(r.played), { p1: "ice", p2: "fire", p3: "ice" }, "三个人盖下的牌都亮出来");
+  assert.deepEqual(J(Object.keys(r.shown)), ["p1", "p3"], "比分的还是没弃牌的两个");
+  assert.deepEqual(J(r.winners), ["p1", "p3"], "弃牌的乙不参与比分");
+  assert.match(g.log.find(e => e.t === "result").text, /第 1 轮亮牌：甲〔冰〕.*丙〔冰〕.*；弃牌的乙〔火〕/);
+  for (const id of ["p1", "p2", "p3"]) assert.deepEqual(J(X.view(g, id).results[0].played), { p1: "ice", p2: "fire", p3: "ice" }, id + " 看得到亮出来的牌");
+});
+
+test("其他人都弃牌直接赢的那一轮也亮牌（主人 10/31）：每人这一轮盖下的牌都亮出来，不比分、不翻第 2 张层牌和天气", () => {
+  const g = game3();
+  toBet1(g, { p1: "fire", p2: "physical", p3: "ice" });
+  A(g, "p2", "fold");
+  A(g, "p3", "raise", { amount: 4 });
+  A(g, "p1", "fold");
+  const r = g.results[0];
+  assert.equal(r.outcome, "fold");
+  assert.equal(r.shown, undefined, "不比分");
+  assert.deepEqual(J(r.played), { p1: "fire", p2: "physical", p3: "ice" });
+  assert.deepEqual([J(r.layers), J(r.weathers)], [["flesh"], []]);
+  assert.match(g.log.find(e => e.t === "result").text, /其他人都弃牌，丙拿走底池 7 枚；亮牌：甲〔火〕、乙〔物理〕、丙〔冰〕/);
+});
+
+test("revealAll 关掉（false）就照原规则：只亮比分的人，弃牌的和直接赢的那一轮不亮", () => {
+  C.holdem.revealAll = false;
+  try {
+    const g = game3();
+    toBet1(g, { p1: "fire", p2: "physical", p3: "ice" });
+    A(g, "p2", "fold"); A(g, "p3", "raise", { amount: 4 }); A(g, "p1", "fold");
+    assert.equal(g.results[0].played, undefined);
+    assert.doesNotMatch(g.log.find(e => e.t === "result").text, /亮牌/);
+  } finally { C.holdem.revealAll = true; }
+});
+
 test("跟注后的追加窗口（同 High Flux，秒数读 CC_CONFIG.callWindowSec）：还能下注的人都可以加注 / 弃牌 / 放弃；有人加注就关窗、照常轮流应对；都放弃或到时间关窗", () => {
   const g = game3();
   toBet1(g, { p1: "fire", p2: "physical", p3: "ice" });

@@ -26,6 +26,7 @@
  *   每个下注回合最多加注 3 次；下注不封顶（#496，只受自己手上的筹码限制，跟不起要先借）；筹码不够也可以全押，比自己多押的部分开边池（同德州）；
  *   跟注后有 3 秒追加窗口（#496，还可以加注或弃牌；秒数、pass / closeWindow 的用法同 High Flux）；弃牌的不参与比分。
  *   多人局不用分档赔付，只按底池结算。
+ * 每轮结算时亮出每名玩家这一轮盖下的牌（主人 10/31，HOLDEM_CONFIG.revealAll）：弃牌的人、其他人都弃牌直接赢的那一轮也亮（弃牌的只亮不计分）。
  * 借贷 3 借 4 还、不设上限（同 High Flux：算借多少、记账、结束时扣还都直接用 counter-cards.js 的同一份代码）。5 轮后筹码最多的赢。
  * 赌场桌（#520）：人坐的座位不够时先从钱包补到够用（CounterCards.bet.topUp，casino.js 注入），钱包空了才借；AI 座位照旧借。
  * 规则层不碰网页：AI 在 flux-holdem-ai.js，界面在 flux-holdem-ui.js。
@@ -58,6 +59,9 @@
     weathersPerRound: 2,               // 每轮翻 2 张天气，叠加
     blinds: [1, 2],                    // 小盲 1 × 轮数、大盲 2 × 轮数
     maxRaises: 3,                      // 每个下注回合最多加注 3 次
+    // 每轮结算时亮出每名玩家这一轮盖下的牌（主人 10/31）：弃牌的人、其他人都弃牌直接赢的那一轮也亮（只亮牌，弃牌的不计分、不参与比分）。
+    // false：照原规则只亮比分的人（results[i].shown），弃牌的和直接赢的那一轮不亮
+    revealAll: true,
     seatNames: ["玩家 1", "玩家 2", "玩家 3", "玩家 4"],
     // 赌场桌（#488 第 5 步；钱照 #487，在 casino.js）：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），
     // 没有主持人坐庄。players = 这张桌子几人（含你）；names = 座位上的称呼（你坐第一个）。
@@ -593,7 +597,7 @@
       winners: pots.length ? pots[0].winners.slice() : [], split: !!(pots.length && pots[0].winners.length > 1), pot: pots.reduce((t, p) => t + p.amount, 0),
       carryIn, carry: carryOf(g), allIn: !!g.allIn }, g.allIn ? { phaseAt: g.allIn.at, cap: g.allIn.cap } : {}));
   }
-  /** 只剩一个人没弃牌：他拿走整个底池（含上一轮滚存下来的），不亮牌 */
+  /** 只剩一个人没弃牌：他拿走整个底池（含上一轮滚存下来的），不比分；每人盖下的牌照样在结算时亮出（revealAll，closeRound） */
   function foldWin(g, id) {
     const carryIn = carryOf(g), pot = g.order.reduce((t, k) => t + g.sides[k].bet, 0) + carryIn;
     g.sides[id].chips += pot;
@@ -603,10 +607,13 @@
   }
   function closeRound(g, res) {
     res.bets = {}; res.delta = {}; res.chips = {}; res.folded = [];
+    // played：这一轮每名玩家盖下的牌，结算时全部亮出（HOLDEM_CONFIG.revealAll，主人 10/31；弃牌的也亮）
+    if (HOLDEM_CONFIG.revealAll) res.played = {};
     g.order.forEach(id => {
       const s = g.sides[id];
       res.bets[id] = s.bet; res.delta[id] = s.chips - s.roundStart; res.chips[id] = s.chips;
       if (s.folded) res.folded.push(id);
+      if (res.played && s.card) res.played[id] = s.card;
     });
     g.order.forEach(id => { const s = g.sides[id]; s.bet = 0; s.st = 0; });
     g.betting = null;
@@ -623,8 +630,15 @@
     const n = (id) => nameOf(g, id);
     const chips = `（筹码变动：${g.order.filter(id => res.delta[id]).map(id => `${n(id)} ${res.delta[id] > 0 ? "+" : ""}${res.delta[id]}`).join("，") || "没有"}）`;
     const carryIn = res.carryIn ? `（含上一轮滚存的 ${res.carryIn} 枚）` : "";
-    if (res.outcome === "fold") return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走底池 ${res.pot} 枚${carryIn}${chips}。`;
-    const shown = Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，");
+    // 弃牌的人这一轮盖下的牌（revealAll 时亮出来；不计分）
+    const foldedCards = (ids) => ids.filter(id => res.played && res.played[id]).map(id => `${n(id)}〔${cardName(res.played[id])}〕`).join("、");
+    if (res.outcome === "fold") {
+      const all = foldedCards(g.order);
+      return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走底池 ${res.pot} 枚${carryIn}${all ? `；亮牌：${all}` : ""}${chips}。`;
+    }
+    const folded = foldedCards(res.folded);
+    const shown = Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，")
+      + (folded ? `；弃牌的${folded}` : "");
     const allIn = res.allIn ? `相位全押（各押到 ${res.cap} 枚）。` : "";
     const pots = res.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
       + (p.carried ? `：${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
@@ -654,7 +668,8 @@
   }
 
   /* ---------- 这名玩家能看到的东西 ---------- */
-  /** 别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家。亮牌的结果（results[i].shown）是公开的 */
+  /** 别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家。亮牌的结果（results[i].shown）、
+   *  结算时亮出的每人这一轮盖下的牌（results[i].played，revealAll）是公开的——结算之前别人盖下的牌照旧看不到 */
   function view(g, id) {
     if (!g.sides[id]) fail("没有这名玩家：" + id);
     const me = g.sides[id], b = g.betting, C = CC().CC_CONFIG;
