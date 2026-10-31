@@ -135,6 +135,24 @@ test("技能版 vs 普攻版对打（--h2h）：同一对阵容 4 场（先后�
   assert.ok(!Object.keys(P.summarizeAll([{ k: "h2h", s: 1, w: "X" }])).length, "决斗的汇总不算对打");
 });
 
+test("技能版报告：写明样本多少、跑了多久，并按每场的平均用时估算加大样本（同一条命令只改 --pairs / --h2h / --pve）要多久", () => {
+  const o = { sizes: [1, 4], levels: [3, 10], pairs: 2, variants: ["base", "noLate"], workers: 4, h2h: 1, pve: 1 };
+  const many = (n, k) => Array.from({ length: n }, () => ({ k }));
+  // 决斗 2 种情况 × 2 种人数 × 2 个等级 × 2 对 × 先后手 = 32 场；对打 2 × 2 × 1 对 × 4 = 16 场；遭遇战 6 种 × 1 个种子 × 两种打法 = 12 场
+  const rows = many(32, "random").concat(many(16, "h2h"), many(P.PVE_SCENARIOS.length * 2, "pve"));
+  // 一场平均：1v1 1 秒、4v4 5 秒；对打 1v1 2 秒、4v4 4 秒；遭遇战普攻版 0.5 秒、技能版 3.5 秒
+  const timing = { "1v1": { meanMs: 1000 }, "4v4": { meanMs: 5000 }, "h2h:1v1": { meanMs: 2000 }, "h2h:4v4": { meanMs: 4000 }, "pve:basic": { meanMs: 500 }, "pve:skill": { meanMs: 3500 } };
+  const t = P.sampleText({ options: o, rows, seconds: 125, timing });
+  ["决斗 32 场", "对打 16 场", "遭遇战 12 场", "一共 60 场", "4 个线程跑了 2.1 分钟（125 秒）"].forEach(s => assert.ok(t.includes(s), s + "：" + t));
+  // 每加 1 多跑多久（4 个线程）：--pairs (1 + 5) 秒 × 2 种情况 × 2 个等级 × 2 场 ÷ 4 = 12 秒；--h2h (2 + 4) × 2 个等级 × 4 场 ÷ 4 = 12 秒；--pve (0.5 + 3.5) × 6 种 ÷ 4 = 6 秒
+  ["`--pairs` 每加 1（决斗每格多 1 对）约多 0.2 分钟", "`--h2h` 每加 1（对打每格多 1 对）约多 0.2 分钟", "`--pve` 每加 1（每种遭遇多 1 个种子）约多 0.1 分钟"].forEach(s => assert.ok(t.includes(s), s + "：" + t));
+  const big = P.CONFIG.bigSample, est = 0.2 * big.pairs + 0.2 * big.h2h + 0.1 * big.pve;
+  assert.ok(t.includes(`\`--pairs ${big.pairs} --h2h ${big.h2h} --pve ${big.pve}\` 约 ${est.toFixed(1)} 分钟`), t);
+  // 没跑对打、遭遇战：不写那两项，例子也只改 --pairs
+  const t2 = P.sampleText({ options: Object.assign({}, o, { h2h: 0, pve: 0 }), rows: many(32, "random"), seconds: 60, timing: { "1v1": { meanMs: 1000 }, "4v4": { meanMs: 5000 } } });
+  assert.ok(!/对打|遭遇战|--h2h|--pve/.test(t2) && t2.includes(`\`--pairs ${big.pairs}\` 约 ${(0.2 * big.pairs).toFixed(1)} 分钟`), t2);
+});
+
 test("汇总：先手胜率只算分出胜负的场次，平局、超时、异常另列；差值带区间", () => {
   const row = (w, extra) => Object.assign({ v: "base", k: "random", s: 2, L: 10, i: 0, f: "a", w, r: 5 }, extra || {});
   const rows = [row("F", { st: "F", stR: 1, dn: "F", dnR: 2 }), row("F", { st: "S", stR: 2 }), row("S", { st: "S", stR: 1 }), row("D"), row("T"), row("E")];

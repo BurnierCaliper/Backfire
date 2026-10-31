@@ -8,9 +8,10 @@
 //   node tools/pvp-balance.js --fixed 0                        不跑固定阵容
 //   node tools/pvp-balance.js --rebuild docs/balance/pvp-balance-1030
 //                                                              不重跑，用已有的 json 重新生成报告（改了报告格式时用）
-//   node tools/pvp-balance.js --policy skill --pairs 10 --fixed 0 --pve 6
+//   node tools/pvp-balance.js --policy skill --pairs 2 --fixed 0 --h2h 1 --pve 2
 //                                                              两队都用看情况用技能的打法（#538，BattleSim.SKILL_POLICY）→ docs/balance/pvp-balance-skill-1031，
-//                                                              和普攻版（--compare，默认 docs/balance/pvp-balance-1030）同一批阵容、种子并排对比；--pve N 另跑几场遭遇战对照
+//                                                              和普攻版（--compare，默认 docs/balance/pvp-balance-1030）同一批阵容、种子并排对比；--h2h N 技能版 vs 普攻版对打，
+//                                                              --pve N 另跑几场遭遇战对照（这是 10/31 的小样本，4 个线程约 10 分钟；大样本只改 --pairs / --h2h / --pve）
 //
 // 每一对阵容打两场：先手、后手对调（镜像），其余完全一样（同一个战斗种子），阵容强弱在先后手之间抵消；
 // 阵容：两队互不重复的角色（同一个角色不能同时在两队），从 11 名角色里按种子随机抽，另有几组固定阵容。
@@ -46,7 +47,8 @@ const CONFIG = {
   skillOut: "docs/balance/pvp-balance-skill-1031",   // --policy skill 默认写到这里
   compare: "docs/balance/pvp-balance-1030",          // --policy skill 的报告和这份普攻版并排比（同一批阵容、种子）
   skillCfg: { items: false },                        // SKILL_POLICY 在决斗里的设置（盖在 SKILL_POLICY_CFG 上）：满状态 PvP 不带道具
-  pveLimit: 30                                       // 遭遇战对照的回合上限
+  pveLimit: 30,                                      // 遭遇战对照的回合上限
+  bigSample: { pairs: 10, h2h: 3, pve: 6 }           // 技能版报告里估算「加大样本要多久」举的例子（同一条命令只改这几个数）
 };
 // 打法：报告里写的名字和说明
 const POLICIES = {
@@ -795,6 +797,28 @@ function pveSummary(rows) {
   });
   return out;
 }
+/** 技能版报告开头的「样本和用时」：各部分几场、跑了多久；加大样本用同一条命令、只改 --pairs / --h2h / --pve，
+ *  按这次每场的平均用时（report.timing）估一下要多久（例子是 CONFIG.bigSample） */
+function sampleText(report) {
+  const o = report.options, sizes = o.sizes, levels = o.levels, workers = o.workers || CONFIG.workers, timing = report.timing || {};
+  const nScen = (report.pveScenarios || PVE_SCENARIOS).length, count = f => report.rows.filter(f).length;
+  const nH2h = count(r => r.k === "h2h"), nPve = count(r => r.k === "pve"), nDuel = report.rows.length - nH2h - nPve;
+  const ms = k => (timing[k] ? timing[k].meanMs : 0), min = x => x / workers / 60000;
+  // 每加 1 多跑多久（几个线程一起跑）：--pairs = 每种人数 × 情况 × 等级 × 先后手 2 场；--h2h = 每种人数 × 等级 × 4 场；--pve = 每种遭遇 × 两种打法
+  const per = {
+    pairs: min(sizes.reduce((s, n) => s + ms(`${n}v${n}`), 0) * o.variants.length * levels.length * 2),
+    h2h: min(sizes.reduce((s, n) => s + ms(`h2h:${n}v${n}`), 0) * levels.length * 4),
+    pve: min((ms("pve:basic") + ms("pve:skill")) * nScen)
+  };
+  const what = { pairs: "决斗每格多 1 对", h2h: "对打每格多 1 对", pve: "每种遭遇多 1 个种子" };
+  const keys = ["pairs"].concat(nH2h ? ["h2h"] : [], nPve ? ["pve"] : []), big = CONFIG.bigSample;
+  const parts = [`决斗 ${nDuel} 场（${o.variants.length} 种情况 × ${sizes.length} 种人数 × ${levels.length} 个等级 × 每格 ${o.pairs} 对 × 先后手）`];
+  if (nH2h) parts.push(`技能版 vs 普攻版对打 ${nH2h} 场（每种人数 × 等级 ${o.h2h} 对 × 4 场）`);
+  if (nPve) parts.push(`遭遇战 ${nPve} 场（${nScen} 种 × ${o.pve} 个种子 × 两种打法）`);
+  return `**样本和用时**：${parts.join("、")}，一共 ${report.rows.length} 场，${workers} 个线程跑了 ${(report.seconds / 60).toFixed(1)} 分钟（${report.seconds} 秒）。` +
+    `加大样本用同一条命令、只改样本数：按这次每场的平均用时，${keys.map(k => `\`--${k}\` 每加 1（${what[k]}）约多 ${f1(per[k])} 分钟`).join("，")}；` +
+    `例如 \`${keys.map(k => `--${k} ${big[k]}`).join(" ")}\` 约 ${f1(keys.reduce((s, k) => s + per[k] * big[k], 0))} 分钟。`;
+}
 /** 技能版的报告：每一项和普攻版并排（同一批阵容、种子；另附普攻版 #491 全部样本） */
 function compareMarkdown(report, basic) {
   const o = report.options, sizes = o.sizes, levels = o.levels, l = [], has = v => o.variants.includes(v);
@@ -812,6 +836,7 @@ function compareMarkdown(report, basic) {
   l.push(`工具 \`tools/pvp-balance.js\`（${report.version}），提交 \`${report.provenance.commit || "?"}\`${report.provenance.dirty ? "（工作区有未提交的改动）" : ""}，Node ${report.provenance.node}。` +
     `命令：\`${report.provenance.command}\`。规则源码 SHA256：\`${report.provenance.sourceHash.slice(0, 16)}…\`。普攻版的数据：\`${basic ? basic.file + ".json" : "（没找到）"}\`（#491）。`, "");
   l.push("**只测量、不改规则。** 「临时关掉」的对照（后手补偿、起身翻滚）照 #491，只在模拟里、每一场自己的规则环境里改。两队都换成技能版（`BattleSim.SKILL_POLICY`），其余和 #491 一样。", "");
+  l.push(sampleText(report), "");
   // ---- 一句话结论 ----
   l.push("## 一句话结论", "");
   if (sk) l.push(`- **先后手**（现在的规则）：技能版${edgeText(sk)}；${basicName} ${pct(bp && bp.firstRate)}（${ciText(bp && bp.ci)}），普攻版 #491 全部 ${pct(b0 && b0.firstRate)}（${ciText(b0 && b0.ci)}）。技能版每种情况 ${perVariant} 场（${sizes.length} 种人数 × ${levels.length} 个等级 × ${o.pairs} 对 × 先后手），区间比 #491 宽。`);
@@ -837,7 +862,9 @@ function compareMarkdown(report, basic) {
   l.push(`- **打分**（权重在 \`SKILL_POLICY_CFG.w\`）：对手掉的血（按血量上限算比例，一整条 = ${w.hp}）、架势（一整条 = ${w.def}）、打出失衡 ${w.stagger}、打倒 ${w.down}、再起不能 ${w.out}；自己一方掉的血（一整条 = ${w.ownHp}）、倒地 ${w.ownDown}；站位：普攻打得到对手 +${w.reach}，远程留在有对手近战的区每个近战 −${w.risk}；留着附赠（对面回合里能协助格挡）+${w.keepBonus}；召唤武器人 +${w.summon}（每过一个回合少 ${Math.round((w.summonDecay || 0) * 100)}%，最少 ${Math.round((w.summonMin || 0) * 100)}%）；状态效果按种类加减分，治疗回的血按自己掉血的权重算。`);
   l.push(`- **样本**：随机阵容，${sizes.map(s => s + "v" + s).join(" / ")} × ${levels.join(" / ")} 级 × 每格 ${o.pairs} 对 × 先后手对调 = 每种情况 ${perVariant} 场，情况：${o.variants.map(v => VARIANTS[v].name).join("、")}；${o.fixedPairs ? `固定阵容每组每级 ${o.fixedPairs} 对；` : "不跑固定阵容；"}种子前缀 \`${o.seed}\`。阵容、战斗种子和 #491 的前 ${o.pairs} 对完全一样，所以表里「${basicName}」一列是 #491 里同一批阵容、种子的普攻版结果（两种打法从第一步起就分开了，骰子不会一样）；「普攻版（全部）」是 #491 每格 150 对的结果，区间更窄。`);
   if (o.h2h || o.pve) l.push(`- **顺手验证**（第 9 节）：${o.h2h ? `决斗里一队技能版、一队普攻版对打（每种人数 × 等级 ${o.h2h} 对阵容，每对 4 场：先后手对调 × 哪一队用技能版对调）` : ""}${o.h2h && o.pve ? "；" : ""}${o.pve ? `${(report.pveScenarios || PVE_SCENARIOS).length} 种遭遇战（PvE）每种 ${o.pve} 个种子，两种打法同一个种子各打一场` : ""}。`);
-  l.push(`- **胜率和区间**照 #491：先手胜率 = 先手赢的 ÷ 分出胜负的（平局、超时另列），Wilson 95% 区间；差值区间按两组独立算（偏保守）。技能版样本少，单格区间大约 ±${o.pairs <= 10 ? "15–20" : o.pairs <= 25 ? "10–13" : "6–9"} 个百分点，看合计和趋势。`);
+  // 区间大约多宽：胜率 50% 时 n 场的 Wilson 区间半宽（百分点）
+  const half = n => { const ci = B.wilson(n / 2, n); return ci ? Math.round((ci[1] - ci[0]) / 2 * 100) : "—"; };
+  l.push(`- **胜率和区间**照 #491：先手胜率 = 先手赢的 ÷ 分出胜负的（平局、超时另列），Wilson 95% 区间；差值区间按两组独立算（偏保守）。技能版样本少：单格 ${o.pairs * 2} 场，区间大约 ±${half(o.pairs * 2)} 个百分点；每种情况合计 ${perVariant} 场，大约 ±${half(perVariant)} 个百分点，看合计和趋势。`);
   l.push(`- **原始数据**：同名的 \`.json\`（每场一行，字段说明在 \`columns\`；技能版多记了用了哪些技能 \`use\`、召唤 \`sm\`、移动 \`mv\`、想了几次 \`dec\`、试跑了几个候选 \`tr\`）。重新生成报告：\`node tools/pvp-balance.js --rebuild ${o.out}\`。`, "");
   // ---- 1. 先后手 ----
   l.push("## 1. 先后手胜率（现在的规则）：按人数、等级", "");
@@ -1010,6 +1037,8 @@ function compareMarkdown(report, basic) {
   l.push("");
   // ---- 12. 建议 ----
   l.push("## 12. 建议（只是建议，没有改规则）", "");
+  // 小样本（每格不到 CONFIG.bigSample.pairs 对）：先说清楚下面的方向要等大样本确认
+  if (o.pairs < CONFIG.bigSample.pairs) l.push(`这一版样本少（每种情况 ${perVariant} 场，合计的区间大约 ±${half(perVariant)} 个百分点），下面的方向只是按这一版的数据挑的，定之前请用同一条命令加大样本（\`--pairs\`）再跑一次。`, "");
   compareNotes(report, { S, P1, P0, get, pve }).forEach(t => l.push(t));
   l.push("", "## 注意", "");
   l.push("- **技能版也只是一个近似**：它只替轮到的那个单位往前看（这一回合自己的几步），不会和队友商量集火、不会预判对面下一回合怎么打；打分的权重是人定的（`SKILL_POLICY_CFG.w`），换一套权重结论可能会变。比普攻版接近真人，但不等于真人。");
@@ -1222,4 +1251,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
 module.exports = { CONFIG, VARIANTS, DEFAULT_VARIANTS, FIXED, POLICIES, PVE_SCENARIOS, lineup, plan, prepare, duelPolicy, runJob, runPve, runH2h, runJobs, rollPick, summarize, summarizeAll, diff, packRow, unpackRow,
-  markdown, notesFor, compareMarkdown, pveSummary, h2hSummary, meleeStats, heroWins, loadReport, main };
+  markdown, notesFor, compareMarkdown, sampleText, pveSummary, h2hSummary, meleeStats, heroWins, loadReport, main };
