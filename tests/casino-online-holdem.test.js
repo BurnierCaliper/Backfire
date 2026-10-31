@@ -193,6 +193,40 @@ test("Flux Hold'em · 存档读回来（房主刷新）以后多人桌还在：�
   assert.equal(mine("p2", "ruby").seat.game.over, true);
 });
 
+test("Flux Hold'em · 每轮结算时亮出每人这一轮盖下的牌（results[i].played，#530）：联机包里照发（弃牌的、其他人都弃牌直接赢的那一轮也亮）；结算之前别人盖下的牌不在包里", () => {
+  const r = funded(20), { c, send, mine, book } = r;
+  ok(send("p2", { op: "holdemOpen", kit: "ruby", table: "holdem-alley", buyIn: 20, size: 2 }));
+  const id = holdemTable(r, "p2").id;
+  ok(send("p3", { op: "holdemJoin", kit: "helu", table: id }));
+  // 开局（房主这边，测试用：指定两人的手牌——赫鲁米卡的三张都不会出现在瑞比的包里别的地方：不是天气、层牌，也不在瑞比手里）
+  const HELU = ["electric", "energy", "harmonic"];
+  c.trpgCasinoHoldemStart(id, "ruby", { hands: { p1: ["fire", "ice", "physical"], p2: HELU.slice() } });
+  assert.equal(c.FluxHoldem.HOLDEM_CONFIG.revealAll, true, "#530：每轮结算亮出所有人盖下的牌");
+  // 瑞比照常打（过牌 / 跟注），赫鲁米卡盖下一张以后能弃牌就弃：这一轮「其他人都弃牌」，以前不亮牌
+  const ruby = actor(r, "p2", "ruby"), helu = actor(r, "p3", "helu");
+  const heluPick = (g) => (g.legal.some(o => o.type === "fold") ? { type: "fold" } : X.pick(g));
+  let seenPlayed = false;
+  for (let i = 0; i < 300 && !mine("p2", "ruby").seat.game.results.length; i++) {
+    const ga = mine("p2", "ruby").seat.game;
+    if (ga.seats.find(s => s.id === "p2").played) seenPlayed = true;
+    // 结算之前：瑞比的包里没有赫鲁米卡盖下的牌（座位上只有「盖了没有」）
+    assert.ok(!HELU.some(k => JSON.stringify(ga).includes(`"${k}"`)), "结算之前别人盖下的牌不在包里：" + JSON.stringify(ga.seats));
+    assert.ok(ga.seats.every(s => !("card" in s) && typeof s.played === "boolean"));
+    const turn = [ruby, helu].map(a => ({ a, g: a.game() })).find(x => x.g && x.g.myTurn);
+    assert.ok(turn, "没人能动");
+    ok(send(turn.a.who, Object.assign({ op: "act" }, turn.a.cmd, { action: turn.a === helu ? heluPick(turn.g) : X.pick(turn.g) })));
+  }
+  assert.ok(seenPlayed, "赫鲁米卡盖下了牌、还没结算的那几步都查过了");
+  const raw = book().tables[id].game.results[0];
+  assert.deepEqual([raw.outcome, plain(raw.folded)], ["fold", ["p2"]], "赫鲁米卡弃牌：其他人都弃牌，瑞比直接赢");
+  assert.ok(HELU.includes(raw.played.p2) && raw.played.p1, "规则层结算时记下了每人这一轮盖下的牌");
+  // 结算以后：两个人的包里都有这一轮亮出的牌（公开的）
+  const ra = mine("p2", "ruby").seat.game.results[0], rb = mine("p3", "helu").seat.game.results[0];
+  assert.deepEqual(plain(ra.played), plain(raw.played), "瑞比看得到赫鲁米卡弃掉的那一张（以前白名单不放 played）");
+  assert.deepEqual(plain(rb.played), plain(raw.played), "赫鲁米卡也看得到瑞比的");
+  assert.deepEqual(plain(ra.shown), {}, "其他人都弃牌：没有比分");
+});
+
 test("白名单（online-view.js · projectHoldemGame / 多人桌大厅）：别人的手牌、盖下的牌、牌堆、只给别人看的记录不放；不是庄家没有偷看；主持人的座位只给主持人", () => {
   const seat = (id, extra) => Object.assign({ id, name: id === "p1" ? "瑞比" : "AI 甲", chips: 30, start: 30, bet: 1, st: 1, loan: 0, owe: 0, folded: false, allIn: false, out: false, handCount: 3, played: true,
     dealer: id === "p2", sb: false, bb: false }, extra || {});
@@ -225,6 +259,16 @@ test("白名单（online-view.js · projectHoldemGame / 多人桌大厅）：别
     game: Object.assign({}, game, { side: "p2", me: seat("p2", { hand: ["shield"], card: null, history: [] }), peek: { card: "heat", where: "top" } }) }] }) }), { recipientId: "host" }).casino;
   assert.deepEqual(plain(dealerView.gmSeats[0].game.peek), { card: "heat", where: "top" });
   assert.equal(dealerView.gmSeats[0].game.side, "p2");
+  // 结算记录里每人这一轮盖下的牌（results[i].played，#530）：公开的，照发；不在这一桌的座位不放；没有这一项（revealAll 关着）就不放
+  const done = Object.assign({}, game, { results: [
+    { r: 1, outcome: "fold", winners: ["p1"], folded: ["p2"], pot: 4, bets: { p1: 2, p2: 2 }, delta: { p1: 2, p2: -2 }, chips: { p1: 32, p2: 28 }, shown: {}, pots: [],
+      layers: ["armor", "flesh"], weathers: ["heat", "snow"], played: { p1: "acid", p2: "ice", p9: "SECRET-12" } },
+    { r: 2, outcome: "showdown", winners: ["p2"], folded: [], pot: 6, shown: { p1: { card: "fire", score: 1 }, p2: { card: "ice", score: 2 } }, pots: [], layers: [], weathers: [] }] });
+  const seat0 = Object.assign({}, raw.casino.mine[0].seat, { game: done });
+  const proj = V.projectView(Object.assign({}, raw, { casino: Object.assign({}, raw.casino, { mine: [Object.assign({}, raw.casino.mine[0], { seat: seat0 })] }) }), { recipientId: "p2" }).casino.mine[0].seat.game;
+  assert.ok(!JSON.stringify(proj).includes("SECRET"));
+  assert.deepEqual(plain(proj.results[0].played), { p1: "acid", p2: "ice" }, "弃牌的那一轮也亮：照发");
+  assert.ok(!("played" in proj.results[1]), "规则层没写 played（revealAll 关着）：不放，牌桌照旧写「不亮牌」");
   // 包不会太大：四人桌打完一局（60 条记录、5 轮结算）也远小于联机单包上限
   const r = funded(20);
   ok(r.send("p2", { op: "holdemOpen", kit: "ruby", table: "holdem-alley", buyIn: 20, size: 4 }));

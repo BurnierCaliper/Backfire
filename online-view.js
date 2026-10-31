@@ -701,9 +701,10 @@
       held: pair(get(f, "held"), nullableNum), loans: pair(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined)), busted: arr(get(f, "busted")).filter(s => DUEL_SIDES.includes(s)) } : null;
     return out;
   }
-  /* Flux Hold'em（#526，flux-holdem.js · view）：座位 p1…p4。别人只有筹码、押了多少、弃没弃牌、手牌张数、盖了没有；
+  /* Flux Hold'em（#526，flux-holdem.js · view）：座位 p1…p4。别人只有筹码、押了多少、弃没弃牌、手牌张数、盖了没有（played 只是有没有盖）；
    * 自己的手牌、盖下的那张只在自己的包里；牌堆（元素 / 层牌 / 天气）只有张数，顺序不发；庄家偷看的那张只给庄家。
-   * 亮牌的结果（results[i].shown：比到最后的人的牌和得分）是公开的 */
+   * 亮牌的结果（results[i].shown：比到最后的人的牌和得分）是公开的；每轮结算时亮出的每人这一轮盖下的牌（results[i].played，
+   * HOLDEM_CONFIG.revealAll，#530：弃牌的、其他人都弃牌直接赢的那一轮也亮）结算后也是公开的——结算之前别人盖下的牌照旧不放 */
   const HOLDEM_SEAT = /^p[1-4]$/;
   const holdemId = v => (typeof v === "string" && HOLDEM_SEAT.test(v) ? v : null);
   const holdemIds = list => arr(list).map(holdemId).filter(Boolean).slice(0, 4);
@@ -752,6 +753,8 @@
       d.bets = holdemMap(get(r, "bets"), number, ids); d.delta = holdemMap(get(r, "delta"), number, ids); d.chips = holdemMap(get(r, "chips"), number, ids);
       // 亮牌：比到最后的人（没弃牌）的牌和得分——公开的
       d.shown = holdemMap(get(r, "shown"), s => (obj(s) && id(get(s, "card")) ? Object.assign({ card: get(s, "card") }, selected(s, ["score"])) : undefined), ids) || {};
+      // 每人这一轮盖下的牌（revealAll 打开时规则层结算才写，#530）：公开的；没有这一项（revealAll 关着）就不放，牌桌照旧写「不亮牌」
+      const played = holdemMap(get(r, "played"), c => id(c) || undefined, ids); if (played) d.played = played;
       d.pots = arr(get(r, "pots")).slice(0, 4).flatMap(p => obj(p) ? [Object.assign(selected(p, ["amount", "carried"]), { eligible: holdemIds(get(p, "eligible")), winners: holdemIds(get(p, "winners")),
         tied: holdemIds(get(p, "tied")), shares: holdemMap(get(p, "shares"), number, ids) || {} })] : []);
       return [d];
