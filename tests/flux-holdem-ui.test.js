@@ -457,7 +457,7 @@ test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌—�
   assert.ok(!p.$("#fh-board .cc-chips.cc-collect"), "底池滚到下一轮：谁的筹码都不收进来");
 });
 
-test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步（谁弃牌，标在座位上；AI 弃的也停一下）停 lastMs 就弹横幅，不判定、不翻牌、不亮牌；赢家的筹码收进来", (t) => {
+test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步（谁弃牌，标在座位上；AI 弃的也停一下）→ 亮牌（主人 10/31：每个人这一轮盖下的牌都亮，弃牌的也亮）各停 lastMs 就弹横幅，不判定、不翻牌；横幅写每人亮出来的牌；赢家的筹码收进来", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const T = page().w.CounterCardsUI.UI_CONFIG.settle;
   // 你弃牌
@@ -466,17 +466,27 @@ test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步�
   click(p.$('#fh-actions [data-fh="fold"]'));
   assert.equal(g.results[0].outcome, "fold");
   let st = settleOf(p);
-  assert.deepEqual([J(st.beats), st.judge], [["last"], false], "只有最后一步，不判定");
+  assert.deepEqual([J(st.beats), st.judge], [["last", "show"], false], "最后一步 → 亮牌，不判定");
   assert.equal(prompt(p), "你弃牌。");
   assert.equal(p.$("#fh-board .cc-me .cc-acted").textContent, "弃牌");
   assert.deepEqual(J(faces(p)), { layers: ["flesh"], weathers: ["heat"] }, "弃牌不翻牌");
-  assert.ok(!p.$('#fh-board [data-face="physical"]'), "不亮牌");
+  assert.ok(!p.$('#fh-board [data-face="physical"]'), "最后一步还没亮牌");
   assert.ok(!visible(p.$("#fh-banner")));
   t.mock.timers.tick(T.lastMs - 1);
-  assert.ok(!visible(p.$("#fh-banner")), "最后一步停 lastMs");
+  assert.ok(!visible(p.$("#fh-banner")) && settleOf(p).phase === "last", "最后一步停 lastMs");
   t.mock.timers.tick(1);
-  assert.ok(visible(p.$("#fh-banner")) && !settleOf(p), "弃牌：最后一步之后直接弹横幅");
+  // 亮牌：两人盖下的牌都翻过来（弃牌的你也亮），不翻第 2 张层牌、天气
+  assert.equal(settleOf(p).phase, "show");
+  assert.equal(prompt(p), "亮牌：你〔火〕（弃牌）、乙〔物理〕。");
+  assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"] [data-face="physical"]'), "乙盖下的物理翻过来");
+  assert.deepEqual(J(faces(p)), { layers: ["flesh"], weathers: ["heat"] }, "亮牌也不翻第 2 张层牌、天气");
+  assert.ok(!visible(p.$("#fh-banner")));
+  t.mock.timers.tick(T.lastMs);
+  assert.ok(visible(p.$("#fh-banner")) && !settleOf(p), "弃牌：亮牌之后直接弹横幅（不判定）");
   assert.match(p.$("#fh-banner").textContent, /你弃牌了/);
+  assert.match(p.$("#fh-banner .fh-shown").textContent, /你〔火〕弃牌/);
+  assert.match(p.$("#fh-banner .fh-shown").textContent, /乙〔物理〕/);
+  assert.doesNotMatch(p.$("#fh-banner").textContent, /不亮牌/);
   assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"] .cc-chips.cc-collect'), "乙拿走底池：它的筹码收进来");
   // AI 弃牌：你下注，乙（AI）弃牌——也停一下，标在乙的座位上
   p = page(); g = bet2Game(p, "AI弃牌");
@@ -494,8 +504,12 @@ test("结算前的过渡：有人弃牌直接赢也走过渡——最后一步�
   assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"]').classList.contains("folded"));
   assert.ok(!visible(p.$("#fh-banner")));
   t.mock.timers.tick(T.lastMs);
+  assert.equal(settleOf(p).phase, "show", "AI 弃牌也亮牌");
+  assert.equal(prompt(p), "亮牌：你〔火〕、乙〔物理〕（弃牌）。");
+  t.mock.timers.tick(T.lastMs);
   assert.ok(visible(p.$("#fh-banner")));
   assert.match(p.$("#fh-banner").textContent, /其他人都弃牌，你拿走底池/);
+  assert.match(p.$("#fh-banner .fh-shown").textContent, /乙〔物理〕弃牌/);
   assert.ok(p.$("#fh-board .cc-me .cc-chips.cc-collect"), "你拿走底池：你的筹码收进来");
 });
 
