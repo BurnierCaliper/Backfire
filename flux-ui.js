@@ -49,8 +49,8 @@
    *   stageControls(T, v) → { p, b }（下注以外的步骤：出牌……）、waitText(T, v)、streetText(T, v)、infoLine(T, v)、
    *   weatherOf(v)（天气特效用哪张）、chart(v, 结算横幅的那一轮)（克制表数据）、chartKey(v, 结算横幅的那一轮)、tipHtml(T, 牌, v)、
  *   click(T, act, dataset)（自己的按钮，处理了返回 true）、
- *   settle（结算前的过渡，#525；不给就照旧一结算就弹横幅）：{ beats(T, 做最后一步之前的画面, 现在的画面, 这一轮的结算) → st（{ beats, judge, texts, acted, … }），
- *     view(T, 现在的画面, st)（第 st.at 步桌上停成什么样）, note（判定中那一行的说明）, collect(T, 结算) → 弹横幅时筹码「收进来」的那几方 } */
+ *   settle（结算前的过渡，#525；不给就照旧一结算就弹横幅）：{ beats(T, 做最后一步之前的画面, 现在的画面, 这一轮的结算) → st（{ beats, judge, texts, acted, note?, … }），
+ *     view(T, 现在的画面, st)（第 st.at 步桌上停成什么样）, note（判定中那一行的说明；st.note 优先）, collect(T, 结算) → 弹横幅时筹码「收进来」的那几方 } */
   function table(spec) {
     const K = spec.key, ATTR = "data-" + K, TIP = "data-" + K + "-tip", TIPKEY = K + "Tip";
     const el = (s) => $(K + "-" + s);
@@ -162,10 +162,10 @@
       const v = R().view(S.game, S.human);
       return S.settle ? spec.settle.view(api, v, S.settle) : v;
     }
-    /** 过渡中的操作栏（High Flux 那一份）：这一步做了什么 / 判定中，「直接看结算」 */
+    /** 过渡中的操作栏（High Flux 那一份）：这一步做了什么 / 判定中（说明读 st.note，没有就是 spec.settle.note），「直接看结算」 */
     function settleBar() {
       const st = S.settle, T = CUI().UI_CONFIG.settle, i = Math.min(st.at, st.texts.length - 1);
-      return CS().bar(st, st.texts[i] || "这一轮的下注结束了。", spec.settle.note, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
+      return CS().bar(st, st.texts[i] || "这一轮的下注结束了。", st.note != null ? st.note : spec.settle.note, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
     }
     function casinoHook(name) {
       if (!S || !S.casino || typeof S.casino[name] !== "function") return;

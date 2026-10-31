@@ -15,6 +15,9 @@
 /* 这一轮背面朝上的天气 */
 .fd-wback { width: 92px; height: 120px; }
 .fd-shown { margin: 0; font-size: 13px; color: #ffe08a; }
+/* 结算前的过渡（#525）：判定中两边暗出的牌轻轻抖（牌背照 High Flux 的 .cc-slots.cc-judging .cc-back；亮牌开关打开时翻过来的牌面也抖） */
+.fd-slots.cc-judging .cc-card { animation: ccJudge .8s ease-in-out infinite; }
+.fd-slots.cc-judging .fd-slot:nth-child(2) .cc-card { animation-delay: -.4s; }
 
 /* ---------- Flux Hold'em ---------- */
 /* 上面一排对手：名字、难度、庄 / 小盲 / 大盲、筹码、这一轮押了多少、手牌张数、盖了没有；轮到谁描一圈黄 */
@@ -53,7 +56,7 @@
 .fh-seat .cc-chips.cc-collect { --from: 46px; }   /* 对手坐在上面一排：筹码从下面的底池收进来 */
 
 @media (prefers-reduced-motion: reduce) {
-  .fh-opps.cc-judging .fh-played .cc-card, .cc-me .cc-slot.cc-judging .cc-card { animation: none !important; }
+  .fd-slots.cc-judging .cc-card, .fh-opps.cc-judging .fh-played .cc-card, .cc-me .cc-slot.cc-judging .cc-card { animation: none !important; }
 }
 
 @media (max-width: 760px) {
