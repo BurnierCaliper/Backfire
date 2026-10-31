@@ -51,8 +51,13 @@ const SKILL_POLICY_CFG = {
     ownStagger: 40,
     ownDef: 20,
     weapon: 0.5,     // 武器人的血、倒地、站位按这个比例算（决斗里武器人倒了不算输）
-    summon: 30,      // 场上多一个自己的武器人（召唤）
-    summonDecay: 0.1,  // 召唤的分每过一个回合少这么多（比例），最少剩 summonMin
+    // 攻击力（effectiveAtk）：一名角色的平均攻击力 = atk 分。增益 / 减益改了攻击力的照算；打倒攻击力高的对手更值。
+    // 召唤武器人主要看它：多数角色唤出武器人以后自己的攻击力掉到只剩徒手，和武器人加起来差不多，武器人血又少，不一定划算
+    atk: 60,         // 自己一方（在场、没倒地）的攻击力合计
+    foeAtk: 40,      // 对手（在场、没倒地）的攻击力合计（扣分）
+    weaponAtk: 0.8,  // 武器人的攻击力按这个比例算（血少，容易被打倒）
+    summon: 8,       // 场上多一个自己的武器人（多一个能行动、能协助格挡的单位），再加上它的攻击力
+    summonDecay: 0.1,  // 召唤的这一项每过一个回合少这么多（比例），最少剩 summonMin
     summonMin: 0.3,
     reach: 12,       // 普攻打得到至少一名对手（站位）
     risk: 15,        // 远程（同区打不了）留在有对手近战的区：每个近战对手扣这么多
@@ -331,11 +336,16 @@ const BattleSearch = (function () {
     // 一整条血：场上角色（玩家这一边、不含武器人）血量上限的平均数
     const heroes = state.units.filter(x => onField(x) && x.isPlayer && !isWeapon(x));
     const bar = Math.max(1, heroes.length ? heroes.reduce((s, x) => s + maxHp(x), 0) / heroes.length : maxHp(me));
+    // 一名角色的平均攻击力（攻击力那一项的单位）
+    const atkOf = (x) => Math.max(0, Number(typeof effectiveAtk === "function" ? effectiveAtk(x, state.units) : x.atk) || 0);
+    const atkBar = Math.max(1, heroes.length ? heroes.reduce((s, x) => s + atkOf(x), 0) / heroes.length : atkOf(me));
+    const atkPts = (x) => atkOf(x) * (isWeapon(x) ? W.weaponAtk : 1) / atkBar;
     const maxOf = new Map();
     /** 一个单位对我方的好坏（x 不在了按离场算） */
     function unitValue(id, x) {
       const s = side.get(id);
-      if (x && x.hidden && !x.dead && !x._removed && rootVal.has(id)) return rootVal.get(id);   // 收回手上的武器人、躲起来的：当作没变
+      // 收回手上的武器人、躲起来的：当作没变（武器人的攻击力不算：收回以后算在持有者身上）
+      if (x && x.hidden && !x.dead && !x._removed && rootVal.has(id)) return rootVal.get(id) - (rootAtk.get(id) || 0);
       const imp = x && isWeapon(x) ? W.weapon : 1;
       const out = !x || x.dead || x._removed || x.pvpOut;
       if (x && !maxOf.has(id)) maxOf.set(id, maxHp(x));
@@ -353,14 +363,16 @@ const BattleSearch = (function () {
         Object.keys(W.buff).forEach(k => { if (on(ss[k])) st -= W.buff[k]; });
         if (x.self && x.self !== "none") st -= W.self;
       }
+      // 攻击力：在场、没倒地的才算
+      const atk = x && !out && !down ? atkPts(x) : 0;
       if (s < 0) {
-        v = imp * (W.hp * (1 - hp) - W.shp * shp + (down ? W.down : 0) + (out ? W.out : 0)) + (stun ? W.stagger : 0) + W.def * (1 - defFrac) + st;
+        v = imp * (W.hp * (1 - hp) - W.shp * shp + (down ? W.down : 0) + (out ? W.out : 0)) + (stun ? W.stagger : 0) + W.def * (1 - defFrac) + st - W.foeAtk * atk;
         if (x && !out) {
           v += W.instant * Object.keys(x.instant || {}).filter(k => x.instant[k]).length;
           v += W.high * (Number(x.highEnergy) || 0) + W.focus * ((x.focuses || []).length || 0);
         }
       } else {
-        v = -imp * (W.ownHp * (1 - hp) - W.ownShp * shp + (down ? W.ownDown : 0) + (out ? W.ownOut : 0)) - (stun ? W.ownStagger : 0) - W.ownDef * (1 - defFrac) - st;
+        v = -imp * (W.ownHp * (1 - hp) - W.ownShp * shp + (down ? W.ownDown : 0) + (out ? W.ownOut : 0)) - (stun ? W.ownStagger : 0) - W.ownDef * (1 - defFrac) - st + W.atk * atk;
         if (x && !out && !down) {
           // 站位：普攻打得到对手；远程（同区打不了）和对手的近战在同一区
           const r = range.get(id);
@@ -376,11 +388,16 @@ const BattleSearch = (function () {
     function value() {
       let v = 0;
       for (const id of rootIds) v += unitValue(id, state.units.find(u => u.id === id));
-      // 新出现的自己人武器人：召唤
-      state.units.forEach(x => { if (!side.has(x.id) && onField(x) && x.isPlayer && isWeapon(x) && teammateOf(me, x)) v += summonPts; });
+      // 新出现的自己人武器人：召唤（多一个单位 + 它的攻击力；持有者掉的攻击力在持有者那一项里）
+      state.units.forEach(x => { if (!side.has(x.id) && onField(x) && x.isPlayer && isWeapon(x) && teammateOf(me, x)) v += summonPts + W.atk * atkPts(x); });
       return v;
     }
-    rootIds.forEach(id => rootVal.set(id, unitValue(id, state.units.find(u => u.id === id))));
+    const rootAtk = new Map();
+    rootIds.forEach(id => {
+      const x = state.units.find(u => u.id === id);
+      rootVal.set(id, unitValue(id, x));
+      rootAtk.set(id, (side.get(id) > 0 ? W.atk : -W.foeAtk) * atkPts(x));
+    });
     return { value };
   }
 

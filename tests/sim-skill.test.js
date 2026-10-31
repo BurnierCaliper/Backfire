@@ -45,8 +45,8 @@ test("SKILL_POLICY：同一种子整场结果一样（试跑不动真实的骰�
   c.startCombat();
   const kolt = S.units.find(u => u.kit === "kolt");
   const before = JSON.stringify(S.units), draws = c.S.RNG.draws(), seed = c.S.RNG.seed, pages = JSON.stringify(S.logPages), random = c.Math.random;
-  const tok = c.BattleSearch.plan(kolt.id, c.BattleSim.SKILL_POLICY, c.S.SKILL_POLICY_CFG);
-  assert.ok(tok, "第一回合有事做");
+  c.BattleSearch.plan(kolt.id, c.BattleSim.SKILL_POLICY, c.S.SKILL_POLICY_CFG);
+  assert.ok(c.BattleSearch.plan.last.tried > 5, "试跑了一批候选");
   assert.equal(JSON.stringify(S.units), before, "局面没变");
   assert.deepEqual([c.S.RNG.draws(), c.S.RNG.seed, c.Math.random === random], [draws, seed, true], "骰子没动");
   assert.equal(JSON.stringify(S.logPages), pages, "战斗记录没多出试跑的内容");

@@ -53,14 +53,15 @@ const POLICIES = {
   basic: { name: "普攻版", note: "BattleSim.BASIC_POLICY：能打到就普攻血最少的，打不到就用附赠走一格；不用技能、道具，不召唤武器人" },
   skill: { name: "技能版", note: "BattleSim.SKILL_POLICY：列出所有合法动作，在沙盒里几个平行世界试跑，一回合内往前看几步，按打分挑（sim-search.js）；会用技能、召唤武器人，决斗里不带道具" }
 };
-// 遭遇战（PvE）对照（--pve N：每一项 N 个种子，两种打法各打一场）：队伍照 R1 单场矩阵升到这个等级，敌人同等级；
-// 挑的是普攻版不总是赢的几场（有精英、首领），看技能版是不是更强、有没有乱放技能
+// 遭遇战（PvE）对照（--pve N：每一项 N 个种子，两种打法各打一场）：队伍照 R1 单场矩阵升到 level，敌人比队伍高 plus 级；
+// 难度按普攻版挑的（10/31 用普攻版每项 6–8 个种子试过：P1–P5 普攻版有赢有输，P6 普攻版一场都打不赢），看技能版是不是更强、有没有乱放技能
 const PVE_SCENARIOS = [
-  { id: "P1", party: ["kolt", "helu"], level: 3, enemies: ["thug_knife", "thug_hammer", "bandit_boss"] },
-  { id: "P2", party: ["ruby", "tou", "yuito"], level: 5, enemies: ["guard_sword", "guard_gun", "patrol_car"] },
-  { id: "P3", party: ["hiaki", "xia", "nora", "ras"], level: 10, enemies: ["sand_beast", "sand_human", "bigsand"] },
-  { id: "P4", party: ["chuan", "kolt", "helu", "longge"], level: 10, enemies: ["outlaw_king"] },
-  { id: "P5", party: ["tou", "yuito", "xia", "ruby"], level: 15, enemies: ["sand_aggregate"] }
+  { id: "P1", party: ["kolt", "helu"], level: 3, plus: 2, enemies: ["thug_knife", "thug_hammer", "bandit_boss"] },
+  { id: "P2", party: ["ruby", "tou", "yuito"], level: 5, plus: 4, enemies: ["bandit_boss", "bandit_boss", "thug_hammer", "thug_knife"] },
+  { id: "P3", party: ["hiaki", "xia", "nora", "ras"], level: 10, plus: 7, enemies: ["sand_beast", "sand_human", "bigsand"] },
+  { id: "P4", party: ["chuan", "kolt", "helu", "longge"], level: 10, plus: 4, enemies: ["outlaw_king", "bandit_boss", "thug_hammer", "thug_knife"] },
+  { id: "P5", party: ["tou", "yuito", "xia", "ruby"], level: 15, plus: 4, enemies: ["sand_aggregate"] },
+  { id: "P6", party: ["chuan", "kolt", "helu", "longge"], level: 10, plus: 0, enemies: ["ufo_boss"] }
 ];
 // 情况：每一项只改一处，其余和「现在的规则」一样
 const VARIANTS = {
@@ -109,9 +110,16 @@ function plan(opt = {}) {
       pair({ kind: f.id, variant: "base", size: f.a.length, level, index: i, a: f.a.slice(), b: f.b.slice(), seed: `${prefix}:${f.id}:${level}:${i}` }, i);
     }
   }
+  // 技能版 vs 普攻版对打（--h2h N）：每种人数 × 等级 N 对阵容，先后手对调 × 哪一队用技能版对调 = 每对 4 场，阵容强弱、先后手都抵消
+  for (const size of opt.h2h ? sizes : []) for (const level of levels) for (let i = 0; i < opt.h2h; i++) {
+    const { a, b } = lineup(prefix, size, i);
+    for (const first of ["a", "b"]) for (const swap of [0, 1]) {
+      jobs.push({ kind: "h2h", variant: "base", size, level, index: i, a, b, seed: `${prefix}:h2h:${size}:${level}:${i}`, first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1], swap });
+    }
+  }
   // 遭遇战对照：每一项 pve 个种子，两种打法各打一场（同一个种子）
   for (const sc of opt.pve ? PVE_SCENARIOS : []) for (let i = 0; i < opt.pve; i++) for (const p of ["basic", "skill"]) {
-    jobs.push({ kind: "pve", id: sc.id, party: sc.party.slice(), enemies: sc.enemies.slice(), level: sc.level, index: i, policy: p, seed: `${prefix}:pve:${sc.id}:${i}` });
+    jobs.push({ kind: "pve", id: sc.id, party: sc.party.slice(), enemies: sc.enemies.slice(), level: sc.level, plus: sc.plus || 0, index: i, policy: p, seed: `${prefix}:pve:${sc.id}:${i}` });
   }
   return jobs;
 }
@@ -282,8 +290,37 @@ function policyStats(row, pol) {
   Object.assign(row, { use: Object.assign({}, st.skills), sm: st.summons, mv: st.moves, it: st.items, dec: st.decisions, tr: st.tried });
   row.nm = JSON.parse(JSON.stringify(st.names || {}));   // 技能名：汇总进 report.skillNames 以后从行里拿掉（不写进 json 的 rows）
 }
+/** 技能版 vs 普攻版对打（镜像）：A 队（swap 时 B 队）用技能版、另一队用普攻版，起身 / 翻滚两边一样。w：X 技能版赢 / Y 普攻版赢 / D 平局 */
+function runH2h(job) {
+  const row = { k: "h2h", s: job.size, L: job.level, i: job.index, f: job.first, x: job.swap, w: "E" };
+  try {
+    const { c, V, firstTeam } = prepare(job);
+    const X = duelPolicy(c, V, firstTeam, "skill"), Y = duelPolicy(c, V, firstTeam, "basic");
+    const xTeam = job.swap ? other(job.aTeam) : job.aTeam;
+    const pick = u => (c.pvpDuelTeamOf(u) === xTeam ? X : Y);
+    const mixed = Object.assign({}, X, { name: "h2h", act: u => pick(u).act(u), standAsk: (u, z) => pick(u).standAsk(u, z) });
+    const res = c.BattleSim.run({ maxRounds: CONFIG.maxRounds, policy: mixed });
+    const duel = res.duel;
+    row.w = !duel ? "T" : duel.winner ? (duel.winner === xTeam ? "X" : "Y") : "D";
+    row.r = res.rounds;
+    policyStats(row, X);
+    if (c.__errors.length) row.bugs = ["规则 console.error：" + c.__errors.slice(0, 3).join(" | ").slice(0, 300)];
+  } catch (e) { row.w = "E"; row.err = String(e && e.stack || e).split("\n").slice(0, 4).join(" | ").slice(0, 400); }
+  return row;
+}
+/** 对打汇总：技能版赢了几场（只算分出胜负的），按人数分开 */
+function h2hSummary(rows) {
+  const out = {};
+  rows.filter(r => r.k === "h2h").forEach(r => ["all", r.s].forEach(s => { (out[s] = out[s] || []).push(r); }));
+  Object.keys(out).forEach(s => {
+    const xs = out[s].filter(r => r.w !== "E"), dec = xs.filter(r => r.w === "X" || r.w === "Y"), won = dec.filter(r => r.w === "X").length;
+    out[s] = { n: xs.length, dec: dec.length, won, rate: dec.length ? won / dec.length : null, ci: B.wilson(won, dec.length), draws: xs.length - dec.length, rounds: mean(xs.map(r => r.r).filter(Number.isFinite)), sm: mean(xs.map(r => r.sm || 0)) };
+  });
+  return out;
+}
 function runJob(job) {
   if (job.kind === "pve") return runPve(job);
+  if (job.kind === "h2h") return runH2h(job);
   const row = { v: job.variant, k: job.kind, s: job.size, L: job.level, i: job.index, f: job.first, w: "E" };
   if (job.policy && job.policy !== "basic") row.p = job.policy;
   try {
@@ -329,7 +366,8 @@ function runPve(job) {
     c.S.RNG.install(job.seed + ":setup");
     const runs = leveledRuns(c, job.party, job.level, job.seed);
     c.S.LEDGER.dur = {}; c.S.LEDGER.weapons = {}; c.S.LEDGER.heroes = {}; c.S.LEDGER.hours = 0;
-    c.BattleSim.setup({ party: job.party, enemies: job.enemies.map(id => ({ id, lv: job.level, zone: 2 })), seed: job.seed + ":battle", before: () => runs.forEach(r => c.Rogue.applyPartyToField(r)) });
+    const lv = job.level + (Number(job.plus) || 0);   // 敌人比队伍高几级（plus）
+    c.BattleSim.setup({ party: job.party, enemies: job.enemies.map(id => ({ id, lv, zone: 2 })), seed: job.seed + ":battle", before: () => runs.forEach(r => c.Rogue.applyPartyToField(r)) });
     const pol = row.p === "skill" ? c.BattleSim.skillPolicy() : c.BattleSim.BASIC_POLICY;
     const res = c.BattleSim.run({ maxRounds: CONFIG.pveLimit, policy: pol });
     row.w = res.winner === "player" ? "W" : res.winner === "enemy" ? "L" : "T";
@@ -395,7 +433,7 @@ function summarize(rows) {
 function summarizeAll(rows) {
   const by = new Map(), add = (k, r) => { if (!by.has(k)) by.set(k, []); by.get(k).push(r); };
   rows.forEach(r => {
-    if (r.k === "pve") return;   // 遭遇战对照另算（pveSummary）
+    if (r.k === "pve" || r.k === "h2h") return;   // 遭遇战对照、对打另算（pveSummary / h2hSummary）
     const kind = r.k === "random" ? "random" : r.k;
     for (const s of [r.s, "all"]) for (const L of [r.L, "all"]) add([r.v, kind, s, L].join("|"), r);
   });
@@ -787,8 +825,9 @@ function compareMarkdown(report, basic) {
     l.push(`- **近战多 / 远程多**：两队近战人数不一样时，近战多的一方技能版赢 ${pct(ms.rate)}（${ciText(ms.ci)}），${basicName} ${pct(mb && mb.rate)}（${ciText(mb && mb.ci)}）——会用技能、会走位以后，远程${ms.rate != null && mb && mb.rate != null && ms.rate < mb.rate ? "没那么吃亏了" : "照样吃亏"}。`);
   }
   if (sk) l.push(`- **平均回合**：技能版 ${f1(sk.rounds)} 回合（中位 ${f1(sk.roundsMed)}），${basicName} ${f1(bp && bp.rounds)}，普攻版全部 ${f1(b0 && b0.rounds)}。`);
-  const pa = pve["all|skill"], pb = pve["all|basic"];
-  if (pa && pb) l.push(`- **遭遇战（PvE）对照**：同样的 ${PVE_SCENARIOS.length} 种遭遇、同一批种子，技能版胜率 ${pct(pa.rate)}（${ciText(pa.ci)}）、普攻版 ${pct(pb.rate)}（${ciText(pb.ci)}）；赢下来的平均 ${f1(pa.roundsWin)} 回合 vs ${f1(pb.roundsWin)} 回合，剩下的血量 ${pct(pa.hp)} vs ${pct(pb.hp)}（第 9 节）。`);
+  const pa = pve["all|skill"], pb = pve["all|basic"], h2 = h2hSummary(report.rows).all;
+  if (h2) l.push(`- **技能版是不是更强**（决斗里一队技能版、一队普攻版对打，镜像 ${h2.n} 场）：技能版赢 ${pct(h2.rate)}（${ciText(h2.ci)}）（第 9 节）。`);
+  if (pa && pb) l.push(`- **遭遇战（PvE）对照**：同样的 ${(report.pveScenarios || PVE_SCENARIOS).length} 种遭遇、同一批种子，技能版胜率 ${pct(pa.rate)}（${ciText(pa.ci)}）、普攻版 ${pct(pb.rate)}（${ciText(pb.ci)}）；赢下来的平均 ${f1(pa.roundsWin)} 回合 vs ${f1(pb.roundsWin)} 回合，剩下的血量 ${pct(pa.hp)} vs ${pct(pb.hp)}（第 9 节）。`);
   l.push(`- **速度**（${o.workers || CONFIG.workers} 个线程一起跑，每场单独计时）：1v1 平均 ${sec("1v1")}、2v2 ${sec("2v2")}、3v3 ${sec("3v3")}、4v4 ${sec("4v4")} 一场；遭遇战 ${sec("pve:skill")}（普攻版 ${sec("pve:basic")}）。全部 ${report.rows.length} 场共 ${report.seconds} 秒。`);
   l.push("");
   // ---- 怎么测的 ----
@@ -797,6 +836,7 @@ function compareMarkdown(report, basic) {
   l.push(`- **技能版**（\`BattleSim.SKILL_POLICY\`，sim.js / sim-search.js）：轮到一个单位时，列出它所有的合法动作（每个技能 × 每种分步选择 × 每个目标、移动、召唤武器人；决斗满状态不带道具），每个动作在 ${cfg.worlds} 个平行世界（同一串动作、不同的骰子）里试跑取平均；一个回合之内往前看 ${cfg.depth} 步（束宽 ${cfg.width}），挑总分最高的那条路线，做它的第一步，骰子出来以后再从头看一遍。倒地起身、起身翻滚、协助格挡 / 协助攻击和普攻版完全一样（两边只差「轮到自己时做什么」）。`);
   l.push(`- **打分**（权重在 \`SKILL_POLICY_CFG.w\`）：对手掉的血（按血量上限算比例，一整条 = ${w.hp}）、架势（一整条 = ${w.def}）、打出失衡 ${w.stagger}、打倒 ${w.down}、再起不能 ${w.out}；自己一方掉的血（一整条 = ${w.ownHp}）、倒地 ${w.ownDown}；站位：普攻打得到对手 +${w.reach}，远程留在有对手近战的区每个近战 −${w.risk}；留着附赠（对面回合里能协助格挡）+${w.keepBonus}；召唤武器人 +${w.summon}（每过一个回合少 ${Math.round((w.summonDecay || 0) * 100)}%，最少 ${Math.round((w.summonMin || 0) * 100)}%）；状态效果按种类加减分，治疗回的血按自己掉血的权重算。`);
   l.push(`- **样本**：随机阵容，${sizes.map(s => s + "v" + s).join(" / ")} × ${levels.join(" / ")} 级 × 每格 ${o.pairs} 对 × 先后手对调 = 每种情况 ${perVariant} 场，情况：${o.variants.map(v => VARIANTS[v].name).join("、")}；${o.fixedPairs ? `固定阵容每组每级 ${o.fixedPairs} 对；` : "不跑固定阵容；"}种子前缀 \`${o.seed}\`。阵容、战斗种子和 #491 的前 ${o.pairs} 对完全一样，所以表里「${basicName}」一列是 #491 里同一批阵容、种子的普攻版结果（两种打法从第一步起就分开了，骰子不会一样）；「普攻版（全部）」是 #491 每格 150 对的结果，区间更窄。`);
+  if (o.h2h || o.pve) l.push(`- **顺手验证**（第 9 节）：${o.h2h ? `决斗里一队技能版、一队普攻版对打（每种人数 × 等级 ${o.h2h} 对阵容，每对 4 场：先后手对调 × 哪一队用技能版对调）` : ""}${o.h2h && o.pve ? "；" : ""}${o.pve ? `${(report.pveScenarios || PVE_SCENARIOS).length} 种遭遇战（PvE）每种 ${o.pve} 个种子，两种打法同一个种子各打一场` : ""}。`);
   l.push(`- **胜率和区间**照 #491：先手胜率 = 先手赢的 ÷ 分出胜负的（平局、超时另列），Wilson 95% 区间；差值区间按两组独立算（偏保守）。技能版样本少，单格区间大约 ±${o.pairs <= 10 ? "15–20" : o.pairs <= 25 ? "10–13" : "6–9"} 个百分点，看合计和趋势。`);
   l.push(`- **原始数据**：同名的 \`.json\`（每场一行，字段说明在 \`columns\`；技能版多记了用了哪些技能 \`use\`、召唤 \`sm\`、移动 \`mv\`、想了几次 \`dec\`、试跑了几个候选 \`tr\`）。重新生成报告：\`node tools/pvp-balance.js --rebuild ${o.out}\`。`, "");
   // ---- 1. 先后手 ----
@@ -902,7 +942,7 @@ function compareMarkdown(report, basic) {
     l.push("");
   }
   // ---- 8. 技能版做了什么 ----
-  const duel = report.rows.filter(r => r.k !== "pve" && r.w !== "E");
+  const duel = report.rows.filter(r => r.k !== "pve" && r.k !== "h2h" && r.w !== "E");
   if (duel.length) {
     l.push("## 8. 技能版做了什么（统计）", "", "两队合计、每场平均。「普攻以外的技能」不含普攻（`*_aa`），含召唤。", "");
     l.push("|人数|场数|想了几次|试跑的候选|普攻|普攻以外的技能|召唤武器人|移动|");
@@ -923,16 +963,25 @@ function compareMarkdown(report, basic) {
     used.slice(0, 30).forEach(id => { const n = names[id] || {}; l.push(`|${n.name || id}（\`${id}\`）|${n.unit || "—"}|${tot[id]}|${f2(tot[id] / duel.length)}|`); });
     l.push("");
   }
-  // ---- 9. PvE ----
+  // ---- 9. 技能版是不是更强：对打 + PvE ----
+  const hh = h2hSummary(report.rows);
+  if (hh.all || (pa && pb)) l.push("## 9. 顺手验证：技能版是不是更强、有没有乱放技能", "");
+  if (hh.all) {
+    l.push("**9a. 决斗里技能版 vs 普攻版对打**（现在的规则；一队用技能版、一队用普攻版，同一对阵容打 4 场：先后手对调 × 哪一队用技能版对调，阵容强弱、先后手、站位都抵消；起身、翻滚两边一样）", "");
+    l.push("|人数|场数|技能版赢（只算分出胜负的）|平局|平均回合|技能版每场召唤|");
+    l.push("|---|---:|---|---:|---:|---:|");
+    sizes.concat(["all"]).forEach(s => { const x = hh[s]; if (x) l.push(`|${SIZE_NAME(s)}|${x.n}|${x.won} / ${x.dec} = **${pct(x.rate)}**（${ciText(x.ci)}）|${x.draws}|${f1(x.rounds)}|${f2(x.sm)}|`); });
+    l.push("", `一句话：技能版对普攻版赢 ${pct(hh.all.rate)}（${ciText(hh.all.ci)}）${hh.all.ci && hh.all.ci[0] > 0.5 ? "，区间整个在 50% 以上：技能版明显更强" : "，区间包含 50%：样本里看不出技能版更强"}。`, "");
+  }
   if (pa && pb) {
-    l.push("## 9. 顺手验证：遭遇战（PvE）里技能版 vs 普攻版", "", `队伍照 R1 单场矩阵升到这个等级、敌人同等级站 2 区，同一个种子两种打法各打一场（我方的打法不同，敌人照旧 ai.js），回合上限 ${CONFIG.pveLimit}。PvE 里技能版可以用背包里的道具（R1 开局的补给）。`, "");
-    l.push("|项|队伍|等级|敌人|场数|普攻版：胜率 / 平均回合 / 剩余血量|技能版：胜率 / 平均回合 / 剩余血量|技能版每场：普攻 / 普攻以外的技能 / 召唤 / 道具 / 移动|");
-    l.push("|---|---|---:|---|---:|---|---|---|");
-    PVE_SCENARIOS.forEach(sc => {
+    l.push("**9b. 遭遇战（PvE）里技能版 vs 普攻版**", "", `队伍照 R1 单场矩阵升到这个等级、敌人站 2 区（比队伍高几级见表），同一个种子两种打法各打一场（我方的打法不同，敌人照旧 ai.js），回合上限 ${CONFIG.pveLimit}。难度按普攻版挑：P1–P5 普攻版有赢有输，P6 普攻版一场都打不赢。PvE 里技能版可以用背包里的道具（R1 开局的补给）。`, "");
+    l.push("|项|队伍|我方 / 敌人等级|敌人|场数|普攻版：胜率 / 平均回合 / 剩余血量|技能版：胜率 / 平均回合 / 剩余血量|技能版每场：普攻 / 普攻以外的技能 / 召唤 / 道具 / 移动|");
+    l.push("|---|---|---|---|---:|---|---|---|");
+    (report.pveScenarios || PVE_SCENARIOS).forEach(sc => {
       const a = pve[sc.id + "|basic"], b = pve[sc.id + "|skill"];
       if (!a || !b) return;
       const row = x => `**${pct(x.rate)}** / ${f1(x.rounds)} / ${pct(x.hp)}`;
-      l.push(`|${sc.id}|${sc.party.map(report.heroNames).join("、")}|${sc.level}|${sc.enemies.join("、")}|${b.n}|${row(a)}|${row(b)}|${f1(b.aa)} / ${f1(b.skills)} / ${f2(b.sm)} / ${f2(b.it)} / ${f1(b.mv)}|`);
+      l.push(`|${sc.id}|${sc.party.map(report.heroNames).join("、")}|${sc.level} / ${sc.level + (sc.plus || 0)}|${sc.enemies.join("、")}|${b.n}|${row(a)}|${row(b)}|${f1(b.aa)} / ${f1(b.skills)} / ${f2(b.sm)} / ${f2(b.it)} / ${f1(b.mv)}|`);
     });
     l.push(`|合计|||||**${pct(pb.rate)}**（${ciText(pb.ci)}）/ ${f1(pb.rounds)} / ${pct(pb.hp)}|**${pct(pa.rate)}**（${ciText(pa.ci)}）/ ${f1(pa.rounds)} / ${pct(pa.hp)}|${f1(pa.aa)} / ${f1(pa.skills)} / ${f2(pa.sm)} / ${f2(pa.it)} / ${f1(pa.mv)}|`);
     const better = pa.rate > pb.rate || (pa.rate === pb.rate && pa.hp > pb.hp);
@@ -942,7 +991,7 @@ function compareMarkdown(report, basic) {
   l.push("## 10. 速度", "", `每场单独计时（${o.workers || CONFIG.workers} 个线程同时跑，单场的时间是在一个线程里打完它用的时间）。`, "");
   l.push("|对局|场数|平均每场|最长一场|");
   l.push("|---|---:|---:|---:|");
-  Object.keys(timing).sort().forEach(k => l.push(`|${k.replace("pve:basic", "遭遇战·普攻版").replace("pve:skill", "遭遇战·技能版")}|${timing[k].n}|${(timing[k].meanMs / 1000).toFixed(2)} 秒|${(timing[k].maxMs / 1000).toFixed(1)} 秒|`));
+  Object.keys(timing).sort().forEach(k => l.push(`|${k.replace("pve:basic", "遭遇战·普攻版").replace("pve:skill", "遭遇战·技能版").replace(/^h2h:/, "对打（技能版 vs 普攻版）")}|${timing[k].n}|${(timing[k].meanMs / 1000).toFixed(2)} 秒|${(timing[k].maxMs / 1000).toFixed(1)} 秒|`));
   l.push("", `技能版的时间几乎都花在试跑上（每个候选在每个平行世界里存取一次局面、执行一次）：宽度、深度、平行世界数在 \`SKILL_POLICY_CFG\`，调小会快、但看得没那么远。`, "");
   // ---- 11. 撞到的问题 ----
   l.push("## 11. 撞到的问题", "");
@@ -1039,7 +1088,7 @@ function provenance(argv) {
   return { commit, dirty, node: process.version, command: ("node tools/pvp-balance.js " + argv.join(" ")).trim(), sourceHash: B.hash(sources) };
 }
 function parseArgs(argv) {
-  const out = {}, allowed = ["sizes", "levels", "pairs", "fixed", "variants", "seed", "workers", "out", "rebuild", "max-rounds", "policy", "pve", "compare"];
+  const out = {}, allowed = ["sizes", "levels", "pairs", "fixed", "variants", "seed", "workers", "out", "rebuild", "max-rounds", "policy", "pve", "compare", "h2h"];
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
     if (!key.startsWith("--") || !allowed.includes(key.slice(2))) throw new Error("Unknown argument: " + key);
@@ -1059,12 +1108,14 @@ function parseArgs(argv) {
     maxRounds: out["max-rounds"] ? B.positiveInt(out["max-rounds"], "max rounds") : CONFIG.maxRounds,
     policy: out.policy || CONFIG.policy,
     pve: out.pve != null ? Number(out.pve) : 0,
+    h2h: out.h2h != null ? Number(out.h2h) : 0,
     compare: out.compare || CONFIG.compare,
     rebuild: out.rebuild || null
   };
   opt.out = out.out || (opt.policy === "skill" ? CONFIG.skillOut : CONFIG.out);
   if (!POLICIES[opt.policy]) throw new Error("policy: " + Object.keys(POLICIES).join(", "));
   if (!Number.isInteger(opt.pve) || opt.pve < 0) throw new Error("pve must be a nonnegative integer");
+  if (!Number.isInteger(opt.h2h) || opt.h2h < 0) throw new Error("h2h must be a nonnegative integer");
   if (opt.sizes.some(s => ![1, 2, 3, 4].includes(s))) throw new Error("sizes must be 1–4");
   if (opt.levels.some(L => !Number.isInteger(L) || L < 1 || L > 20)) throw new Error("levels must be 1–20");
   if (opt.variants.some(v => !VARIANTS[v])) throw new Error("variants: " + Object.keys(VARIANTS).join(", "));
@@ -1074,7 +1125,7 @@ function parseArgs(argv) {
 // json 里每场一行写成数组（字段顺序见 rowKeys），比对象小一半多；读的时候两种都认
 // （后面接的几项是 #538 加的：打法、技能版做了什么、遭遇战对照；以前的 json 照样读得回来）
 const ROW_KEYS = ["v", "k", "s", "L", "i", "f", "w", "why", "r", "act", "st", "stR", "dn", "dnR", "out", "outR", "stF", "stS", "dnF", "dnS", "outF", "outS", "blk1", "blkF", "blkS", "asks", "wipes", "pct", "bugs", "err",
-  "p", "use", "sm", "mv", "it", "dec", "tr", "id", "hp", "hd"];
+  "p", "use", "sm", "mv", "it", "dec", "tr", "id", "hp", "hd", "x"];
 function packRow(r) { const a = ROW_KEYS.map(k => (r[k] === undefined ? null : r[k])); while (a.length && a[a.length - 1] === null) a.pop(); return a; }
 function unpackRow(a) { return Array.isArray(a) ? Object.fromEntries(ROW_KEYS.map((k, i) => [k, a[i]]).filter(([, v]) => v != null)) : a; }
 /** 同名前缀的单独报告（例 pvp-balance-1030-hold.json）：只取设置和汇总，主报告里列一节 */
@@ -1131,7 +1182,7 @@ async function main(argv = process.argv.slice(2)) {
   const timing = {};
   const every = opt.policy === "skill" ? 50 : 500;
   const rows = await runJobs(jobs, opt.workers, (row, i, ms) => {
-    const key = row.k === "pve" ? `pve:${row.p}` : `${row.s}v${row.s}`;
+    const key = row.k === "pve" ? `pve:${row.p}` : row.k === "h2h" ? `h2h:${row.s}v${row.s}` : `${row.s}v${row.s}`;
     const t = timing[key] || (timing[key] = { n: 0, ms: 0, max: 0 });
     t.n++; t.ms += ms; t.max = Math.max(t.max, ms);
     if (++done % every === 0 || done === jobs.length) console.log(`${done}/${jobs.length} 场（${Math.round((Date.now() - t0) / 1000)} 秒）`);
@@ -1144,7 +1195,7 @@ async function main(argv = process.argv.slice(2)) {
     schema: "backfire-pvp-balance-v1", version: CONFIG.version, generatedAt: new Date().toISOString(), seconds: Math.round((Date.now() - t0) / 1000),
     provenance: provenance(argv),
     options: { sizes: opt.sizes, levels: opt.levels, pairs: opt.pairs, fixedPairs: opt.fixedPairs, variants: opt.variants, seed: opt.seed, maxRounds: opt.maxRounds, roundsLimit: CONFIG.roundsLimit, out: opt.out,
-      policy: opt.policy, workers: opt.workers, pve: opt.pve, compare: opt.policy === "skill" ? opt.compare : undefined },
+      policy: opt.policy, workers: opt.workers, pve: opt.pve, h2h: opt.h2h, compare: opt.policy === "skill" ? opt.compare : undefined },
     timing: Object.fromEntries(Object.entries(timing).map(([k, t]) => [k, { n: t.n, meanMs: Math.round(t.ms / t.n), maxMs: t.max }])),
     skillCfg: opt.policy === "skill" ? Object.assign(JSON.parse(JSON.stringify(vm.runInContext("SKILL_POLICY_CFG", c))), CONFIG.skillCfg) : undefined,
     skillNames: opt.policy === "skill" ? skillNames : undefined,
@@ -1161,7 +1212,8 @@ async function main(argv = process.argv.slice(2)) {
       pct: "回合上限判的剩余血量百分比 [先手, 后手]", bugs: "自检没通过", err: "异常",
       p: "打法（不写 = basic 普攻版；skill 技能版）", use: "技能版：两队一共用了哪些技能（id → 次数，名字见 skillNames）", sm: "技能版：召唤武器人几次", mv: "技能版：移动几次",
       it: "技能版：用了几次道具", dec: "技能版：想了几次（每次轮到一个单位做一步之前想一次）", tr: "技能版：一共试跑了多少个候选动作",
-      id: "遭遇战对照：哪一项（pveScenarios；这时 w 是 W 赢 / L 输 / T 回合上限）", hp: "遭遇战对照：我方剩下的血量 ÷ 上限（倒地按 0）", hd: "遭遇战对照：最后倒地 / 死亡的角色数" },
+      id: "遭遇战对照：哪一项（pveScenarios；这时 w 是 W 赢 / L 输 / T 回合上限）", hp: "遭遇战对照：我方剩下的血量 ÷ 上限（倒地按 0）", hd: "遭遇战对照：最后倒地 / 死亡的角色数",
+      x: "技能版 vs 普攻版对打（k = h2h）：1 = 阵容 B 那一队用技能版（0 = 阵容 A）；这时 w 是 X 技能版赢 / Y 普攻版赢 / D 平局" },
     rows
   };
   const file = finalize(report, opt.out);
@@ -1169,5 +1221,5 @@ async function main(argv = process.argv.slice(2)) {
   return rows.some(r => r.w === "E") ? 1 : 0;
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
-module.exports = { CONFIG, VARIANTS, DEFAULT_VARIANTS, FIXED, POLICIES, PVE_SCENARIOS, lineup, plan, prepare, duelPolicy, runJob, runPve, runJobs, rollPick, summarize, summarizeAll, diff, packRow, unpackRow,
-  markdown, notesFor, compareMarkdown, pveSummary, meleeStats, heroWins, loadReport, main };
+module.exports = { CONFIG, VARIANTS, DEFAULT_VARIANTS, FIXED, POLICIES, PVE_SCENARIOS, lineup, plan, prepare, duelPolicy, runJob, runPve, runH2h, runJobs, rollPick, summarize, summarizeAll, diff, packRow, unpackRow,
+  markdown, notesFor, compareMarkdown, pveSummary, h2hSummary, meleeStats, heroWins, loadReport, main };

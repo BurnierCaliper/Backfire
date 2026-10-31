@@ -124,6 +124,17 @@ test("遭遇战对照（--pve）：两种打法同一个种子各打一场；汇
   assert.ok(!Object.keys(P.summarizeAll([{ k: "pve", id: "P1", p: "skill", w: "W" }])).length, "决斗的汇总不算遭遇战");
 });
 
+test("技能版 vs 普攻版对打（--h2h）：同一对阵容 4 场（先后手 × 哪一队用技能版都对调）；汇总只算分出胜负的", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], h2h: 1 }).filter(j => j.kind === "h2h");
+  assert.deepEqual(jobs.map(j => j.first + j.swap), ["a0", "a1", "b0", "b1"]);
+  assert.ok(jobs.every(j => j.seed === jobs[0].seed && j.a.join() === jobs[0].a.join()), "同一对阵容、同一个种子");
+  const r = P.runH2h(jobs[1]);
+  assert.ok(["X", "Y", "D"].includes(r.w) && r.k === "h2h" && r.x === 1 && r.dec > 0, JSON.stringify(r));
+  const s = P.h2hSummary([{ k: "h2h", s: 1, w: "X", r: 3 }, { k: "h2h", s: 1, w: "Y", r: 5 }, { k: "h2h", s: 2, w: "X", r: 4 }, { k: "h2h", s: 2, w: "D", r: 10 }]);
+  assert.deepEqual([s.all.n, s.all.dec, s.all.won, s[2].draws], [4, 3, 2, 1]);
+  assert.ok(!Object.keys(P.summarizeAll([{ k: "h2h", s: 1, w: "X" }])).length, "决斗的汇总不算对打");
+});
+
 test("汇总：先手胜率只算分出胜负的场次，平局、超时、异常另列；差值带区间", () => {
   const row = (w, extra) => Object.assign({ v: "base", k: "random", s: 2, L: 10, i: 0, f: "a", w, r: 5 }, extra || {});
   const rows = [row("F", { st: "F", stR: 1, dn: "F", dnR: 2 }), row("F", { st: "S", stR: 2 }), row("S", { st: "S", stR: 1 }), row("D"), row("T"), row("E")];
