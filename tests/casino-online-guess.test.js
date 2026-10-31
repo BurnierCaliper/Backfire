@@ -69,14 +69,17 @@ test("猜大猜小 · 押筹码的赌场桌：联机能坐（庄家是赌场，�
   assert.equal(after.last, N("离开猜大猜小 · 大厅：桌上剩 210 枚（买入 40 枚，赢 170 枚），钱包多了 42.5 枚筹码。"));
 });
 
-test("猜大猜小 · 每名玩家各玩各的：两人坐同一张桌子是各自的一手；别人的押注、钱包不在自己的包里；桌上不够这一轮的最低注时从自己的钱包补（#528 照旧）", () => {
-  const r = room("CASINO-GUESS-2"), { send, casino, mine } = r;
+test("猜大猜小 · 每名玩家各玩各的：两人坐同一张桌子是各自的一手；别人的押注、钱包不在自己的包里；刷新（存档读回来）以后这一手还在，桌上不够这一轮的最低注时照样从自己的钱包补（#528）", () => {
+  const r = room("CASINO-GUESS-2"), { c, send, casino, mine } = r;
   ok(send("p2", { op: "open", kit: "ruby" })); ok(send("p3", { op: "open", kit: "helu" }));
   ok(send("p2", { op: "buy", kit: "ruby", n: 10 })); ok(send("p3", { op: "buy", kit: "helu", n: 10 }));   // 赠送 50 + 买 10：坐下后钱包剩 8 枚
   ok(send("p2", { op: "sit", kit: "ruby", table: "guess-vip", buyIn: 50, dealer: "ai" }));   // 贵宾室：桌上 1 枚 = 钱包 1 枚
   ok(send("p3", { op: "sit", kit: "helu", table: "guess-vip", buyIn: 50, dealer: "ai" }));
   rig(guessHand(r, "ruby"), PLUS2); rig(guessHand(r, "helu"), ZERO);
   assert.notEqual(guessHand(r, "ruby"), guessHand(r, "helu"), "各是各的一手");
+  // 刷新：房主的存档读回来（对象都是新的），这一手还在
+  c.LEDGER.casino = JSON.parse(JSON.stringify(c.LEDGER.casino));
+  assert.deepEqual([mine("p2", "ruby").seat.game.round, mine("p3", "helu").seat.game.me.chips], [1, 50], "读回来还是这一手");
   ok(bet(r, "p2", "ruby", { "2": 46 }));                                                   // 瑞比押 46 枚，手上剩 4 枚：正好够第二轮的最低注
   ok(bet(r, "p3", "helu", { "0": 50 }));                                                   // 赫鲁米卡全押 0：第二轮最低注 4 枚，从钱包补
   const a = mine("p2", "ruby").seat.game, b = mine("p3", "helu").seat.game;
