@@ -218,8 +218,8 @@ test("跟不起时下注栏有「全押」和借的按钮；全押后押得多�
   p.UI.state().banner = game.results[0];
   p.UI.render();
   const text = p.$("#fh-banner").textContent;
-  // 你全押 6 枚：主池 6 × 3 = 18（三个人都能分）；乙、丙多押的 6 × 2 = 12 是边池（你分不到）
-  assert.match(text, /主池 18 枚/);
+  // 你全押 6 枚：主池 6 × 3 − 盲注 3 = 15（三个人都能分；盲注进累积奖池，#534）；乙、丙多押的 6 × 2 = 12 是边池（你分不到）
+  assert.match(text, /主池 15 枚/);
   assert.match(text, /边池 1 12 枚/);
   p.UI.stop();
 });
@@ -253,18 +253,19 @@ test("翻到相位：横幅写没弃牌的人全押、押到多少；全押后�
   const text = banner.textContent;
   assert.match(text, /翻到相位（第 1 张天气）：没弃牌的人全押，各押到 30 枚/);
   assert.match(text, /同分，底池滚到下一轮/);
-  assert.match(text, /主池 60 枚：你、乙同分（相位全押），滚到下一轮/);
+  assert.match(text, /主池 57 枚：你、乙同分（相位全押），滚到下一轮/);
+  assert.match(text, /累积奖池 3 枚：你、乙同分，留到下一轮/);
   assert.match(text, /你 −30 枚/);
   assert.match(p.$("#fh-side .cc-results").textContent, /同分，底池滚到下一轮/);
   click(banner.querySelector('[data-fh="dismiss"]'));
   p.UI.stop();
-  // 第 2 轮：乙输光了先借，庄家（乙）偷看后放好；底池里先放着滚存的 60 枚
+  // 第 2 轮：乙输光了先借，庄家（乙）偷看后放好；底池里先放着滚存的 57 枚（60 − 盲注 3，盲注在累积奖池里，#534）
   p.X.act(game, "p2", { type: "borrow", amount: 6 });
   p.X.act(game, "p2", { type: "place", where: "top" });
   p.UI.render();
   assert.equal(game.stage, "play");
-  assert.match(p.$("#fh-board .cc-pot").textContent, /含滚存 60/);
-  assert.match(p.$("#fh-actions .cc-info").textContent, /底池含上一轮滚存 60 枚/);
+  assert.match(p.$("#fh-board .cc-pot").textContent, /含滚存 57/);
+  assert.match(p.$("#fh-actions .cc-info").textContent, /底池含上一轮滚存 57 枚/);
   // 打完第 2 轮：横幅写主池含上一轮滚存的
   p.X.act(game, "p2", { type: "play", card: "ice" });
   p.UI.render();
@@ -274,10 +275,175 @@ test("翻到相位：横幅写没弃牌的人全押、押到多少；全押后�
     const id = p.X.toAct(game)[0], L = p.X.legal(game, id);
     p.X.act(game, id, { type: L.some(o => o.type === "pass") ? "pass" : L.some(o => o.type === "check") ? "check" : "call" });
   }
-  assert.equal(game.results[1].carryIn, 60);
+  assert.equal(game.results[1].carryIn, 57);
   p.UI.state().banner = game.results[1];
   p.UI.render();
-  assert.match(p.$("#fh-banner").textContent, /主池 \d+ 枚(归你|归乙|由你、乙平分)（含上一轮滚存的 60 枚）/);
+  assert.match(p.$("#fh-banner").textContent, /主池 \d+ 枚(归你|归乙|由你、乙平分)（含上一轮滚存的 57 枚）/);
+  p.UI.stop();
+});
+
+/* ---------- 累积奖池、最后一轮同分加赛（#534，主人 10/31） ---------- */
+/** 10 张天气、没有相位：5 轮各翻 2 张（第 r 轮翻第 2r−1、2r 张） */
+const W10 = ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "acid", "thunder"];
+/** 规则层替所有人打完这一轮：不借、偷看后留在顶上、盖 cards[座位]、都不追加 / 过牌 / 跟注（到最后一轮同分进加赛也停） */
+function quietRules(X, g, cards) {
+  const r = g.round;
+  for (let i = 0; i < 80 && g.round === r && !g.over && g.stage !== "playoff"; i++) {
+    const who = X.toAct(g), id = who[0], L = X.legal(g, id);
+    if (g.stage === "peek") X.act(g, id, { type: "place", where: "top" });
+    else if (g.stage === "play") who.forEach(k => X.act(g, k, { type: "play", card: cards[k] }));
+    else X.act(g, id, { type: ["noLoan", "pass", "check", "call"].find(t => L.some(o => o.type === t)) });
+  }
+}
+
+test("累积奖池（#534）：底池旁边另一叠写累积奖池的数目（盲注都进这里，不算在底池里），提示行也写；横幅写累积奖池同分留到下一轮 / 归谁；规则说明写累积奖池和加赛", () => {
+  const p = page();
+  const game = p.X.newGame({ seed: "奖池", players: [{ id: "p1", name: "你" }, { id: "p2", name: "乙" }, { id: "p3", name: "丙" }], layers: LAYERS.slice(), weathers: W10.slice(),
+    hands: { p1: ["fire", "ice", "physical"], p2: ["physical", "fire", "ice"], p3: ["ice", "physical", "fire"] }, elements: ["harmonic", "energy", "acid"] });
+  p.UI.start({ game, human: "p1", levels: { p2: "easy", p3: "easy" }, seed: "奖池" });
+  p.UI.stop();
+  const rules = p.$("#fh-side .cc-rules").textContent;
+  assert.match(rules, /累积奖池：每轮交的小盲、大盲不进这一轮的底池，进公开的累积奖池（下注照旧：盲注算自己这一轮已经下的注，大盲算第一次下注，别人要跟到这个数）/);
+  assert.match(rules, /单独拿到最高分的人拿走整个累积奖池（全押的也整个拿走，不受边池限制；其他人都弃牌、只剩一个人也拿走）；最高分不止一人就不分，留到下一轮接着累积/);
+  assert.match(rules, /加赛：最后一轮还同分，底池 \/ 边池照常结算，累积奖池由同分的人加赛：不下注，每人从剩下的手牌里再盖 1 张；公共层牌 10 张全部重洗、翻 2 张，天气 7 张全部重洗、翻 2 张，照常计分（翻到相位当作没有修正的天气，不全押）/);
+  assert.match(rules, /还同分的人里有人手牌用光了就不再加赛，由还同分的人平分。对局提前结束（只剩一个人没出局）时还有累积奖池，归坐在桌上的那个人/);
+  click(p.$('#fh-actions [data-fh="place"][data-where="top"]'));
+  p.UI.stop();
+  // 小盲 1、大盲 2 进累积奖池：底池 0，累积奖池 3
+  const jp = () => p.$("#fh-board .cc-pot .fh-jackpot");
+  assert.equal(jp().querySelector("b").textContent, "3");
+  assert.match(jp().textContent, /累积奖池/);
+  assert.match(jp().getAttribute("title"), /每轮的小盲、大盲都进这里（不算在底池里）；没弃牌的人里单独拿到最高分的人整个拿走，同分留到下一轮，最后一轮同分就加赛/);
+  assert.equal(p.$("#fh-board .cc-pot .cc-potstack > b").textContent, "0", "盲注不算在底池里");
+  p.X.act(game, "p2", { type: "play", card: "fire" }); p.X.act(game, "p3", { type: "play", card: "ice" });
+  p.UI.render();
+  click(mine(p, "ice"));
+  p.UI.stop();
+  p.X.act(game, "p2", { type: "call" }); p.X.act(game, "p3", { type: "check" });
+  p.UI.render();
+  const info = p.$("#fh-actions .cc-info").textContent;
+  assert.match(info, /小盲 1 \/ 大盲 2（进累积奖池）/);
+  assert.match(info, /累积奖池 3 枚（单独最高分拿走，同分留到下一轮）/);
+  assert.match(p.$("#fh-actions").textContent, /要跟 2 枚/, "跟注的数目照旧（大盲算第一次下注）");
+  click(p.$('#fh-actions [data-fh="call"]'));
+  p.UI.stop();
+  p.X.act(game, "p2", { type: "pass" }); p.X.act(game, "p3", { type: "pass" });
+  p.UI.render();
+  click(p.$('#fh-actions [data-fh="pass"]'));
+  p.UI.stop();
+  // 第二轮：乙弃牌、丙过牌，你过牌——你和丙都是冰 0 分，同分
+  p.X.act(game, "p2", { type: "fold" }); p.X.act(game, "p3", { type: "check" });
+  p.UI.render();
+  click(p.$('#fh-actions [data-fh="check"]'));
+  skipSettle(p);
+  p.UI.stop();
+  const banner = p.$("#fh-banner").textContent;
+  assert.match(banner, /主池 3 枚由你、丙平分；累积奖池 3 枚：你、丙同分，留到下一轮/);
+  assert.match(p.$("#fh-side .cc-results").textContent, /你和别人平分主池（2 人）/);
+  click(p.$('#fh-banner [data-fh="dismiss"]'));
+  p.UI.stop();
+  // 第 2 轮：累积奖池 3 + 小盲 2 + 大盲 4 = 9；上一轮弃牌的乙能量 +2 单独最高分，拿走
+  p.X.act(game, "p2", { type: "place", where: "top" });
+  p.UI.render();
+  assert.equal(jp().querySelector("b").textContent, "9");
+  quietRules(p.X, game, { p1: "harmonic", p2: "energy", p3: "acid" });
+  assert.equal(game.results[1].jackpot.winner, "p2");
+  p.UI.state().banner = game.results[1];
+  p.UI.render();
+  assert.match(p.$("#fh-banner").textContent, /主池 6 枚归乙；累积奖池 9 枚归乙/);
+  p.UI.stop();
+});
+
+test("最后一轮同分加赛（#534）：横幅写同分、加赛争累积奖池（按钮「去加赛」）→ 你点一张剩下的手牌盖下（不下注、层牌天气都是牌背）→ 结算前的过渡把重洗后翻开的层牌、天气一张一张翻 → 亮牌 → 判定中 → 加赛横幅写累积奖池归你 → 总结算写加赛了几次", (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const p = page(), T = p.w.CounterCardsUI.UI_CONFIG.settle;
+  // 两人拿的牌一模一样、每轮出一样的：每轮都同分，累积奖池一直留着（3 + 6 + 9 + 12 + 15 = 45）
+  const game = p.X.newGame({ seed: "加赛", players: [{ id: "p1", name: "你" }, { id: "p2", name: "乙" }], layers: LAYERS.slice(), weathers: W10.slice(),
+    hands: { p1: ["fire", "ice", "physical"], p2: ["fire", "ice", "physical"] },
+    elements: ["harmonic", "harmonic", "acid", "acid", "energy", "energy", "electric", "electric"],
+    playoff: [{ layers: ["shield", "sand", "flesh", "flesh", "armor", "armor", "shield", "sand", "spirit", "spirit"], weathers: ["acid", "thunder", "heat", "snow", "glow", "sand", "phase"] }] });
+  ["fire", "ice", "physical", "harmonic", "acid"].forEach(c => quietRules(p.X, game, { p1: c, p2: c }));
+  assert.equal(game.stage, "playoff");
+  assert.equal(game.jackpot, 45);
+  p.UI.start({ game, human: "p1", levels: { p2: "easy" }, seed: "加赛" });
+  p.UI.stop();
+  p.UI.state().banner = game.results[4];
+  p.UI.render();
+  const banner = p.$("#fh-banner");
+  assert.match(banner.querySelector("h3").textContent, /同分，加赛争累积奖池/);
+  assert.match(banner.textContent, /累积奖池 45 枚：你、乙同分，最后一轮，加赛/);
+  assert.equal(banner.querySelector('[data-fh="dismiss"]').textContent, "去加赛");
+  click(banner.querySelector('[data-fh="dismiss"]'));
+  p.UI.stop();
+  // 加赛：顶栏写第几次加赛；手里剩下的两张能点，没有下注按钮；层牌、天气都是牌背（全部重洗，天气堆 7 张）
+  assert.match(p.$("#fh-top .cc-round").textContent, /第 5 \/ 5 轮 · 第 1 次加赛/);
+  assert.match(prompt(p), /第 1 次加赛（争累积奖池 45 枚，不下注）：你和乙同分。从剩下的手牌里点一张再盖下/);
+  assert.deepEqual(p.$$("#fh-board .cc-me button.cc-can").map(b => b.dataset.card), ["energy", "electric"]);
+  assert.ok(!p.$$("#fh-actions button[data-fh]").some(b => ["check", "call", "bet", "raise", "fold"].includes(b.dataset.fh)), "加赛不下注");
+  assert.equal(p.$$("#fh-board .fh-community .fh-hidden").length, 4);
+  assert.equal(p.$("#fh-board .cc-deck b").textContent, "7");
+  assert.match(p.$('#fh-board .fh-seat[data-seat="p2"] .fh-bet').textContent, /加赛/);
+  assert.match(p.$("#fh-actions .cc-info").textContent, /第 1 次加赛 · 只争累积奖池 45 枚 · 不下注 · 翻到相位当作没有修正的天气，不全押/);
+  // 乙（规则层替它）盖能量；你点电
+  p.X.act(game, "p2", { type: "play", card: "energy" });
+  p.UI.render();
+  assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"] .fh-played .cc-back'), "乙盖了（看不到是哪张）");
+  assert.ok(!p.$('#fh-board .fh-seat[data-seat="p2"] [data-face="energy"]'));
+  click(mine(p, "electric"));
+  const st = settleOf(p);
+  assert.ok(st && game.over, "规则层已经结算完（分出胜负，对局结束）");
+  // 最后一步（你盖牌）连同翻开第 1 张层牌 → 第 2 张层牌 → 第 1 张天气 → 第 2 张天气 → 亮牌 → 判定中
+  assert.deepEqual(J(st.beats), ["last", "flip", "flip", "flip", "show"]);
+  assert.match(prompt(p), /你加赛盖下了一张元素牌。.*第 1 次加赛：翻开公共层牌〔护盾〕。/);
+  assert.equal(p.$("#fh-board .cc-me .cc-acted").textContent, "加赛盖牌");
+  assert.deepEqual(J(faces(p)), { layers: ["shield"], weathers: [] });
+  assert.match(p.$("#fh-top .cc-round").textContent, /第 5 \/ 5 轮 · 第 1 次加赛/, "过渡中顶栏还是这一次加赛");
+  assert.equal(p.$("#fh-board .cc-pot .fh-jackpot b").textContent, "45", "累积奖池还在桌上");
+  assert.ok(!visible(banner));
+  t.mock.timers.tick(T.lastMs);
+  assert.deepEqual(J(faces(p)), { layers: ["shield", "sand"], weathers: [] });
+  t.mock.timers.tick(T.flipMs);
+  assert.deepEqual(J(faces(p)), { layers: ["shield", "sand"], weathers: ["acid"] });
+  assert.equal(prompt(p), "翻开天气〔酸雨〕。");
+  t.mock.timers.tick(T.flipMs);
+  assert.deepEqual(J(faces(p)), { layers: ["shield", "sand"], weathers: ["acid", "thunder"] });
+  t.mock.timers.tick(T.flipMs);
+  assert.equal(st.phase, "show");
+  assert.equal(prompt(p), "亮牌：你〔电〕、乙〔能量〕。");
+  assert.ok(p.$('#fh-board .fh-seat[data-seat="p2"] .fh-played [data-face="energy"]'), "乙加赛盖的能量翻过来");
+  t.mock.timers.tick(T.flipMs);
+  assert.equal(st.phase, "judge");
+  assert.match(p.$("#fh-actions").textContent, /加赛：每人新盖的元素牌对重洗后翻开的 2 张公共层牌计分求和（两张天气叠加），单独最高分的人拿走累积奖池/);
+  t.mock.timers.tick(T.reducedJudgeMs);
+  // 加赛的横幅：护盾 + 沙尘、酸雨 + 雷鸣：电 +4、能量 +2——你单独最高分，拿走 45 枚
+  assert.ok(visible(banner) && !settleOf(p));
+  assert.match(banner.querySelector("small").textContent, /第 5 轮 · 第 1 次加赛 · 层牌 〔护盾〕〔沙尘〕 · 天气 酸雨 \+ 雷鸣/);
+  assert.equal(banner.querySelector("h3").textContent, "你拿走累积奖池");
+  assert.match(banner.textContent, /你〔电〕得 \+4/);
+  assert.match(banner.textContent, /乙〔能量〕得 \+2/);
+  assert.match(banner.textContent, /累积奖池 45 枚归你/);
+  assert.match(banner.textContent, /你 \+45 枚/);
+  assert.ok(p.$("#fh-board .cc-me .cc-chips.cc-collect"), "拿到累积奖池：你的筹码收进来");
+  assert.match(p.$("#fh-side .cc-results").textContent, /第 5 轮 · 第 1 次加赛你拿走累积奖池/);
+  click(banner.querySelector('[data-fh="dismiss"]'));
+  assert.match(p.$("#fh-banner .cc-final").textContent, /对局结束 · 打了 5 轮（最后一轮同分，加赛 1 次）/);
+});
+
+test("最后一轮同分加赛（#534）：你没同分就不参加——座位写「不参加加赛」，手牌不能点，等加赛的人盖牌", () => {
+  const p = page();
+  // 乙、丙拿的牌一样、每轮出一样的；你一直出谐波，第 5 轮乙丙电 +3、你谐波 +1
+  const game = p.X.newGame({ seed: "旁观加赛", players: [{ id: "p1", name: "你" }, { id: "p2", name: "乙" }, { id: "p3", name: "丙" }], layers: LAYERS.slice(), weathers: W10.slice(),
+    hands: { p1: ["harmonic", "harmonic", "harmonic"], p2: ["fire", "ice", "physical"], p3: ["fire", "ice", "physical"] },
+    elements: ["harmonic", "harmonic", "harmonic", "harmonic", "acid", "acid", "harmonic", "energy", "energy", "harmonic", "electric", "electric"] });
+  ["fire", "ice", "physical", "energy", "electric"].forEach(c => quietRules(p.X, game, { p1: "harmonic", p2: c, p3: c }));
+  assert.equal(game.stage, "playoff");
+  assert.deepEqual(J(game.playoff.ids), ["p2", "p3"]);
+  p.UI.start({ game, human: "p1", levels: { p2: "easy", p3: "easy" }, seed: "旁观加赛" });
+  p.UI.stop();
+  assert.equal(p.$$("#fh-board .cc-me button.cc-can").length, 0, "不参加加赛：手牌不能点");
+  assert.match(p.$("#fh-board .cc-me .cc-slot").textContent, /不参加加赛/);
+  assert.match(p.$("#fh-actions").textContent, new RegExp(`乙、丙在加赛（争累积奖池 ${game.jackpot} 枚）`));
+  ["p2", "p3"].forEach(id => assert.match(p.$(`#fh-board .fh-seat[data-seat="${id}"] .fh-bet`).textContent, /加赛/));
   p.UI.stop();
 });
 
@@ -431,7 +597,7 @@ test("结算前的过渡：翻到相位全押、一口气翻完剩下的牌—�
   assert.equal(p.$("#fh-board .cc-me .cc-acted").textContent, "跟注 1 枚");
   assert.deepEqual(J(faces(p)), { layers: ["flesh"], weathers: ["phase"] }, "只翻开了第 1 张天气");
   assert.ok(p.$('#fh-board [data-weather="phase"]').classList.contains("cc-flip") && p.$("#fh-board .cc-flash"), "翻牌、闪一下");
-  assert.equal(p.$("#fh-board .cc-pot .cc-chips > b").textContent, "60", "全押的筹码推进底池");
+  assert.equal(p.$("#fh-board .cc-pot .cc-chips > b").textContent, "57", "全押的筹码推进底池（盲注 3 枚在累积奖池里，#534）");
   assert.match(p.$('#fh-board .fh-seat[data-seat="p2"] .fh-bet').textContent, /本轮押 30 · 全押/);
   assert.equal(p.$("#fh-board .cc-me .cc-chips > b").textContent, "20");
   t.mock.timers.tick(T.lastMs - 1);

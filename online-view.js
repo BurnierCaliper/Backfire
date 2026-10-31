@@ -704,13 +704,23 @@
   /* Flux Hold'em（#526，flux-holdem.js · view）：座位 p1…p4。别人只有筹码、押了多少、弃没弃牌、手牌张数、盖了没有（played 只是有没有盖）；
    * 自己的手牌、盖下的那张只在自己的包里；牌堆（元素 / 层牌 / 天气）只有张数，顺序不发；庄家偷看的那张只给庄家。
    * 亮牌的结果（results[i].shown：比到最后的人的牌和得分）是公开的；每轮结算时亮出的每人这一轮盖下的牌（results[i].played，
-   * HOLDEM_CONFIG.revealAll，#530：弃牌的、其他人都弃牌直接赢的那一轮也亮）结算后也是公开的——结算之前别人盖下的牌照旧不放 */
+   * HOLDEM_CONFIG.revealAll，#530：弃牌的、其他人都弃牌直接赢的那一轮也亮）结算后也是公开的——结算之前别人盖下的牌照旧不放。
+   * 累积奖池（#534）：jackpot 数目、每人这一轮交了多少盲注（blind）、每轮结算的 jackpot（归谁 / 同分留到下一轮 / 加赛 / 平分）公开；
+   * 最后一轮同分的加赛（playoff）只放第几次、谁参加、谁已经盖了——盖的是哪张亮牌前不放（自己的在 me.card），加赛的结算（outcome "playoff"）亮牌后公开 */
   const HOLDEM_SEAT = /^p[1-4]$/;
   const holdemId = v => (typeof v === "string" && HOLDEM_SEAT.test(v) ? v : null);
   const holdemIds = list => arr(list).map(holdemId).filter(Boolean).slice(0, 4);
   function holdemMap(o, fn, ids) { if (!obj(o)) return null; const out = {}; ids.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
+  /** 一轮结算里的累积奖池（#534，flux-holdem.js · jackpotRound）：数目、这一轮交进去的盲注、归谁、同分的、谁分了多少、留到下一轮 / 加赛 / 平分（手牌用光的人） */
+  function projectHoldemJackpot(j, ids) {
+    if (!obj(j)) return null;
+    const d = selected(j, ["amount", "added", "kept", "playoff", "split"]);
+    d.winner = holdemId(get(j, "winner")); d.tied = holdemIds(get(j, "tied")); d.shares = holdemMap(get(j, "shares"), number, ids) || {};
+    const empty = holdemIds(get(j, "empty")); if (empty.length) d.empty = empty;
+    return d;
+  }
   function projectHoldemGame(g) {
-    const out = copyFields(g, { mode: "holdem" }, ["stage"], ["round", "rounds", "layerDeckCount", "deckCount", "elementDeckCount", "minBet", "maxRaises", "pot"], ["over", "myTurn"]);
+    const out = copyFields(g, { mode: "holdem" }, ["stage"], ["round", "rounds", "layerDeckCount", "deckCount", "elementDeckCount", "minBet", "maxRaises", "pot", "jackpot"], ["over", "myTurn"]);
     out.side = holdemId(get(g, "side"));
     out.order = holdemIds(get(g, "order"));
     if (!out.side || !out.order.includes(out.side)) return null;
@@ -725,9 +735,12 @@
     const ask = get(g, "loanAsk"); out.loanAsk = Array.isArray(ask) ? holdemIds(ask) : null;
     const carry = get(g, "carry");
     out.carry = obj(carry) ? Object.assign(selected(carry, ["amount", "r"]), { from: holdemIds(get(carry, "from")) }) : null;
+    // 加赛（#534）：第几次、谁参加、谁已经盖了（盖的是哪张不放）
+    const po = get(g, "playoff");
+    out.playoff = obj(po) && number(get(po, "n")) !== undefined ? { n: get(po, "n"), ids: holdemIds(get(po, "ids")), played: holdemIds(get(po, "played")) } : null;
     const seat = (s) => {
       if (!obj(s) || !holdemId(get(s, "id"))) return null;
-      const d = Object.assign({ id: get(s, "id") }, selected(s, ["chips", "start", "bet", "st", "loan", "owe", "handCount", "folded", "allIn", "out", "played", "dealer", "sb", "bb"]));
+      const d = Object.assign({ id: get(s, "id") }, selected(s, ["chips", "start", "bet", "st", "blind", "loan", "owe", "handCount", "folded", "allIn", "out", "played", "dealer", "sb", "bb"]));
       const name = text(get(s, "name"), 40); if (name) d.name = name;
       return d;
     };
@@ -745,12 +758,17 @@
     } else out.betting = null;
     out.results = arr(get(g, "results")).slice(-CASINO_CAP.results).flatMap(r => {
       if (!obj(r)) return [];
-      const d = copyFields(r, {}, [], ["r", "pot", "carryIn", "carry", "phaseAt", "cap"], ["split", "allIn"]);
-      enumField(r, d, "outcome", ["showdown", "fold"]);
+      // n：第几次加赛（outcome "playoff"，#534）
+      const d = copyFields(r, {}, [], ["r", "n", "pot", "carryIn", "carry", "phaseAt", "cap"], ["split", "allIn"]);
+      enumField(r, d, "outcome", ["showdown", "fold", "playoff"]);
       d.dealer = holdemId(get(r, "dealer"));
       d.layers = cards(get(r, "layers")); d.weathers = cards(get(r, "weathers"));
       d.winners = holdemIds(get(r, "winners")); d.folded = holdemIds(get(r, "folded"));
       d.bets = holdemMap(get(r, "bets"), number, ids); d.delta = holdemMap(get(r, "delta"), number, ids); d.chips = holdemMap(get(r, "chips"), number, ids);
+      // 累积奖池（#534）：每人交的盲注、这一轮的累积奖池归谁；加赛的那一次另有参加的人（ids）
+      const blinds = holdemMap(get(r, "blinds"), number, ids); if (blinds) d.blinds = blinds;
+      const jp = projectHoldemJackpot(get(r, "jackpot"), ids); if (jp) d.jackpot = jp;
+      if (Array.isArray(get(r, "ids"))) d.ids = holdemIds(get(r, "ids"));
       // 亮牌：比到最后的人（没弃牌）的牌和得分——公开的
       d.shown = holdemMap(get(r, "shown"), s => (obj(s) && id(get(s, "card")) ? Object.assign({ card: get(s, "card") }, selected(s, ["score"])) : undefined), ids) || {};
       // 每人这一轮盖下的牌（revealAll 打开时规则层结算才写，#530）：公开的；没有这一项（revealAll 关着）就不放，牌桌照旧写「不亮牌」

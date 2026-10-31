@@ -195,6 +195,26 @@ test("Flux Hold'em 赌场桌：人坐第一个座位，其余座位是这张桌�
   assert.equal(K.chips(w).normal, 100 - 2 - res.buyIn + g.final.chips.p1, "贵宾室桌上 1 枚 = 钱包 1 枚");
 });
 
+test("Flux Hold'em 赌场桌（#534 累积奖池）：照常打得完——最后一轮同分的加赛也打完；打完桌上不留累积奖池，四个座位的筹码守恒（买入 × 4 + 从钱包补的 + 借的），离桌按桌上剩下的结算回钱包", () => {
+  const { K, X, XA, FACE } = rules();
+  let playoffs = 0, jackpotWins = 0;
+  for (let k = 0; k < 10; k++) {
+    const w = K.wallet({ gifted: true, gift: 0, normal: 100 * FACE });
+    const g = K.sit(w, "holdem-alley", 20, { seed: "奖池赌场" + k });
+    XA.playOut(g, { p1: "normal", p2: "easy", p3: "normal", p4: "hard" }, "奖池" + k);
+    assert.equal(g.over, true);
+    assert.equal(g.jackpot, 0, "打完桌上不留累积奖池");
+    const loans = g.order.reduce((t, id) => t + g.sides[id].loan, 0), topUp = w.seat.topUp || 0;
+    assert.equal(g.order.reduce((t, id) => t + g.final.held[id], 0), 20 * 4 + topUp + loans, `第 ${k} 局筹码守恒`);
+    g.results.forEach(r => { if (r.outcome === "playoff") playoffs++; if (r.jackpot && r.jackpot.winner) jackpotWins++; });
+    const res = K.leave(w);
+    assert.equal(res.chips, g.final.chips.p1);
+    // 后巷小桌每枚 10 奎支：桌上 20 枚 = 钱包 1 枚；入场费 2 枚 = 钱包 0.1 枚
+    assert.ok(Math.abs(K.chips(w).total - (100 - 2 * 10 / FACE + (res.chips - res.buyIn) * 10 / FACE)) < 1e-9, `第 ${k} 局离桌结算`);
+  }
+  assert.ok(playoffs > 0 && jackpotWins > 0, `加赛 ${playoffs} 次，单独最高分拿走累积奖池 ${jackpotWins} 次`);
+});
+
 test("打到一半的 Flux 牌局跟着钱包存档：存了再读（JSON 原样），接着打完、照样离桌结算", () => {
   const { K, DA, XA, FACE } = rules();
   const cases = [

@@ -53,6 +53,9 @@
 .cc-card.fh-small.fh-face .cc-name { font-size: 11px; }
 .cc-card.fh-small.fh-face .cc-corner { display: none; }
 .fh-center .cc-pot { position: relative; }
+/* 累积奖池（#534）：底池下面一叠小一点的，数字用青色和底池分开 */
+.cc-pot .fh-jackpot .cc-stack { width: 34px; height: 34px; }
+.cc-pot .fh-jackpot b { font-size: 15px; color: #7fe3d4; }
 .fh-opps.cc-judging .fh-played .cc-card, .cc-me .cc-slot.cc-judging .cc-card { animation: ccJudge .8s ease-in-out infinite; }
 .fh-seat .cc-chips.cc-collect { --from: 46px; }   /* 对手坐在上面一排：筹码从下面的底池收进来 */
 
