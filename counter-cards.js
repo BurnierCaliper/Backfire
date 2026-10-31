@@ -42,6 +42,13 @@
  *   CounterCards.chart(g.weather)            → 克制表（得分）：这个天气下每张元素牌打每张层牌的得分，格式同 matchup.js · matchupChart，
  *                                              牌局中随时能开（counter-cards-ui.js 交给 matchup-ui.js 照平时克制表的样子画）
  *   CounterCards.cardChart("fire", g.weather) → 悬停预览：这张元素牌在这个天气下打五种层各得几分（就是上面克制表里这张牌的一行）
+ *   庄家叫牌（#503，主人 10/30，基础模式、整局一次，默认关、newGame({ dealerCall: true }) 打开，界面接好后再改 CC_CONFIG.dealerCall.enabled）：
+ *     第二轮下注结束（或者相位全押）以后、结算以前进 stage "dealerCall"，等庄家叫牌或者不叫：
+ *   CounterCards.canCall(g)                  → 庄家现在能不能叫牌
+ *   CounterCards.callElement(g, "fire")      → 叫玩家这一轮暗出的元素牌（= act(g, "dealer", { type: "callElement", element })）
+ *   CounterCards.skipCall(g)                 → 这一轮不叫（= act(g, "dealer", { type: "noCall" })）
+ *   CounterCards.callState(g, side)          → { enabled, used, round, element, correct, revealed: [{ r, layer }] }（revealed 只有玩家看得到）
+ *     叫对：这一轮庄家赢（普通赔率，同差 1），庄家这一轮出的层牌回到手上；叫错：玩家赢（普通赔率），庄家这一轮的层牌亮给玩家看
  *   CounterCards.bet.*                       → 两人对局的下注、借贷、追加窗口：Flux Duel（flux-duel.js，#488）直接用这一份（见文件末尾 bet 那一段）
  */
 (function (root) {
@@ -60,6 +67,8 @@
     // 跟注后的追加窗口（#496，主人 10/30）：一方跟注后双方还有这么多秒可以加注（照样算进 maxRaises）或弃牌，没人动作就结束这个下注回合。
     // 规则层不计时（pass = 这一方放弃追加，双方都放弃或者 closeWindow 到时间就关窗）；界面按这个秒数倒计时
     callWindowSec: 3,
+    // 庄家叫牌（#503）：enabled = 新开的对局默认开不开（界面还没接，先关；newGame({ dealerCall: true }) 单独打开）
+    dealerCall: { enabled: false },
     pctStep: 0.25,                     // 天气修正每 25% 记 ±1
     // 分档赔付（下标 = 分差）：差 1 赢家拿走底池；差 2 输家再赔自己这一轮下注额 × 0.5。只有这两档：
     // 主人 10/30 删掉了「差 3 及以上 × 1」（单轮分差最多 ±2，打不出来）；万一分差超过 2，按差 2 算
@@ -272,6 +281,8 @@
       // bottom = 压到牌堆底的几张（按堆里的顺序，最后一张在最底下）；偷看看的是 top 后面那一张（#502）
       know: { top: [], bottom: [] },
       normalUsed: false,
+      // 庄家叫牌（#503）：整局一次；revealed = 叫错时亮给玩家的层牌（只给玩家看）
+      dealerCall: { enabled: opt.dealerCall != null ? !!opt.dealerCall : !!CC_CONFIG.dealerCall.enabled, used: false, round: null, element: null, correct: null, pending: null, revealed: [] },
       results: [], log: [], final: null
     };
     startRound(g);
@@ -412,7 +423,7 @@
     if (g.over) return [];
     switch (g.stage) {
       case "loan": return g.loanAsk && g.loanAsk.length ? [g.loanAsk[0]] : [];
-      case "dealerWeather": case "dealerPeek": return ["dealer"];
+      case "dealerWeather": case "dealerPeek": case "dealerCall": return ["dealer"];
       case "play": return SIDES.filter(k => !g.sides[k].card);
       case "bet1": case "bet2": return betWaiting(g);
       case "weather": case "normal": return ["player"];
@@ -457,6 +468,8 @@
       }
       case "dealerPeek":
         return [{ type: "place", where: "top" }, { type: "place", where: "bottom" }];
+      case "dealerCall":
+        return CC_CONFIG.elements.map(element => ({ type: "callElement", element })).concat([{ type: "noCall" }]);
       case "play":
         return me.hand.filter(c => (side === "dealer" ? true : isElement(c))).map(card => ({ type: "play", card }));
       case "bet1": case "bet2": return betLegal(g, side);
@@ -512,7 +525,7 @@
     if (!a || typeof a.type !== "string") fail("操作格式不对");
     const opts = legal(g, side);
     if (!opts.length) fail(`现在不是${sideName(side)}操作的时候`);
-    const ok = opts.find(o => o.type === a.type && (o.op == null || o.op === a.op) && (o.where == null || o.where === a.where) && (o.card == null || o.card === a.card));
+    const ok = opts.find(o => o.type === a.type && (o.op == null || o.op === a.op) && (o.where == null || o.where === a.where) && (o.card == null || o.card === a.card) && (o.element == null || o.element === a.element));
     if (!ok) fail(`${sideName(side)}现在不能这样做（${a.type}${a.op ? " " + a.op : ""}${a.card ? " " + cardName(a.card) : ""}）`);
     const me = g.sides[side];
     switch (a.type) {
@@ -540,6 +553,8 @@
         break;
       }
       case "noNormal": afterWeather(g); break;
+      case "callElement": dealerCallAct(g, a.element); break;
+      case "noCall": note(g, { t: "call", by: "dealer", op: "none", text: "庄家这一轮不叫牌。" }); showdown(g); break;
       case "borrow": borrow(g, side, a, ok); if (g.stage === "loan") nextLoan(g); break;   // 下注时借完还是自己下注
       case "noLoan": noLoan(g, side); break;
       default: fail("未知操作：" + a.type);
@@ -720,7 +735,7 @@
     const street = g.betting ? g.betting.street : 1;
     g.betting = null;
     if (modeOf(g)) { modeOf(g).closeStreet(g, street); return; }
-    if (street === 1) beginWeather(g); else showdown(g);
+    if (street === 1) beginWeather(g); else beforeShowdown(g);
   }
 
   /* 5. 玩家的天气 */
@@ -758,7 +773,7 @@
     const c = cap(g);
     SIDES.forEach(k => { const s = g.sides[k]; pay(s, c - s.bet); });
     note(g, { t: "allIn", text: `翻到相位：本轮双方全押，各押 ${c} 枚（筹码较少一方的全部筹码）。` });
-    showdown(g);
+    beforeShowdown(g);
   }
 
   /** 结算一轮的筹码（纯函数，不改传进来的东西）。
@@ -795,15 +810,61 @@
     return out;
   }
 
+  /* 庄家叫牌（#503）：下注结束、结算以前，整局一次；相位轮也可以叫 */
+  function canCall(g) {
+    const c = g && g.dealerCall;
+    return !!(c && c.enabled && !c.used && !g.mode && !g.over);
+  }
+  function beforeShowdown(g) {
+    if (canCall(g)) { g.stage = "dealerCall"; return; }
+    showdown(g);
+  }
+  function dealerCallAct(g, element) {
+    const c = g.dealerCall, d = g.sides.dealer, p = g.sides.player;
+    const correct = p.card === element;
+    c.used = true; c.round = g.round; c.element = element; c.correct = correct;
+    c.pending = { element, correct, layer: d.card };
+    note(g, { t: "call", by: "dealer", op: "call", element, correct,
+      text: `庄家叫牌：〔${cardName(element)}〕——${correct ? "叫对了，这一轮庄家赢" : "叫错了，这一轮玩家赢"}。` });
+    showdown(g);
+  }
+  function callElement(g, element) { return act(g, "dealer", { type: "callElement", element }); }
+  function skipCall(g) { return act(g, "dealer", { type: "noCall" }); }
+  function callState(g, side) {
+    const c = g.dealerCall || {};
+    return { enabled: !!c.enabled, used: !!c.used, round: c.round == null ? null : c.round, element: c.element || null,
+      correct: c.correct == null ? null : c.correct, available: canCall(g),
+      revealed: side === "player" ? clone(c.revealed || []) : [] };
+  }
+
   /* 7. 不亮牌，直接判胜负、结算 */
   function showdown(g) {
     const d = g.sides.dealer, p = g.sides.player;
     const pick = (x) => ({ bet: x.bet, pot: x.pot, chips: x.chips, infinite: x.infinite });
-    const out = settle(score(p.card, d.card, g.weather), { dealer: pick(d), player: pick(p) }, { allIn: g.allIn, last: g.round >= g.rounds });
+    const call = g.dealerCall && g.dealerCall.pending;
+    // 叫牌的一轮不比分：叫对按庄家赢、叫错按玩家赢，普通赔率（同差 1，只拿底池）
+    const diff = call ? (call.correct ? -1 : 1) : score(p.card, d.card, g.weather);
+    const out = settle(diff, { dealer: pick(d), player: pick(p) }, { allIn: g.allIn, last: g.round >= g.rounds });
     SIDES.forEach(k => { g.sides[k].chips = out.after[k].chips; g.sides[k].pot = out.after[k].pot; });
     const res = { r: g.round, weather: g.weather, allIn: g.allIn, outcome: out.winner || "tie", winner: out.winner, tier: out.tier, extra: out.extra, pot: out.pot, bets: { dealer: d.bet, player: p.bet } };
     if (out.refund) res.refund = true;
     if (out.rollover) res.rollover = true;
+    if (call) {
+      g.dealerCall.pending = null;
+      res.call = { element: call.element, correct: call.correct };
+      if (call.correct) {
+        // 叫对：庄家收回这一轮的层牌，之后还能再出
+        d.hand.push(call.layer);
+        const h = d.history[d.history.length - 1];
+        if (h && h.r === g.round) h.returned = true;
+        note(g, { t: "callReturn", by: "dealer", to: "dealer", card: call.layer, text: `叫对了：你收回了这一轮出的〔${cardName(call.layer)}〕。` });
+        note(g, { t: "callReturn", by: "dealer", text: "庄家收回了这一轮出的层牌（回到手上，之后还能再出）。" });
+      } else {
+        // 叫错：庄家这一轮的层牌亮给玩家
+        g.dealerCall.revealed.push({ r: g.round, layer: call.layer });
+        note(g, { t: "callReveal", by: "dealer", to: "player", card: call.layer, text: `庄家叫错了：庄家这一轮出的是〔${cardName(call.layer)}〕。` });
+      }
+    }
     closeRound(g, res);
   }
   /** 弃牌：立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份），对方拿走整个底池 */
@@ -895,6 +956,7 @@
       loan: { unit: CC_CONFIG.loan.unit, repay: CC_CONFIG.loan.repay }, loanAsk: g.loanAsk ? g.loanAsk.slice() : null,
       pot: g.sides.dealer.pot + g.sides.player.pot + g.sides.dealer.bet + g.sides.player.bet,
       normalUsed: g.normalUsed,
+      dealerCall: callState(g, side), dealerCallUsed: !!(g.dealerCall && g.dealerCall.used),
       me: Object.assign(pub(me), { hand: me.hand.slice(), card: me.card, history: clone(me.history), discards: clone(me.discards) }),
       opp: Object.assign(pub(op), { handCount: op.hand.length, played: !!op.card, discardCount: op.discards.length }),
       // window：跟注后的追加窗口开着（n 第几个、by 谁跟的注、sec 几秒、passed 自己放弃追加了没有；对方放没放弃不写）
@@ -952,7 +1014,7 @@
   const api = {
     CC_CONFIG, SIDES, other, cardName, weatherName, sideName, isElement,
     chartScore, weatherScore, score, scoreParts, chart, cardChart, tierOf, extraOf, minBetOf, settle, repayOf,
-    newGame, toAct, legal, act, closeWindow, view, spareElements, resultText, casino, makeRng, hashSeed, shuffle, bet
+    newGame, toAct, legal, act, closeWindow, canCall, callElement, skipCall, callState, view, spareElements, resultText, casino, makeRng, hashSeed, shuffle, bet
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.CounterCards = api;
