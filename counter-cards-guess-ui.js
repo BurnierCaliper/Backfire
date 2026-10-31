@@ -16,10 +16,15 @@
  * 赌命桌（startLife）：押注的角色只给名字——界面根本拿不到坚毅，所以不管还剩多少，按钮、提示、能押的格子都一模一样
  *   （不会变灰、不会写「坚毅不足」、不会少几个选项）。每格写固定代价「押上 1 点坚毅」（规则文字）；结算横幅只写「坚毅受创」，
  *   不写扣了多少、还剩多少。扣坚毅、发奖、真死由接进来的那一边做（opt.settle），横幅只照它说的写「永久死亡」。
+ * 赌场桌（#528，casino-ui.js 打开，长线养成 / 本机跑团的赌场）：打的是钱包里坐着的那一手（opt.game，钱在 casino.js），赌场里的一局就是一手。
+ *   顶栏写桌子、买入（含牌局里从钱包补的）和「离桌」，没有换桌 / 回到标题；结算横幅「再来一手 / 离桌」交回打开牌桌的模式
+ *   （再来一手 = 离桌结算、同一张桌子同样买入再坐下，再交入场费）；每走一步叫 casino.onChange（模式存档）。
+ *   庄家是赌场（筹码无限，不用做决定）；桌上不够这一轮的最低注时规则层先从钱包补（记录里写「从钱包补了 N 枚到桌上」）。
  * 页面骨架在 game.html 的 #scr-ccg；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsGuessUI.open()                                         打开设置页（选桌）
  *   CounterCardsGuessUI.start({ table: "street", chips: 50, seed, deals, fast })   直接坐下开一手（deals：测试用，按顺序指定每一手的三张牌；fast：结算前不停，测试用）
+ *   CounterCardsGuessUI.start({ game, side, casino: { label, againText, leaveTitle, onChange, onLeave, onAgain }, fast })   赌场桌（casino-ui.js 打开）
  *   CounterCardsGuessUI.startLife({ seat: { id, name }, settle(bill) → { dead, notes }, back(), seed, deals, fast })   坐上赌命桌
  */
 (function (root) {
@@ -75,9 +80,10 @@
   const SETUP = { table: null };
   let S = null;   // { table, chips, seed, n（第几手）, hand, draft（这一轮还没交的押注 { 结果: 押多少 }）, msg, banner（这一手结算过了：账记了、该弹横幅了）, last（上次画的，放动画用）, history, deals,
                   //   life（赌命桌才有：{ seat: { id, name }, settle, back, outcome（这一手结算后接入层说的：{ dead, notes }）, dead }）,
+                  //   casino（赌场桌才有，#528：{ label, againText, leaveTitle, onChange, onLeave, onAgain }）, side（赌场桌：你坐的位置 id）,
                   //   settle（结算前的过渡，见 settleStart；放着的时候横幅先不画）, fast（测试用：结算前不停）}
   let bound = false;
-  const meId = () => (S && S.life ? S.life.seat.id : ME);
+  const meId = () => (S && S.life ? S.life.seat.id : S && S.side ? S.side : ME);
 
   function show(name) {
     const setup = $("ccg-setup"), game = $("ccg-game");
@@ -102,9 +108,11 @@
     renderSetup();
     show("setup");
   }
-  /** 坐下：opt.table（桌子 id）、opt.chips（带上桌的筹码，默认 startChips）、opt.seed、opt.deals（测试用） */
+  /** 坐下：opt.table（桌子 id）、opt.chips（带上桌的筹码，默认 startChips）、opt.seed、opt.deals（测试用）；
+   *  opt.game：赌场桌（casino-ui.js 打开，见 startCasino） */
   function start(opt) {
     opt = opt || {};
+    if (opt.game) return startCasino(opt);
     bind();
     const table = G().tableOf(opt.table || SETUP.table).id;
     if (table === G().GUESS_CONFIG.life.id) throw new Error("赌命桌从长线养成 / 跑团进（startLife）");
@@ -117,6 +125,23 @@
     if (!deal()) { renderSetup(); show("setup"); return null; }
     render();
     return S.hand;
+  }
+  /** 赌场桌（#528，casino-ui.js 打开）：opt.game = 钱包里坐着的那一手（casino.js · sit 开的，入场费、买入都在钱包那边算过了），
+   *  opt.side = 你坐的位置；opt.casino = { label（顶栏，每次重画都读：买入含牌局里从钱包补的）, againText, leaveTitle,
+   *  onChange（每走一步：模式存档）, onLeave（离桌）, onAgain（再来一手）}；opt.fast（测试用）。
+   *  这一手已经打完了（存档读回来、面板上点「看总结算」）就直接是结算横幅 */
+  function startCasino(opt) {
+    bind();
+    dropSettle();
+    const h = opt.game, side = String(opt.side != null ? opt.side : (h.casino && h.casino.side) || ME);
+    if (!h.players.some(p => p.id === side)) throw new Error("这一手里没有你坐的位置");
+    S = { table: h.table.id, chips: 0, seed: h.seed, n: 1, hand: h, draft: {}, msg: "", banner: false, last: { shown: Object.assign({}, h.shown) }, anim: { deal: true },
+      history: [], deals: [], life: null, settle: null, fast: !!opt.fast, casino: opt.casino || {}, side };
+    sync();
+    enterScreen();
+    show("game");
+    render();
+    return h;
   }
   /** 坐上赌命桌（长线养成 / 跑团接进来）：
    *  opt.seat = { id, name }（押注的角色：只要 id 和名字，不带坚毅——界面根本拿不到）；
@@ -158,7 +183,7 @@
   }
   /** 这一手的筹码写回带上桌的筹码；结算了记一笔。赌命桌：结算了把账交给接入的那一边（扣坚毅、发奖、真死），记下它说的结果 */
   function sync() {
-    const h = S.hand, me = h.players[0];
+    const h = S.hand, me = h.players.find(p => p.id === meId()) || h.players[0];
     if (!S.life) S.chips = me.chips;
     if (!h.over || S.banner) return;
     S.banner = true;
@@ -205,6 +230,13 @@
     sync();
     if (S.hand.over) settleStart(pre);
     render();
+    // 赌场桌（#528）：这一手走了一步（开下一轮时可能还从钱包补了筹码），交给模式存档
+    if (S.casino && S.casino.onChange) S.casino.onChange(S.hand);
+  }
+  /** 赌场桌的「离桌」「再来一手」：交给打开牌桌的模式（casino-ui.js）；没做成（筹码不够再来一手）把原因写在操作栏 */
+  function casinoHook(name) {
+    if (!S || !S.casino || typeof S.casino[name] !== "function") return;
+    try { S.casino[name](); } catch (e) { if (S) { S.msg = e.message; render(); } }
   }
 
   /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#525）：翻开的牌一张一步 → 判定中 → 结算横幅 ----------
@@ -293,18 +325,20 @@
       <p class="cc-tagline">黑市玩法 · 庄家盖三张牌，分三轮押这一手的得分</p>
       <div class="cc-pick"><span class="cc-pick-label">坐哪张桌</span>${ts.map(opt).join("")}</div>
       <p class="cc-hint">本地试玩：坐下拿 ${startChips()} 枚筹码，一手接一手，筹码带到下一手；交不起入场费就重新坐下。庄家是 AI（筹码无限）。</p>
-      ${msg}${rulesHtml()}
+      ${msg}${rulesHtml(true)}
       <div class="cc-go"><button type="button" class="cc-btn" data-ccg="title">回到标题</button><button type="button" class="cc-btn primary" data-ccg="start">坐下</button></div>
     </div>`;
   }
-  function rulesHtml() {
-    const GC = G().GUESS_CONFIG, C = CC().CC_CONFIG, life = !!(S && S.life);
-    const t = G().tableOf(life ? GC.life.id : (SETUP.table || (S && S.table)));
+  /** 规则说明：赌命桌写押坚毅；赌场桌（#528）读坐着的那张桌子，另写入场费从钱包交、桌上不够先从钱包补；setup = 设置页（读选中的练习桌） */
+  function rulesHtml(setup) {
+    const GC = G().GUESS_CONFIG, C = CC().CC_CONFIG, life = !!(S && S.life), casino = !setup && !!(S && S.casino);
+    const t = G().tableOf(life ? GC.life.id : casino ? S.table : (SETUP.table || (S && S.table)));
     const pct = Math.round(C.pctStep * 100);
     const guard = life
       ? `<li><b>押坚毅</b>：每格押上固定的坚毅生命——第一轮 ${t.stake[0]} 点、第二轮 ${t.stake[1]} 点、第三轮 ${t.stake[2]} 点；不收入场费；第一轮没押，后两轮不能再押。押输了坚毅受创，坚毅扣光即真正死亡。押坚毅永远能下。</li>
          <li><b>奖品</b>：押中的格子，押上的点数 × 赔率（向下取整）× ${GC.life.kuizhiPerPoint} 奎支；单格赔率 ${GC.life.items.map(x => `≥ ${x.minOdds} 另给${esc(itemName(x.item))}`).join("、")}。</li>`
-      : `<li><b>防白看</b>：每手入场费 ${t.entry} 枚（不退）；每格最低注第一轮 ${t.minBet[0]}、第二轮 ${t.minBet[1]}、第三轮 ${t.minBet[2]}；第一轮没押，后两轮不能再押。</li>`;
+      : `<li><b>防白看</b>：每手入场费 ${t.entry} 枚（不退）；每格最低注第一轮 ${t.minBet[0]}、第二轮 ${t.minBet[1]}、第三轮 ${t.minBet[2]}；第一轮没押，后两轮不能再押。</li>`
+        + (casino ? `<li><b>赌场</b>：这里的一局就是一手。入场费坐下时从筹码钱包交给赌场；桌上不够这一轮每格的最低注时，先自动从钱包补到够押一格（算进买入），钱包空了只能不押；离桌时桌上剩下的按倍率回钱包。</li>` : "");
     return `<details class="cc-rules"><summary>${esc(life ? GC.life.name : GC.name)} 规则</summary><ul>
       <li><b>牌</b>：庄家随机抽 1 张元素（${C.elements.length} 选 1）、1 张天气（${C.weathers.length} 选 1）、1 张层牌（${C.layers.length} 选 1），都盖在桌上。猜这一手的得分：${GC.results.map(G().label).join(" / ")}（超出按两头算）。</li>
       <li><b>计分</b>：和 ${esc(C.name)} 一样——克制 +1、劣势 −1、其余 0，天气修正每 ${pct}% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外打装甲另 +1）。相位只把克制分翻倍（+1→+2、−1→−2，0 不变），不加天气修正。</li>
@@ -348,6 +382,12 @@
         + `<span class="cc-role"><b>${esc(S.life.seat.name)}</b>下注 · 第 ${S.n} 手 · 庄家：${esc(S.life.dealer || v.table.dealer)}</span>`
         + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-ccg="leave">离桌</button>`;
     }
+    // 赌场桌（#528）：桌子、买入（含牌局里从钱包补的）和「离桌」；不能换桌，也没有「回到标题」
+    if (S.casino) {
+      return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(G().GUESS_CONFIG.name)}</b><span class="cc-round">${status}</span>`
+        + `<span class="cc-role">${esc(S.casino.label || "赌场")} · 庄家：赌场</span>`
+        + `<span class="cc-spacer"></span>${btn("leave", "离桌", { title: S.casino.leaveTitle || "" })}`;
+    }
     return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(G().GUESS_CONFIG.name)}</b><span class="cc-round">${status}</span>`
       + `<span class="cc-role">${esc(v.table.name)} · 第 ${S.n} 手 · 庄家：AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-ccg="setup">换桌</button><button type="button" class="cc-btn" data-ccg="title">回到标题</button>`;
@@ -361,7 +401,8 @@
       const face = val ? faceOf(k, val, cls) : CUI().backHtml({ cls: "cc-down" + (deal ? " cc-deal" : ""), delay: deal ? i : null });
       return `<div class="ccg-slot${val ? " up" : ""}" data-slot="${k}"><small>${esc(kinds[k])}</small>${face}</div>`;
     };
-    const dealer = S.life ? `<div class="cc-who"><b>${esc(S.life.dealer || v.table.dealer)}</b><small>${S.life.dealer ? "坐庄" : "黑市 NPC"}</small></div>` : `<div class="cc-who"><b>庄家</b><small>AI · 筹码无限</small></div>`;
+    const dealer = S.life ? `<div class="cc-who"><b>${esc(S.life.dealer || v.table.dealer)}</b><small>${S.life.dealer ? "坐庄" : "黑市 NPC"}</small></div>`
+      : `<div class="cc-who"><b>庄家</b><small>${S.casino ? "赌场" : "AI"} · 筹码无限</small></div>`;
     // 结算前的过渡（#525）：判定中三张牌轻轻抖，「判定中」胶带贴在三张牌下沿
     const judging = !!(S.settle && S.settle.phase === "judge");
     let seat;
@@ -412,7 +453,8 @@
     const o = betOpt(v);
     let p = `第 ${v.round} 轮下注：${UI_CONFIG.roundText[v.round] || ""}，还剩 ${v.board.N} 种组合。`;
     if (S.life) p += o ? `点赔率表上开盘的格子押上坚毅：这一轮每格押上 ${o.stake} 点坚毅（固定代价），可以押好几格；押注按现在的赔率锁定。` : "";
-    else p += o ? `点赔率表上开盘的格子押注，可以押好几格，每格至少 ${o.min} 枚；押注按现在的赔率锁定。` : `你的筹码不够这一轮的最低注 ${v.minBet} 枚，只能不押。`;
+    else p += o ? `点赔率表上开盘的格子押注，可以押好几格，每格至少 ${o.min} 枚；押注按现在的赔率锁定。`
+      : S.casino ? `桌上的筹码不够这一轮的最低注 ${v.minBet} 枚，钱包里的也补不上，只能不押。` : `你的筹码不够这一轮的最低注 ${v.minBet} 枚，只能不押。`;
     if (v.round === 1) p += S.life ? "第一轮不押，这一手后面都不能再押。" : "第一轮不押，这一手后面都不能再押（入场费不退）。";
     const keys = Object.keys(S.draft).map(Number).sort((a, b) => a - b);
     const lines = keys.map(r => {
@@ -479,15 +521,18 @@
     const tone = me.net > 0 ? "win" : me.net < 0 ? "lose" : "";
     const line = !me.slips.length ? "这一手你没押。" : hits.length ? `押中 ${hits.length} 格，连本带利拿回 ${me.won} 枚。` : "没押中。";
     const entry = v.table.entry, can = S.chips >= entry;
-    return `<div class="cc-banner-card ccg-result ${tone}" role="dialog" aria-label="第 ${S.n} 手结算">
-      <small>第 ${S.n} 手结算 · ${esc(v.table.name)}</small>
+    // 赌场桌（#528）：「再来一手 / 离桌」交回模式（再来一手 = 离桌结算、同一张桌子同样买入再坐下，再交入场费）；桌上剩的离桌时回钱包
+    const btns = S.casino ? btn("casinoAgain", esc(S.casino.againText || "再来一手"), { primary: true }) + btn("leave", "离桌", { title: S.casino.leaveTitle || "" })
+      : `${btn("again", can ? `再来一手（入场费 ${entry}）` : `筹码不够入场费 ${entry} 枚`, { primary: can, disabled: !can })}${btn("setup", can ? "换桌" : "重新坐下", { primary: !can })}${btn("title", "回到标题")}`;
+    return `<div class="cc-banner-card ccg-result ${tone}" role="dialog" aria-label="${S.casino ? "这一手" : `第 ${S.n} 手`}结算">
+      <small>${S.casino ? "这一手" : `第 ${S.n} 手`}结算 · ${esc(v.table.name)}</small>
       <h3>结果 ${esc(G().label(r.score))}</h3>
       ${cards}
       <p class="cc-tier">${esc(how)}</p>
       <p class="cc-tier">${esc(line)}</p>
-      <p class="cc-deltas"><span class="${me.net > 0 ? "up" : me.net < 0 ? "down" : ""}">这一手 ${signed(me.net)} 枚</span><span>手上 ${S.chips} 枚</span></p>
-      <p class="cc-quiet">净输赢含入场费 ${me.paid} 枚。</p>
-      <div class="cc-btns">${btn("again", can ? `再来一手（入场费 ${entry}）` : `筹码不够入场费 ${entry} 枚`, { primary: can, disabled: !can })}${btn("setup", can ? "换桌" : "重新坐下", { primary: !can })}${btn("title", "回到标题")}</div>
+      <p class="cc-deltas"><span class="${me.net > 0 ? "up" : me.net < 0 ? "down" : ""}">这一手 ${signed(me.net)} 枚</span><span>${S.casino ? "桌上" : "手上"} ${S.chips} 枚</span></p>
+      <p class="cc-quiet">净输赢含入场费 ${me.paid} 枚${S.casino ? "（坐下时从钱包交给了赌场）" : ""}。</p>
+      <div class="cc-btns">${btns}</div>
     </div>`;
   }
 
@@ -520,7 +565,8 @@
       case "start": start({ table: SETUP.table }); return;
       case "setup": open(); return;
       case "title": toTitle(); return;
-      case "leave": leaveLife(); return;
+      case "leave": if (S && S.casino) casinoHook("onLeave"); else leaveLife(); return;   // 赌场桌：离桌结算回钱包（#528）
+      case "casinoAgain": casinoHook("onAgain"); return;                                    // 赌场桌：同一张桌子再来一手（再交入场费）
     }
     if (!S || !S.hand) return;
     switch (d.ccg) {

@@ -1,5 +1,6 @@
 /* 赌场界面（#487）：钱包、兑换、选桌坐下；坐下以后交给这张桌子那种玩法的牌桌：High Flux（counter-cards-ui.js）、
- * Flux Duel（flux-duel-ui.js）、Flux Hold'em（flux-holdem-ui.js）（#488；桌子按玩法分组，玩法名读各自的配置）。
+ * Flux Duel（flux-duel-ui.js）、Flux Hold'em（flux-holdem-ui.js）（#488）、猜大猜小（counter-cards-guess-ui.js，#528）
+ * （桌子按玩法分组，玩法名读各自的配置）。
  * 长线养成（rogue-ui.js）、跑团本机（trpg-ui.js）用同一份；钱的规则在 casino.js，各模式把自己的钱包、奎支接进来（adapter）。
  *
  *   CasinoUI.html(v, o)          赌场面板的 HTML。v = 模式给的 casinoView：{ chips, sellable, kuizhi, tables, buy, sell, game }；
@@ -20,19 +21,22 @@
     games: {
       highflux: "庄家是 AI，筹码无限。",
       duel: "两人对决：你坐第 1 轮先手，对手是赌场的 AI，筹码无限。",
-      holdem: "多人公共牌桌：你坐第一个座位，其余座位是 AI，开局筹码和你的买入一样多（赌场出）。"
+      holdem: "多人公共牌桌：你坐第一个座位，其余座位是 AI，开局筹码和你的买入一样多（赌场出）。",
+      guess: "庄家是赌场，筹码无限：盖三张牌，你分三轮押这一手的得分（−2 … +2）。这里的一局就是一手。"
     },
     rule: "赠送筹码只能下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码，能卖。入场费每开一局收一次、不退。"
-      + "牌局里桌上的筹码不够时，先自动从钱包补到够用（先拿赠送的），算进买入；钱包空了才问借不借。",
+      + "牌局里桌上的筹码不够时，先自动从钱包补到够用（先拿赠送的），算进买入；钱包空了才问借不借（猜大猜小没有借贷：补不满只能不押）。",
     leaveTitle: "离桌：桌上剩下的筹码按倍率回钱包（打到一半离桌，已经押进底池的不退）"
   };
   const K = () => root.Casino;
   const AI = () => root.CounterCardsAI;
-  /** 坐着的这一局交给哪张牌桌（#488）：都有赌场模式（顶栏「离桌」、总结算「再来一局 / 离桌」、每走一步叫 onChange） */
+  /** 坐着的这一局交给哪张牌桌（#488）：都有赌场模式（顶栏「离桌」、总结算「再来一局 / 离桌」、每走一步叫 onChange）。
+   *  again：「再来一局」按钮上的字（猜大猜小的一局就是一手，#528） */
   const TABLE_UI = {
     highflux: { ui: () => root.CounterCardsUI, opt: () => ({ side: "player" }) },
     duel: { ui: () => root.FluxDuelUI, opt: (g) => ({ side: g.casino.side }) },
-    holdem: { ui: () => root.FluxHoldemUI, opt: (g) => ({ human: g.casino.side }) }
+    holdem: { ui: () => root.FluxHoldemUI, opt: (g) => ({ human: g.casino.side }) },
+    guess: { ui: () => root.CounterCardsGuessUI, opt: (g) => ({ side: g.casino.side }), again: "再来一手" }
   };
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[ch]);
   const num = (n) => String(Math.round((Number(n) || 0) * 1000) / 1000);
@@ -46,14 +50,15 @@
   }
   const levelName = (lv) => (AI() && AI().LEVEL_NAMES ? AI().LEVEL_NAMES[lv] : lv) || lv;
 
-  /** 一张桌子：倍率、最低买入、入场费（都写成桌上几枚 = 钱包几枚）、庄家 / 对手 AI（Hold'em 写几人桌）、买入多少、坐下 */
+  /** 一张桌子：倍率、最低买入、入场费（都写成桌上几枚 = 钱包几枚）、庄家 / 对手 AI（Hold'em 写几人桌；猜大猜小写每轮每格最低注）、买入多少、坐下 */
   function tableHtml(t, v) {
     const want = Math.max(t.minBuyIn, Math.floor(Number(draft.buyIn[t.id]) || t.minBuyIn));
     const need = t.minBuyInChips + t.entryFeeChips;
     const short = v.chips.total < need;
     const per = t.perChip > 0 ? Math.round(1 / t.perChip * 1000) / 1000 : 0;
     const lv = levelName(t.difficulty);
-    const who = t.game === "holdem" ? `${t.players} 人桌 · 对手：${t.players - 1} 名${lv} AI` : t.game === "duel" ? `对手：${lv} AI` : `庄家：${lv} AI`;
+    const who = t.game === "holdem" ? `${t.players} 人桌 · 对手：${t.players - 1} 名${lv} AI` : t.game === "duel" ? `对手：${lv} AI`
+      : t.game === "guess" ? `庄家：赌场 · 每格最低注 ${(t.minBet || []).join(" / ")} 枚` : `庄家：${lv} AI`;
     return `<div class="cs-table" data-table="${esc(t.id)}">
       <div class="cs-tname"><b>${esc(t.short || t.name)}</b><small>${esc(who)}</small></div>
       <div class="cs-tmeta">桌上每枚 ${t.rate} 奎支（钱包 1 枚 = 桌上 ${num(per)} 枚）· 最低买入 ${t.minBuyIn} 枚（${num(t.minBuyInChips)} 枚筹码）· 入场费 ${t.entryFee} 枚（${num(t.entryFeeChips)} 枚筹码，每局一次）</div>
@@ -142,12 +147,12 @@
       // 顶栏写总买入：牌局里从钱包补了就跟着加上（#520；牌桌每次重画都读一次）
       get label() { return `${t.name} · 买入 ${g.casino.buyIn} 枚`; },
       leaveTitle: UI_CONFIG.leaveTitle,
-      againText: `再来一局（买入 ${buyIn} 枚 + 入场费 ${t.entryFee} 枚）`,
+      againText: `${T.again || "再来一局"}（买入 ${buyIn} 枚 + 入场费 ${t.entryFee} 枚）`,
       onChange: () => adapter.saved(),
       onLeave: leave,
       onAgain: () => {
         msg = lines(adapter.leave());
-        try { adapter.sit(t.id, buyIn); } catch (e) { msg = `${msg} 没能再来一局：${e.message}`; adapter.back(); return; }
+        try { adapter.sit(t.id, buyIn); } catch (e) { msg = `${msg} 没能${T.again || "再来一局"}：${e.message}`; adapter.back(); return; }
         play(adapter);
       }
     } }));
