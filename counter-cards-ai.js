@@ -160,6 +160,11 @@
     const U = oppUniverse(v);
     const h = (v.me.history || []).find(x => x.r === res.r);
     if (!h || res.outcome === "fold") return U;
+    // 叫牌的一轮（#503）不比分：玩家叫错时看到了层牌，就是它；其余推不出来
+    if (res.call) {
+      const rv = v.side === "player" && v.dealerCall && (v.dealerCall.revealed || []).find(x => x.r === res.r);
+      return rv ? [rv.layer] : U;
+    }
     const want = res.outcome === "tie" ? 0 : res.winner === v.side ? 1 : -1;
     return U.filter(o => {
       const s = myScore(v, h.card, o, res.weather);
@@ -170,7 +175,8 @@
   /** 困难：整局的结果一起看，枚举「对方每一轮各出了哪张（不重复）」，没被用掉的牌按出现次数算概率 */
   function beliefHard(v) {
     const U = oppUniverse(v);
-    const past = (v.results || []).map(res => candidates(v, res));
+    // 庄家叫对收回的那一轮（#503）：那张层牌回到手上，不算用掉
+    const past = (v.results || []).filter(res => !(v.side === "player" && res.call && res.call.correct)).map(res => candidates(v, res));
     const counts = {}; U.forEach(c => { counts[c] = 0; });
     const used = new Set();
     let total = 0;
@@ -670,6 +676,26 @@
     return clampN(Math.ceil(gap / o.step) * o.step, o.min, o.max);
   }
 
+  /* ---------- 庄家叫牌（#503）：保守，偶尔用 ----------
+   * 推理里剩下的候选少（后几轮）或者这一轮保留了对玩家有利的天气时才考虑；按概率最高的叫，命中率不够就不叫，再掺随机。
+   * 简单不叫 */
+  const CALL_AI = { easy: 0, normal: 0.35, hard: 0.6 };
+  function dealerCall(ctx) {
+    const v = ctx.v, rng = ctx.rng, base = CALL_AI[ctx.level] || 0;
+    const no = { type: "noCall" };
+    if (!base) return no;
+    const bel = ctx.belief || {};
+    const els = Object.keys(bel).filter(k => bel[k] > 0).sort((a, b) => bel[b] - bel[a]);
+    if (!els.length) return no;
+    const top = bel[els[0]], late = v.round >= v.rounds - 1 || els.length <= 3;
+    const w = playWeather(v), kept = (v.log || []).some(e => e.r === v.round && e.t === "dw" && e.op === "keep");
+    // 保留的天气对玩家有利（玩家手里平均得分 > 0 的元素多）：多半是想骗玩家，叫一下
+    const favor = kept && w && conf().elements.filter(el => conf().layers.some(ly => CC().score(el, ly, w) > 0)).length >= 4;
+    let p = base * (late ? 1 : favor ? 0.6 : 0.15) * Math.min(1, top * 3);
+    if (rng() >= p) return no;
+    return { type: "callElement", element: els[0] };
+  }
+
   /* ---------- 入口 ---------- */
   function decide(view, level, rng) {
     if (!view || !view.legal || !view.legal.length) return null;
@@ -685,6 +711,7 @@
       case "bet1": case "bet2": a = view.betting && view.betting.window ? windowAct(ctx) : bet(ctx); break;
       case "weather": a = playerWeather(ctx); break;
       case "normal": a = playerNormal(ctx); break;
+      case "dealerCall": a = dealerCall(ctx); break;
     }
     return safe(view, a, rng);
   }
