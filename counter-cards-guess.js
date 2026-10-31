@@ -28,6 +28,10 @@
  *   CounterCardsGuess.newHand({ table: GUESS_CONFIG.life.id, players: [{ id: "ruby", name: "瑞比" }] })   → 押坚毅的一手（只要 id 和名字）
  *   CounterCardsGuess.act(h, "ruby", { type: "bet", bets: { "0": true } })   → 每格押上这一轮的固定点数
  *   CounterCardsGuess.lifeBill(h, "ruby")                    → 结算后给接入的那一边的账（押输了几点、奖品）：由它去扣坚毅、发奖；界面不用
+ * 赌场桌（#528，钱在 casino.js：长线养成、本机跑团的赌场）：
+ *   CounterCardsGuess.newHand({ table: "guess-hall", players: [{ id: "me", name: "你", chips: 买入 }], entryPaid: true })
+ *                                                            → 赌场坐下时已经从钱包收过入场费（entryPaid），这一手只记在 paid 里、不从桌上的筹码扣
+ *   CounterCardsGuess.setTopUp(fn)                           → 桌上不够这一轮的最低注时先从钱包补（casino.js 加载时注入 Casino.refill，同 #520）
  */
 (function (root) {
   "use strict";
@@ -45,11 +49,26 @@
     phase: { weather: "phase", mult: 2 },   // 相位：只把克制分翻倍，不加天气修正
     entry: 2,                          // 每局入场费（不退）
     minBet: [2, 4, 8],                 // 第 1–3 轮每格最低注
-    // 桌子：mult = 倍率，入场费和每轮最低注都 × 倍率（数值是占位，筹码钱包接上以后再定）
+    // 桌子（标题「本地玩法」里的练习桌，筹码不进任何钱包）：mult = 倍率，入场费和每轮最低注都 × 倍率（数值是占位）
     tables: [
       { id: "street", name: "街边桌", mult: 1 },
       { id: "backroom", name: "里屋", mult: 5 }
     ],
+    // 赌场桌（#528，主人 10/31；钱照 #487，在 casino.js）：长线养成、本机跑团的赌场能坐，用筹码钱包。
+    // 人坐 seat（名字 name），庄家是赌场（筹码无限，不用做决定）；赌场里的一局就是一手。
+    // 照另外三种的赌场桌（CC_CONFIG.casino.tables、DUEL_CONFIG.casino……）：倍率 rate = 桌上每枚折多少奎支、最低买入 minBuyIn、
+    // 入场费 entryFee（桌上的枚数，坐下时由赌场从钱包收，每局一次、不退；这一手不再从桌上的筹码里扣第二次）。
+    // 每轮每格最低注照上面的 minBet（桌上的枚数，赌场桌不再 × mult：桌子之间只差每枚折多少奎支）。
+    // 数值先照 High Flux 的三张赌场桌占位，试玩再调；id 全赌场不重复（casino.js 按 id 认桌子）
+    casino: {
+      seat: "me",
+      name: "你",
+      tables: [
+        { id: "guess-alley", name: "后巷小桌", rate: 10, minBuyIn: 20, entryFee: 2 },
+        { id: "guess-hall", name: "大厅", rate: 50, minBuyIn: 30, entryFee: 2 },
+        { id: "guess-vip", name: "贵宾室", rate: 200, minBuyIn: 50, entryFee: 2 }
+      ]
+    },
     // 赌命版（黑市 NPC 当庄，#489 正文 + 主人 10/30 的补充）：押的是坚毅生命。规则层根本不读坚毅——能不能押、能押什么、
     // 画面上写什么，都和角色还剩多少坚毅无关（剩下的比押的少也照样能押：不然试几次就推得出还剩多少）。
     // 每格押上固定代价（第 1–3 轮各几点，规则文字可以写明）；不收入场费；第一轮没押的后两轮照样不能押。
@@ -138,10 +157,20 @@
     const L = GUESS_CONFIG.life;
     return { id: L.id, name: L.name, dealer: L.dealer, life: true, mult: 1, entry: 0, stake: L.stake.slice(), minBet: L.stake.slice(), odds: L.odds.slice() };
   }
-  /** 普通桌（筹码）；赌命桌不在这里，用 tableOf(GUESS_CONFIG.life.id) */
+  /** 赌场桌（#528）：入场费是这张桌子的 entryFee（坐下时赌场从钱包收），每轮每格最低注照 minBet（桌上的枚数）；
+   *  另带倍率 rate（桌上每枚折多少奎支）、最低买入 minBuyIn。赔率、开盘照普通桌 */
+  function casinoTableInfo(t) {
+    const G = GUESS_CONFIG;
+    return { id: t.id, name: t.name, life: false, casino: true, mult: 1, entry: Math.max(0, Math.floor(Number(t.entryFee) || 0)),
+      minBet: G.minBet.slice(), odds: G.odds.slice(), rate: t.rate, minBuyIn: t.minBuyIn };
+  }
+  const casinoTables = () => (GUESS_CONFIG.casino && GUESS_CONFIG.casino.tables) || [];
+  /** 普通桌（筹码，本地练习）；赌命桌、赌场桌不在这里：赌命桌用 tableOf(GUESS_CONFIG.life.id)，赌场桌在 GUESS_CONFIG.casino（casino.js 列出来） */
   function tables() { return GUESS_CONFIG.tables.map(tableInfo); }
   function tableOf(id) {
     if (id && id === GUESS_CONFIG.life.id) return lifeTable();
+    const c = id ? casinoTables().find(x => x.id === id) : null;
+    if (c) return casinoTableInfo(c);
     const t = GUESS_CONFIG.tables.find(x => x.id === (id || GUESS_CONFIG.tables[0].id));
     if (!t) fail("没有这张桌子：" + id);
     return tableInfo(t);
@@ -157,8 +186,10 @@
   }
 
   /* ---------- 开一手 ---------- */
-  /** opt：seed；table（桌子 id，默认第一张；赌命桌是 GUESS_CONFIG.life.id）；players：[{ id, name, chips }]（几名玩家同桌，各押各的；
-   *  赌命桌只要 id 和名字——不收、也不看坚毅）；deal（测试用：指定三张牌 { element, weather, layer }） */
+  /** opt：seed；table（桌子 id，默认第一张；赌命桌是 GUESS_CONFIG.life.id，赌场桌是 GUESS_CONFIG.casino.tables 的 id）；
+   *  players：[{ id, name, chips }]（几名玩家同桌，各押各的；赌命桌只要 id 和名字——不收、也不看坚毅）；
+   *  entryPaid（赌场桌：坐下时 casino.js 已经从钱包收过入场费——只记在 paid 里，净输赢照样含入场费，不从带上桌的筹码里扣）；
+   *  deal（测试用：指定三张牌 { element, weather, layer }） */
   function newHand(opt) {
     opt = opt || {};
     needCC();
@@ -179,21 +210,23 @@
       slips: []          // 押注：{ round, result, amount（赌命桌 = 押上几点坚毅）, odds（下注那一刻锁定）}
     }));
     players.forEach((p, i) => { if (players.findIndex(x => x.id === p.id) !== i) fail("玩家 id 重复：" + p.id); });
-    // 入场费（不退）：交不起的坐不上桌。赌命桌不收
+    // 入场费（不退）：交不起的坐不上桌。赌命桌不收；赌场桌坐下时已经从钱包收过了（entryPaid），这里只记下
+    const prepaid = !!opt.entryPaid && !t.life;
     if (!t.life) players.forEach(p => {
-      if (p.chips < t.entry) fail(`${p.name}的筹码不够入场费 ${t.entry} 枚`);
-      p.chips -= t.entry; p.paid = t.entry;
+      if (!prepaid && p.chips < t.entry) fail(`${p.name}的筹码不够入场费 ${t.entry} 枚`);
+      if (!prepaid) p.chips -= t.entry;
+      p.paid = t.entry;
     });
     const h = {
-      v: 1, seed, table: t,
-      stage: "bet1", round: 1, over: false,
+      v: 1, mode: "guess", seed, table: t,              // mode：赌场按这个认玩法（同 Flux 的对局，casino.js · gameOf）
+      stage: "bet1", round: 1, rounds: GUESS_CONFIG.order.length, over: false,
       secret: deal,                                        // 三张牌（翻开之前谁都看不到，view 里没有）
       shown: { element: null, weather: null, layer: null },   // 翻开的牌
       players, board: null, boards: [], log: [], result: null
     };
     note(h, { t: "open", text: t.life
       ? `${t.name}：${t.dealer}抽了一张元素、一张天气、一张层牌，都盖在桌上。押的是坚毅生命，每格押上固定的点数。`
-      : `${t.name}：庄家抽了一张元素、一张天气、一张层牌，都盖在桌上。入场费 ${t.entry} 枚（不退）。` });
+      : `${t.name}：庄家抽了一张元素、一张天气、一张层牌，都盖在桌上。入场费 ${t.entry} 枚（${prepaid ? "坐下时交给了赌场，" : ""}不退）。` });
     openRound(h, 1);
     return h;
   }
@@ -202,7 +235,29 @@
   /** 这一轮能押的人：第一轮是所有人，后两轮只有第一轮押过的 */
   const eligible = (h) => h.players.filter(p => h.round === 1 || p.in);
 
-  /** 开一轮下注：按翻开的牌现算赔率表；没有开盘的格子（结果已经定了）或者没人能押，直接翻下一张 */
+  /* ---------- 桌上不够时先从钱包补（#528，照 #520）：赌场桌由 casino.js 注入，只补接了钱包的那名玩家 ---------- */
+  let refill = null;
+  /** 注入「补筹码」（casino.js 加载时注入 Casino.refill）：fn(这一手, 玩家 id, 还差几枚) → 补了几枚（已经从钱包拿过来了）；
+   *  只有接了钱包的那一手补得到（赌场桌你坐的那个位置），别的（本地练习）fn 返回 0，照旧只能不押 */
+  function setTopUp(fn) { refill = typeof fn === "function" ? fn : null; }
+  /** 轮到这名玩家这一轮下注、手上不够这一轮每格的最低注：先问注入的钩子补到正好够押一格最低注（钱包不够就有多少补多少）。
+   *  补上来的是这名玩家自己的筹码：加进手上的，另记一共补了多少（topUp），写一行公开记录；不算押注，也不算这一手的输赢。
+   *  只在开一轮下注的时候补（legal / view 不补）；赌命桌押的是坚毅，不补。返回补了几枚 */
+  function topUp(h, p) {
+    if (!refill || h.table.life || h.over) return 0;
+    const gap = minBetOf(h) - p.chips;
+    if (gap <= 0) return 0;
+    const n = Math.max(0, Math.floor(Number(refill(h, p.id, gap)) || 0));
+    if (!n) return 0;
+    p.chips += n;
+    p.topUp = (p.topUp || 0) + n;
+    note(h, { t: "topUp", by: p.id, amount: n,
+      text: `${p.name}从钱包补了 ${n} 枚到桌上${n < gap ? `（钱包只够补这么多，还差 ${gap - n} 枚）` : ""}。` });
+    return n;
+  }
+
+  /** 开一轮下注：按翻开的牌现算赔率表；没有开盘的格子（结果已经定了）或者没人能押，直接翻下一张。
+   *  要押的人手上不够这一轮的最低注时先从钱包补（赌场桌，#528） */
   function openRound(h, r) {
     h.round = r; h.stage = "bet" + r;
     h.board = board(h.shown, h.table.odds);
@@ -213,7 +268,7 @@
     } else if (!eligible(h).length) {
       note(h, { t: "nobody", text: `第 ${r} 轮：第一轮没人押，后面不能再押，直接翻牌。` });
       advance(h);
-    }
+    } else eligible(h).forEach(p => topUp(h, p));
   }
   /** 这一轮都押完了：翻下一张；翻完三张结算 */
   function advance(h) {
@@ -384,7 +439,7 @@
 
   const api = {
     GUESS_CONFIG, label, outcome, tally, oddsOf, payoutOf, board, tables, tableOf, dealOf,
-    newHand, toAct, legal, act, view, lifeBill, prizeText
+    newHand, toAct, legal, act, view, lifeBill, prizeText, setTopUp
   };
   // 配置挂到 High Flux 的 CC_CONFIG 上（同一份对象）
   if (CC() && CC().CC_CONFIG) CC().CC_CONFIG.guess = GUESS_CONFIG;

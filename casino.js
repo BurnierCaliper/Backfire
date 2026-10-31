@@ -1,7 +1,7 @@
 /* 赌场的钱（#487）：筹码钱包、牌桌上的输赢记进钱包
  * 规则层不碰网页。牌局本身是 High Flux（counter-cards.js；赌场桌走 CounterCards.casino.*），
- * 另有 Flux Duel（flux-duel.js）、Flux Hold'em（flux-holdem.js）的赌场桌（#488，见下面 GAMES）；这里只管钱：
- * 筹码从哪来、押上桌、离桌时剩下的怎么回到钱包。三种玩法的钱一样算。
+ * 另有 Flux Duel（flux-duel.js）、Flux Hold'em（flux-holdem.js）的赌场桌（#488）、猜大猜小（counter-cards-guess.js）的赌场桌（#528，见下面 GAMES）；
+ * 这里只管钱：筹码从哪来、押上桌、离桌时剩下的怎么回到钱包。几种玩法的钱一样算。
  *
  * 钱包：每个存档一份（联机时每位玩家各自一份），由各模式自己存（对象原样放进存档）：
  *   { v, gifted, gift, normal, seat }
@@ -21,11 +21,11 @@
  *   Casino.chips(w)                              → { gift, normal, total, seat } 都按枚（可能有零头）
  *   Casino.buy(w, 枚数, 现有奎支) / Casino.sell(w, 枚数)   → 兑换：200 奎支买 1 枚（奎支不够不能买），1 枚卖 190 奎支（只卖普通筹码的整枚）；
  *                                                  奎支由各模式自己扣 / 加（返回的 cost / gain）
- *   Casino.tables() / Casino.games()             → 能坐的赌场桌（三种玩法，High Flux 在前；每张带 game 是哪种玩法）/ 加载了的玩法
+ *   Casino.tables() / Casino.games()             → 能坐的赌场桌（几种玩法，High Flux 在前；每张带 game 是哪种玩法）/ 加载了的玩法
  *   Casino.sit(w, 桌子 id, 买入, { seed })        → 坐上赌场桌开一局（赌场 = AI 或主持人坐庄）：先收入场费（每局一次、不退），
  *                                                  再押买入；返回这一局
  *   Casino.leave(w)                              → 离桌：桌上剩下的筹码按倍率回钱包（输了先扣赠送的），返回结算
- *   Casino.runAi(这一局, 难度)                    → 赌场那几方（AI）走到轮到人
+ *   Casino.runAi(这一局, 难度)                    → 赌场那几方（AI）走到轮到人（猜大猜小的庄家不用做决定：走 0 步）
  *   Casino.topUp(w, 还差几枚)                     → 桌上不够时先从钱包补（#520）：补到够用，钱包不够就有多少补多少；牌局里由规则层自己来问（refill）
  */
 (function (root) {
@@ -48,14 +48,16 @@
   const clone = (o) => JSON.parse(JSON.stringify(o));
   function fail(msg) { throw new Error(msg); }
 
-  /* ---------- 三种玩法都能坐赌场桌（#488）：High Flux、Flux Duel、Flux Hold'em ----------
+  /* ---------- 几种玩法都能坐赌场桌（#488）：High Flux、Flux Duel、Flux Hold'em、猜大猜小（#528） ----------
    * 桌子放在各自玩法的配置里：High Flux 是 CC_CONFIG.casino.tables（#486），Flux Duel 是 DUEL_CONFIG.casino.tables，
-   * Flux Hold'em 是 HOLDEM_CONFIG.casino.tables；桌子 id 全赌场不重复，长线养成 / 跑团的坐桌指令只认桌子 id。
-   * 没加载的玩法（例：只测 High Flux 的页面）就没有它的桌子。钱（买入、入场费、离桌结算、先扣赠送筹码）三种一样，
+   * Flux Hold'em 是 HOLDEM_CONFIG.casino.tables，猜大猜小是 GUESS_CONFIG.casino.tables；桌子 id 全赌场不重复，长线养成 / 跑团的坐桌指令只认桌子 id。
+   * 没加载的玩法（例：只测 High Flux 的页面）就没有它的桌子。钱（买入、入场费、离桌结算、先扣赠送筹码、桌上不够先从钱包补）几种一样，
    * 不一样的只有人坐哪一方、赌场坐哪几方（由 AI 走）：
    *   High Flux：人坐玩家，庄家是赌场（筹码无限）；
    *   Flux Duel：人坐 DUEL_CONFIG.casino.seat（a，第 1 轮先手），另一方是赌场（筹码无限，flux-duel.js · newGame 的 house）；
-   *   Flux Hold'em：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），没有主持人坐庄。
+   *   Flux Hold'em：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），没有主持人坐庄；
+   *   猜大猜小：人坐 GUESS_CONFIG.casino.seat，庄家是赌场（筹码无限，只抽牌、不用做决定，没有 AI 要走，也没有主持人坐庄）。
+   *     赌场里的一局就是一手：入场费坐下时从钱包收（这一手不再从桌上扣，entryPaid），「再来一局」= 离桌结算再坐下。
    * 玩家对赌（pvp*）现在只有 High Flux。 */
   const GAMES = {
     highflux: {
@@ -89,12 +91,27 @@
       },
       side: () => "p1",
       ai: (g) => g.order.filter(id => id !== g.casino.side)
+    },
+    // 猜大猜小（#528）：一局 = 一手，人坐 GUESS_CONFIG.casino.seat 带着买入上桌；入场费坐下时从钱包收过了（entryPaid）。
+    // opt.deal 测试用（指定三张牌）。桌子另带每轮每格最低注 minBet（桌上的枚数，面板上写）
+    guess: {
+      has: () => !!(root.CounterCardsGuess && root.CounterCardsGuess.GUESS_CONFIG.casino),
+      name: () => root.CounterCardsGuess.GUESS_CONFIG.name,
+      tables: () => root.CounterCardsGuess.GUESS_CONFIG.casino.tables.map(t => Object.assign(clone(t), { minBet: root.CounterCardsGuess.tableOf(t.id).minBet })),
+      gm: false,
+      start(t, n, opt) {
+        const G = root.CounterCardsGuess, c = G.GUESS_CONFIG.casino;
+        return G.newHand({ seed: opt.seed, table: t.id, players: [{ id: c.seat, name: c.name, chips: n }], entryPaid: true, deal: opt.deal });
+      },
+      side: () => root.CounterCardsGuess.GUESS_CONFIG.casino.seat,
+      ai: () => []
     }
   };
   /** 这一局是哪种玩法（High Flux 的对局没有 mode） */
   const gameOf = (g) => (g && g.mode && GAMES[g.mode] ? g.mode : "highflux");
-  /** 这一局的规则、AI：High Flux 是 CounterCards / CounterCardsAI，Flux Duel 是 FluxDuel / FluxDuelAI，Flux Hold'em 是 FluxHoldem / FluxHoldemAI */
-  const RULES = { highflux: ["CounterCards", "CounterCardsAI"], duel: ["FluxDuel", "FluxDuelAI"], holdem: ["FluxHoldem", "FluxHoldemAI"] };
+  /** 这一局的规则、AI：High Flux 是 CounterCards / CounterCardsAI，Flux Duel 是 FluxDuel / FluxDuelAI，Flux Hold'em 是 FluxHoldem / FluxHoldemAI；
+   *  猜大猜小是 CounterCardsGuess（庄家不用做决定，没有 AI） */
+  const RULES = { highflux: ["CounterCards", "CounterCardsAI"], duel: ["FluxDuel", "FluxDuelAI"], holdem: ["FluxHoldem", "FluxHoldemAI"], guess: ["CounterCardsGuess", null] };
   /** 加载了的玩法：[{ game, name }]，High Flux 在前（名字读各自的配置） */
   function games() { return Object.keys(GAMES).filter(k => GAMES[k].has()).map(k => ({ game: k, name: GAMES[k].name() })); }
 
@@ -229,11 +246,16 @@
     bind(w);
     return game;
   }
-  /** 人那一方桌上剩多少（三种玩法一样算，同 CounterCards.casino.cashOut）：剩下的筹码扣还向主持方借的（对局结束时已经扣过）；
-   *  打到一半离桌，已经押进底池的（这一轮下的、滚存的）不退 */
+  /** 人那一方桌上剩多少（几种玩法一样算，同 CounterCards.casino.cashOut）：剩下的筹码扣还向主持方借的（对局结束时已经扣过）；
+   *  打到一半离桌，已经押进底池的（这一轮下的、滚存的）不退。
+   *  猜大猜小：手上的筹码（打完了含连本带利拿回的）；打到一半离桌，已经押下的注不退；没有借贷 */
   function cashOut(g) {
     if (gameOf(g) === "highflux") return CC().casino.cashOut(g);
     if (!g.casino) fail("这一局不是赌场的对局");
+    if (gameOf(g) === "guess") {
+      const p = g.players.find(x => x.id === g.casino.side), chips = p ? p.chips : 0, net = chips - g.casino.buyIn;
+      return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: 0, owe: 0 };
+    }
     const s = g.sides[g.casino.side];
     const chips = s.chips - (g.over ? 0 : s.owe), net = chips - g.casino.buyIn;
     return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: s.loan, owe: s.owe };
@@ -259,6 +281,7 @@
   /* ---------- 桌上不够时先从钱包补（#520，主人 10/30） ----------
    * 牌局里桌上的筹码不够（每轮开始不够「底注 + 最低下注额」，或者轮到自己下注时不够「要跟的 + 最低下注额」）时，
    * 规则层（counter-cards.js · bet.topUp，三种玩法共用）先问这里能从钱包补多少（refill），补不满的缺口才问借不借。
+   * 猜大猜小（#528）：每轮轮到你押、手上不够这一轮每格的最低注时，规则层（counter-cards-guess.js · topUp）先问这里补到最低注；没有借贷，补不满只能不押。
    * 补到正好够用为止（缺口同借贷的算法，只是不用凑整 3 枚）；钱包不够补满就有多少补多少（按桌子的倍率折成整枚，零头补不了）。
    *   赌场桌（AI / 主持人坐庄）：只补人那一方（赌场那几方不补：庄家筹码无限，Flux Hold'em 的 AI 座位由赌场出）；
    *     和买入一样先拿赠送筹码、再拿普通筹码，押在桌上；补上来的算进买入（seat.buyIn、对局的 casino.buyIn 跟着加，
@@ -318,7 +341,9 @@
    *  High Flux 是庄家；Flux Duel 是人对面那一方；Flux Hold'em 是人以外的座位（人出局了就由 AI 打到结束）。
    *  随机数按种子和记录条数派生（联机时由房主跑，存档、刷新以后接着走结果一样）。返回走了几步 */
   function runAi(g, level) {
-    const kind = gameOf(g), R = root[RULES[kind][0]], AIm = root[RULES[kind][1]];
+    const kind = gameOf(g);
+    if (!RULES[kind][1]) return 0;         // 猜大猜小：庄家只抽牌，不用做决定
+    const R = root[RULES[kind][0]], AIm = root[RULES[kind][1]];
     if (!AIm) fail(`要先加载 ${GAMES[kind].name()} 的 AI`);
     if (kind === "highflux") {
       let n = 0;
@@ -415,8 +440,10 @@
   const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, games, gameOf, tables, sit, cashOut, leave, payBack, runAi,
     topUp, refill, pvpBind,
     STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle };
-  // 桌上不够时先从钱包补（#520）：把 refill 注入三种玩法共用的下注 / 借贷代码（counter-cards.js · bet.setTopUp）
+  // 桌上不够时先从钱包补（#520）：把 refill 注入三种玩法共用的下注 / 借贷代码（counter-cards.js · bet.setTopUp），
+  // 猜大猜小另有自己的一份（counter-cards-guess.js · setTopUp，#528；game.html 里先加载猜大猜小、再加载 casino.js）
   if (root.CounterCards && root.CounterCards.bet && root.CounterCards.bet.setTopUp) root.CounterCards.bet.setTopUp(refill);
+  if (root.CounterCardsGuess && root.CounterCardsGuess.setTopUp) root.CounterCardsGuess.setTopUp(refill);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.Casino = api;
 })(typeof window !== "undefined" ? window : globalThis);
