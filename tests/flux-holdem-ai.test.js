@@ -263,6 +263,95 @@ test("庄家偷看后放哪、下注额也带随机性（#521）：普通、困�
   }
 });
 
+/* ---------- 累积奖池、最后一轮同分加赛（#534，主人 10/31） ---------- */
+
+test("估算底池算进累积奖池（#534，普通、困难）：同一个局面，累积奖池大了更不容易弃牌——AI 自对局里有累积奖池是 0 时弃牌、累积奖池大时不弃的局面，没有反过来的；简单不看", () => {
+  let seen = 0, flips = 0, worse = 0;
+  for (let n = 0; n < 12; n++) {
+    const g = X.newGame({ seed: `奖池估算-${n}`, players: seatsOf(2 + (n % 3)) });
+    const levels = {}, rngs = {};
+    g.order.forEach((id, i) => { levels[id] = LEVELS[1 + ((n + i) % 2)]; rngs[id] = CC.makeRng("估算" + n + id); });
+    for (let step = 0; !g.over; step++) {
+      assert.ok(step < 3000, "卡住了：" + g.stage);
+      const id = X.toAct(g)[0], v = X.view(g, id);
+      if ((v.stage === "bet1" || v.stage === "bet2") && !v.betting.window && v.betting.toCall > 0) {
+        seen++;
+        const at = (jackpot, level) => AI.decide(Object.assign(J(v), { jackpot }), level, CC.makeRng(`估算${n}-${step}`)).type;
+        const small = at(0, levels[id]), big = at(500, levels[id]);
+        if (small === "fold" && big !== "fold") flips++;
+        if (small !== "fold" && big === "fold") worse++;
+        assert.equal(at(0, "easy"), at(500, "easy"), "简单不看累积奖池");
+      }
+      AI.step(g, id, levels[id], rngs[id]);
+    }
+  }
+  assert.ok(flips > 0, `${seen} 个要跟注的局面里，累积奖池是 0 时弃牌、累积奖池大时不弃的有 ${flips} 个`);
+  assert.equal(worse, 0, "累积奖池大了反而弃牌");
+});
+
+/** 三人局打到最后一轮同分（天气 10 张没有相位，同 flux-holdem.test.js 的 toPlayoff）：甲电 +3、乙能量 +3 同分加赛，丙谐波 +1 不参加；
+ *  甲剩酸、能量，乙剩电、酸；10 张公共层牌这 5 轮都翻过了 */
+function playoffGame() {
+  const g = X.newGame({ seed: "加赛AI", players: seatsOf(3), layers: LAYERS.slice(), weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "acid", "thunder"],
+    hands: { p1: ["fire", "ice", "physical"], p2: ["physical", "fire", "ice"], p3: ["ice", "physical", "fire"] },
+    elements: ["harmonic", "energy", "acid", "electric", "harmonic", "energy", "acid", "electric", "harmonic", "energy", "acid", "electric"] });
+  [{ p1: "physical", p2: "physical", p3: "fire" }, { p1: "harmonic", p2: "fire", p3: "acid" }, { p1: "ice", p2: "ice", p3: "energy" },
+    { p1: "fire", p2: "harmonic", p3: "physical" }, { p1: "electric", p2: "energy", p3: "harmonic" }].forEach(cards => {
+    const r = g.round;
+    for (let i = 0; i < 80 && g.round === r && g.stage !== "playoff"; i++) {
+      const who = X.toAct(g), id = who[0], L = X.legal(g, id);
+      if (g.stage === "peek") A(g, id, "place", { where: "top" });
+      else if (g.stage === "play") who.forEach(k => A(g, k, "play", { card: cards[k] }));
+      else A(g, id, ["noLoan", "pass", "check", "call"].find(t => L.some(o => o.type === t)));
+    }
+  });
+  return g;
+}
+
+test("加赛时能出牌（#534）：AI 从剩下的手牌里盖一张（普通 / 困难按胜率加权抽签）；胜率按重洗后的全部 10 张层牌、7 张天气算，对手只算一起加赛的人；交给 AI 打得完", () => {
+  const g = playoffGame();
+  assert.equal(g.stage, "playoff");
+  assert.deepEqual(J(g.playoff.ids), ["p1", "p2"]);
+  const v = X.view(g, "p1");
+  for (const level of LEVELS) for (let s = 0; s < 6; s++) {
+    const a = AI.decide(v, level, CC.makeRng(level + s));
+    assert.equal(a.type, "play", level);
+    assert.ok(["acid", "energy"].indexOf(a.card) >= 0, level + "：从剩下的手牌里盖 " + a.card);
+  }
+  assert.equal(AI.decide(X.view(g, "p3"), "hard", CC.makeRng("x")), null, "丙不参加加赛，没有要做的");
+  const odds = AI.cardOdds(v, "hard");
+  assert.deepEqual(Object.keys(odds).sort(), ["acid", "energy"]);
+  assert.ok(Math.abs(odds.acid + odds.energy - 1) < 1e-9);
+  // 对手只有一起加赛的乙（丙不算）：平均份额 1 / 2
+  const q = AI.equity(v, "acid", "hard");
+  assert.deepEqual([q.n, q.fair], [1, 0.5]);
+  // 层牌、天气全部重洗：之前 5 轮翻过的也都可能翻到，2 张天气不会一样
+  const scs = AI.scenarios(v);
+  assert.ok(Math.abs(scs.reduce((t, sc) => t + sc.p, 0) - 1) < 1e-9);
+  scs.forEach(sc => { assert.equal(sc.layers.length, 2); assert.equal(sc.weathers.length, 2); assert.notEqual(sc.weathers[0], sc.weathers[1]); });
+  assert.equal(new Set(scs.flatMap(sc => sc.layers)).size, 5, "五种层牌都可能");
+  assert.equal(new Set(scs.flatMap(sc => sc.weathers)).size, 7, "七张天气都可能（含相位）");
+  AI.playOut(g, { p1: "hard", p2: "normal", p3: "easy" });
+  assert.equal(g.over, true);
+  assert.ok(g.results.some(r => r.outcome === "playoff"));
+  assert.equal(g.jackpot, 0);
+  assert.equal(g.order.reduce((t, id) => t + g.final.held[id], 0), 150, "筹码守恒");
+});
+
+test("AI 自对局（#534）：出现过最后一轮同分加赛、加赛还同分接着加赛，都打得完；打完桌上不留累积奖池，筹码守恒", () => {
+  let playoffs = 0, again = 0, wins = 0;
+  for (let n = 0; n < 30; n++) {
+    const g = X.newGame({ seed: "奖池自对局" + n, players: seatsOf(2 + (n % 3)) });
+    const levels = {};
+    g.order.forEach((id, i) => { levels[id] = LEVELS[(n + i) % 3]; });
+    AI.playOut(g, levels);
+    assert.equal(g.jackpot, 0);
+    assert.equal(g.order.reduce((t, id) => t + g.final.held[id] - g.sides[id].loan, 0), 50 * g.order.length);
+    g.results.forEach(r => { if (r.outcome === "playoff") { playoffs++; if (r.jackpot.playoff) again++; } if (r.jackpot.winner) wins++; });
+  }
+  assert.ok(playoffs > 0 && again > 0 && wins > 0, `加赛 ${playoffs} 次（还同分接着加赛 ${again} 次），单独最高分拿走累积奖池 ${wins} 次`);
+});
+
 test("同一个种子打两次，结果完全一样（#521：随机数只用传进来的 rng）", () => {
   const run = (seed, n, k) => {
     const g = X.newGame({ seed, players: seatsOf(n) });

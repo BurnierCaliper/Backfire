@@ -227,6 +227,90 @@ test("Flux Hold'em · 每轮结算时亮出每人这一轮盖下的牌（results
   assert.deepEqual(plain(ra.shown), {}, "其他人都弃牌：没有比分");
 });
 
+test("累积奖池（#534）· 白名单：包里有累积奖池的数目、每人交的盲注、每轮结算的累积奖池（归谁 / 同分留到下一轮 / 加赛 / 平分）；加赛只放第几次、谁参加、谁盖了——别人加赛盖的牌、重洗后的顺序不放", () => {
+  const seat = (id, extra) => Object.assign({ id, name: id === "p1" ? "瑞比" : "AI 甲", chips: 30, start: 30, bet: 0, st: 0, blind: 0, loan: 0, owe: 0, folded: false, allIn: false, out: false,
+    handCount: 1, played: false, dealer: id === "p1", sb: false, bb: false }, extra || {});
+  const game = { mode: "holdem", side: "p1", order: ["p1", "p2"], round: 5, rounds: 5, stage: "playoff", over: false, waiting: ["p1"], myTurn: true, dealer: "p1", sb: "p1", bb: "p2",
+    layers: [], usedLayers: [], layerDeckCount: 10, weathers: [], deckCount: 7, discards: [], elementDeckCount: 14, blinds: [5, 10], minBet: 5, maxRaises: 3,
+    loan: { unit: 3, repay: 4 }, loanAsk: null, pot: 0, carry: null, jackpot: 45,
+    playoff: { n: 1, ids: ["p1", "p2", "SECRET-1"], played: ["p2"], layerDeck: ["SECRET-2"], deck: ["SECRET-3"] }, playoffDecks: ["SECRET-4"],
+    me: seat("p1", { hand: ["energy", "electric"], card: null, history: [{ r: 5, card: "acid" }] }),
+    seats: [seat("p1"), seat("p2", { played: true, blind: 10, card: "SECRET-5" })],
+    betting: null, legal: [{ type: "play", card: "energy" }, { type: "play", card: "electric" }],
+    results: [
+      { r: 5, outcome: "showdown", winners: ["p1", "p2"], folded: [], pot: 20, bets: { p1: 15, p2: 15 }, blinds: { p1: 5, p2: 10, p9: 99 }, delta: { p1: 0, p2: 0 }, chips: { p1: 30, p2: 30 },
+        shown: { p1: { card: "acid", score: 1 }, p2: { card: "acid", score: 1 } }, pots: [], layers: ["sand", "spirit"], weathers: ["acid", "thunder"],
+        jackpot: { amount: 45, added: 15, winner: null, tied: ["p1", "p2"], shares: {}, playoff: true, secret: "SECRET-6" } },
+      { r: 4, outcome: "showdown", winners: ["p1"], folded: [], pot: 8, shown: {}, pots: [], layers: [], weathers: [],
+        jackpot: { amount: 12, added: 12, winner: "p1", tied: [], shares: { p1: 12, p9: 3 } } },
+      { r: 5, outcome: "playoff", n: 1, ids: ["p1", "p2", "p9"], winners: ["p1"], folded: [], pot: 0, bets: { p1: 0, p2: 0 }, delta: { p1: 45, p2: 0 }, chips: { p1: 75, p2: 30 },
+        shown: { p1: { card: "electric", score: 4 }, p2: { card: "energy", score: 2 } }, played: { p1: "electric", p2: "energy" }, pots: [], layers: ["shield", "sand"], weathers: ["acid", "thunder"],
+        jackpot: { amount: 45, added: 0, winner: "p1", tied: [], shares: { p1: 45 } } },
+      { r: 5, outcome: "playoff", n: 2, ids: ["p1", "p2"], winners: ["p1", "p2"], folded: [], pot: 0, shown: {}, pots: [], layers: [], weathers: [],
+        jackpot: { amount: 9, added: 0, winner: null, tied: ["p1", "p2"], shares: { p1: 5, p2: 4 }, split: true, empty: ["p1", "SECRET-7"] } }],
+    log: [{ r: 5, t: "playoff", op: "open", n: 1, amount: 45, text: "第 1 次加赛：瑞比、AI 甲同分，争累积奖池 45 枚。" },
+      { r: 5, t: "play", by: "p2", text: "AI 甲加赛盖下了一张元素牌。" }, { r: 5, t: "myCard", by: "p2", to: "p2", card: "SECRET-8", text: "你加赛盖下了〔SECRET-9〕。" }],
+    final: null };
+  const raw = { playerId: "p2", hostId: "host", casino: { config: {}, tables: [], open: [], holdem: [],
+    mine: [{ kit: "ruby", name: "瑞比", purse: 1, chips: {}, sellable: 0, last: "", seat: { kind: "holdem", mode: "holdem", table: "h1", side: "p1", size: 2, host: true, auto: false, started: true, game } }],
+    dealing: [], seated: [], gmSeats: [] } };
+  const g = V.projectView(raw, { recipientId: "p2" }).casino.mine[0].seat.game;
+  assert.ok(!JSON.stringify(g).includes("SECRET"), JSON.stringify(g));
+  assert.equal(g.jackpot, 45);
+  assert.deepEqual(plain(g.playoff), { n: 1, ids: ["p1", "p2"], played: ["p2"] }, "加赛：第几次、谁参加、谁盖了");
+  assert.deepEqual(plain(g.seats.map(s => [s.id, s.blind, s.played])), [["p1", 0, false], ["p2", 10, true]]);
+  assert.ok(g.seats.every(s => !("card" in s)), "别人加赛盖的牌不放");
+  assert.deepEqual(plain(g.log.map(e => e.t)), ["playoff", "play"], "别人盖了哪张的那条不放");
+  assert.deepEqual(plain(g.results[0].jackpot), { amount: 45, added: 15, playoff: true, winner: null, tied: ["p1", "p2"], shares: {} });
+  assert.deepEqual(plain(g.results[0].blinds), { p1: 5, p2: 10 }, "不在这一桌的座位不放");
+  assert.deepEqual(plain(g.results[1].jackpot), { amount: 12, added: 12, winner: "p1", tied: [], shares: { p1: 12 } });
+  assert.deepEqual([g.results[2].outcome, g.results[2].n, plain(g.results[2].ids)], ["playoff", 1, ["p1", "p2"]]);
+  assert.deepEqual(plain(g.results[2].played), { p1: "electric", p2: "energy" }, "加赛亮牌以后公开");
+  assert.deepEqual(plain(g.results[3].jackpot), { amount: 9, added: 0, split: true, winner: null, tied: ["p1", "p2"], shares: { p1: 5, p2: 4 }, empty: ["p1"] });
+});
+
+test("累积奖池（#534）· 联机多人桌：每一包里的累积奖池和房主那边一样；最后一轮同分，两名玩家在联机包里看到加赛（谁参加、谁盖了，看不到对方盖的哪张），各自点牌打完加赛，赢的拿走累积奖池", () => {
+  const r = funded(20), { c, send, mine, book } = r;
+  ok(send("p2", { op: "holdemOpen", kit: "ruby", table: "holdem-alley", buyIn: 20, size: 2 }));
+  const id = holdemTable(r, "p2").id;
+  ok(send("p3", { op: "holdemJoin", kit: "helu", table: id }));
+  // 两人拿的牌一模一样、每轮出一样的：每轮同分，累积奖池留到第 5 轮（3 + 6 + 9 + 12 + 15 = 45），加赛
+  const LAYERS = ["flesh", "armor", "shield", "sand", "spirit", "flesh", "armor", "shield", "sand", "spirit"];
+  c.trpgCasinoHoldemStart(id, "ruby", { hands: { p1: ["fire", "ice", "physical"], p2: ["fire", "ice", "physical"] },
+    elements: ["harmonic", "harmonic", "acid", "acid", "energy", "energy", "electric", "electric"], layers: LAYERS,
+    weathers: ["heat", "snow", "acid", "thunder", "glow", "sand", "heat", "snow", "acid", "thunder"],
+    playoff: [{ layers: ["shield", "sand"].concat(LAYERS.slice(2, 10)), weathers: ["acid", "thunder", "heat", "snow", "glow", "sand", "phase"] }] });
+  const ruby = actor(r, "p2", "ruby"), helu = actor(r, "p3", "helu"), plan = { 1: "fire", 2: "ice", 3: "physical", 4: "harmonic", 5: "acid" };
+  let sawPlayoff = false, sawPlayed = false;
+  for (let i = 0; i < 400; i++) {
+    const gs = [ruby, helu].map(a => ({ a, g: a.game() })), host = book().tables[id].game;
+    if (gs.every(x => x.g.over)) break;
+    gs.forEach(x => assert.equal(x.g.jackpot, host.jackpot, "包里的累积奖池和房主那边一样"));
+    if (host.stage === "playoff") {
+      sawPlayoff = true;
+      gs.forEach(x => assert.deepEqual(plain(x.g.playoff.ids), ["p1", "p2"]));
+      assert.equal(gs[0].g.jackpot, 45);
+      if (host.sides.p1.card) {
+        sawPlayed = true;
+        const hv = gs[1].g;
+        assert.deepEqual(plain(hv.playoff.played), ["p1"], "赫鲁米卡看得到瑞比盖了");
+        assert.ok(!("card" in hv.seats.find(s => s.id === "p1")) && !hv.log.some(e => e.t === "myCard" && e.by === "p1"), "看不到瑞比盖的哪张");
+      }
+    }
+    const turn = gs.find(x => x.g.myTurn && !(x.a === helu && x.g.stage === "playoff" && !host.sides.p1.card));
+    assert.ok(turn, "没人能动：" + host.stage);
+    const g = turn.g;
+    const action = g.stage === "play" ? { type: "play", card: plan[g.round] } : g.stage === "playoff" ? { type: "play", card: turn.a === ruby ? "electric" : "energy" } : X.pick(g);
+    ok(send(turn.a.who, Object.assign({ op: "act" }, turn.a.cmd, { action })));
+  }
+  assert.ok(sawPlayoff && sawPlayed, "打到了加赛");
+  const res = mine("p2", "ruby").seat.game.results, last = res[res.length - 1];
+  assert.deepEqual([last.outcome, last.n, plain(last.ids)], ["playoff", 1, ["p1", "p2"]]);
+  assert.deepEqual(plain(last.jackpot), { amount: 45, added: 0, winner: "p1", tied: [], shares: { p1: 45 } }, "护盾 + 沙尘、酸雨 + 雷鸣：瑞比电 +4、赫鲁米卡能量 +2");
+  assert.equal(mine("p3", "helu").seat.game.results.length, res.length, "两个人收到的结算一样多");
+  assert.equal(book().tables[id].game.jackpot, 0);
+});
+
 test("白名单（online-view.js · projectHoldemGame / 多人桌大厅）：别人的手牌、盖下的牌、牌堆、只给别人看的记录不放；不是庄家没有偷看；主持人的座位只给主持人", () => {
   const seat = (id, extra) => Object.assign({ id, name: id === "p1" ? "瑞比" : "AI 甲", chips: 30, start: 30, bet: 1, st: 1, loan: 0, owe: 0, folded: false, allIn: false, out: false, handCount: 3, played: true,
     dealer: id === "p2", sb: false, bb: false }, extra || {});

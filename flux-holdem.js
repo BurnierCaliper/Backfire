@@ -8,14 +8,25 @@
  * 每轮（夕夏 10/30 调整的顺序）：
  *   0. 借贷：手上不够「该下的盲注 + 最低下注额」的先决定借不借（输光的先问；输光了不借就出局）；
  *   1. 庄家偷看天气堆顶，决定留在顶上还是压到堆底（这张暂不翻开；放哪公开，是哪张只有庄家知道）；
- *   2. 翻开第 1 张公共层牌，交盲注；
+ *   2. 翻开第 1 张公共层牌，交盲注（盲注进累积奖池，见下）；
  *   3. 每人盖下 1 张元素牌；
  *   4. 第一轮下注（从庄家左边开始顺时针）；
  *   5. 翻开第 1 张天气（是相位：没弃牌的人全押，跳过第二轮下注，直接到 7）；
  *   6. 第二轮下注（同样从庄家左边开始）；
  *   7. 结算：同时翻开第 2 张公共层牌和第 2 张天气（第 2 张是相位：比分之前没弃牌的人补押到全押的数目），亮牌——
  *      每人的元素牌对 2 张公共层牌分别计分求和（两张天气叠加），最高分拿走底池，同分平分
- *      （平局是这个模式的特色，不另加决胜规则；分不开的零头从庄家左边起一人一枚）。
+ *      （分不开的零头从庄家左边起一人一枚）；累积奖池只给单独最高分的人，同分留到下一轮（见下）。
+ * 累积奖池（主人 10/31 确认，#534；和相位滚存的 carry 是两回事，分开记在 g.jackpot，公开）：
+ *   每轮交的小盲、大盲不进这一轮的底池，进累积奖池。下注的算法不变——盲注照旧算这名玩家这一轮已经下的注（大盲算第一次下注，
+ *   别人要跟到这个数），只是结算时盲注那部分不在底池 / 边池里（分池照旧按每人这一轮押的总数分层，每一层里扣掉盲注那部分）。
+ *   一轮结算时，没弃牌的人里单独拿到最高分的人拿走整个累积奖池——全押的人也整个拿走（不受边池上限限制），
+ *   其他人都弃牌只剩一个人时这个人也拿走；最高分不止一人：底池 / 边池照常处理（普通轮平分，相位全押那轮照旧滚存），
+ *   累积奖池不分，留到下一轮接着累积（这一轮弃牌的人只是不参加这一轮，之后的轮次照样能赢它）。
+ *   最后一轮还同分 → 加赛（stage "playoff"，只争累积奖池；底池 / 边池先照常结算）：只有同分的人参加，不下注。
+ *   每次加赛同分的每个人从自己剩下的手牌里再盖 1 张；公共层牌 10 张、天气 7 张全部重洗，各翻 2 张（HOLDEM_CONFIG.playoff），
+ *   照常计分（handScore，两张天气叠加）；翻到相位当作没有修正的天气，不全押（加赛不下注）。单独最高分的人拿走奖池，
+ *   还同分的人接着加赛，直到分出胜负；还同分的人里有人手牌用光了就不再加赛，奖池由还同分的人平分（零头从庄家左边起一人一枚）。
+ *   对局提前结束（只剩一个人没出局）时桌上还有累积奖池：归坐在桌上的那个人（同滚存的底池）。
  * 相位（主人 10/30 确认，取代正文「本轮最低注翻倍」）：翻开相位时所有还没弃牌的人全押——上限 = 没弃牌的人里筹码最少那位的全部筹码
  *   （这一轮已下的 + 手上的），其他人押到同样的数（之前押得比这个数多的不退，照旧开边池），然后直接比分。
  *   全押后同分：底池不分，留在桌上滚到下一轮（算进下一轮的主池）；最后一轮同分的人平分。
@@ -25,7 +36,7 @@
  * 下注：过牌 / 跟注 / 加注 / 弃牌；加注至少等于上一次加注额（也不少于最低下注额 = 轮数，第一轮下注时大盲算第一次下注），
  *   每个下注回合最多加注 3 次；下注不封顶（#496，只受自己手上的筹码限制，跟不起要先借）；筹码不够也可以全押，比自己多押的部分开边池（同德州）；
  *   跟注后有 3 秒追加窗口（#496，还可以加注或弃牌；秒数、pass / closeWindow 的用法同 High Flux）；弃牌的不参与比分。
- *   多人局不用分档赔付，只按底池结算。
+ *   多人局不用分档赔付，只按底池（和累积奖池）结算。
  * 每轮结算时亮出每名玩家这一轮盖下的牌（主人 10/31，HOLDEM_CONFIG.revealAll）：弃牌的人、其他人都弃牌直接赢的那一轮也亮（弃牌的只亮不计分）。
  * 借贷 3 借 4 还、不设上限（同 High Flux：算借多少、记账、结束时扣还都直接用 counter-cards.js 的同一份代码）。5 轮后筹码最多的赢。
  * 赌场桌（#520）：人坐的座位不够时先从钱包补到够用（CounterCards.bet.topUp，casino.js 注入），钱包空了才借；AI 座位照旧借。
@@ -34,10 +45,11 @@
  *   const g = FluxHoldem.newGame({ seed: "A", players: [{ id: "p1", name: "你" }, { id: "p2" }, { id: "p3" }] });
  *   FluxHoldem.toAct(g)                       → 现在等谁（id 列表；盖牌、追加窗口时好几个人同时能动）
  *   FluxHoldem.legal(g, "p1")                 → 这名玩家现在能做的
- *   FluxHoldem.act(g, "p1", { type: "play", card: "fire" })   → 盖下一张元素牌；下注：check / call / bet / raise / allIn / fold / pass / borrow
+ *   FluxHoldem.act(g, "p1", { type: "play", card: "fire" })   → 盖下一张元素牌（加赛时也是它）；下注：check / call / bet / raise / allIn / fold / pass / borrow
  *   FluxHoldem.closeWindow(g)                 → 跟注后的追加窗口到时间
  *   FluxHoldem.view(g, "p1")                  → 这名玩家能看到的（别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家；
- *                                               滚存的底池 carry 公开，pot 里也算上了）
+ *                                               滚存的底池 carry 公开，pot 里也算上了；累积奖池 jackpot 公开，不算在 pot 里；
+ *                                               加赛 playoff 公开谁参加、谁盖了，盖的是哪张亮牌前只有自己知道）
  *   FluxHoldem.scoreStack("fire", "flesh", ["heat", "glow"])   → 两张天气叠加时的得分
  *   FluxHoldem.chart(["heat", "glow"])        → 克制表（得分）：场上的天气叠加后每张元素牌打每张层牌的实际得分（格式同 CounterCards.chart）
  */
@@ -57,7 +69,9 @@
     layerSets: 2,                      // 公共层牌 2 组 × 5 张 = 10 张，每轮翻 2 张
     layersPerRound: 2,
     weathersPerRound: 2,               // 每轮翻 2 张天气，叠加
-    blinds: [1, 2],                    // 小盲 1 × 轮数、大盲 2 × 轮数
+    blinds: [1, 2],                    // 小盲 1 × 轮数、大盲 2 × 轮数；交的盲注进累积奖池（#534），不进这一轮的底池
+    // 最后一轮同分的加赛（#534，只争累积奖池）：公共层牌、天气全部重洗后各翻几张（每次加赛同分的每人再盖 1 张元素牌）
+    playoff: { layers: 2, weathers: 2 },
     maxRaises: 3,                      // 每个下注回合最多加注 3 次
     // 每轮结算时亮出每名玩家这一轮盖下的牌（主人 10/31）：弃牌的人、其他人都弃牌直接赢的那一轮也亮（只亮牌，弃牌的不计分、不参与比分）。
     // false：照原规则只亮比分的人（results[i].shown），弃牌的和直接赢的那一轮不亮
@@ -89,6 +103,9 @@
   const signed = (n) => (n > 0 ? "+" + n : n < 0 ? "−" + Math.abs(n) : "0");
   const uniq = (a) => a.filter((x, i) => a.indexOf(x) === i);
   const startChips = () => (HOLDEM_CONFIG.startChips != null ? HOLDEM_CONFIG.startChips : CC().CC_CONFIG.startChips);
+  /** n 组牌洗混之前：cards 重复 n 遍（元素牌 4 组、公共层牌 2 组） */
+  const setOf = (cards, n) => { const out = []; for (let i = 0; i < n; i++) out.push.apply(out, cards); return out; };
+  const names = (g, ids) => ids.map(id => nameOf(g, id)).join("、");
 
   /* ---------- 计分：两张天气叠加（CounterCards 的克制、天气修正两项） ---------- */
   /** 一张元素牌打一张层牌、场上这几张天气叠在一起时的实际得分：
@@ -135,7 +152,7 @@
     c.weatherName = W(ws);
     c.weathers = ws.slice();
     c.notes = [`得分 = 克制（克制 +1、被克制 −1、普通 0）+ 天气修正（每 ${Math.round(C.pctStep * 100)}% 记 ±1）。场上几张天气的修正直接相加、不设上限；`
-      + `你的元素牌对 2 张公共层牌分别计分求和，最高分拿走底池。`];
+      + `你的元素牌对 2 张公共层牌分别计分求和，最高分拿走底池；单独拿到最高分的人另拿走累积奖池（盲注都进这里，同分留到下一轮）。`];
     if (glow) c.notes.push("微光：克制关系反转（能量除外）；另一张天气给所有元素的修正（含给能量的、酸雨打装甲那一项）也反转，微光自己给能量的 +1 保留");
     if (ws.indexOf(C.allInWeather) >= 0) c.notes.push(`${weatherName(C.allInWeather)}：不改得分；翻开时没弃牌的人全押（上限是没弃牌的人里筹码最少那位的全部筹码），不再下注直接比分；`
       + `全押后同分底池滚到下一轮，最后一轮同分的人平分`);
@@ -154,7 +171,8 @@
   /* ---------- 开局 ---------- */
   /** opt：seed；players：[{ id, name, chips }]（2–4 人，按座位顺时针）；chips（每人开局筹码，默认 HOLDEM_CONFIG.startChips）；
    *  dealer（第 1 轮的庄家 id，默认第一个）；测试用：hands（{ id: [开局的 3 张] }）、elements（元素牌堆的顺序，第 0 张在顶）、
-   *  layers（公共层牌的顺序）、weathers（天气堆的顺序） */
+   *  layers（公共层牌的顺序）、weathers（天气堆的顺序）、playoff（最后一轮同分加赛时每一次重洗后的顺序：[{ layers, weathers }]，第 0 张先翻；
+   *  没写的那一次照种子洗） */
   function newGame(opt) {
     opt = opt || {};
     needCC();
@@ -169,24 +187,30 @@
     list.forEach((p, i) => {
       const id = order[i], chips = Math.max(0, Math.floor(Number(p.chips != null ? p.chips : base) || 0));
       names[id] = String(p.name || H.seatNames[i] || id);
-      sides[id] = { hand: [], card: null, chips, start: chips, bet: 0, st: 0, roundStart: chips, loan: 0, owe: 0,
+      // blind：这一轮交了多少盲注（算在 bet 里，结算时进累积奖池，#534）
+      sides[id] = { hand: [], card: null, chips, start: chips, bet: 0, st: 0, blind: 0, roundStart: chips, loan: 0, owe: 0,
         folded: false, allIn: false, out: false, history: [], pot: 0 };
     });
     const rng = (tag) => CC().makeRng(seed + "|holdem-" + tag);
-    const set = (cards, n) => { const out = []; for (let i = 0; i < n; i++) out.push.apply(out, cards); return out; };
     // 元素牌：4 组 × 7 种洗混；测试可以指定开局的手牌和剩下的牌堆
     let elements;
     if (opt.hands) {
       order.forEach(id => { const h = opt.hands[id] || []; if (h.length !== H.hand) fail(`开局每人 ${H.hand} 张：` + id); sides[id].hand = h.slice(); });
-      elements = opt.elements ? opt.elements.slice() : CC().shuffle(set(C.elements, H.elementSets), rng("elements"));
+      elements = opt.elements ? opt.elements.slice() : CC().shuffle(setOf(C.elements, H.elementSets), rng("elements"));
     } else {
-      elements = opt.elements ? opt.elements.slice() : CC().shuffle(set(C.elements, H.elementSets), rng("elements"));
+      elements = opt.elements ? opt.elements.slice() : CC().shuffle(setOf(C.elements, H.elementSets), rng("elements"));
       for (let k = 0; k < H.hand; k++) order.forEach(id => { if (elements.length) sides[id].hand.push(elements.shift()); });
     }
     elements.concat(...order.map(id => sides[id].hand)).forEach(c => { if (!CC().isElement(c)) fail("没有这张元素牌：" + c); });
-    const layers = opt.layers ? opt.layers.slice() : CC().shuffle(set(C.layers, H.layerSets), rng("layers"));
+    const layers = opt.layers ? opt.layers.slice() : CC().shuffle(setOf(C.layers, H.layerSets), rng("layers"));
     const deck = opt.weathers ? opt.weathers.slice() : CC().shuffle(C.weathers, rng("weathers"));
     deck.forEach(w => { if (C.weathers.indexOf(w) < 0) fail("没有这张天气牌：" + w); });
+    // 测试用：加赛每一次重洗后的层牌、天气顺序
+    const playoffDecks = (opt.playoff || []).map(d => ({ layers: d && d.layers ? d.layers.slice() : null, weathers: d && d.weathers ? d.weathers.slice() : null }));
+    playoffDecks.forEach(d => {
+      (d.layers || []).forEach(ly => { if (C.layers.indexOf(ly) < 0) fail("没有这张公共层牌：" + ly); });
+      (d.weathers || []).forEach(w => { if (C.weathers.indexOf(w) < 0) fail("没有这张天气牌：" + w); });
+    });
     const g = {
       v: 1, mode: MODE, seed, rounds: H.rounds, round: 0, stage: "start", over: false,
       order, names, sides,
@@ -202,6 +226,9 @@
       peek: null,                // 这一轮庄家偷看的那张：{ card, where }（只给庄家看）
       allIn: null,               // 这一轮翻到相位、没弃牌的人全押了：{ at: 第几张天气是相位, cap: 押到多少 }
       carry: null,               // 相位全押后同分、留在桌上滚到下一轮的底池（公开）：{ amount, from: 当时同分的人, r: 第几轮留下的 }
+      jackpot: 0,                // 累积奖池（#534，公开）：每轮交的盲注都进这里，单独最高分的人拿走，同分留到下一轮
+      playoff: null,             // 最后一轮同分的加赛（#534）：{ n: 第几次, ids: 参加的人, layerDeck / deck: 重洗后的层牌、天气（谁都看不到） }
+      playoffDecks,              // 测试用：加赛每一次重洗后的顺序（不写 = 照种子洗）
       betting: null, loanAsk: null,
       results: [], log: [], final: null
     };
@@ -239,7 +266,7 @@
       // 第 2–5 轮开始时每人摸 1 张（按座位顺序）
       for (let k = 0; k < HOLDEM_CONFIG.draw; k++) seated(g).forEach(id => { if (g.elementDeck.length) g.sides[id].hand.push(g.elementDeck.shift()); });
     }
-    g.order.forEach(id => { const s = g.sides[id]; s.card = null; s.bet = 0; s.st = 0; s.folded = false; s.allIn = false; s.roundStart = s.chips; });
+    g.order.forEach(id => { const s = g.sides[id]; s.card = null; s.bet = 0; s.st = 0; s.blind = 0; s.folded = false; s.allIn = false; s.roundStart = s.chips; });
     g.betting = null; g.peek = null; g.allIn = null;
     positions(g);
     // 借贷：手上不够「该下的盲注 + 最低下注额」的先问（输光的先问——输光了不借就出局），其余按座位顺序。
@@ -298,16 +325,20 @@
     note(g, { t: "peek", by: g.dealer, op: where, text: `${nameOf(g, g.dealer)}偷看了天气堆顶，${where === "bottom" ? "压到了牌堆底" : "留在了顶上"}。` });
     openTable(g);
   }
-  /** 翻开第 1 张公共层牌，下盲注，大家盖牌 */
+  /** 翻开第 1 张公共层牌，下盲注，大家盖牌。盲注照旧算这名玩家这一轮已经下的注（bet / st；大盲算第一次下注），
+   *  钱进累积奖池（#534，blind 记着每人交了多少，结算时这部分不在底池 / 边池里） */
   function openTable(g) {
     const L1 = g.layerDeck.shift();
     if (L1) g.layers.push(L1);
-    note(g, { t: "layer", layer: L1, text: `翻开第 1 张公共层牌〔${cardName(L1)}〕。` });
+    let paid = 0;
     [[g.sb, 0], [g.bb, 1]].forEach(([id, k]) => {
       const s = g.sides[id], n = Math.min(blindOf(g.round, k), Math.max(0, s.chips));
-      B().pay(s, n); s.st += n;
+      B().pay(s, n); s.st += n; s.blind += n; paid += n;
       if (s.chips <= 0) s.allIn = true;
     });
+    g.jackpot += paid;
+    note(g, { t: "layer", layer: L1, amount: paid,
+      text: `翻开第 1 张公共层牌〔${cardName(L1)}〕；盲注 ${paid} 枚进累积奖池（现在 ${g.jackpot} 枚）。` });
     g.stage = "play";
   }
 
@@ -318,6 +349,7 @@
       case "loan": return g.loanAsk && g.loanAsk.length ? [g.loanAsk[0]] : [];
       case "peek": return [g.dealer];
       case "play": return seated(g).filter(id => !g.sides[id].card);
+      case "playoff": return g.playoff.ids.filter(id => !g.sides[id].card);   // 加赛：同分的人同时盖牌
       case "bet1": case "bet2": {
         const b = g.betting;
         if (b.window) return g.order.filter(id => canAct(g, id) && !b.window.passed[id]);
@@ -350,7 +382,7 @@
     switch (g.stage) {
       case "loan": { const lo = loanAt(g, id); return (lo ? [lo] : []).concat([{ type: "noLoan" }]); }
       case "peek": return [{ type: "place", where: "top" }, { type: "place", where: "bottom" }];
-      case "play": return uniq(s.hand).map(card => ({ type: "play", card }));
+      case "play": case "playoff": return uniq(s.hand).map(card => ({ type: "play", card }));
       case "bet1": case "bet2": {
         const b = g.betting, rm = s.chips, mr = minRaise(g), open = othersCanAct(g, id);
         const raiseOk = b.raises < HOLDEM_CONFIG.maxRaises && open;
@@ -398,13 +430,15 @@
     }
     return g;
   }
+  /** 盖下一张元素牌：每轮大家都盖完就开第一轮下注；加赛（#534）同分的人都盖完就重洗、翻牌、比分 */
   function playCard(g, id, card) {
-    const s = g.sides[id];
+    const s = g.sides[id], P = g.stage === "playoff" ? g.playoff : null;
     s.hand.splice(s.hand.indexOf(card), 1);
     s.card = card;
-    s.history.push({ r: g.round, card });
-    note(g, { t: "play", by: id, text: `${nameOf(g, id)}盖下了一张元素牌。` });
-    note(g, { t: "myCard", by: id, to: id, card, text: `你盖下了〔${cardName(card)}〕。` });
+    s.history.push(P ? { r: g.round, card, playoff: P.n } : { r: g.round, card });
+    note(g, { t: "play", by: id, text: `${nameOf(g, id)}${P ? "加赛" : ""}盖下了一张元素牌。` });
+    note(g, { t: "myCard", by: id, to: id, card, text: `你${P ? "加赛" : ""}盖下了〔${cardName(card)}〕。` });
+    if (P) { if (P.ids.every(k => g.sides[k].card)) playoffShowdown(g); return; }
     if (seated(g).every(k => g.sides[k].card)) openStreet(g, 1);
   }
 
@@ -541,22 +575,28 @@
 
   /* ---------- 结算 ---------- */
   const carryOf = (g) => (g.carry ? g.carry.amount : 0);
-  /** 底池（主池 + 边池）：按没弃牌的人各自押了多少分层，每一层只有押到这么多的人能分（同德州）。
+  /** 这名玩家这一轮押下去的里面进底池的部分：盲注那部分进了累积奖池（#534） */
+  const potPart = (s) => Math.max(0, s.bet - (s.blind || 0));
+  /** 底池（主池 + 边池）：按没弃牌的人各自这一轮押了多少（含盲注——下注的算法不变）分层，每一层只有押到这么多的人能分（同德州）；
+   *  每一层的数目里扣掉盲注那部分（#534：盲注进累积奖池，不在底池 / 边池里；每人押的里面最先的 blind 枚是盲注）。
    *  返回 [{ amount, eligible: [id……] }]；弃牌的人押的也在里面（他们不参与分）；上一轮滚存下来的算进主池（这一轮还在牌局里的人都能分） */
   function potsOf(g) {
     const live = g.order.filter(id => inHand(g, id));
     const levels = uniq(live.map(id => g.sides[id].bet)).sort((x, y) => x - y);
+    // 这名玩家押的 (lo, hi] 那一段里不是盲注的部分
+    const part = (id, lo, hi) => { const s = g.sides[id]; return Math.max(0, Math.min(s.bet, hi) - Math.max(lo, s.blind || 0)); };
     const out = [];
     let prev = 0;
     levels.forEach(L => {
       let amount = 0;
-      g.order.forEach(id => { amount += Math.max(0, Math.min(g.sides[id].bet, L) - prev); });
+      g.order.forEach(id => { amount += part(id, prev, L); });
       if (amount > 0) out.push({ amount, eligible: live.filter(id => g.sides[id].bet >= L) });
       prev = L;
     });
     let rest = 0;
-    g.order.forEach(id => { rest += Math.max(0, g.sides[id].bet - prev); });
-    if (rest && out.length) out[out.length - 1].amount += rest;
+    g.order.forEach(id => { rest += part(id, prev, Infinity); });
+    // 弃牌的人押得比没弃牌的人都多的那部分：算进最上面那一层（一层都没有时——没弃牌的人押的都是盲注——给押得最多的那几个）
+    if (rest) { if (out.length) out[out.length - 1].amount += rest; else out.push({ amount: rest, eligible: live.filter(id => g.sides[id].bet >= prev) }); }
     const carry = carryOf(g);
     if (carry) { if (out.length) out[0].amount += carry; else out.push({ amount: carry, eligible: live }); }
     return out;
@@ -572,8 +612,33 @@
     winners.forEach(id => { g.sides[id].chips += got[id]; });
     return got;
   }
+  /** 把桌上的累积奖池整个分给 ids（一个人就是整个拿走；几个人平分，零头同 award），返回谁拿了多少 */
+  function takeJackpot(g, ids) {
+    const got = award(g, { amount: g.jackpot }, ids);
+    g.jackpot = 0;
+    return got;
+  }
+  /** 一轮结算时的累积奖池（#534）：top = 没弃牌的人里拿到最高分的（其他人都弃牌：剩下的那一个）。
+   *  只有一个 → 整个拿走（全押的也整个拿走，不受边池上限限制）；不止一个 → 不分：不是最后一轮就留到下一轮接着累积，
+   *  最后一轮加赛（tieBreak）。返回这一轮结算记录里的 jackpot：
+   *  { amount（结算时桌上有多少，含这一轮的盲注）, added（这一轮交进去的盲注）, winner（单独最高分拿走的）, tied（同分的）, shares（谁拿了多少）,
+   *    kept（同分，留到下一轮）/ playoff（同分，接着加赛）/ split + empty（同分的人里 empty 手牌用光了：不再加赛，由同分的人平分） } */
+  function jackpotRound(g, top, last) {
+    const j = { amount: g.jackpot, added: g.order.reduce((t, id) => t + (g.sides[id].blind || 0), 0), winner: null, tied: [], shares: {} };
+    if (top.length === 1) { j.winner = top[0]; j.shares = takeJackpot(g, top); return j; }
+    j.tied = top.slice();
+    if (!j.amount) return j;
+    if (last) tieBreak(g, j, top); else j.kept = true;
+    return j;
+  }
+  /** 最后一轮（或加赛）同分：同分的人里有人手牌用光了 → 不再加赛，奖池由同分的人平分；都还有牌 → （接着）加赛 */
+  function tieBreak(g, j, top) {
+    const empty = top.filter(id => !g.sides[id].hand.length);
+    if (empty.length) { j.split = true; j.empty = empty; j.shares = takeJackpot(g, top); } else j.playoff = true;
+  }
   /** 亮牌：同时翻开第 2 张公共层牌和第 2 张天气（是相位：比分之前没弃牌的人补押到全押的数目），每人对 2 张公共层牌分别计分求和，
-   *  每个池给池里分最高的（同分平分）。这一轮相位全押了、又不是最后一轮：同分的池不分，留在桌上滚到下一轮 */
+   *  每个池给池里分最高的（同分平分）。这一轮相位全押了、又不是最后一轮：同分的池不分，留在桌上滚到下一轮。
+   *  累积奖池（#534）给没弃牌的人里单独拿到最高分的那个，同分留到下一轮，最后一轮同分加赛（jackpotRound） */
   function showdown(g) {
     g.stage = "showdown";
     const L2 = g.layerDeck.shift(), w2 = drawWeather(g);
@@ -593,29 +658,35 @@
     });
     const kept = pots.filter(p => p.carried);
     g.carry = kept.length ? { amount: kept.reduce((t, p) => t + p.amount, 0), from: uniq([].concat(...kept.map(p => p.tied))), r: g.round } : null;
+    const best = Math.max(...live.map(id => shown[id].score));
+    const jackpot = jackpotRound(g, live.filter(id => shown[id].score === best), g.round >= g.rounds);
     closeRound(g, Object.assign({ r: g.round, outcome: "showdown", dealer: g.dealer, layers: g.layers.slice(), weathers: g.weathers.slice(), shown, pots,
-      winners: pots.length ? pots[0].winners.slice() : [], split: !!(pots.length && pots[0].winners.length > 1), pot: pots.reduce((t, p) => t + p.amount, 0),
-      carryIn, carry: carryOf(g), allIn: !!g.allIn }, g.allIn ? { phaseAt: g.allIn.at, cap: g.allIn.cap } : {}));
+      // winners：主池归谁（没弃牌的人押的都是盲注、一个池都没有时：拿走累积奖池的人）
+      winners: pots.length ? pots[0].winners.slice() : jackpot.winner ? [jackpot.winner] : [], split: !!(pots.length && pots[0].winners.length > 1), pot: pots.reduce((t, p) => t + p.amount, 0),
+      carryIn, carry: carryOf(g), allIn: !!g.allIn, jackpot }, g.allIn ? { phaseAt: g.allIn.at, cap: g.allIn.cap } : {}));
   }
-  /** 只剩一个人没弃牌：他拿走整个底池（含上一轮滚存下来的），不比分；每人盖下的牌照样在结算时亮出（revealAll，closeRound） */
+  /** 只剩一个人没弃牌：他拿走整个底池（含上一轮滚存下来的）和累积奖池（#534），不比分；每人盖下的牌照样在结算时亮出（revealAll，closeRound） */
   function foldWin(g, id) {
-    const carryIn = carryOf(g), pot = g.order.reduce((t, k) => t + g.sides[k].bet, 0) + carryIn;
+    const carryIn = carryOf(g), pot = g.order.reduce((t, k) => t + potPart(g.sides[k]), 0) + carryIn;
     g.sides[id].chips += pot;
     g.betting = null; g.carry = null;
+    const jackpot = jackpotRound(g, [id], false);
     closeRound(g, { r: g.round, outcome: "fold", dealer: g.dealer, layers: g.layers.slice(), weathers: g.weathers.slice(), winners: [id], split: false, pot,
-      pots: [{ amount: pot, eligible: [id], winners: [id], shares: { [id]: pot } }], carryIn, carry: 0, allIn: false });
+      pots: [{ amount: pot, eligible: [id], winners: [id], shares: { [id]: pot } }], carryIn, carry: 0, allIn: false, jackpot });
   }
+  /** 一轮结算完：记下每人这一轮押了多少（bets，含盲注；blinds 其中的盲注）、筹码变动（含拿到的累积奖池），开下一轮；
+   *  最后一轮同分（#534）：底池 / 边池已经照常结算，累积奖池由同分的人加赛（openPlayoff），加赛分出胜负才结束 */
   function closeRound(g, res) {
-    res.bets = {}; res.delta = {}; res.chips = {}; res.folded = [];
+    res.bets = {}; res.blinds = {}; res.delta = {}; res.chips = {}; res.folded = [];
     // played：这一轮每名玩家盖下的牌，结算时全部亮出（HOLDEM_CONFIG.revealAll，主人 10/31；弃牌的也亮）
     if (HOLDEM_CONFIG.revealAll) res.played = {};
     g.order.forEach(id => {
       const s = g.sides[id];
-      res.bets[id] = s.bet; res.delta[id] = s.chips - s.roundStart; res.chips[id] = s.chips;
+      res.bets[id] = s.bet; res.blinds[id] = s.blind; res.delta[id] = s.chips - s.roundStart; res.chips[id] = s.chips;
       if (s.folded) res.folded.push(id);
       if (res.played && s.card) res.played[id] = s.card;
     });
-    g.order.forEach(id => { const s = g.sides[id]; s.bet = 0; s.st = 0; });
+    g.order.forEach(id => { const s = g.sides[id]; s.bet = 0; s.st = 0; s.blind = 0; });
     g.betting = null;
     // 这一轮的天气弃掉（之后天气堆抽完时洗回去），翻开的层牌记着（公开）
     g.discards.push(...g.weathers);
@@ -624,31 +695,95 @@
     g.results.push(res);
     note(g, { t: "result", res: clone(res), text: resultText(g, res) });
     g.stage = "settled";
+    if (res.jackpot && res.jackpot.playoff) { openPlayoff(g, res.jackpot.tied); return; }
     startRound(g);
+  }
+
+  /* ---------- 加赛（#534）：最后一轮同分，只争累积奖池 ---------- */
+  /** 开第 n 次加赛：只有同分的人参加，不下注；公共层牌、天气全部重洗（洗出来的顺序谁都看不到；测试可以用 newGame 的 playoff 指定），
+   *  同分的人各从剩下的手牌里再盖 1 张（同时盖，toAct） */
+  function openPlayoff(g, ids) {
+    const H = HOLDEM_CONFIG, C = CC().CC_CONFIG, n = (g.playoff ? g.playoff.n : 0) + 1;
+    const fixed = (g.playoffDecks && g.playoffDecks[n - 1]) || {};
+    const rng = (tag) => CC().makeRng(g.seed + "|holdem-playoff-" + tag + "|" + n);
+    g.playoff = { n, ids: ids.slice(),
+      layerDeck: fixed.layers ? fixed.layers.slice() : CC().shuffle(setOf(C.layers, H.layerSets), rng("layers")),
+      deck: fixed.weathers ? fixed.weathers.slice() : CC().shuffle(C.weathers, rng("weathers")) };
+    g.order.forEach(id => { g.sides[id].card = null; });
+    g.layers = []; g.weathers = []; g.peek = null; g.allIn = null; g.betting = null;
+    g.stage = "playoff";
+    note(g, { t: "playoff", op: "open", n, amount: g.jackpot,
+      text: `第 ${n} 次加赛：${names(g, ids)}同分，争累积奖池 ${g.jackpot} 枚——只有同分的人参加，不下注；各从剩下的手牌里再盖 1 张，`
+        + `公共层牌 ${C.layers.length * H.layerSets} 张全部重洗、翻 ${H.playoff.layers} 张，天气 ${C.weathers.length} 张全部重洗、翻 ${H.playoff.weathers} 张。` });
+  }
+  /** 加赛的人都盖好了：翻开重洗后的层牌、天气，照常计分（handScore，两张天气叠加；相位当作没有修正的天气——加赛不下注，不全押）。
+   *  单独最高分的人拿走累积奖池；还同分的接着加赛（还同分的人里有人手牌用光了就由还同分的人平分，tieBreak）。
+   *  每次加赛记一条结算（results，outcome "playoff"，n = 第几次；bets 都是 0，delta = 这一次分到的累积奖池） */
+  function playoffShowdown(g) {
+    const P = g.playoff, H = HOLDEM_CONFIG;
+    g.layers = P.layerDeck.splice(0, H.playoff.layers);
+    g.weathers = P.deck.splice(0, H.playoff.weathers);
+    const phase = g.weathers.some(isPhase);
+    note(g, { t: "playoff", op: "reveal", n: P.n, layers: g.layers.slice(), weathers: g.weathers.slice(),
+      text: `第 ${P.n} 次加赛：翻开公共层牌${g.layers.map(x => `〔${cardName(x)}〕`).join("")}和天气${g.weathers.map(w => `〔${weatherName(w)}〕`).join("")}`
+        + `${phase ? `（加赛翻到${weatherName(CC().CC_CONFIG.allInWeather)}：当作没有修正的天气，不全押）` : ""}。` });
+    const shown = {};
+    P.ids.forEach(id => { shown[id] = { card: g.sides[id].card, score: handScore(g.sides[id].card, g.layers, g.weathers) }; });
+    const best = Math.max(...P.ids.map(id => shown[id].score)), top = P.ids.filter(id => shown[id].score === best);
+    const jackpot = { amount: g.jackpot, added: 0, winner: null, tied: [], shares: {} };
+    if (top.length === 1) { jackpot.winner = top[0]; jackpot.shares = takeJackpot(g, top); } else { jackpot.tied = top.slice(); tieBreak(g, jackpot, top); }
+    const res = { r: g.round, outcome: "playoff", n: P.n, dealer: g.dealer, ids: P.ids.slice(), layers: g.layers.slice(), weathers: g.weathers.slice(), shown,
+      winners: jackpot.winner ? [jackpot.winner] : jackpot.split ? top.slice() : [], split: !!jackpot.split, pot: 0, pots: [], carryIn: 0, carry: 0, allIn: false, jackpot,
+      bets: {}, blinds: {}, delta: {}, chips: {}, folded: [], played: {} };
+    g.order.forEach(id => { res.bets[id] = 0; res.blinds[id] = 0; res.delta[id] = jackpot.shares[id] || 0; res.chips[id] = g.sides[id].chips; });
+    P.ids.forEach(id => { res.played[id] = g.sides[id].card; });
+    g.results.push(res);
+    note(g, { t: "result", res: clone(res), text: resultText(g, res) });
+    if (jackpot.playoff) { openPlayoff(g, top); return; }
+    g.playoff = null;
+    g.stage = "settled";
+    startRound(g);   // 最后一轮打完了：结束
+  }
+
+  /** 累积奖池那一句（#534；结算记录、牌桌横幅同一种说法）：j = 结算记录里的 jackpot，n(id) = 怎么称呼，again = 加赛里还同分 */
+  function jackpotText(j, n, again) {
+    if (!j || !j.amount) return "";
+    const who = (ids) => (ids || []).map(n).join("、");
+    if (j.winner) return `累积奖池 ${j.amount} 枚归${n(j.winner)}`;
+    if (j.split) return `累积奖池 ${j.amount} 枚：${who(j.tied)}${again ? "还" : ""}同分，${who(j.empty)}的手牌用光了，不再加赛，由${who(j.tied)}平分`;
+    if (j.playoff) return `累积奖池 ${j.amount} 枚：${who(j.tied)}${again ? "还同分，接着加赛" : "同分，最后一轮，加赛"}`;
+    if (j.kept) return `累积奖池 ${j.amount} 枚：${who(j.tied)}同分，留到下一轮`;
+    return "";
   }
   function resultText(g, res) {
     const n = (id) => nameOf(g, id);
     const chips = `（筹码变动：${g.order.filter(id => res.delta[id]).map(id => `${n(id)} ${res.delta[id] > 0 ? "+" : ""}${res.delta[id]}`).join("，") || "没有"}）`;
     const carryIn = res.carryIn ? `（含上一轮滚存的 ${res.carryIn} 枚）` : "";
+    const jp = jackpotText(res.jackpot, n, res.outcome === "playoff");
     // 弃牌的人这一轮盖下的牌（revealAll 时亮出来；不计分）
     const foldedCards = (ids) => ids.filter(id => res.played && res.played[id]).map(id => `${n(id)}〔${cardName(res.played[id])}〕`).join("、");
+    const scores = () => Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，");
+    if (res.outcome === "playoff") {
+      const phase = res.weathers.some(isPhase) ? `；${weatherName(CC().CC_CONFIG.allInWeather)}当作没有修正的天气，不全押` : "";
+      return `第 ${res.r} 轮第 ${res.n} 次加赛：${scores()}（公共层牌${res.layers.map(x => `〔${cardName(x)}〕`).join("")}，天气 ${W(res.weathers)}${phase}）。${jp}${chips}。`;
+    }
     if (res.outcome === "fold") {
-      const all = foldedCards(g.order);
-      return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走底池 ${res.pot} 枚${carryIn}${all ? `；亮牌：${all}` : ""}${chips}。`;
+      const all = foldedCards(g.order), j = res.jackpot && res.jackpot.amount ? res.jackpot.amount : 0;
+      const took = [res.pot || !j ? `底池 ${res.pot} 枚${carryIn}` : "", j ? `累积奖池 ${j} 枚` : ""].filter(Boolean).join("和");
+      return `第 ${res.r} 轮：其他人都弃牌，${n(res.winners[0])}拿走${took}${all ? `；亮牌：${all}` : ""}${chips}。`;
     }
     const folded = foldedCards(res.folded);
-    const shown = Object.keys(res.shown).map(id => `${n(id)}〔${cardName(res.shown[id].card)}〕${signed(res.shown[id].score)}`).join("，")
-      + (folded ? `；弃牌的${folded}` : "");
+    const shown = scores() + (folded ? `；弃牌的${folded}` : "");
     const allIn = res.allIn ? `相位全押（各押到 ${res.cap} 枚）。` : "";
     const pots = res.pots.map((p, i) => `${i ? `边池 ${i}` : "主池"} ${p.amount} 枚`
       + (p.carried ? `：${p.tied.map(n).join("、")}同分（相位全押），滚到下一轮`
         : p.winners.length > 1 ? `由${p.winners.map(n).join("、")}平分${res.allIn ? "（相位全押，最后一轮不再滚存）" : ""}` : `归${n(p.winners[0])}`)
-      + (i === 0 ? carryIn : "")).join("；");
+      + (i === 0 ? carryIn : "")).concat(jp ? [jp] : []).join("；");
     return `第 ${res.r} 轮亮牌：${shown}。${allIn}${pots}${chips}。`;
   }
-  /** 对局结束：桌上还有滚存的底池就先分掉，扣还借款，按最终筹码数比，最多的赢（一样多的都算赢） */
+  /** 对局结束：桌上还有滚存的底池、累积奖池就先分掉，扣还借款，按最终筹码数比，最多的赢（一样多的都算赢） */
   function finish(g) {
-    g.over = true; g.stage = "over"; g.betting = null; g.loanAsk = null;
+    g.over = true; g.stage = "over"; g.betting = null; g.loanAsk = null; g.playoff = null;
     // 滚存的底池没有下一轮了（只剩一个人没出局，提前结束）：归坐在桌上的那个人；一个都不剩就由当时同分的人平分
     if (g.carry) {
       const left = seated(g), to = left.length === 1 ? left : g.carry.from, amount = g.carry.amount;
@@ -656,26 +791,36 @@
       g.carry = null;
       note(g, { t: "carry", ids: to.slice(), amount, text: `桌上滚存的 ${amount} 枚没有下一轮了，${to.length > 1 ? `由${to.map(id => nameOf(g, id)).join("、")}平分` : `归${nameOf(g, to[0])}`}。` });
     }
+    // 累积奖池（#534）也一样：只剩一个人没出局（提前结束）就归他；一个都不剩就由最后一次同分的人平分
+    if (g.jackpot > 0) {
+      const left = seated(g), last = g.results[g.results.length - 1], tied = last && last.jackpot && last.jackpot.tied;
+      const to = left.length ? left : tied && tied.length ? tied.slice() : g.order.slice(), amount = g.jackpot;
+      takeJackpot(g, to);
+      note(g, { t: "jackpot", ids: to.slice(), amount, text: `桌上的累积奖池 ${amount} 枚没有下一轮了，${to.length > 1 ? `由${names(g, to)}平分` : `归${nameOf(g, to[0])}`}。` });
+    }
     const held = {}, chips = {}, loans = {};
     g.order.forEach(id => { const s = g.sides[id]; held[id] = s.chips; s.chips -= s.owe; chips[id] = s.chips; loans[id] = { loan: s.loan, owe: s.owe }; });
     const best = Math.max(...g.order.map(id => chips[id]));
     const winners = g.order.filter(id => chips[id] === best);
     const net = {};
     g.order.forEach(id => { net[id] = chips[id] - g.sides[id].start; });
-    g.final = { rounds: g.results.length, winners, chips, held, net, loans, out: g.order.filter(id => g.sides[id].out) };
+    // rounds：打了几轮（加赛不算一轮，另记 playoffs 加赛了几次）
+    g.final = { rounds: g.results.filter(r => r.outcome !== "playoff").length, playoffs: g.results.filter(r => r.outcome === "playoff").length,
+      winners, chips, held, net, loans, out: g.order.filter(id => g.sides[id].out) };
     const repaid = (id) => (g.sides[id].owe ? `（已扣还借款 ${g.sides[id].owe} 枚）` : "");
     note(g, { t: "over", text: `对局结束：${g.order.map(id => `${nameOf(g, id)} ${chips[id]} 枚${repaid(id)}`).join("，")}——${winners.map(id => nameOf(g, id)).join("、")}赢。` });
   }
 
   /* ---------- 这名玩家能看到的东西 ---------- */
   /** 别人的手牌、盖下的牌、牌堆的顺序都不在里面；庄家偷看的那张只给庄家。亮牌的结果（results[i].shown）、
-   *  结算时亮出的每人这一轮盖下的牌（results[i].played，revealAll）是公开的——结算之前别人盖下的牌照旧看不到 */
+   *  结算时亮出的每人这一轮盖下的牌（results[i].played，revealAll）是公开的——结算之前别人盖下的牌照旧看不到。
+   *  累积奖池（jackpot，#534）公开；加赛时（playoff）公开谁参加、谁已经盖了，盖的是哪张亮牌前同样只有自己知道（me.card） */
   function view(g, id) {
     if (!g.sides[id]) fail("没有这名玩家：" + id);
-    const me = g.sides[id], b = g.betting, C = CC().CC_CONFIG;
+    const me = g.sides[id], b = g.betting, C = CC().CC_CONFIG, P = g.playoff;
     const seat = (k) => {
       const s = g.sides[k];
-      return { id: k, name: nameOf(g, k), chips: s.chips, start: s.start, bet: s.bet, st: s.st, loan: s.loan, owe: s.owe,
+      return { id: k, name: nameOf(g, k), chips: s.chips, start: s.start, bet: s.bet, st: s.st, blind: s.blind, loan: s.loan, owe: s.owe,
         folded: s.folded, allIn: s.allIn, out: s.out, handCount: s.hand.length, played: !!s.card,
         dealer: k === g.dealer, sb: k === g.sb, bb: k === g.bb };
     };
@@ -685,12 +830,17 @@
       mode: MODE, side: id, order: g.order.slice(), round: g.round, rounds: g.rounds, stage: g.stage, over: g.over,
       waiting, myTurn: toAct(g).indexOf(id) >= 0,
       dealer: g.dealer, sb: g.sb, bb: g.bb,
-      layers: g.layers.slice(), usedLayers: g.usedLayers.slice(), layerDeckCount: g.layerDeck.length,
-      weathers: g.weathers.slice(), deckCount: g.deck.length, discards: g.discards.slice(), elementDeckCount: g.elementDeck.length,
+      // 加赛时公共层牌、天气全部重洗：牌堆的张数照重洗后的算，弃掉的天气也洗回去了
+      layers: g.layers.slice(), usedLayers: g.usedLayers.slice(), layerDeckCount: P ? P.layerDeck.length : g.layerDeck.length,
+      weathers: g.weathers.slice(), deckCount: P ? P.deck.length : g.deck.length, discards: P ? [] : g.discards.slice(), elementDeckCount: g.elementDeck.length,
       blinds: [blindOf(g.round, 0), blindOf(g.round, 1)], minBet: minBetNow(g), maxRaises: HOLDEM_CONFIG.maxRaises,
       loan: { unit: C.loan.unit, repay: C.loan.repay }, loanAsk: g.loanAsk ? g.loanAsk.slice() : null,
-      // pot：这一轮大家押下去的 + 上一轮相位全押同分滚存下来的（carry，公开）
-      pot: g.order.reduce((t, k) => t + g.sides[k].bet, 0) + carryOf(g), carry: g.carry ? clone(g.carry) : null,
+      // pot：这一轮大家押下去的（盲注那部分不算，进了累积奖池）+ 上一轮相位全押同分滚存下来的（carry，公开）
+      pot: g.order.reduce((t, k) => t + potPart(g.sides[k]), 0) + carryOf(g), carry: g.carry ? clone(g.carry) : null,
+      // jackpot：累积奖池（#534，公开）：这一轮交的盲注 + 前几轮同分留下来的；没弃牌的人里单独拿到最高分的人拿走
+      jackpot: g.jackpot,
+      // playoff：最后一轮同分的加赛（#534）：第几次、谁参加、谁已经盖了（盖的是哪张不写）
+      playoff: P ? { n: P.n, ids: P.ids.slice(), played: P.ids.filter(k => !!g.sides[k].card) } : null,
       me: Object.assign(seat(id), { hand: me.hand.slice(), card: me.card, history: clone(me.history) }),
       seats: g.order.map(seat),
       // window：跟注后的追加窗口开着（n 第几个、by 谁跟的注、sec 几秒、passed 自己放弃追加了没有；别人放没放弃不写）
@@ -707,16 +857,17 @@
   }
 
   /* ---------- 统计：平分底池有多常见（主人 10/30：试玩时统计一下 AI 自对局里平分的局占多少） ---------- */
-  /** 一局（打完的）里：打到亮牌的轮数、主池平分的轮数、任何一个池平分的轮数、相位全押的轮数、全押后同分滚存的轮数（滚存的不算平分） */
+  /** 一局（打完的）里：打到亮牌的轮数、主池平分的轮数、任何一个池平分的轮数、相位全押的轮数、全押后同分滚存的轮数（滚存的不算平分）。
+   *  轮数不算最后一轮同分的加赛（#534，加赛的结算 outcome 是 "playoff"） */
   function splitStats(g) {
     const sd = g.results.filter(r => r.outcome === "showdown");
-    return { rounds: g.results.length, showdowns: sd.length, mainSplit: sd.filter(r => r.split).length, anySplit: sd.filter(r => r.pots.some(p => p.winners.length > 1)).length,
+    return { rounds: g.results.filter(r => r.outcome !== "playoff").length, showdowns: sd.length, mainSplit: sd.filter(r => r.split).length, anySplit: sd.filter(r => r.pots.some(p => p.winners.length > 1)).length,
       allIns: sd.filter(r => r.allIn).length, carried: sd.filter(r => r.carry > 0).length };
   }
 
   const api = {
     HOLDEM_CONFIG, MODE, scoreStack, handScore, chart, cardChart,
-    newGame, toAct, legal, act, closeWindow, view, potsOf, resultText, splitStats, minBetNow,
+    newGame, toAct, legal, act, closeWindow, view, potsOf, resultText, jackpotText, splitStats, minBetNow,
     name: () => HOLDEM_CONFIG.name
   };
   // 配置挂到 High Flux 的 CC_CONFIG 上（同一份对象）；借贷记录里的称呼按这里的名字（counter-cards.js · registerMode）

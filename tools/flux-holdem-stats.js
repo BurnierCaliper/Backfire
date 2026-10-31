@@ -33,7 +33,8 @@ function run(players, games, opt) {
     t.games += 1; t.rounds += s.rounds; t.showdowns += s.showdowns; t.mainSplit += s.mainSplit; t.anySplit += s.anySplit;
     t.foldWins += s.rounds - s.showdowns; t.allIns += s.allIns; t.carried += s.carried;
     if (s.mainSplit) t.gamesWithSplit += 1;
-    g.results.filter(r => r.split).forEach(r => { const k = r.winners.length; t.splitWays[k] = (t.splitWays[k] || 0) + 1; });
+    // 只算亮牌比分的那几轮（最后一轮同分的加赛平分累积奖池也记 split，#534，不算平分底池）
+    g.results.filter(r => r.outcome === "showdown" && r.split).forEach(r => { const k = r.winners.length; t.splitWays[k] = (t.splitWays[k] || 0) + 1; });
   }
   const pct = (a, b) => (b ? Math.round(a / b * 1000) / 10 : 0);
   t.splitPerShowdown = pct(t.mainSplit, t.showdowns);

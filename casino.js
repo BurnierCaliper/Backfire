@@ -248,7 +248,7 @@
     return game;
   }
   /** 人那一方桌上剩多少（几种玩法一样算，同 CounterCards.casino.cashOut）：剩下的筹码扣还向主持方借的（对局结束时已经扣过）；
-   *  打到一半离桌，已经押进底池的（这一轮下的、滚存的）不退。
+   *  打到一半离桌，已经押进底池的（这一轮下的、滚存的；Flux Hold'em 交进累积奖池的盲注，#534）不退。
    *  猜大猜小：手上的筹码（打完了含连本带利拿回的）；打到一半离桌，已经押下的注不退；没有借贷 */
   function cashOut(g) {
     if (gameOf(g) === "highflux") return CC().casino.cashOut(g);
@@ -261,7 +261,7 @@
     const chips = s.chips - (g.over ? 0 : s.owe), net = chips - g.casino.buyIn;
     return { chips, net, value: chips * g.casino.rate, netValue: net * g.casino.rate, loan: s.loan, owe: s.owe };
   }
-  /** 离桌：桌上剩下的筹码（扣还向主持方借的；打到一半离桌，已经押进底池的不退）按倍率回钱包。
+  /** 离桌：桌上剩下的筹码（扣还向主持方借的；打到一半离桌，已经押进底池、累积奖池的不退）按倍率回钱包。
    *  净输赢按总买入算（坐下时的买入 + 牌局里从钱包补的，#520）。
    *  返回 { table, chips（桌上剩下的枚数）, buyIn（总买入）, topUp（其中从钱包补的）, net（桌上净输赢，枚）, value（剩下的折多少面值）, netChips（钱包净变化，枚）, over, text } */
   function leave(w) {
@@ -533,7 +533,7 @@
     return s.id;
   }
   /** 开局：空着的座位由 AI 补，每个座位开局都是买入那么多。opt.names（{ 座位: 记录里的称呼 }，模式给）、opt.seed，
-   *  测试用：hands / elements / layers / weathers（同 FluxHoldem.newGame） */
+   *  测试用：hands / elements / layers / weathers / playoff（最后一轮同分加赛时重洗后的顺序，#534）（同 FluxHoldem.newGame） */
   function holdemStart(t, opt) {
     opt = opt || {};
     if (t.game) fail("这一桌已经开局了");
@@ -541,7 +541,7 @@
     const names = opt.names || {};
     t.game = root.FluxHoldem.newGame({ seed: opt.seed != null ? opt.seed : `holdem|${t.id}|${Date.now()}`,
       players: t.seats.map(s => ({ id: s.id, name: names[s.id] || s.id, chips: t.buyIn })),
-      hands: opt.hands, elements: opt.elements, layers: opt.layers, weathers: opt.weathers });
+      hands: opt.hands, elements: opt.elements, layers: opt.layers, weathers: opt.weathers, playoff: opt.playoff });
     return t.game;
   }
   /** 由 AI 走的座位：空座位（AI）和托管的 */

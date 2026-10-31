@@ -5,8 +5,10 @@
  *   简单不看牌；普通只扣掉自己手里、用过的牌；困难另外扣掉之前亮牌时公开过的牌，还把对手这一回合的下注 / 加注当成信号。
  *   庄家偷看过天气堆顶：留在顶上的那张就是第 1 张天气，压到堆底的那张（堆里不止一张时）不会是第 1 张。
  *   简单：随手盖牌，下注也随机，偶尔乱弃牌；
- *   普通：盖胜率最高的那张；下注看胜率比「平均份额」（1 ÷ 还在牌局里的人数）高多少，跟注看底池赔率（底池算上滚存的），偶尔诈唬；
- *   困难：同普通，下注额按底池 × 多出来的胜率，对手加注时把自己的胜率往下调。
+ *   普通：盖胜率最高的那张；下注看胜率比「平均份额」（1 ÷ 还在牌局里的人数）高多少，跟注看底池赔率（底池算上滚存的和累积奖池，#534），偶尔诈唬；
+ *   困难：同普通，下注额按底池（同样算上累积奖池）× 多出来的胜率，对手加注时把自己的胜率往下调。
+ *   最后一轮同分的加赛（#534，只争累积奖池，不下注）：同盖牌——简单随手盖，普通 / 困难按胜率加权抽签；
+ *     这时公共层牌、天气全部重洗，胜率按全部 10 张层牌、7 张天气算，对手只算参加加赛的人。
  *   相位（主人 10/30：翻开就全押，上限按没弃牌的人里筹码最少那位）——普通、困难：
  *     庄家偷看到相位：手牌最好那张的胜率比平均份额高够了才留在顶上（翻开就全押），不然压到堆底；
  *     下注时后面还可能翻到相位、自己的牌又比平均份额差：被逼全押的期望亏损（概率 × (自己要补的 − 胜率 × 大家补进来的)）
@@ -85,15 +87,17 @@
   }
   /** 组合数 */
   function choose(n, k) { let r = 1; for (let i = 1; i <= k; i++) r = r * (n - k + i) / i; return r; }
-  /** 还在牌局里（没弃牌、没出局）的对手 */
-  const rivals = (v) => v.seats.filter(s => s.id !== v.side && !s.folded && !s.out);
+  /** 还在牌局里（没弃牌、没出局）的对手；加赛时（#534）是一起加赛的人 */
+  const rivals = (v) => v.seats.filter(s => s.id !== v.side && (v.playoff ? v.playoff.ids.indexOf(s.id) >= 0 : !s.folded && !s.out));
+  /** 估算底池：桌上的底池（含滚存的）+ 累积奖池（#534：单独拿到最高分就整个拿走） */
+  const potOf = (v) => (v.pot || 0) + (v.jackpot || 0);
 
   /* ---------- 牌池：还没见过的牌 ---------- */
-  /** 公共层牌堆里可能还有的（2 组 × 5 张，扣掉翻开过的）：{ 层: 张数 } */
+  /** 公共层牌堆里可能还有的（2 组 × 5 张，扣掉翻开过的；加赛时全部重洗，一张都不扣）：{ 层: 张数 } */
   function layerPool(v) {
     const n = {};
     conf().layers.forEach(ly => { n[ly] = X().HOLDEM_CONFIG.layerSets; });
-    v.usedLayers.concat(v.layers).forEach(ly => { n[ly] -= 1; });
+    (v.playoff ? v.layers : v.usedLayers.concat(v.layers)).forEach(ly => { n[ly] -= 1; });
     Object.keys(n).forEach(ly => { if (n[ly] <= 0) delete n[ly]; });
     return n;
   }
@@ -101,22 +105,25 @@
   function elementPool(v, cfg) {
     const n = {};
     conf().elements.forEach(el => { n[el] = X().HOLDEM_CONFIG.elementSets; });
-    const mine = v.me.hand.concat(v.me.card ? [v.me.card] : [], (v.me.history || []).filter(h => h.r !== v.round).map(h => h.card));
+    // 用过的：history 里都有（这一轮盖下的那张也在里面；加赛盖的也记在最后一轮下面）
+    const mine = v.me.hand.concat((v.me.history || []).map(h => h.card));
     mine.forEach(el => { n[el] -= 1; });
     if (cfg.seen) (v.results || []).forEach(r => Object.keys(r.shown || {}).forEach(id => { if (id !== v.side) n[r.shown[id].card] -= 1; }));
     Object.keys(n).forEach(el => { if (n[el] <= 0) delete n[el]; });
     return Object.keys(n).length ? n : (() => { const u = {}; conf().elements.forEach(el => { u[el] = 1; }); return u; })();
   }
-  /** 接下来翻的天气可能是哪张：还没上场的（场上的、弃掉的不算；天气堆空了才会洗回弃掉的） */
+  /** 接下来翻的天气可能是哪张：还没上场的（场上的、弃掉的不算；天气堆空了才会洗回弃掉的；加赛时 7 张全部重洗，view 里 discards 是空的） */
   function weatherPool(v) {
     const used = v.weathers.concat(v.deckCount > 0 ? v.discards : []);
     const out = conf().weathers.filter(w => used.indexOf(w) < 0);
     return out.length ? out : conf().weathers.filter(w => v.weathers.indexOf(w) < 0);
   }
-  /** 还没翻开的层牌、天气的所有可能（带概率）：[{ layers, weathers, p }]。force：{ w1 } 指定第 1 张天气（庄家看估值用） */
+  /** 还没翻开的层牌、天气的所有可能（带概率）：[{ layers, weathers, p }]。force：{ w1 } 指定第 1 张天气（庄家看估值用）。
+   *  加赛（#534）翻几张照 HOLDEM_CONFIG.playoff，没有庄家偷看 */
   function scenarios(v, force) {
+    const H = X().HOLDEM_CONFIG, per = v.playoff ? H.playoff : { layers: H.layersPerRound, weathers: H.weathersPerRound };
     const lp = layerPool(v), lt = Object.values(lp).reduce((a, b) => a + b, 0);
-    const needL = Math.max(0, X().HOLDEM_CONFIG.layersPerRound - v.layers.length);
+    const needL = Math.max(0, per.layers - v.layers.length);
     // 层牌：不放回地抽 needL 张（按张数加权）
     let lsets = [{ layers: v.layers.slice(), p: 1 }];
     for (let k = 0; k < needL; k++) {
@@ -130,7 +137,7 @@
       lsets = next.length ? next : lsets;
     }
     // 天气：还要翻几张；庄家偷看过的按他知道的算
-    const needW = Math.max(0, X().HOLDEM_CONFIG.weathersPerRound - v.weathers.length);
+    const needW = Math.max(0, per.weathers - v.weathers.length);
     const pool = weatherPool(v);
     let wsets = [{ ws: v.weathers.slice(), p: 1 }];
     for (let k = 0; k < needW; k++) {
@@ -259,7 +266,7 @@
       return { type: "call" };
     }
     const { e, edge, phase } = read(ctx);
-    const pot = v.pot;
+    const pot = potOf(v);   // 算上累积奖池（#534）
     const odds = toCall > 0 ? toCall / (pot + toCall) : 0;
     const worthCall = toCall > 0 && (e >= odds - cfg.callSlack || toCall <= pot * cfg.cheapCall);
     if (short) {
@@ -290,10 +297,10 @@
     if (ctx.level === "hard") e = Math.max(0, e - ctx.cfg.aggrRead * aggression(v) / Math.max(1, q.n));
     return { e, fair: q.fair, edge: e - q.fair, phase: q.phase };
   }
-  /** 下注额：普通牌很好时双倍最低额；困难按底池 × 多出来的胜率。#521 起带随机性（High Flux 的 AI 的同一份 betSize）：
+  /** 下注额：普通牌很好时双倍最低额；困难按底池（算上累积奖池，#534）× 多出来的胜率。#521 起带随机性（High Flux 的 AI 的同一份 betSize）：
    *  普通在 bigEdge 附近最低额、双倍都会下（sizeTemp），困难多出来的那部分上下浮动 sizeJitter */
   function size(ctx, o, edge) {
-    return HF().betSize(o.min, ctx.v.pot, edge, ctx.level, ctx.cfg, ctx.rng);
+    return HF().betSize(o.min, potOf(ctx.v), edge, ctx.level, ctx.cfg, ctx.rng);
   }
   /** 借多少才够跟注：缺口向上取整到一份，夹在这次能借的范围里 */
   function loanToCall(v, o) {
@@ -311,7 +318,7 @@
     switch (view.stage) {
       case "loan": a = loanAtStart(ctx); break;
       case "peek": a = place(ctx); break;
-      case "play": a = playCard(ctx); break;
+      case "play": case "playoff": a = playCard(ctx); break;   // 加赛（#534）：同盖牌，胜率按重洗后的牌算（scenarios）
       case "bet1": case "bet2": a = bet(ctx); break;
     }
     // 保险：算出来的不在可选的里面，就随便挑一个合法的
@@ -323,9 +330,9 @@
     }
     return a;
   }
-  /** 盖牌那一步每张牌会被抽中的概率 { 牌: 概率 }（#521，测试 / 调参用；decide 就按它抽）：简单是平均的；不是盖牌的时候返回 null */
+  /** 盖牌那一步（含加赛，#534）每张牌会被抽中的概率 { 牌: 概率 }（#521，测试 / 调参用；decide 就按它抽）：简单是平均的；不是盖牌的时候返回 null */
   function cardOdds(view, level) {
-    if (!view || view.stage !== "play" || !view.legal || !view.legal.length) return null;
+    if (!view || (view.stage !== "play" && view.stage !== "playoff") || !view.legal || !view.legal.length) return null;
     level = LEVELS.indexOf(level) >= 0 ? level : "normal";
     const cards = view.legal.filter(o => o.type === "play").map(o => o.card);
     const p = level === "easy" ? cards.map(() => 1 / cards.length) : playOdds({ v: view, level, cfg: AI_CONFIG[level] }, cards);
