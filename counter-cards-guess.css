@@ -52,6 +52,17 @@ button.ccg-cell:hover { border-color: var(--sk-hazard, #f2c230); }
 .ccg-grit.hurt { color: var(--sk-canvas, #ece0c6); background: var(--sk-blood, #d8322a); }
 .ccg-dead { margin: 0; padding: 4px 14px; font: 800 18px var(--sk-tag, var(--ui)); color: var(--sk-canvas, #ece0c6); background: #0b0806; border: 2px solid var(--sk-blood, #d8322a); }
 
+/* ---------- 结算前的过渡（#525，样子同 High Flux 的 counter-cards.css：.cc-judge / .cc-judging）：判定中三张牌轻轻抖，
+ * 「判定中」胶带贴在三张牌的下沿（上沿是「元素 / 天气 / 层牌」的小字），一半在下面赔率表上方的空隙里 ---------- */
+.ccg-dealer .ccg-slots { position: relative; }
+.ccg-slots.cc-judging .cc-card { animation: ccJudge .8s ease-in-out infinite; }
+.ccg-slots.cc-judging .ccg-slot:nth-child(2) .cc-card { animation-delay: -.4s; }
+.cc-judge.ccg-judge { top: auto; bottom: 0; translate: -50% 50%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ccg-slots.cc-judging .cc-card { animation: none !important; }
+}
+
 /* ---------- 结算横幅：三张牌摆小一点 ---------- */
 .ccg-result .ccg-slots { gap: 8px; }
 .ccg-mini .cc-card { width: 56px; height: 80px; }

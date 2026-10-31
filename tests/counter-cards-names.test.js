@@ -171,7 +171,7 @@ test("牌名（#509）· 猜大猜小、赌场、联机赌场浮层：翻开的�
   // 猜大猜小：五种层牌各翻一手（天气都是沙暴：层牌沙尘和天气沙暴写在一起也分得清）
   click(p.$("#t-ccg"));
   noOld(p.$("#scr-ccg").innerHTML, "猜大猜小的设置页");
-  p.GUI.start({ table: "street", seed: "牌名", deals: C.layers.map(layer => ({ element: "harmonic", weather: "sand", layer })) });
+  p.GUI.start({ table: "street", seed: "牌名", deals: C.layers.map(layer => ({ element: "harmonic", weather: "sand", layer })), fast: true });   // fast：结算前不停（#525 的过渡）
   C.layers.forEach((ly, i) => {
     noOld(p.$("#scr-ccg").innerHTML, `猜大猜小第 ${i + 1} 手（三张盖着）`);
     click(p.$('#ccg-actions [data-ccg="pass"]'));
