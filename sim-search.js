@@ -22,6 +22,49 @@ const BATTLE_SEARCH_CFG = {
   reaction: /_opp$|_block$|assist/
 };
 
+/* 看情况用技能的打法（sim.js · BattleSim.SKILL_POLICY）的设置。只给模拟、测试、工具用。
+ * 轮到一个单位时：列出它所有的合法动作，每个动作在几个平行世界（不同的骰子）里试跑，按打分（跑完的局面比跑之前好了多少）取平均；
+ * 留最好的 width 条路线接着往下看，这个单位自己的动作最多看 depth 步（连招、攒资源再放）；任何一步停下（结束这个单位的回合）都算一条路线，
+ * 挑总分最高的那条，做它的第一步——做完、骰子出来以后再从头看一遍。一步都不做最好（分数都不到 0）就结束。
+ * 分数的单位：把一名对手打掉一整条血 = w.hp（100）分，别的都按它比着定。坚毅生命只在 AI 自己算分时用（打到起身中的对手身上的伤害），
+ * 不给任何人看。 */
+const SKILL_POLICY_CFG = {
+  width: 3,          // 束宽：每一步留几条路线往下看
+  depth: 3,          // 这个单位一个回合里往前看几步
+  worlds: 2,         // 平行世界几个（同一串动作、不同的骰子），分数取平均
+  items: true,       // 用背包里的道具（背包空着就没有：PvP 平衡模拟满状态、不带道具）
+  summon: true,      // 召唤武器人
+  freeSkills: false, // 不花行动点、附赠的技能（开关、换姿态）：BattleSim 的回合循环里做了它这个单位就停下了，默认不用
+  w: {
+    hp: 100,         // 对手掉的血：按它的血量上限算比例，一整条 = 100
+    shp: 60,         // 对手起身中（靠坚毅生命战斗）挨的伤害：按它的血量上限算比例
+    down: 60,        // 打倒一名对手（倒地）
+    out: 120,        // 一名对手再起不能 / 死亡 / 离场（再加上打倒的分）
+    stagger: 40,     // 打出失衡
+    def: 30,         // 对手掉的架势：一整条 = 30
+    ownHp: 80,       // 自己一方掉的血（一整条 = 80）；治疗回的血也按这个算
+    ownShp: 50,      // 自己一方起身中掉的坚毅生命（自焚这类）
+    ownDown: 60,
+    ownOut: 120,
+    ownStagger: 40,
+    ownDef: 20,
+    weapon: 0.5,     // 武器人的血、倒地、站位按这个比例算（决斗里武器人倒了不算输）
+    summon: 30,      // 场上多一个自己的武器人（召唤）
+    summonDecay: 0.1,  // 召唤的分每过一个回合少这么多（比例），最少剩 summonMin
+    summonMin: 0.3,
+    reach: 12,       // 普攻打得到至少一名对手（站位）
+    risk: 15,        // 远程（同区打不了）留在有对手近战的区：每个近战对手扣这么多
+    keepBonus: 10,   // 留着附赠（对面回合里能协助格挡）：身边有队友时，每个角色留着 1 个就算
+    instant: 5,      // 对手身上每个即时效果（热熔、超频、预告……）
+    self: 5,         // 自己人的自我效果（自焚、超导……）；对手的算负
+    high: 1,         // 对手每 1 点高能值
+    focus: 4,        // 对手身上每个聚焦
+    // 状态效果：挂在对手身上加分、挂在自己人身上扣分（减益）；增益反过来
+    debuff: { burn: 8, shock: 8, corr: 8, frostbite: 8, shockwave: 8, high: 10, reso: 6, weak: 10, blind: 8, unstable: 6, chase: 4 },
+    buff: { inspire: 8, sturdy: 8, hide: 6, advantage: 8 }
+  }
+};
+
 const BattleSearch = (function () {
   "use strict";
   const SKIP = new Set(BATTLE_SEARCH_CFG.skip);
@@ -57,11 +100,12 @@ const BattleSearch = (function () {
     return { keys, data: copyState(keys, state), ledger: typeof LEDGER !== "undefined" && LEDGER ? LEDGER.save() : null };
   }
   function load(s) {
+    // 先读队伍档案（它会顺手把水写进 state.bag），再整个盖回 state：局面和存的时候一模一样
+    if (s.ledger && typeof LEDGER !== "undefined" && LEDGER) LEDGER.load(JSON.parse(JSON.stringify(s.ledger)));
     const keep = new Set(s.keys);
     Object.keys(state).forEach(k => { if (!keep.has(k)) delete state[k]; });
     const data = copyState(s.keys, s.data);
     s.keys.forEach(k => { state[k] = data[k]; });
-    if (s.ledger && typeof LEDGER !== "undefined" && LEDGER) LEDGER.load(JSON.parse(JSON.stringify(s.ledger)));
   }
 
   /** 用来判断「这一下有没有真的做了什么」以及去重 */
@@ -212,23 +256,213 @@ const BattleSearch = (function () {
   let BUSY = 0;
   function busy() { return BUSY > 0; }
   /**
-   * 在沙盒里跑 fn(root)：root 是进沙盒时的局面。试跑期间战斗日志、计算器的撤销记录换成临时的，骰子由 fn 自己换（trial 的 seed）；
-   * 跑完把局面、日志、撤销记录、骰子（种子随机数连同已经掷到第几个）原样还回去——真实战斗的随机数一个都不动，同一种子结果一样。
+   * 在沙盒里跑 fn(root)：root 是进沙盒时的局面（load(root) 读出来的是拷贝）。试跑期间战斗日志、计算器的撤销记录换成临时的，
+   * 骰子由 fn 自己换（trial 的 seed）。跑完把进沙盒时的局面原样放回去：state 的每一项还是原来那个对象（试跑只动拷贝，原来的一点没动，
+   * 手里拿着的单位照样能用），队伍档案、日志、撤销记录、骰子（种子随机数连同已经掷到第几个）也都还回去——真实战斗的随机数一个都不动，
+   * 同一种子结果一样。
    */
   function sandbox(fn) {
-    const keep = { seed: RNG.seed, fn: RNG.fn, random: Math.random, logPages: state.logPages, logIndex: state.logIndex, history: state.history };
+    const keys = Object.keys(state), refs = {};
+    keys.forEach(k => { refs[k] = state[k]; });
+    const keep = { seed: RNG.seed, fn: RNG.fn, random: Math.random, ledger: typeof LEDGER !== "undefined" && LEDGER ? LEDGER.save() : null };
     BUSY++;
     state.logPages = [{ turn: state.turnNo || 1, lines: [] }];
     state.logIndex = 0;
     state.history = [];
-    const root = snap();
-    try { return fn(root); } finally {
-      load(root);
-      state.logPages = keep.logPages; state.logIndex = keep.logIndex; state.history = keep.history;
+    const root = { keys: Object.keys(state), data: Object.assign({}, state), ledger: keep.ledger };
+    try {
+      // 先换成一份拷贝再交给 fn（队伍档案不用读：和现在一样；读了会往原来的 state.bag 里写水）
+      const data = copyState(root.keys, root.data);
+      root.keys.forEach(k => { state[k] = data[k]; });
+      return fn(root);
+    } finally {
+      if (keep.ledger) LEDGER.load(JSON.parse(JSON.stringify(keep.ledger)));   // 先读档案（会写 state.bag 的水），再放回原来的 state
+      Object.keys(state).forEach(k => { if (!Object.prototype.hasOwnProperty.call(refs, k)) delete state[k]; });
+      keys.forEach(k => { state[k] = refs[k]; });
       RNG.seed = keep.seed; RNG.fn = keep.fn; Math.random = keep.random;
       BUSY--;
     }
   }
 
-  return { snap, load, cloneData: o => cloneData(o, new Map()), signature, actors, flowPicks, affordable, candidateActions, tokenOf, idOf, tokenize, resolve, execute, trial, sandbox, busy };
+  /* ---------- 看情况用技能：打分 ---------- */
+  const isWeapon = (u) => typeof isWeaponUnit === "function" && isWeaponUnit(u);
+  const onField = (u) => !!u && !u.hidden && !u.dead && !u._removed && !u.fused;
+  const downed = (u) => !!u && !!u.dying && !u.upOnShp;
+  const hpNow = (u) => (u.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0);
+  const zdist = (a, b) => zoneDist(Number(a), Number(b), Number(state.zoneMode));
+  const on = (v) => v === true || (typeof v === "number" && v > 0);
+  /** 普攻的射程（站位打分用；和 sim.js · skillRangeOf 一样） */
+  function aaRange(u) {
+    let list = [];
+    try { list = skillList(u) || []; } catch (e) { list = []; }
+    const aa = list.find(s => s.id === u.kit + "_aa") || list.find(s => /_aa$/.test(s.id || ""));
+    if (!aa) return null;
+    return (typeof skillRangeFor === "function" && skillRangeFor(u, aa.id)) || parseSkillRange(aa.hint) || { min: 0, max: 1 };
+  }
+  /** 场上和 a 敌对、打得到的单位（倒地没起身的不算：和 BASIC_POLICY 一样不去打） */
+  function foesOf(a) {
+    const taunt = typeof playerTauntTarget === "function" ? playerTauntTarget(a) : null;
+    if (taunt) return [taunt];
+    return state.units.filter(x => onField(x) && hostileTo(a, x) && !downed(x) && !x.untargetable && !x.submerged);
+  }
+  function alliesOf(a) { return state.units.filter(x => onField(x) && x.isPlayer && (x.id === a.id || teammateOf(a, x))); }
+
+  /**
+   * 站在 me 这一边看局面的打分器：value() = 现在的局面值多少分（只有差值有意义）。
+   * 进沙盒时（root）记下场上有哪些单位、各是哪一边、对手的普攻射程；之后新出现的自己人武器人算召唤。
+   */
+  function scorer(me, cfg) {
+    const W = cfg.w;
+    // 普攻射程进沙盒时记一次（站位打分每个局面都要用，每次都重新列技能太慢）
+    const side = new Map(), range = new Map(), rootVal = new Map(), rootIds = [];
+    state.units.forEach(x => {
+      if (!onField(x)) return;
+      const s = x.isPlayer && (x.id === me.id || teammateOf(me, x)) ? 1 : hostileTo(me, x) ? -1 : 0;
+      if (!s) return;
+      side.set(x.id, s); rootIds.push(x.id);
+      range.set(x.id, aaRange(x));
+    });
+    const turn = Number(state.turnNo) || 1;
+    const summonPts = W.summon * Math.max(W.summonMin, 1 - (turn - 1) * W.summonDecay);
+    const melee = (r) => !!r && r.max === 0;
+    /** 一个单位对我方的好坏（x 不在了按离场算） */
+    function unitValue(id, x) {
+      const s = side.get(id);
+      if (x && x.hidden && !x.dead && !x._removed && rootVal.has(id)) return rootVal.get(id);   // 收回手上的武器人、躲起来的：当作没变
+      const imp = x && isWeapon(x) ? W.weapon : 1;
+      const out = !x || x.dead || x._removed || x.pvpOut;
+      const max = x ? Math.max(1, typeof totalMaxHp === "function" ? totalMaxHp(x) : 1) : 1;
+      const hp = out || !x ? 0 : hpNow(x) / max;
+      const shp = out || !x || !x.upOnShp ? 0 : (Number(x.shp) || 0) / max;
+      const down = out || downed(x);
+      const defFrac = x && !out && !x.noPosture && Number(x.defMax) > 0 ? Math.max(0, Number(x.def) || 0) / Number(x.defMax) : 1;
+      const stun = !!(x && !out && x.stunned);
+      let v = 0, st = 0;
+      if (x && !out) {
+        const ss = x.statuses || {};
+        Object.keys(W.debuff).forEach(k => { if (on(ss[k])) st += W.debuff[k]; });
+        Object.keys(W.buff).forEach(k => { if (on(ss[k])) st -= W.buff[k]; });
+        if (x.self && x.self !== "none") st -= W.self;
+      }
+      if (s < 0) {
+        v = imp * (W.hp * (1 - hp) - W.shp * shp + (down ? W.down : 0) + (out ? W.out : 0)) + (stun ? W.stagger : 0) + W.def * (1 - defFrac) + st;
+        if (x && !out) {
+          v += W.instant * Object.keys(x.instant || {}).filter(k => x.instant[k]).length;
+          v += W.high * (Number(x.highEnergy) || 0) + W.focus * ((x.focuses || []).length || 0);
+        }
+      } else {
+        v = -imp * (W.ownHp * (1 - hp) - W.ownShp * shp + (down ? W.ownDown : 0) + (out ? W.ownOut : 0)) - (stun ? W.ownStagger : 0) - W.ownDef * (1 - defFrac) - st;
+        if (x && !out && !down) {
+          // 站位：普攻打得到对手；远程（同区打不了）和对手的近战在同一区
+          const r = range.get(id);
+          const foes = state.units.filter(f => side.get(f.id) === -1 && onField(f) && !downed(f));
+          if (r && foes.some(f => { const d = zdist(x.zone, f.zone); return d >= r.min && d <= r.max; })) v += imp * W.reach;
+          if (r && r.min >= 1) v -= imp * W.risk * foes.filter(f => Number(f.zone) === Number(x.zone) && !f.stunned && melee(range.get(f.id))).length;
+          // 留着附赠：对面回合里能替队友协助格挡（身边有别的自己人才算）
+          if (!isWeapon(x) && (Number(x.bonus) || 0) >= 1 && state.units.some(y => y !== x && side.get(y.id) === 1 && onField(y) && !downed(y))) v += W.keepBonus;
+        }
+      }
+      return v;
+    }
+    function value() {
+      let v = 0;
+      for (const id of rootIds) v += unitValue(id, state.units.find(u => u.id === id));
+      // 新出现的自己人武器人：召唤
+      state.units.forEach(x => { if (!side.has(x.id) && onField(x) && x.isPlayer && isWeapon(x) && teammateOf(me, x)) v += summonPts; });
+      return v;
+    }
+    rootIds.forEach(id => rootVal.set(id, unitValue(id, state.units.find(u => u.id === id))));
+    return { value };
+  }
+
+  /* ---------- 看情况用技能：这个单位能做的动作 ---------- */
+  function candidatesFor(a, cfg) {
+    const foes = foesOf(a), allies = alliesOf(a);
+    const inRange = (r) => (x) => { if (!r) return true; const d = zdist(a.zone, x.zone); return d >= r.min && d <= r.max; };
+    return candidateActions({
+      actors: [a],
+      skip: (u, sk) => BATTLE_SEARCH_CFG.reaction.test(sk.id) || (!cfg.summon && /_summon$/.test(sk.id)) ||
+        (!cfg.freeSkills && !((skillCost(sk.id) || {}).ap) && !((skillCost(sk.id) || {}).bonus)),
+      // 目标：按技能选的那一边（敌人 / 友方 / 任意）和射程挑场上的单位。有射程的技能只试射程里的（不选目标白花行动点）；
+      // 没写射程的先试「不选」，plan 里再看选了目标有没有不一样（召唤、给自己的增益选谁都一样，就不再一个一个试）
+      targets: (u, sk) => {
+        const side = typeof skillSideOf === "function" ? skillSideOf(u, sk.id) : "enemy";
+        const r = (typeof skillRangeFor === "function" && skillRangeFor(u, sk.id)) || parseSkillRange(sk.hint);
+        const list = (/^ally/.test(side) ? allies : /^any/.test(side) ? foes.concat(allies) : foes).filter(inRange(r)).map(x => x.id);
+        return r ? list : [null].concat(list);
+      },
+      canMove: u => (u.bonus || 0) > 0 && !u.noMove,
+      items: !!cfg.items,
+      itemTargets: (u, spec) => spec.target === "self" ? [{ target: u.id }]
+        : spec.target === "ally" ? allies.map(x => ({ target: x.id }))
+        : spec.target === "enemy" ? foes.map(x => ({ target: x.id }))
+        : spec.target === "zone" ? Array.from({ length: Number(state.zoneMode) || 2 }, (_, i) => ({ dest: i + 1 })) : []
+    });
+  }
+  function canAct(u) { return onField(u) && !u.stunned && !downed(u) && ((u.ap || 0) > 0 || (u.bonus || 0) > 0); }
+
+  /* ---------- 看情况用技能：束搜索 ---------- */
+  let PLAN_NO = 0;
+  /**
+   * 轮到 actorId 时挑一个动作（tokenize 过的指令，执行前 resolve）；一步都不做最好就返回 null。
+   * policy：试跑时格挡 / 协助怎么选（BattleSim.resolveQueues 用）。在沙盒里跑：真实的局面、日志、骰子都不动。
+   * 每一步的平行世界种子 = 这场战斗的种子 + 已经掷了几次骰子 + 单位 + 第几步 + 第几个世界：同一种子整场结果一样，同一步的所有候选用同一批种子（公平比较）
+   */
+  function plan(actorId, policy, cfg) {
+    cfg = cfg || SKILL_POLICY_CFG;
+    const me0 = unitById(actorId);
+    if (!canAct(me0)) return null;
+    const seedBase = `skill:${RNG.seed != null ? RNG.seed + ":" + RNG.draws() : "free:" + (++PLAN_NO)}:${actorId}`;
+    const info = { tried: 0, ok: 0, depth: 0 };
+    const tok = sandbox(root => {
+      const ev = scorer(me0, cfg);
+      const v0 = ev.value();
+      const W = Math.max(1, Number(cfg.worlds) || 1), depth = Math.max(1, Number(cfg.depth) || 1), width = Math.max(1, Number(cfg.width) || 1);
+      let beam = [{ snaps: Array.from({ length: W }, () => root), path: [], score: 0 }];
+      let best = { path: [], score: 0 };
+      for (let d = 0; d < depth && beam.length; d++) {
+        const last = d === depth - 1, next = new Map();
+        const seed = w => `${seedBase}:${d}:${w}`;
+        beam.forEach(node => {
+          load(node.snaps[0]);
+          const me = unitById(actorId);
+          if (!canAct(me)) return;
+          const before0 = signature();
+          // 同一个技能、同一种分步选择：「不选目标」做成了，第一个目标的结果又和它一样 → 这个技能不看目标，后面的目标不用再试
+          const groups = new Map();
+          candidatesFor(me, cfg).map(cmd => tokenize(cmd)).forEach(tok => {
+            const gk = tok.type === "skill" && tok.picks && tok.picks.target === undefined ? tok.skill + "|" + JSON.stringify(tok.picks) : null;
+            const g = gk ? groups.get(gk) : null;
+            if (g && g.same) return;
+            info.tried++;
+            // 先不存跑完的局面（存一份和跑一遍差不多慢）：留进束里的那几条再跑一遍存下来（同一批种子，结果一样）
+            const r = trial(node.snaps, tok, { before0, policy, seed, measure: () => ev.value() - v0, keep: false, onBase: signature });
+            if (gk) {
+              if (tok.target == null) groups.set(gk, { none: r ? r.base : null, checked: false });
+              else if (g && !g.checked) { g.checked = true; g.same = !!r && g.none != null && r.base === g.none; }
+            }
+            if (!r) return;
+            info.ok++;
+            const score = r.vals.reduce((a, b) => a + b, 0) / r.vals.length;
+            const prev = next.get(r.base);
+            if (!prev || score > prev.score) next.set(r.base, { from: node, tok, path: node.path.concat([tok]), score });
+          });
+        });
+        const all = [...next.values()].sort((a, b) => b.score - a.score);
+        if (all.length && all[0].score > best.score) best = all[0];
+        info.depth = d + 1;
+        beam = last ? [] : all.slice(0, width).map(n => {
+          const r = trial(n.from.snaps, n.tok, { policy, seed });
+          return r ? { snaps: r.snaps, path: n.path, score: n.score } : null;
+        }).filter(Boolean);
+      }
+      info.best = best.score;
+      return best.path.length ? best.path[0] : null;
+    });
+    plan.last = info;
+    return tok;
+  }
+
+  return { snap, load, cloneData: o => cloneData(o, new Map()), signature, actors, flowPicks, affordable, candidateActions, tokenOf, idOf, tokenize, resolve, execute, trial, sandbox, busy,
+    scorer, candidatesFor, plan, aaRange };
 })();
