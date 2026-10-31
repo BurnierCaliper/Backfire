@@ -412,6 +412,7 @@ function trpgCasinoSit(table, buyIn, key, opt) {
  *  对赌桌：还没开局的退回押的；开了局以后有人离桌，这一桌就结束了——打到一半离桌的算认输（和弃牌一样，底池归对方），两边一起结算 */
 function trpgCasinoLeave(key) {
   const w = trpgCasinoWallet(key), s = w.seat;
+  if (s && s.kind === "holdem") return trpgCasinoHoldemLeave(s.table, key);   // Flux Hold'em 多人桌（#526）
   if (!s || s.kind !== "pvp") { const text = Casino.leave(w).text; w.last = text; return ["赌场：" + text]; }
   const c = trpgCasinoBook(), t = c.tables[s.table];
   if (!t) { w.seat = null; return ["赌场：这一桌已经没有了。"]; }
@@ -431,8 +432,9 @@ function trpgCasinoLeave(key) {
 }
 
 /* ---------- 赌场 · 联机（hotseat-game.js 的 casino 指令；谁能动哪个钱包在那边查）---------- */
-/** 联机能开的玩法（#526）：High Flux 和 Flux Duel 都有三种坐法——AI 坐庄 / 主持人坐庄的赌场桌、玩家之间对赌（押筹码或押奎支） */
-const TRPG_CASINO_ONLINE_GAMES = ["highflux", "duel"];
+/** 联机能开的玩法（#526）：High Flux 和 Flux Duel 都有三种坐法——AI 坐庄 / 主持人坐庄的赌场桌、玩家之间对赌（押筹码或押奎支）；
+ *  Flux Hold'em 有赌场桌（一个人坐，其余座位是 AI）和多人桌（几名玩家同桌，空座位 AI 补，主持人也能坐，见下面 trpgCasinoHoldem…） */
+const TRPG_CASINO_ONLINE_GAMES = ["highflux", "duel", "holdem"];
 const trpgCasinoOnlineTables = () => Casino.tables().filter(t => TRPG_CASINO_ONLINE_GAMES.indexOf(t.game || "highflux") >= 0);
 /** 对局按玩法用哪一份规则（High Flux 的对局没有 mode） */
 function trpgCasinoRules(g) {
@@ -452,6 +454,10 @@ function trpgCasinoSeatOf(kit) {
   const w = c.wallets && c.wallets[kit] ? Casino.wallet(c.wallets[kit]) : null, s = w && w.seat;
   if (!s) return null;
   if (s.kind === "pvp") { const t = c.tables && c.tables[s.table]; return t ? { kind: "pvp", side: s.side, game: t.game, table: t, topUp: s.topUp || 0 } : null; }
+  if (s.kind === "holdem") {
+    const t = c.tables && c.tables[s.table], seat = t && Array.isArray(t.seats) ? t.seats.find(x => x.id === s.side) : null;
+    return t ? { kind: "holdem", side: s.side, game: t.game, table: t, level: t.difficulty || "normal", buyIn: s.buyIn, topUp: s.topUp || 0, auto: !!(seat && seat.auto) } : null;
+  }
   const cfg = Casino.tables().find(x => x.id === s.table) || {};
   // 人坐哪一方：High Flux 是玩家，Flux 的记在对局的 casino.side（Flux Duel 是甲）
   const side = s.game && s.game.casino && s.game.casino.side ? s.game.casino.side : "player";
@@ -468,6 +474,7 @@ function trpgCasinoPvpBind(t) {
 function trpgCasinoAct(kit, action, opt) {
   const seat = trpgCasinoSeatOf(kit);
   if (!seat) throw new Error("没坐在桌上");
+  if (seat.kind === "holdem") return trpgCasinoHoldemAct(seat.table.id, kit, action);   // Flux Hold'em 多人桌（#526）
   if (!seat.game) throw new Error("对手还没坐下，还没开局");
   let side = seat.side;
   if (opt && opt.asDealer) {
@@ -528,13 +535,110 @@ function trpgCasinoPvpJoin(kit, tableId, opt) {
   if (pay) trpgPurseSet(kit, trpgPurse(kit) - pay);
   return [`赌场：${trpgPurseName(kit)} 坐上了对赌桌（${trpgCasinoSideLabel(t, side)}），开局。`];
 }
+
+/* ---------- 赌场 · 联机多人桌：Flux Hold'em（#526；钱的规则在 casino.js · holdem…）----------
+ * 开桌：玩家选一张 Flux Hold'em 的赌场桌（倍率、最低买入、入场费、AI 难度照配置），定每人买入多少、几人桌（2–4），自己坐第 1 个座位；
+ * 入座：别的玩家坐空着的座位（交同样的入场费 + 买入，买入只能用普通筹码），主持人也能坐一个（赌场出筹码）；
+ * 开局：开桌的人（或主持人）点开局，空着的座位由这张桌子难度的 AI 补。牌局里 AI 的座位在房主这边接着走到轮到人。
+ * 离桌：没开局退回买入、入场费；打到一半交给 AI 托管（打完自动结算回钱包，回来可以接着打）；打完了按桌上剩下的结算。
+ * 记录里的称呼：人按角色名，主持人、AI 照 TRPG_CASINO_HOLDEM */
+const TRPG_CASINO_HOLDEM = { gm: "主持人", ai: ["AI 甲", "AI 乙", "AI 丙", "AI 丁"] };
+function trpgCasinoHoldemTable(id) {
+  const t = trpgCasinoBook().tables[id];
+  if (!t || t.kind !== "holdem") throw new Error("没有这一桌");
+  return t;
+}
+/** 坐着的是谁（记录、包里写的名字）：角色名 / 主持人 / AI（空座位按座位先后编号） */
+function trpgCasinoHoldemNames(t) {
+  const out = {};
+  let ai = 0;
+  t.seats.forEach(s => { out[s.id] = s.who === Casino.HOLDEM_GM ? TRPG_CASINO_HOLDEM.gm : s.who ? trpgPurseName(s.who) : (TRPG_CASINO_HOLDEM.ai[ai++] || s.id); });
+  return out;
+}
+const trpgCasinoHoldemBind = (t) => Casino.holdemBind(t, who => trpgCasinoWallet(who));
+/** AI 的座位（空座位、托管的）走到轮到人；打完了把托管的座位结算回钱包 */
+function trpgCasinoHoldemRun(t) {
+  if (!t.game) return;
+  trpgCasinoHoldemBind(t);
+  if (!t.game.over) Casino.runAi(t.game, t.difficulty || "normal", Casino.holdemAiSeats(t));
+  if (t.game.over) t.seats.forEach(s => {
+    if (!s.auto || !s.who) return;
+    if (s.who === Casino.HOLDEM_GM) { s.who = null; s.auto = false; return; }
+    const w = trpgCasinoWallet(s.who), r = Casino.holdemSettle(t, s.id, w);
+    w.last = r.text;
+  });
+}
+/** 没有玩家了（没开局、或者打完了）就收掉这一桌；没开局时开桌的人走了，换下一位玩家当开桌的人 */
+function trpgCasinoHoldemTidy(t) {
+  const humans = t.seats.filter(s => s.who && s.who !== Casino.HOLDEM_GM);
+  if (!humans.length && (!t.game || t.game.over)) { delete trpgCasinoBook().tables[t.id]; return; }
+  if (!t.game && humans.length && !humans.some(s => s.who === t.host)) t.host = humans[0].who;
+}
+/** 开一张多人桌：kit 坐第 1 个座位。table = 配置里的 Flux Hold'em 桌子，buyIn = 每人买入几枚，size = 几人桌（2–4） */
+function trpgCasinoHoldemOpen(kit, table, buyIn, size) {
+  const c = trpgCasinoBook(), w = trpgCasinoWallet(kit);
+  if (w.seat) throw new Error("已经坐在桌上了，先离桌");
+  const t = Casino.holdemTable("h" + (c.seq + 1), table, buyIn, size, kit);
+  Casino.holdemSit(t, "p1", kit, w);
+  c.seq += 1;
+  c.tables[t.id] = t;
+  return [`赌场：${trpgPurseName(kit)} 开了一桌${t.name}（${t.size} 人桌，每人买入 ${t.buyIn} 枚），等人坐下。`];
+}
+/** 坐上别人开的多人桌（seat 不给 = 第一个空座位）；主持人坐用 trpgCasinoHoldemGm */
+function trpgCasinoHoldemJoin(kit, tableId, seat) {
+  const t = trpgCasinoHoldemTable(tableId);
+  const at = Casino.holdemSit(t, seat || null, kit, trpgCasinoWallet(kit));
+  return [`赌场：${trpgPurseName(kit)} 坐上了${t.name}的 ${at} 号座位。`];
+}
+function trpgCasinoHoldemGm(tableId, seat) {
+  const t = trpgCasinoHoldemTable(tableId);
+  const at = Casino.holdemGm(t, seat || null);
+  return [`赌场：主持人坐上了${t.name}的 ${at} 号座位。`];
+}
+/** 开局：by = 开桌的人（角色 kit）或主持人（"gm"）；空着的座位由 AI 补，AI 先走到轮到人。opt：seed / hands……（测试用） */
+function trpgCasinoHoldemStart(tableId, by, opt) {
+  const t = trpgCasinoHoldemTable(tableId);
+  if (by !== Casino.HOLDEM_GM && by !== t.host) throw new Error("只有开桌的人或主持人能开局");
+  Casino.holdemStart(t, Object.assign({}, opt || {}, { names: trpgCasinoHoldemNames(t) }));
+  trpgCasinoHoldemRun(t);
+  const ai = Casino.holdemAiSeats(t).length;
+  return [`赌场：${t.name}开局（${t.size} 人桌${ai ? `，${ai} 个空座位由 AI 补` : ""}）。`];
+}
+/** 牌局里走一步：who = 角色 kit / "gm"（坐在这一桌的那个座位）。托管中的先「接着打」 */
+function trpgCasinoHoldemAct(tableId, who, action) {
+  const t = trpgCasinoHoldemTable(tableId), seat = t.seats.find(s => s.who === who);
+  if (!seat) throw new Error("没坐在这一桌");
+  if (!t.game) throw new Error("还没开局");
+  if (seat.auto) throw new Error("这个座位正由 AI 托管：先点「接着打」");
+  trpgCasinoHoldemBind(t);
+  FluxHoldem.act(t.game, seat.id, action);
+  trpgCasinoHoldemRun(t);
+  return [];
+}
+/** 离开多人桌：who = 角色 kit / "gm" */
+function trpgCasinoHoldemLeave(tableId, who) {
+  const t = trpgCasinoHoldemTable(tableId), gm = who === Casino.HOLDEM_GM;
+  const w = gm ? null : trpgCasinoWallet(who), r = Casino.holdemLeave(t, who, w);
+  if (w) w.last = r.text;
+  if (r.auto) trpgCasinoHoldemRun(t);   // 托管了：AI 接着走（全是 AI 了就一口气打完、结算）
+  trpgCasinoHoldemTidy(t);
+  return [`赌场：${gm ? "主持人" : trpgPurseName(who)}${r.text}`];
+}
+/** 托管中回来接着打 */
+function trpgCasinoHoldemBack(tableId, who) {
+  const t = trpgCasinoHoldemTable(tableId);
+  Casino.holdemBack(t, who);
+  return [`赌场：${who === Casino.HOLDEM_GM ? "主持人" : trpgPurseName(who)}回到${t.name}接着打。`];
+}
 /** 联机包：这个人能看到的赌场（hotseat-game.js · getViewFor 按收件人造，online-view.js · projectCasino 再按白名单拷）。
  *  kits = 他操控的角色；isGM = 主持人。只读，不往存档里加东西。
  *   - 人人都有：桌子（倍率、最低买入、入场费）、兑换价、等人坐的对赌桌（谁开的、押什么、空着哪一方）；
  *   - mine：自己每名角色的钱包（筹码、能卖几枚、角色钱包里的奎支、上一局的结算）和坐着的那一局——只有自己这一方的 view
  *     （各玩法的 view：对方的手牌、暗出 / 暗弃 / 盖下的牌、牌堆的顺序、庄家偷看到的天气都不在里面）；
- *   - 主持人另有 dealing：主持人坐庄的那几桌（庄家那一方的 view：High Flux 的庄家、Flux Duel 人对面那一方）；seated：谁坐在哪桌、第几轮（公开的，没有牌）。
- *   别人的钱包、别人那一方的 view 都不放。mode = 这一桌打哪种玩法（highflux / duel，#526） */
+ *   - 主持人另有 dealing：主持人坐庄的那几桌（庄家那一方的 view：High Flux 的庄家、Flux Duel 人对面那一方）；seated：谁坐在哪桌、第几轮（公开的，没有牌）；
+ *     gmSeats：主持人自己坐的 Flux Hold'em 多人桌座位（那一个座位的 view）；
+ *   - holdem：Flux Hold'em 多人桌的大厅（每个座位坐着谁、开没开局，没有牌）。
+ *   别人的钱包、别人那一方的 view 都不放。mode = 这一桌打哪种玩法（highflux / duel / holdem，#526） */
 function trpgCasinoPacket(kits, isGM) {
   if (typeof Casino === "undefined" || typeof CounterCards === "undefined") return null;
   const raw = LEDGER.casino && typeof LEDGER.casino === "object" ? LEDGER.casino : {};
@@ -546,6 +650,11 @@ function trpgCasinoPacket(kits, isGM) {
       const t = seat.table, opp = t.seats[Casino.pvpOther(t, seat.side)];
       return { kind: "pvp", mode: Casino.pvpMode(t), table: t.id, stakeKind: t.stakeKind, start: t.start, opponent: nameOf(opp), topUp: seat.topUp };
     }
+    if (seat.kind === "holdem") {
+      const t = seat.table;
+      return { kind: "holdem", mode: "holdem", table: t.id, tableName: t.name, rate: t.rate, buyIn: seat.buyIn, fee: t.fee, level: t.difficulty, topUp: seat.topUp,
+        size: t.size, host: t.host === kit, auto: seat.auto, started: !!t.game };
+    }
     return { kind: seat.kind, mode: Casino.gameOf(seat.game), table: seat.table.id, tableName: seat.table.name, rate: seat.table.rate, buyIn: seat.game.casino.buyIn, fee: seat.table.entryFee, level: seat.level, topUp: seat.topUp };
   };
   // 等人坐的对赌桌：每一方坐着谁（High Flux 是 dealer / player，Flux Duel 是 a / b；空着的是 null）
@@ -554,11 +663,20 @@ function trpgCasinoPacket(kits, isGM) {
     Casino.pvpSides(t).forEach(k => { row[k] = nameOf(t.seats[k]); });
     return row;
   };
+  // Flux Hold'em 多人桌（#526）：谁坐在哪个座位（玩家 / 主持人 / AI / 空着）、开没开局（公开的，没有牌）
+  const holdemRow = (t) => {
+    const names = trpgCasinoHoldemNames(t);
+    return { id: t.id, table: t.table, name: t.name, rate: t.rate, difficulty: t.difficulty, buyIn: t.buyIn, fee: t.fee, size: t.size, host: nameOf(t.host),
+      started: !!t.game, over: !!(t.game && t.game.over), round: t.game ? t.game.round : 0,
+      seats: t.seats.map(s => ({ id: s.id, kind: s.who === Casino.HOLDEM_GM ? "gm" : s.who ? "player" : t.game ? "ai" : "empty", name: s.who || t.game ? names[s.id] : null, auto: !!s.auto })) };
+  };
+  const list = Object.keys(tables).map(k => tables[k]).filter(Boolean);
   const out = {
     config: { buy: Casino.CONFIG.buy, sell: Casino.CONFIG.sell, face: Casino.CONFIG.face, gift: Casino.CONFIG.gift },
     tables: trpgCasinoOnlineTables().map(t => Object.assign(t, { gm: Casino.gmDealer(t.game) })),
-    open: Object.keys(tables).map(k => tables[k]).filter(t => t && t.seats && !t.game).map(openRow),
-    mine: [], dealing: [], seated: []
+    open: list.filter(t => !t.kind && t.seats && !t.game).map(openRow),
+    holdem: typeof FluxHoldem === "undefined" ? [] : list.filter(t => t.kind === "holdem" && Array.isArray(t.seats)).map(holdemRow),
+    mine: [], dealing: [], seated: [], gmSeats: []
   };
   (kits || []).forEach(kit => {
     const w = Casino.wallet(JSON.parse(JSON.stringify(wallets[kit] || null)));   // 拷一份看：没来过赌场的角色不往存档里加钱包
@@ -574,6 +692,12 @@ function trpgCasinoPacket(kits, isGM) {
     const m = meta(kit, seat), g = seat.game;
     out.seated.push(Object.assign({ kit, name: nameOf(kit), round: g ? g.round : 0, over: !!(g && g.over) }, m));
     if (seat.kind === "gm" && g) out.dealing.push(Object.assign({ kit, name: nameOf(kit), game: trpgCasinoGameView(g, trpgCasinoHouseSide(g)) }, m));
+  });
+  // 主持人自己坐的多人桌座位（主持人那一个座位的 view）
+  if (isGM) list.filter(t => t.kind === "holdem" && Array.isArray(t.seats)).forEach(t => {
+    const s = t.seats.find(x => x.who === Casino.HOLDEM_GM);
+    if (s) out.gmSeats.push({ kind: "holdem", mode: "holdem", table: t.id, tableName: t.name, rate: t.rate, buyIn: t.buyIn, level: t.difficulty, size: t.size,
+      side: s.id, auto: !!s.auto, started: !!t.game, game: t.game ? FluxHoldem.view(t.game, s.id) : null });
   });
   return out;
 }

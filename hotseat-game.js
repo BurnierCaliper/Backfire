@@ -397,8 +397,27 @@
     if (a.amount != null && Number.isFinite(Number(a.amount))) out.amount = Number(a.amount);
     return out;
   }
+  /** 主持人自己坐的 Flux Hold'em 多人桌座位（#526）：坐下、开局、出牌、离桌、托管后接着打——不用角色，c.table = 哪一桌 */
+  function casinoGmSeat(c) {
+    if (sender !== gm()) fail("只有主持人能坐赌场那一边的座位");
+    const table = String(c.table || ""), G = Casino.HOLDEM_GM;
+    let notes;
+    try {
+      switch (String(c.op || "")) {
+        case "holdemGm": notes = trpgCasinoHoldemGm(table, c.seat ? String(c.seat) : null); break;
+        case "holdemStart": notes = trpgCasinoHoldemStart(table, G); break;
+        case "act": notes = trpgCasinoHoldemAct(table, G, casinoAction(c.action)); break;
+        case "leave": notes = trpgCasinoHoldemLeave(table, G); break;
+        case "holdemBack": notes = trpgCasinoHoldemBack(table, G); break;
+        default: fail("没有这种赌场操作");
+      }
+    } catch (e) { fail(e.message); }
+    if (root.GAME && GAME.rememberCampaign) GAME.rememberCampaign();
+    return { notes };
+  }
   function casinoCommand(c) {
     casinoExploring();
+    if (c.asGm) return casinoGmSeat(c);
     const kit = String(c.kit || ""), u = heroes().find(h => h.kit === kit && !h.dead), isGM = sender === gm();
     // 坐着的角色死了 / 离队了：主持人照样能让他离桌（不然那一桌一直卡着）
     if (!u && !(isGM && c.op === "leave")) fail("没有这名角色");
@@ -421,6 +440,11 @@
           break;
         }
         case "pvpJoin": own(); notes = trpgCasinoPvpJoin(kit, String(c.table || "")); break;
+        // Flux Hold'em 多人桌（#526）：开桌（定买入、几人桌）、坐空座位、开桌的人开局、托管后接着打
+        case "holdemOpen": own(); notes = trpgCasinoHoldemOpen(kit, String(c.table || ""), c.buyIn, c.size); break;
+        case "holdemJoin": own(); notes = trpgCasinoHoldemJoin(kit, String(c.table || ""), c.seat ? String(c.seat) : null); break;
+        case "holdemStart": own(); notes = trpgCasinoHoldemStart(String(c.table || ""), kit); break;
+        case "holdemBack": own(); notes = trpgCasinoHoldemBack(String(c.table || ""), kit); break;
         case "act":
           if (c.asDealer) { if (!isGM) fail("只有主持人能替主持人坐庄的那一桌出牌"); }
           else own();

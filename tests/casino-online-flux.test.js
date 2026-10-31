@@ -4,61 +4,10 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
-const H = require("./headless");
-const V = require("../online-view");
-const plain = x => JSON.parse(JSON.stringify(x));
-const read = f => fs.readFileSync(path.join(H.ROOT, f), "utf8");
-const RULES = ["counter-cards.js", "counter-cards-ai.js", "flux-duel.js", "flux-duel-ai.js", "flux-holdem.js", "flux-holdem-ai.js", "counter-cards-guess.js", "casino.js"];
-
-/** 联机跑团房间：主持人 host（操控柯尔特）、玩家甲 p2（瑞比）、玩家乙 p3（赫鲁米卡）。在探索环节 */
-function room() {
-  const c = H.load();
-  for (const f of RULES) vm.runInContext(read(f), c, { filename: f });
-  c.BattleSim.setup({ party: ["ruby", "helu", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "CASINO-FLUX" });
-  let saves = 0;
-  c.GAME = { depth: 0, sim: false, tape: null, ended: false, level: 1, undo: [], disarm() {}, refresh() {}, resumeHotseat() {}, rememberCampaign() { saves++; } };
-  c.document = { readyState: "loading", addEventListener() {}, getElementById() { return null; } };
-  c.location = { search: "" }; c.URLSearchParams = URLSearchParams; c.addEventListener = () => {}; c.setInterval = () => 0;
-  c.OnlineGame = { isHost: () => true, isPaused: () => false };
-  for (const f of ["hotseat.js", "hotseat-authority.js", "hotseat-validation.js", "gm-commands.js", "hotseat-game.js"]) vm.runInContext(read(f), c, { filename: f });
-  const hero = k => c.S.state.units.find(u => u.kit === k);
-  const players = [{ id: "host", name: "主持人", gm: true }, { id: "p2", name: "甲" }, { id: "p3", name: "乙" }];
-  assert.equal(c.HotseatGame.enableOnline({ mode: "trpg", players, assignments: { [hero("ruby").id]: "p2", [hero("helu").id]: "p3" } }).ok, true);
-  c.S.TRPG.active = true;
-  c.LEDGER.purse = { ruby: 30000, helu: 30000 };
-  const send = (who, cmd) => c.HotseatGame.receiveFrom(who, plain(Object.assign({ type: "casino" }, cmd)));
-  const view = who => V.projectView(plain(c.HotseatGame.getViewFor(who)), { recipientId: who });
-  const casino = who => view(who).casino;
-  const mine = (who, kit) => casino(who).mine.find(r => r.kit === kit);
-  return { c, hero, send, view, casino, mine, saves: () => saves, book: () => c.LEDGER.casino };
-}
-const ok = (ack, msg) => assert.equal(ack.ok, true, (msg || "") + "：" + ack.error);
-const no = (ack, re, msg) => { assert.equal(ack.ok, false, msg); if (re) assert.match(ack.error, re, msg); };
-const has = (o, s) => JSON.stringify(o).includes(s);
-
-/** 规则给的操作里挑一个能把牌局往下打的：出牌（第一种组合）→ 不追加 → 过牌 → 跟注 → 不借 → 弃牌 */
-function pick(g) {
-  const L = g.legal || [], f = t => L.find(o => o.type === t);
-  const play = f("play");
-  if (play) return play.card ? { type: "play", card: play.card } : { type: "play", layer: play.layer, element: play.element };
-  if (f("place")) return { type: "place", where: "top" };
-  for (const t of ["pass", "check", "call", "noLoan", "fold"]) if (f(t)) return { type: t };
-  throw new Error("没有能做的操作：" + JSON.stringify(L));
-}
+const X = require("./casino-online.helper");
+const { room, ok, no, has, plain, V } = X;
 /** 几个人轮着打到这一局结束：actors = [{ who, kit, game: () => 这个人收到的包里的这一局, asDealer }] */
-function playOut(send, actors) {
-  for (let i = 0; i < 3000; i++) {
-    const gs = actors.map(a => ({ a, g: a.game() }));
-    if (gs.every(x => !x.g || x.g.over)) return i;
-    const turn = gs.find(x => x.g && !x.g.over && x.g.myTurn);
-    assert.ok(turn, "没人能动，牌局卡住了：" + JSON.stringify(gs.map(x => x.g && { stage: x.g.stage, waiting: x.g.waiting })));
-    ok(send(turn.a.who, Object.assign({ op: "act", kit: turn.a.kit, action: pick(turn.g) }, turn.a.asDealer ? { asDealer: true } : {})), "第 " + i + " 步");
-  }
-  throw new Error("3000 步还没打完");
-}
+const playOut = (send, actors) => X.playOut(send, actors.map(a => ({ who: a.who, game: a.game, cmd: Object.assign({ kit: a.kit }, a.asDealer ? { asDealer: true } : {}) })));
 
 test("联机能坐 Flux Duel 的赌场桌：包里的桌子带玩法、能不能主持人坐庄（#526）", () => {
   const { send, casino } = room();

@@ -607,6 +607,7 @@
   function projectCasinoGame(g) {
     if (!obj(g)) return null;
     if (get(g, "mode") === "duel") return projectDuelGame(g);
+    if (get(g, "mode") === "holdem") return projectHoldemGame(g);
     return projectFluxHigh(g);
   }
   /** 牌局的记录（各玩法 view 里已经只剩这一方看得到的）：文字、第几轮，另带结算前的过渡要用的几项——
@@ -698,6 +699,71 @@
       held: pair(get(f, "held"), nullableNum), loans: pair(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined)), busted: arr(get(f, "busted")).filter(s => DUEL_SIDES.includes(s)) } : null;
     return out;
   }
+  /* Flux Hold'em（#526，flux-holdem.js · view）：座位 p1…p4。别人只有筹码、押了多少、弃没弃牌、手牌张数、盖了没有；
+   * 自己的手牌、盖下的那张只在自己的包里；牌堆（元素 / 层牌 / 天气）只有张数，顺序不发；庄家偷看的那张只给庄家。
+   * 亮牌的结果（results[i].shown：比到最后的人的牌和得分）是公开的 */
+  const HOLDEM_SEAT = /^p[1-4]$/;
+  const holdemId = v => (typeof v === "string" && HOLDEM_SEAT.test(v) ? v : null);
+  const holdemIds = list => arr(list).map(holdemId).filter(Boolean).slice(0, 4);
+  function holdemMap(o, fn, ids) { if (!obj(o)) return null; const out = {}; ids.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
+  function projectHoldemGame(g) {
+    const out = copyFields(g, { mode: "holdem" }, ["stage"], ["round", "rounds", "layerDeckCount", "deckCount", "elementDeckCount", "minBet", "maxRaises", "pot"], ["over", "myTurn"]);
+    out.side = holdemId(get(g, "side"));
+    out.order = holdemIds(get(g, "order"));
+    if (!out.side || !out.order.includes(out.side)) return null;
+    const ids = out.order;
+    for (const k of ["dealer", "sb", "bb"]) out[k] = holdemId(get(g, k));
+    out.waiting = holdemIds(get(g, "waiting"));
+    const cards = (list) => arr(list).map(id).filter(Boolean).slice(0, 12);
+    out.layers = cards(get(g, "layers")); out.usedLayers = cards(get(g, "usedLayers"));
+    out.weathers = cards(get(g, "weathers")); out.discards = cards(get(g, "discards"));
+    out.blinds = arr(get(g, "blinds")).map(number).filter(n => n !== undefined).slice(0, 2);
+    const loan = get(g, "loan"); out.loan = obj(loan) ? selected(loan, ["unit", "repay"]) : null;
+    const ask = get(g, "loanAsk"); out.loanAsk = Array.isArray(ask) ? holdemIds(ask) : null;
+    const carry = get(g, "carry");
+    out.carry = obj(carry) ? Object.assign(selected(carry, ["amount", "r"]), { from: holdemIds(get(carry, "from")) }) : null;
+    const seat = (s) => {
+      if (!obj(s) || !holdemId(get(s, "id"))) return null;
+      const d = Object.assign({ id: get(s, "id") }, selected(s, ["chips", "start", "bet", "st", "loan", "owe", "handCount", "folded", "allIn", "out", "played", "dealer", "sb", "bb"]));
+      const name = text(get(s, "name"), 40); if (name) d.name = name;
+      return d;
+    };
+    out.seats = arr(get(g, "seats")).slice(0, 4).map(seat).filter(Boolean);
+    const me = seat(get(g, "me"));
+    if (!me || me.id !== out.side) return null;
+    const m = get(g, "me");
+    out.me = Object.assign(me, { hand: cards(get(m, "hand")), card: id(get(m, "card")),
+      history: arr(get(m, "history")).slice(0, CASINO_CAP.history).flatMap(h => obj(h) ? [{ r: number(get(h, "r")) || 0, card: id(get(h, "card")) }] : []) });
+    const b = get(g, "betting");
+    if (obj(b)) {
+      out.betting = Object.assign(selected(b, ["street", "raises", "cur", "minRaise", "toCall"]), { toAct: holdemId(get(b, "toAct")) });
+      const w = get(b, "window");
+      out.betting.window = obj(w) ? Object.assign(selected(w, ["n", "sec", "passed"]), { by: holdemId(get(w, "by")) }) : null;
+    } else out.betting = null;
+    out.results = arr(get(g, "results")).slice(-CASINO_CAP.results).flatMap(r => {
+      if (!obj(r)) return [];
+      const d = copyFields(r, {}, [], ["r", "pot", "carryIn", "carry", "phaseAt", "cap"], ["split", "allIn"]);
+      enumField(r, d, "outcome", ["showdown", "fold"]);
+      d.dealer = holdemId(get(r, "dealer"));
+      d.layers = cards(get(r, "layers")); d.weathers = cards(get(r, "weathers"));
+      d.winners = holdemIds(get(r, "winners")); d.folded = holdemIds(get(r, "folded"));
+      d.bets = holdemMap(get(r, "bets"), number, ids); d.delta = holdemMap(get(r, "delta"), number, ids); d.chips = holdemMap(get(r, "chips"), number, ids);
+      // 亮牌：比到最后的人（没弃牌）的牌和得分——公开的
+      d.shown = holdemMap(get(r, "shown"), s => (obj(s) && id(get(s, "card")) ? Object.assign({ card: get(s, "card") }, selected(s, ["score"])) : undefined), ids) || {};
+      d.pots = arr(get(r, "pots")).slice(0, 4).flatMap(p => obj(p) ? [Object.assign(selected(p, ["amount", "carried"]), { eligible: holdemIds(get(p, "eligible")), winners: holdemIds(get(p, "winners")),
+        tied: holdemIds(get(p, "tied")), shares: holdemMap(get(p, "shares"), number, ids) || {} })] : []);
+      return [d];
+    });
+    projectCasinoLog(get(g, "log"), ids, out);
+    out.legal = projectLegal(get(g, "legal"));
+    const f = get(g, "final");
+    out.final = obj(f) ? { rounds: number(get(f, "rounds")) || 0, winners: holdemIds(get(f, "winners")), chips: holdemMap(get(f, "chips"), number, ids), held: holdemMap(get(f, "held"), number, ids),
+      net: holdemMap(get(f, "net"), number, ids), loans: holdemMap(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined), ids), out: holdemIds(get(f, "out")) } : null;
+    // 庄家偷看的那张：只有这一方是这一轮的庄家才放
+    const p = get(g, "peek");
+    if (obj(p) && out.side === out.dealer) out.peek = { card: id(get(p, "card")), where: id(get(p, "where")) };
+    return out;
+  }
   /** High Flux（counter-cards.js · view）的对局 */
   function projectFluxHigh(g) {
     const out = copyFields(g, {}, ["stage"], ["round", "rounds", "deckCount", "minBet", "ante", "maxRaises", "pot"], ["over", "myTurn", "allIn", "normalUsed"]);
@@ -756,16 +822,32 @@
   }
   /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局。
    *  buyIn = 总买入、topUp = 牌局里桌上不够时从钱包补了几枚（#520）；mode = 哪种玩法（#526） */
-  const CASINO_MODES = ["highflux", "duel"];
+  const CASINO_MODES = ["highflux", "duel", "holdem"];
   const SEAT_SIDES = [...CC_SIDES, ...DUEL_SIDES];
+  // Flux Hold'em 多人桌（kind "holdem"）另有：size 几人桌、host 自己是不是开桌的人、auto 托管中、started 开局了没有
   function projectCasinoSeat(s, withGame) {
     if (!obj(s)) return null;
-    const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round", "topUp"], ["over"]), ["table", "level"]);
-    enumField(s, out, "kind", ["ai", "gm", "pvp"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]); enumField(s, out, "mode", CASINO_MODES);
+    const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round", "topUp", "size"], ["over", "host", "auto", "started"]), ["table", "level"]);
+    enumField(s, out, "kind", ["ai", "gm", "pvp", "holdem"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]); enumField(s, out, "mode", CASINO_MODES);
     if (!out.kind) return null;
-    const side = get(s, "side"); if (SEAT_SIDES.includes(side)) out.side = side;
+    const side = get(s, "side"); if (SEAT_SIDES.includes(side) || holdemId(side)) out.side = side;
     if (withGame) out.game = projectCasinoGame(get(s, "game"));
     return out;
+  }
+  /** Flux Hold'em 多人桌的大厅（#526）：桌子的配置、每个座位坐着谁（玩家 / 主持人 / AI / 空着）、开没开局；没有牌 */
+  function projectHoldemTables(list) {
+    return arr(list).slice(0, CASINO_CAP.open).flatMap(t => {
+      if (!obj(t) || !id(get(t, "id"))) return [];
+      const d = identifiers(t, copyFields(t, {}, ["name", "host"], ["rate", "buyIn", "fee", "size", "round"], ["started", "over"]), ["id", "table"]);
+      enumField(t, d, "difficulty", ["easy", "normal", "hard"]);
+      d.seats = arr(get(t, "seats")).slice(0, 4).flatMap(s => {
+        if (!obj(s) || !holdemId(get(s, "id"))) return [];
+        const row = { id: get(s, "id"), name: text(get(s, "name"), 40), auto: get(s, "auto") === true };
+        enumField(s, row, "kind", ["player", "gm", "ai", "empty"]);
+        return [row];
+      });
+      return [d];
+    });
   }
   function projectCasino(c) {
     if (!obj(c)) return null;
@@ -805,6 +887,12 @@
       if (!obj(m) || !id(get(m, "kit"))) return [];
       const seat = projectCasinoSeat(m, false);
       return seat ? [Object.assign(identifiers(m, copyFields(m, {}, ["name"]), ["kit"]), seat)] : [];
+    });
+    out.holdem = projectHoldemTables(get(c, "holdem"));
+    // 主持人自己坐的多人桌座位（只给主持人，projectView 里对别人清空）
+    out.gmSeats = arr(get(c, "gmSeats")).slice(0, CASINO_CAP.dealing).flatMap(m => {
+      const seat = projectCasinoSeat(m, true);
+      return seat && seat.kind === "holdem" && seat.table ? [seat] : [];
     });
     return out;
   }
@@ -972,7 +1060,7 @@
     if (get(view, "playerId") === context.recipientId) {
       const casino = projectCasino(get(view, "casino"));
       if (casino) {
-        if (get(view, "hostId") !== context.recipientId) { casino.dealing = []; casino.seated = []; }
+        if (get(view, "hostId") !== context.recipientId) { casino.dealing = []; casino.seated = []; casino.gmSeats = []; }
         out.casino = casino;
       }
     }

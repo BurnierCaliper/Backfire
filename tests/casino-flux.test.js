@@ -245,23 +245,27 @@ test("长线养成、本机跑团：坐桌指令只认桌子 id，Flux 的桌子
   assert.match(t.trpgCasinoLeave().join(""), /离开Flux Hold'em · 大厅/);
 });
 
-test("联机跑团的赌场（#526 第 1 步）：High Flux、Flux Duel 的桌子都发给联机的人；Flux Hold'em 的赌场桌联机还不能坐，钱包不动", () => {
+test("联机跑团的赌场（#526）：三种玩法的桌子都发给联机的人、都能坐；Flux Hold'em 的赌场桌没有主持人坐庄，钱包不动", () => {
   const t = rules().c;
   t.BattleSim.setup({ party: ["kolt", "helu"], enemies: [{ id: "thug_knife", lv: 3, zone: 2 }], seed: "FLUX-ONLINE" });
   t.S.TRPG.active = true;
   t.LEDGER.purse = {};
   t.trpgCasinoOpen("kolt");
+  const all = ["alley", "hall", "vip", "duel-alley", "duel-hall", "duel-vip", "holdem-alley", "holdem-hall", "holdem-vip"];
   const pk = t.trpgCasinoPacket(["kolt"], false);
-  assert.deepEqual(J(pk.tables.map(x => x.id)), ["alley", "hall", "vip", "duel-alley", "duel-hall", "duel-vip"]);
-  assert.deepEqual(J(t.trpgCasinoPacket(["kolt"], true).tables.map(x => x.id)), ["alley", "hall", "vip", "duel-alley", "duel-hall", "duel-vip"], "主持人也一样");
+  assert.deepEqual(J(pk.tables.map(x => x.id)), all);
+  assert.deepEqual(J(t.trpgCasinoPacket(["kolt"], true).tables.map(x => x.id)), all, "主持人也一样");
   const before = J(t.trpgCasinoWallet("kolt"));
-  assert.throws(() => t.trpgCasinoSitAt("kolt", "holdem-alley", 20, { dealer: "ai" }), /Flux Hold'em 的赌场桌联机还不能坐/);
+  assert.throws(() => t.trpgCasinoSitAt("kolt", "holdem-alley", 20, { dealer: "gm" }), /只有 AI，没有主持人坐庄/);
   assert.deepEqual(J(t.trpgCasinoWallet("kolt")), before, "钱包不动");
   t.trpgCasinoSitAt("kolt", "alley", 20, { dealer: "ai" });
   assert.equal(t.trpgCasinoWallet("kolt").seat.table, "alley", "High Flux 的桌子照旧");
   t.trpgCasinoLeave("kolt");
   t.trpgCasinoSitAt("kolt", "duel-hall", 40, { dealer: "ai" });
   assert.equal(t.trpgCasinoWallet("kolt").seat.game.mode, "duel", "Flux Duel 的桌子联机能坐了");
+  t.trpgCasinoLeave("kolt");
+  t.trpgCasinoSitAt("kolt", "holdem-alley", 20, { dealer: "ai" });
+  assert.equal(t.trpgCasinoWallet("kolt").seat.game.mode, "holdem", "Flux Hold'em 的赌场桌联机也能坐了");
 });
 
 /* ---------- 界面：赌场面板按玩法分组，坐下打开对应的牌桌（casino-ui.js） ---------- */

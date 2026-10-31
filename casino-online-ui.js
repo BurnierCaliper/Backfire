@@ -34,6 +34,7 @@
   function gameHtml(g, m, key) {
     if (!g) return "";
     if (g.mode === "duel") return `<div class="cso-game" data-cso-game="${esc(key)}"><p class="cso-line"><b>${g.over ? "对局结束" : `第 ${g.round} / ${g.rounds} 轮`}</b> · Flux Duel · 你是${esc((g.names || {})[g.side] || g.side)} · 底池 <b>${g.pot || 0}</b></p></div>`;
+    if (g.mode === "holdem") return `<div class="cso-game" data-cso-game="${esc(key)}"><p class="cso-line"><b>${g.over ? "对局结束" : `第 ${g.round} / ${g.rounds} 轮`}</b> · Flux Hold'em · ${(g.seats || []).length} 人桌 · 底池 <b>${g.pot || 0}</b></p></div>`;
     const me = g.me || {}, opp = g.opp || {};
     const chips = s => (s.chips == null ? "∞" : s.chips);
     const loan = s => (s.loan ? `（借 ${s.loan} 还 ${s.owe}）` : "");
@@ -76,6 +77,7 @@
       ${row.last ? `<p class="cso-line ol-muted">上一局：${esc(row.last)}</p>` : ""}`;
     const ex = `<div class="crq-state cso-ex"><label>买 <input type="number" min="1" step="1" value="${esc(m.draft.buy)}" data-cso-in="buy"> 枚</label>${btn(`data-cso="buy" ${data}`, `买（每枚 ${cfg.buy} 奎支）`, { disabled: row.purse < cfg.buy })}
       <label>卖 <input type="number" min="1" step="1" value="${esc(m.draft.sell)}" data-cso-in="sell"> 枚</label>${btn(`data-cso="sell" ${data}`, `卖（每枚 ${cfg.sell} 奎支）`, { disabled: !row.sellable, title: row.sellable ? "" : "赠送的筹码不能换成奎支" })}</div>`;
+    if (seat && seat.kind === "holdem") return wallet + holdemSeatHtml(row, c, m);
     if (seat) {
       // 牌局里桌上不够时从钱包补的（#520）：赌场桌算进买入，对赌写补了几枚
       const what = seat.kind === "pvp" ? `对赌（${seat.stakeKind === "chips" ? "押筹码" : `押奎支：1 枚 = ${cfg.face} 奎支`}，开局各 ${seat.start} 枚${seat.topUp ? `，你中途从钱包补了 ${seat.topUp} 枚` : ""}）· 对手 ${esc(seat.opponent || "还没坐下")}`
@@ -104,7 +106,55 @@
       <label>押 <select data-cso-in="stake"><option value="chips"${stake === "chips" ? " selected" : ""}>筹码（只能押普通筹码）</option><option value="kuizhi"${stake === "kuizhi" ? " selected" : ""}>奎支（1 枚 = ${cfg.face} 奎支）</option></select></label>
       ${btn(`data-cso="pvpOpen" ${data}`, "开一桌对赌")}</div>`;
     return `${wallet}${ex}<h3>赌场桌（收入场费）</h3><ul class="crq-list">${tables}</ul>
-      <h3>玩家对赌（不收入场费）</h3>${pvp}${open ? `<ul class="crq-list">${open}</ul>` : '<p class="ol-muted">现在没有等人坐的对赌桌。</p>'}`;
+      <h3>玩家对赌（不收入场费）</h3>${pvp}${open ? `<ul class="crq-list">${open}</ul>` : '<p class="ol-muted">现在没有等人坐的对赌桌。</p>'}
+      ${holdemLobbyHtml(row, c, m)}`;
+  }
+  /* ---------- Flux Hold'em 多人桌（#526）：几名玩家同桌，空座位由这张桌子难度的 AI 补，主持人也能坐一个座位 ---------- */
+  /** 一桌的座位：谁坐在哪（名字就写着是主持人 / AI；空着的写「空座位」，开局后由 AI 补；托管中的写出来） */
+  const holdemSeatsLine = (t) => (t.seats || []).map(s => `${s.id} ${s.kind === "empty" ? "空座位" : esc(s.name || "")}${s.auto ? "（AI 托管）" : ""}`).join(" · ");
+  /** 没坐桌时：开一桌多人桌（选桌子、每人买入、几人桌），等人坐的多人桌（坐下） */
+  function holdemLobbyHtml(row, c, m) {
+    const list = (c.tables || []).filter(t => t.game === "holdem");
+    if (!list.length) return "";
+    const data = `data-kit="${esc(row.kit)}"`, d = m.draft.holdem || {};
+    const pickT = list.find(t => t.id === d.table) || list[0], v = Math.max(pickT.minBuyIn, Number(d.buyIn) || pickT.minBuyIn), size = [2, 3, 4].includes(Number(d.size)) ? Number(d.size) : (pickT.players || 4);
+    const form = `<div class="crq-state cso-pvp"><label>桌子 <select data-cso-in="hTable">${list.map(t => `<option value="${esc(t.id)}"${t.id === pickT.id ? " selected" : ""}>${esc(t.short || t.name)}（每枚 ${t.rate} 奎支 · AI ${esc(LEVEL[t.difficulty] || "")}）</option>`).join("")}</select></label>
+      <label>每人买入 <input type="number" min="${pickT.minBuyIn}" step="1" value="${v}" data-cso-in="hBuyIn"> 枚</label>
+      <label>几人桌 <select data-cso-in="hSize">${[2, 3, 4].map(n => `<option value="${n}"${n === size ? " selected" : ""}>${n} 人</option>`).join("")}</select></label>
+      ${btn(`data-cso="holdemOpen" ${data}`, "开一桌多人桌")}</div>`;
+    const tables = (c.holdem || []).map(t => {
+      const free = !t.started && (t.seats || []).some(s => s.kind === "empty");
+      return `<li class="crq-row"><div><b>${esc(t.name)}</b> · ${esc(t.host || "")} 开的 · ${t.size} 人桌 · 每人买入 ${t.buyIn} 枚（入场费 ${t.fee} 枚）· ${t.started ? (t.over ? "打完了" : `第 ${t.round} 轮`) : "等人"}<br><small class="ol-muted">${holdemSeatsLine(t)}</small></div>
+        <div class="crq-state">${free ? btn(`data-cso="holdemJoin" ${data} data-table="${esc(t.id)}"`, "坐下") : ""}</div></li>`;
+    }).join("");
+    return `<h3>${esc((list[0].gameName) || "Flux Hold'em")} 多人桌（几名玩家同桌，空座位由 AI 补）</h3>${form}
+      <p class="ol-muted">开桌的人定每人买入多少（买入只能用普通筹码，同对赌），坐满或者开桌的人点「开局」就开打，空着的座位由这张桌子难度的 AI 补；主持人也能坐一个座位。</p>
+      ${tables ? `<ul class="crq-list">${tables}</ul>` : '<p class="ol-muted">现在没有多人桌。</p>'}`;
+  }
+  /** 坐在多人桌上：座位、开局（开桌的人）、离桌（没开局退回；打到一半交给 AI 托管；打完结算）、托管中接着打 */
+  function holdemSeatHtml(row, c, m) {
+    const seat = row.seat, t = (c.holdem || []).find(x => x.id === seat.table) || { seats: [] }, data = `data-kit="${esc(row.kit)}" data-table="${esc(seat.table)}"`;
+    const g = seat.game, over = !!(g && g.over);
+    const leave = !seat.started ? "离桌（退回买入）" : over ? "离桌结算" : "离桌（交给 AI 托管）";
+    return `<p class="cso-line"><b>坐在${esc(seat.tableName || "")}</b>：${seat.size} 人桌 · ${seat.side} 号座位 · 买入 ${seat.buyIn} 枚${seat.topUp ? `（含从钱包补的 ${seat.topUp} 枚）` : ""}，入场费 ${seat.fee} 枚${seat.auto ? " · <b>AI 托管中</b>" : ""}</p>
+      <p class="cso-line ol-muted">${holdemSeatsLine(t)}</p>
+      ${g ? gameHtml(g, m, row.kit) : '<p class="ol-muted">等人坐下、开桌的人开局。</p>'}
+      <div class="crq-state">${seat.host && !seat.started ? btn(`data-cso="holdemStart" ${data}`, "开局（空座位由 AI 补）", { primary: true }) : ""}
+        ${seat.auto && g && !over ? btn(`data-cso="holdemBack" ${data}`, "接着打", { primary: true }) : ""}
+        ${btn(`data-cso="leave" ${data}`, leave)}</div>`;
+  }
+  /** 主持人：多人桌（坐一个座位、开局），自己坐着的座位 */
+  function holdemGmHtml(c, m) {
+    const mineAt = new Map((c.gmSeats || []).map(s => [s.table, s]));
+    const rows = (c.holdem || []).map(t => {
+      const s = mineAt.get(t.id), data = `data-table="${esc(t.id)}"`;
+      const sit = !t.started && !s && (t.seats || []).some(x => x.kind === "empty") ? btn(`data-cso="holdemGm" ${data}`, "坐一个座位") : "";
+      const go = !t.started ? btn(`data-cso="holdemStartGm" ${data}`, "开局（空座位由 AI 补）") : "";
+      const mine = s ? `${s.game ? gameHtml(s.game, m, "gm-holdem:" + t.id) : ""}${s.auto && s.game && !s.game.over ? btn(`data-cso="holdemBackGm" ${data}`, "接着打", { primary: true }) : ""}${btn(`data-cso="leaveGm" ${data}`, t.started && !t.over ? "离开座位（交给 AI 托管）" : "离开座位")}` : "";
+      return `<li class="crq-row"><div><b>${esc(t.name)}</b> · ${esc(t.host || "")} 开的 · ${t.size} 人桌 · ${t.started ? (t.over ? "打完了" : `第 ${t.round} 轮`) : "等人"}<br><small class="ol-muted">${holdemSeatsLine(t)}</small>${mine}</div>
+        <div class="crq-state">${sit}${go}</div></li>`;
+    }).join("");
+    return rows ? `<h3>Flux Hold'em 多人桌</h3><ul class="crq-list">${rows}</ul>` : "";
   }
   function playerHtml(m) {
     const c = m.casino, head = `<header><h2>赌场</h2>${btn('data-cso="close"', "关闭")}</header>`;
@@ -122,9 +172,10 @@
     const c = m.casino, head = `<header><h2>赌场</h2>${btn('data-cso="close"', "关闭")}</header>`;
     if (!c) return `<div class="ol-card crq-card cso-card">${head}<p class="ol-muted">只有联机跑团的探索环节有赌场。</p></div>`;
     const dealing = (c.dealing || []).map(d => `<section class="cso-deal"><h3>你给 ${esc(d.name)} 坐庄 · ${esc(d.tableName || "")}</h3>${gameHtml(d.game, Object.assign({}, m, { oppName: d.name }), "gm:" + d.kit)}</section>`).join("");
-    const seated = (c.seated || []).map(s => `<li class="crq-row"><div><b>${esc(s.name)}</b> · ${s.kind === "pvp" ? `对赌（${s.stakeKind === "chips" ? "押筹码" : "押奎支"}）对手 ${esc(s.opponent || "还没坐下")}` : `${esc(s.tableName || "")} · ${s.kind === "gm" ? "你坐庄" : "AI 坐庄"}`} · ${s.over ? "打完了" : s.round ? `第 ${s.round} 轮` : "等人"}</div>
+    const seated = (c.seated || []).map(s => `<li class="crq-row"><div><b>${esc(s.name)}</b> · ${s.kind === "pvp" ? `${s.mode === "duel" ? "Flux Duel " : ""}对赌（${s.stakeKind === "chips" ? "押筹码" : "押奎支"}）对手 ${esc(s.opponent || "还没坐下")}` : s.kind === "holdem" ? `${esc(s.tableName || "")} · 多人桌${s.auto ? " · AI 托管中" : ""}` : `${esc(s.tableName || "")} · ${s.kind === "gm" ? "你坐庄" : "AI 坐庄"}`} · ${s.over ? "打完了" : s.round ? `第 ${s.round} 轮` : "等人"}</div>
       <div class="crq-state">${btn(`data-cso="leave" data-kit="${esc(s.kit)}"`, "让他离桌", { title: "卡住的桌子：按离桌结算（打到一半的对赌算他认输）" })}</div></li>`).join("");
     return `<div class="ol-card crq-card cso-card">${head}${dealing || '<p class="ol-muted">现在没有要你坐庄的桌子。玩家选「主持人坐庄」坐下时，这一桌出现在这里，由你出庄家那一方。</p>'}
+      ${holdemGmHtml(c, m)}
       <h3>谁坐在哪桌</h3>${seated ? `<ul class="crq-list">${seated}</ul>` : '<p class="ol-muted">没有人坐桌。</p>'}${m.error ? `<p class="ol-bad" role="alert">${esc(m.error)}</p>` : ""}
       <p class="ol-muted cso-rule">不亮牌：你只看得到自己坐庄那一方的牌；玩家之间对赌的牌你也看不到。</p></div>`;
   }
@@ -137,7 +188,7 @@
     doc.body.appendChild(box);
     let open = false, busy = false, last = "", error = "", kit = null;
     const opened = new Set();   // 已经替哪些角色领过赠送筹码（第一次打开时发一次 open）
-    const draft = { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips", mode: "highflux" }, amount = {};
+    const draft = { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips", mode: "highflux", holdem: { table: null, buyIn: 0, size: 4 } }, amount = {};
     const v = () => o.view() || {}, hs = () => (v().packet && v().packet.view) || {};
     const casino = () => hs().casino || null;
     const enabled = () => !!(v().active && v().packet && v().packet.mode !== "rogue" && v().screen === "exploration" && casino());
@@ -149,7 +200,7 @@
     }
     const waiting = () => {
       const c = casino(); if (!c) return false;
-      return v().isHost ? (c.dealing || []).some(d => d.game && d.game.myTurn) : (c.mine || []).some(r => r.seat && r.seat.game && r.seat.game.myTurn);
+      return v().isHost ? (c.dealing || []).concat(c.gmSeats || []).some(d => d.game && d.game.myTurn) : (c.mine || []).some(r => r.seat && r.seat.game && r.seat.game.myTurn);
     };
     const label = () => (waiting() ? (v().isHost ? "赌场 · 等你坐庄" : "赌场 · 轮到你") : "赌场");
     function hostButton(on) {
@@ -202,6 +253,17 @@
       }
       if (a === "join") return void submit({ type: "casino", op: "pvpJoin", kit: d.kit, table: d.table });
       if (a === "leave") return void submit({ type: "casino", op: "leave", kit: d.kit });
+      // Flux Hold'em 多人桌（#526）：玩家开桌 / 坐下 / 开局 / 接着打；主持人坐一个座位、开局、离开座位、接着打（asGm）
+      if (a === "holdemOpen") {
+        const h = draft.holdem;
+        h.buyIn = numIn('[data-cso-in="hBuyIn"]', h.buyIn);
+        return void submit({ type: "casino", op: "holdemOpen", kit: d.kit, table: h.table || ((casino().tables || []).find(t => t.game === "holdem") || {}).id, buyIn: h.buyIn, size: h.size });
+      }
+      if (a === "holdemJoin" || a === "holdemStart" || a === "holdemBack") return void submit({ type: "casino", op: a, kit: d.kit, table: d.table });
+      if (a === "holdemGm") return void submit({ type: "casino", op: "holdemGm", table: d.table, asGm: true });
+      if (a === "holdemStartGm") return void submit({ type: "casino", op: "holdemStart", table: d.table, asGm: true });
+      if (a === "holdemBackGm") return void submit({ type: "casino", op: "holdemBack", table: d.table, asGm: true });
+      if (a === "leaveGm") return void submit({ type: "casino", op: "leave", table: d.table, asGm: true });
       if (a === "act") {
         const key = d.csoKey || "", gm = key.startsWith("gm:"), who = gm ? key.slice(3) : key;
         const action = { type: d.type };
@@ -215,6 +277,9 @@
       const t = e.target;
       if (t.dataset.csoIn === "side") draft.side = ["dealer", "player", "a", "b"].includes(t.value) ? t.value : "player";
       else if (t.dataset.csoIn === "mode") { draft.mode = t.value === "duel" ? "duel" : "highflux"; last = ""; paint(); }
+      else if (t.dataset.csoIn === "hTable") { draft.holdem.table = t.value; last = ""; paint(); }
+      else if (t.dataset.csoIn === "hBuyIn") draft.holdem.buyIn = Math.floor(Number(t.value)) || 0;
+      else if (t.dataset.csoIn === "hSize") draft.holdem.size = Number(t.value) || 4;
       else if (t.dataset.csoIn === "stake") draft.stake = t.value === "kuizhi" ? "kuizhi" : "chips";
       else if (t.dataset.csoIn) draft[t.dataset.csoIn] = t.value;
       else if (t.dataset.csoBuyin) draft.buyIn[t.dataset.csoBuyin] = t.value;
