@@ -7,6 +7,10 @@
  *   不开盘的格子灰掉写「不开」）。轮到你押时点开盘的格子加进这一轮的押注（默认最低注，− / + 调），「押注」一次交上去；
  *   押过的注摆在格子上，写锁定的赔率。第一轮「不押」= 这一手后面都不能押（按钮上写清楚）。
  * 结算横幅：结果、三张牌、押中几格、连本带利拿回多少、这一手净输赢（含入场费）。
+ * 结算前的过渡（主人 10/30 试玩反馈，#525；计时、操作栏同 High Flux：counter-cards-ui.js 的 CounterCardsUI.settle）：以前押完最后一轮
+ *   （或第一轮不押，三张一口气翻完）同一下就弹横幅，最后翻开的牌还没看清就出结果了。现在先停在翻开的那张（一口气翻几张的一张一步，
+ *   最后一步那一下的押注 / 不押写在第一步里）→ 判定中（三张牌轻轻抖）→ 结算横幅；点一下桌面直接看结算。
+ *   赌命桌的账在规则层结算的那一下就交给接入的那一边（过渡中离桌也照样算过了），过渡只管画面；fast（测试用）不停。
  * 本地试玩：坐下拿 UI_CONFIG.startChips 枚筹码（null = 和 High Flux 的开局筹码一样），一手接一手，筹码带到下一手；
  *   交不起入场费就回设置页重新坐下。庄家是 AI（筹码无限，不用做决定）。
  * 赌命桌（startLife）：押注的角色只给名字——界面根本拿不到坚毅，所以不管还剩多少，按钮、提示、能押的格子都一模一样
@@ -15,8 +19,8 @@
  * 页面骨架在 game.html 的 #scr-ccg；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsGuessUI.open()                                         打开设置页（选桌）
- *   CounterCardsGuessUI.start({ table: "street", chips: 50, seed, deals })   直接坐下开一手（deals：测试用，按顺序指定每一手的三张牌）
- *   CounterCardsGuessUI.startLife({ seat: { id, name }, settle(bill) → { dead, notes }, back(), seed, deals })   坐上赌命桌
+ *   CounterCardsGuessUI.start({ table: "street", chips: 50, seed, deals, fast })   直接坐下开一手（deals：测试用，按顺序指定每一手的三张牌；fast：结算前不停，测试用）
+ *   CounterCardsGuessUI.startLife({ seat: { id, name }, settle(bill) → { dead, notes }, back(), seed, deals, fast })   坐上赌命桌
  */
 (function (root) {
   "use strict";
@@ -28,7 +32,9 @@
     // 每一轮下注时桌上是什么情况（提示语）
     roundText: { 1: "三张都盖着", 2: "元素翻开了", 3: "天气也翻开了，只剩层牌" },
     // 赌命桌的字：结算只写「坚毅受创」，不写数字
-    life: { hurt: "坚毅受创", safe: "坚毅无损", dead: "坚毅耗尽——永久死亡", online: "联机不开赌命桌" }
+    life: { hurt: "坚毅受创", safe: "坚毅无损", dead: "坚毅耗尽——永久死亡", online: "联机不开赌命桌" },
+    // 结算前的过渡（#525）：时长读 High Flux 的 CounterCardsUI.UI_CONFIG.settle，这里是猜大猜小自己的字（判定中那一行的说明）
+    settle: { judgeNote: "元素打层牌，按克制表和天气算这一手的得分" }
   };
   const G = () => root.CounterCardsGuess;
   const CC = () => root.CounterCards;
@@ -67,8 +73,9 @@
 
   /* ---------- 状态 ---------- */
   const SETUP = { table: null };
-  let S = null;   // { table, chips, seed, n（第几手）, hand, draft（这一轮还没交的押注 { 结果: 押多少 }）, msg, banner, last（上次画的，放动画用）, history, deals,
-                  //   life（赌命桌才有：{ seat: { id, name }, settle, back, outcome（这一手结算后接入层说的：{ dead, notes }）, dead }）}
+  let S = null;   // { table, chips, seed, n（第几手）, hand, draft（这一轮还没交的押注 { 结果: 押多少 }）, msg, banner（这一手结算过了：账记了、该弹横幅了）, last（上次画的，放动画用）, history, deals,
+                  //   life（赌命桌才有：{ seat: { id, name }, settle, back, outcome（这一手结算后接入层说的：{ dead, notes }）, dead }）,
+                  //   settle（结算前的过渡，见 settleStart；放着的时候横幅先不画）, fast（测试用：结算前不停）}
   let bound = false;
   const meId = () => (S && S.life ? S.life.seat.id : ME);
 
@@ -90,6 +97,7 @@
   }
   function open() {
     bind();
+    dropSettle();
     enterScreen();
     renderSetup();
     show("setup");
@@ -101,8 +109,9 @@
     const table = G().tableOf(opt.table || SETUP.table).id;
     if (table === G().GUESS_CONFIG.life.id) throw new Error("赌命桌从长线养成 / 跑团进（startLife）");
     SETUP.table = table;
+    dropSettle();
     S = { table, chips: opt.chips != null ? Math.max(0, Math.floor(Number(opt.chips) || 0)) : startChips(), seed: seedOf(opt), n: 0, hand: null, draft: {}, msg: "",
-      banner: false, last: {}, anim: {}, history: [], deals: (opt.deals || []).slice(), life: null };
+      banner: false, last: {}, anim: {}, history: [], deals: (opt.deals || []).slice(), life: null, settle: null, fast: !!opt.fast };
     enterScreen();
     show("game");
     if (!deal()) { renderSetup(); show("setup"); return null; }
@@ -119,8 +128,9 @@
     if (onlineNow()) throw new Error(UI_CONFIG.life.online);
     if (!opt.seat || opt.seat.id == null) throw new Error("赌命桌要有押注的角色");
     bind();
+    dropSettle();
     S = { table: G().GUESS_CONFIG.life.id, chips: null, seed: seedOf(opt), n: 0, hand: null, draft: {}, msg: "", banner: false, last: {}, anim: {}, history: [],
-      deals: (opt.deals || []).slice(),
+      deals: (opt.deals || []).slice(), settle: null, fast: !!opt.fast,
       life: { seat: { id: String(opt.seat.id), name: String(opt.seat.name || opt.seat.id) }, dealer: opt.dealer ? String(opt.dealer) : null,
         settle: opt.settle || null, back: opt.back || null, outcome: null, dead: false } };
     enterScreen();
@@ -132,6 +142,7 @@
   function seedOf(opt) { return String(opt.seed || ("ccg" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36))); }
   /** 开下一手：普通桌的入场费从带上桌的筹码里扣（交不起返回 false）；赌命桌押注的角色已经死了也返回 false */
   function deal() {
+    dropSettle();
     const t = G().tableOf(S.table);
     if (S.life) {
       if (S.life.dead) return false;
@@ -172,6 +183,7 @@
     doc().body.dataset.screen = "title";
   }
   function leave() {
+    dropSettle();
     if (root.WeatherFx && $("ccg-fx")) root.WeatherFx.sync({ field: $("ccg-fx"), weather: "none" });
   }
   /** 离开赌命桌：这一手押了还没结算的不算（规则层只在结算时出账，接入层什么都没扣），回到原来的画面 */
@@ -187,10 +199,64 @@
   const draftTotal = () => Object.keys(S.draft).reduce((s, k) => s + S.draft[k], 0);
   function humanAct(a) {
     if (!S || !S.hand || S.hand.over) return;
+    const pre = G().view(S.hand, meId());   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
     try { G().act(S.hand, meId(), a); } catch (e) { S.msg = e.message; render(); return; }
     S.draft = {}; S.msg = "";
     sync();
+    if (S.hand.over) settleStart(pre);
     render();
+  }
+
+  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#525）：翻开的牌一张一步 → 判定中 → 结算横幅 ----------
+   * 规则层押完最后一轮（或第一轮不押、后面没得押、结果已经定了）一口气翻牌、结算：记录里 from（做这一步之前有几条）到「结果」那一条之间，
+   * 每翻开一张算一步（这一下的押注 / 不押、「没人能押」「结果已经定了」这几条跟着下一张写），每步停 settle.lastMs → 判定中 → 横幅。
+   * 计时、操作栏是 High Flux 那一份（CounterCardsUI.settle）；账在结算那一下就记过了（sync），过渡只管画面。
+   * S.settle = { frames: [{ kind, shown（这一步翻到哪几张）, cut（记录写到哪）}], beats, texts, judge: true, pre（做这一步之前的画面）, at, phase, timer } */
+  const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
+  function settleStart(pre) {
+    if (S.fast) return;
+    const log = G().view(S.hand, meId()).log, from = pre.log.length;
+    const end = log.findIndex((e, i) => i >= from && e.t === "result");
+    const frames = [];
+    let shown = Object.assign({}, pre.shown), lines = [];
+    for (let i = from; i < (end < 0 ? log.length : end); i++) {
+      const e = log[i];
+      lines.push(e.text);
+      if (e.t !== "reveal") continue;
+      shown = Object.assign({}, shown, { [e.card]: e.value });
+      frames.push({ kind: frames.length ? "flip" : "last", shown, cut: i + 1, text: lines.join(" ") });
+      lines = [];
+    }
+    if (!frames.length) return;
+    S.settle = { frames, beats: frames.map(f => f.kind), texts: frames.map(f => f.text), judge: true, pre };
+    CUI().settle.begin(S.settle, settleHost);
+  }
+  /** 过渡放完（或点了跳过）：弹出结算横幅 */
+  function settleEnd() {
+    const st = S && S.settle;
+    if (!st) return;
+    CUI().settle.stop(st);
+    S.settle = null;
+    render();
+  }
+  /** 不放了（离桌、换桌、开下一手）：停掉计时（账早就记过了） */
+  function dropSettle() {
+    if (!S || !S.settle) return;
+    CUI().settle.stop(S.settle);
+    S.settle = null;
+  }
+  /** 过渡中的画面（第 st.at 步）：这一手已经结算完，桌上停在结算之前——翻开的牌照这一步，赔率表照做这一步之前的（押过的注摆在格子上，还没写押中没有），
+   *  筹码是拿回之前的（结算后的减去连本带利拿回的），赌命桌还没有奖品、受没受创；记录、每手结算里还没有这一手的结果 */
+  function settleView(v, st) {
+    const f = st.frames[st.at], me = Object.assign({}, v.me, { slips: v.me.slips.map(x => { const o = Object.assign({}, x); delete o.win; delete o.pay; return o; }) });
+    if (S.life) { delete me.prize; delete me.hurt; } else { me.chips = v.me.chips - (v.me.won || 0); delete me.won; delete me.net; }
+    return Object.assign({}, v, { stage: "settle", round: st.pre.round, over: false, waiting: [], myTurn: false, legal: [], result: null,
+      shown: f.shown, board: st.pre.board, me, log: v.log.slice(0, f.cut) });
+  }
+  /** 过渡中的操作栏（High Flux 那一份）：这一步翻开了什么 / 判定中，「直接看结算」 */
+  function settleHtml() {
+    const st = S.settle, T = CUI().UI_CONFIG.settle;
+    return CUI().settle.bar(st, st.texts[st.at], UI_CONFIG.settle.judgeNote, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
   }
   function pick(result) {
     const v = G().view(S.hand, meId()), o = betOpt(v);
@@ -253,7 +319,7 @@
   }
   function render() {
     if (!S || !S.hand) return;
-    const v = G().view(S.hand, meId());
+    const now = G().view(S.hand, meId()), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
     const app = $("ccg-game");
     if (!app) return;
     app.dataset.weather = v.shown.weather || "none";
@@ -268,7 +334,7 @@
     // 记录：在底部就滚到底看新记录，往上翻着看旧的就停在原处（借 High Flux 的 logScroll / stickLog，#499）
     if (side) { const was = CUI().logScroll(side); side.innerHTML = sideHtml(v); CUI().stickLog(side, was); }
     if (banner) {
-      const h = S.banner ? bannerHtml(v) : "";
+      const h = S.banner && !S.settle ? bannerHtml(now) : "";
       banner.innerHTML = h;
       banner.hidden = !h;
     }
@@ -296,6 +362,8 @@
       return `<div class="ccg-slot${val ? " up" : ""}" data-slot="${k}"><small>${esc(kinds[k])}</small>${face}</div>`;
     };
     const dealer = S.life ? `<div class="cc-who"><b>${esc(S.life.dealer || v.table.dealer)}</b><small>${S.life.dealer ? "坐庄" : "黑市 NPC"}</small></div>` : `<div class="cc-who"><b>庄家</b><small>AI · 筹码无限</small></div>`;
+    // 结算前的过渡（#525）：判定中三张牌轻轻抖，「判定中」胶带贴在三张牌下沿
+    const judging = !!(S.settle && S.settle.phase === "judge");
     let seat;
     if (S.life) {
       // 赌命桌：没有筹码堆，也不写押上的点数加起来是多少（每格的固定代价写在格子上）
@@ -306,7 +374,7 @@
       seat = `<div class="cc-seat ccg-seat">${CUI().chipsHtml(v.me.chips, { title: "你的筹码", label: "你的筹码", anim: bump("chips", v.me.chips) })}
         <div class="cc-who"><b>你</b><small>入场费 ${v.me.paid} 枚（不退）</small><small>这一手押了 ${staked} 枚</small></div></div>`;
     }
-    return `<div class="ccg-dealer">${dealer}<div class="ccg-slots">${G().GUESS_CONFIG.order.map(slot).join("")}</div></div>
+    return `<div class="ccg-dealer">${dealer}<div class="ccg-slots${judging ? " cc-judging" : ""}">${G().GUESS_CONFIG.order.map(slot).join("")}${judging ? CUI().settle.tag("ccg-judge") : ""}</div></div>
       ${oddsHtml(v)}
       ${seat}`;
   }
@@ -338,6 +406,7 @@
   }
   function actionsHtml(v) {
     const msg = S.msg ? `<p class="cc-msg" role="alert">${esc(S.msg)}</p>` : "";
+    if (S.settle) return settleHtml() + msg;
     if (v.over) return `<p class="cc-prompt">这一手结束了。</p>${msg}`;
     if (!v.myTurn) return `<p class="cc-prompt cc-wait">等别的玩家下注</p>${msg}`;
     const o = betOpt(v);
@@ -369,8 +438,8 @@
   }
   function sideHtml(v) {
     const L = UI_CONFIG.life;
-    // 每手结算、记录都按先后排，最新的在最下面（同 High Flux 的侧栏和战斗记录，#499；以前都是最新的在最上面）
-    const rows = S.history.slice(-UI_CONFIG.historyLines).map(x => {
+    // 每手结算、记录都按先后排，最新的在最下面（同 High Flux 的侧栏和战斗记录，#499；以前都是最新的在最上面）；结算前的过渡中还没有这一手
+    const rows = (S.settle ? S.history.slice(0, -1) : S.history).slice(-UI_CONFIG.historyLines).map(x => {
       if (S.life) {
         const what = !x.bet ? "没押" : x.dead ? L.dead : [x.hits ? `押中 ${x.hits} 格` : "没押中", x.hurt ? L.hurt : ""].filter(Boolean).join(" · ");
         return `<li class="cc-res ${x.dead || x.hurt ? "lose" : x.hits ? "win" : "tie"}"><b>第 ${x.n} 手</b><span>结果 ${esc(G().label(x.score))}</span><span class="cc-wxname">${esc(what)}</span><span class="cc-delta"></span></li>`;
@@ -441,9 +510,12 @@
   /* ---------- 点击 ---------- */
   function onClick(e) {
     const b = e.target && e.target.closest ? e.target.closest("[data-ccg]") : null;
+    // 结算前的过渡：点一下桌面（牌桌、操作栏里按钮以外的地方）直接看结算；顶栏、侧栏照常
+    if (S && S.settle && !b && e.target && e.target.closest && e.target.closest(".cc-table, #ccg-actions")) { settleEnd(); return; }
     if (!b || b.disabled) return;
     const d = b.dataset;
     switch (d.ccg) {
+      case "skipSettle": settleEnd(); return;   // 结算前的过渡：直接看结算
       case "set": SETUP.table = d.table; renderSetup(); return;
       case "start": start({ table: SETUP.table }); return;
       case "setup": open(); return;

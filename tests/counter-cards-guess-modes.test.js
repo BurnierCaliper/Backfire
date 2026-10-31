@@ -124,8 +124,8 @@ test("长线养成接上界面：角色坚毅剩 1 点和满的，黑市入口�
   assert.equal(pa.UI.blackMarketHtml(seats(A), opt), pb.UI.blackMarketHtml(seats(B), opt));
   assert.equal((pa.UI.blackMarketHtml(seats(A), opt).match(/data-ccg-black=/g) || []).length, 2, "两个人都能上桌");
   const adapter = (g) => (bill) => bm(g, kit, bill);
-  pa.UI.startLife({ seat: seats(A)[0], settle: adapter(A), seed: "same", deals: [DEAL] });
-  pb.UI.startLife({ seat: seats(B)[0], settle: adapter(B), seed: "same", deals: [DEAL] });
+  pa.UI.startLife({ seat: seats(A)[0], settle: adapter(A), seed: "same", deals: [DEAL], fast: true });   // fast：结算前不停（过渡在 counter-cards-guess-ui.test.js 查）
+  pb.UI.startLife({ seat: seats(B)[0], settle: adapter(B), seed: "same", deals: [DEAL], fast: true });
   let steps = 0;
   const same = () => {
     steps++;
@@ -182,8 +182,8 @@ test("跑团接上界面：坚毅剩 1 点和满的，牌桌每一步完全一�
   // 和 trpg-ui.js · openBlackMarket 一样：跑 trpg 指令，再看这名角色是不是死了
   const adapter = (c) => (bill) => { tsend(c, { action: "blackMarket", kit: "kolt", bill }); return { dead: !!unitOf(c, "kolt").dead }; };
   const seat = { id: "kolt", name: unitOf(A, "kolt").name };
-  pa.UI.startLife({ seat, dealer: "主持人", settle: adapter(A), seed: "t", deals: [DEAL] });
-  pb.UI.startLife({ seat, dealer: "主持人", settle: adapter(B), seed: "t", deals: [DEAL] });
+  pa.UI.startLife({ seat, dealer: "主持人", settle: adapter(A), seed: "t", deals: [DEAL], fast: true });
+  pb.UI.startLife({ seat, dealer: "主持人", settle: adapter(B), seed: "t", deals: [DEAL], fast: true });
   assert.match(pa.$("#ccg-top").textContent, /庄家：主持人/);
   const same = () => { if (!pa.UI.state().hand.over) assert.equal(pa.$("#scr-ccg").innerHTML, pb.$("#scr-ccg").innerHTML); };
   same();

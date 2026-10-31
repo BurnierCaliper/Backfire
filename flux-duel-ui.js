@@ -6,6 +6,8 @@
  *   前几轮翻开过的天气、底池；两边暗出的牌（各两张牌背，自己的在角上标一下是什么）；自己的手牌分两排（层牌、元素牌），各点一张选中再「暗出」。
  * 结算横幅：胜负、分档、筹码变动；亮牌开关打开时（DUEL_CONFIG.reveal）另写双方出的牌和得分，不亮时写「不亮牌」。
  * 克制表（侧栏、结算横幅上的按钮）、手里元素牌的悬停预览：按这一轮翻开的天气算实际总分（还没翻开 = 按没有天气算）。
+ * 结算前的过渡（主人 10/30 试玩反馈，#525；计时同 High Flux，flux-ui.js）：最后一步（谁跟注 / 过牌 / 弃牌；第一轮下注后翻到相位直接全押的，
+ *   翻天气、全押也在这一步里）→ 亮牌（亮牌开关打开时：双方暗出的牌翻过来）→ 判定中 → 结算横幅；弃牌不判定，最后一步之后直接弹。
  *
  *   FluxDuelUI.open()                                              打开设置页
  *   FluxDuelUI.start({ side: "a", level: "hard", seed, fast })     直接开一局（side：你坐哪一方，a = 第 1 轮先手；fast：AI 不等，测试用）
@@ -17,7 +19,9 @@
   const UI_CONFIG = {
     // 悬停预览（手里的元素牌）的字
     tip: { head: "打对方五种层", foot: "正分加分 · 负分扣分 · 对方的元素打你的层也照这张表算", facedown: "天气还没翻开，按没有天气算" },
-    levelNames: { easy: "简单", normal: "普通", hard: "困难" }
+    levelNames: { easy: "简单", normal: "普通", hard: "困难" },
+    // 结算前的过渡（#525）：时长读 High Flux 的 CounterCardsUI.UI_CONFIG.settle，这里是 Duel 自己的字（判定中那一行的说明，亮不亮牌各一句）
+    settle: { judgeNote: "不亮牌：系统按克制表和这一轮的天气直接判胜负", judgeNoteShown: "各自用自己的元素牌打对方的层牌算分，分高的赢" }
   };
   const FD = () => root.FluxDuel;
   const AI = () => root.FluxDuelAI;
@@ -108,11 +112,16 @@
     const flash = anim.wx ? `<div class="cc-flash" style="--c:${T.weatherColor(v.weather)}" aria-hidden="true"></div>` : "";
     const potShare = me.pot + opp.pot;
     const played = (who, s, cards) => (s ? `<div class="cc-slot fd-slot">${cards}</div>` : `<div class="cc-slot fd-slot"><span class="cc-empty">${who}还没出牌</span></div>`);
+    // 结算前的过渡（#525）：亮牌（亮牌开关打开时，s.shown）那一步起暗出的两张翻过来；判定中桌上的牌轻轻抖、底池发光，「判定中」贴在两边暗出的牌上沿
+    const J = T.judging() ? " cc-judging" : "";
+    const flipShown = { opp: T.bump("oppShown", opp.shown ? v.round : ""), me: T.bump("myShown", me.shown ? v.round : "") };
+    const faces = (s, flip) => [s.layer, s.element].map(c => T.handCard(c, { cls: "cc-down" + (flip ? " cc-flip" : "") })).join("");
+    const collect = (k) => (T.collecting(k) ? "cc-collect" : "");
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>对手</b><small>${esc(levelName(S.level))} AI</small>${T.loanTag(opp, "对手")}</div>
+        <div class="cc-who"><b>对手</b><small>${esc(levelName(S.level))} AI</small>${T.loanTag(opp, "对手")}${T.actedTag(v.opponent)}</div>
         <div class="fd-backs"><div class="cc-hand cc-hand-back" title="层牌 ${opp.layerCount} 张">${backs(opp.layerCount, 0)}</div><small>层牌 ${opp.layerCount}</small>
           <div class="cc-hand cc-hand-back" title="元素牌 ${opp.elementCount} 张">${backs(opp.elementCount, opp.layerCount)}</div><small>元素牌 ${opp.elementCount}</small></div>
-        ${T.chips(opp.chips, { title: "对手的筹码", label: opp.infinite ? "筹码无限" : "", anim: anim.opp })}
+        ${T.chips(opp.chips, { title: "对手的筹码", label: opp.infinite ? "筹码无限" : "", anim: anim.opp, cls: collect(v.opponent) })}
       </div>
       <div class="cc-center">
         <div class="cc-wzone">
@@ -120,23 +129,24 @@
           <div class="cc-wnow">${wnow}<small>${wlabel}</small></div>
           ${v.gone.length ? `<div class="cc-gone" title="前几轮翻开过的天气">${v.gone.map(T.miniWeather).join("")}</div>` : ""}
         </div>
-        <div class="cc-pot${v.allIn ? " allin" : ""}">
+        <div class="cc-pot${v.allIn ? " allin" : ""}${J}">
           ${T.chips(v.pot, { cls: "cc-potstack", title: "底池", label: "底池", anim: anim.pot })}
           ${potShare ? `<small class="cc-roll">含滚存 ${potShare} 枚</small>` : ""}
           <span class="cc-bets"><span>对手本轮 ${opp.bet}</span><span>你本轮 ${me.bet}</span></span>
         </div>
-        <div class="cc-slots fd-slots">
-          ${played("对手", opp.played, T.back({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }) + T.back({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }))}
-          ${played("你", me.element, T.back({ mine: me.layer, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }) + T.back({ mine: me.element, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }))}
+        <div class="cc-slots fd-slots${J}">
+          ${played("对手", opp.played, opp.shown ? faces(opp.shown, flipShown.opp) : T.back({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }) + T.back({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }))}
+          ${played("你", me.element, me.shown ? faces(me.shown, flipShown.me) : T.back({ mine: me.layer, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }) + T.back({ mine: me.element, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }))}
+          ${J ? T.judgeTag() : ""}
         </div>
       </div>
       <div class="cc-seat cc-me">
-        ${T.chips(me.chips, { title: "你的筹码", anim: anim.me })}
+        ${T.chips(me.chips, { title: "你的筹码", anim: anim.me, cls: collect(v.side) })}
         <div class="fd-hand2">
           <div class="cc-hand fd-row" data-row="layer"><span class="fd-rowlabel">层牌</span>${mine(me.layers, "layer", opp.layerCount + opp.elementCount) || `<span class="cc-empty">层牌出完了</span>`}</div>
           <div class="cc-hand fd-row" data-row="element"><span class="fd-rowlabel">元素牌</span>${mine(me.elements, "element", opp.layerCount + opp.elementCount + me.layers.length)}</div>
         </div>
-        <div class="cc-who"><b>你</b>${T.loanTag(me, "你")}</div>
+        <div class="cc-who"><b>你</b>${T.loanTag(me, "你")}${T.actedTag(v.side)}</div>
       </div>`;
   }
   function stageControls(T, v) {
@@ -223,6 +233,40 @@
     return root.FluxUI.tipHtml(card, c, head, U.foot);
   }
 
+  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#525）：最后一步 →（亮牌）→ 判定中 → 结算横幅 ----------
+   * 记录里这一轮的结算在 from（做最后一步之前记录有几条）和结算那一条之间：最后一步（下注、关窗；追加窗口关了才结算的，从开窗的那一下跟注写起，同 High Flux），
+   * 第一轮下注后翻到相位直接全押的，翻天气、全押那两条也在里面（最后一步做完马上翻开，算同一步）。
+   * 亮牌开关打开时（DUEL_CONFIG.reveal，横幅上写双方的牌）多一步亮牌：双方暗出的两张翻过来（不写分，分在横幅上）。弃牌不判定 */
+  function settleBeats(T, pre, now, res) {
+    const CS = root.CounterCardsUI.settle, log = now.log, from = pre.log.length, U = UI_CONFIG.settle;
+    const end = log.findIndex((e, i) => i >= from && e.t === "result" && e.res && e.res.r === res.r);
+    const logEnd = end < 0 ? log.length : end;
+    const steps = CS.lastSteps(log, from, logEnd), texts = [steps.map(e => e.text).join(" ")];
+    const show = !!res.shown && res.outcome !== "fold";
+    if (show) {
+      const pair = (k) => `〔${cn(res.shown[k].layer)}〕〔${cn(res.shown[k].element)}〕`;
+      texts.push(`亮牌：你${pair(now.side)}，对手${pair(now.opponent)}。`);
+    }
+    return { beats: show ? ["last", "show"] : ["last"], texts, logEnd, judge: res.outcome !== "fold", acted: CS.actedOf(steps), note: show ? U.judgeNoteShown : U.judgeNote };
+  }
+  /** 过渡中的画面：规则层已经结算完、开了下一轮，桌上停在结算之前（同 High Flux 的 settleView）——两边的筹码和底池 = 做最后一步之前的 + 这一步推进底池的
+   *  （这一轮下注额 res.bets 减去之前已经下的；翻到相位全押的也在里面）；这一轮的天气、手牌、暗出的牌、天气堆、轮数照做最后一步之前的画面
+   *  （翻到相位的那一张照结算记下的）；亮牌那一步起双方暗出的牌翻过来（shown）；记录、每轮结算里还没有这一轮的结果 */
+  function settleView(T, v, st) {
+    const r = st.res, pre = st.pre, show = st.beats[st.at] === "show";
+    const seat = (was, k) => Object.assign({}, was, { chips: was.chips == null ? null : was.chips - (r.bets[k] - was.bet), bet: r.bets[k], st: 0,
+      shown: show && r.shown ? r.shown[k] : null });
+    return Object.assign({}, v, {
+      round: r.r, lead: pre.lead, over: false, stage: "settle", waiting: [], myTurn: false, legal: [], betting: null, loanAsk: null, final: null,
+      weather: r.weather, facedown: !r.weather && pre.facedown, allIn: r.allIn, deckCount: pre.deckCount, buried: pre.buried, gone: pre.gone, unseen: pre.unseen,
+      ante: pre.ante, minBet: pre.minBet, pot: pre.me.pot + pre.opp.pot + r.bets[v.side] + r.bets[v.opponent],
+      me: seat(pre.me, v.side), opp: Object.assign(seat(pre.opp, v.opponent), { played: true }),
+      results: v.results.slice(0, -1), log: v.log.slice(0, st.logEnd)
+    });
+  }
+  /** 弹横幅时筹码「收进来」的：赢家（同 High Flux；平局、各自拿回的没有） */
+  const settleCollect = (T, r) => (r.winner ? [r.winner] : []);
+
   /* ---------- 自己的按钮 ---------- */
   function click(T, act, d) {
     const S = T.state();
@@ -250,6 +294,7 @@
     key: "fd", screen: "fluxDuel", rules: FD, ai: AI, name: () => FD().DUEL_CONFIG.name,
     begin, setupHtml, topHtml, boardHtml, sideHtml, bannerHtml, finalHtml, stageControls, waitText, streetText, infoLine, seatName,
     weatherOf: (v) => v.weather, chart, chartKey, tipHtml, click,
+    settle: { beats: settleBeats, view: settleView, collect: settleCollect },
     loanNeedText: () => "的底注 + 最低下注额",
     foldTitle: "立即判负：输掉自己已下的筹码（包括自己在滚存底池里的那一份）"
   });

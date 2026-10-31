@@ -21,6 +21,8 @@
  *   偷看出来的那张用排得下的天气牌（weatherCardHtml 的 fit，#499 第 4 项）：「只有你看得到」不被图标挡住，修正都排在牌里，完整说明在悬停提示里。
  * 结算前的过渡（主人 10/30 试玩反馈，#499）：最后一步（谁跟注 / 过牌 / 弃牌，AI 走的也停一下）→ 判定中（两张牌背轻轻抖、底池发光，不亮牌）→ 结算横幅；
  *   点一下桌面直接看结算，时长在 UI_CONFIG.settle。规则层那一步已经结算完、开了下一轮，过渡中桌上停在结算之前（settleView）。
+ *   计时（几步「停一下」→ 判定中 → 横幅）、最后一步的字和座位上的标签、过渡中的操作栏抽成了共用的（CounterCardsUI.settle，#525），
+ *   Flux Duel / Hold'em、猜大猜小的牌桌也用这一份。
  * 页面骨架在 game.html 的 #scr-cc；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsUI.open()                                打开设置页
@@ -61,7 +63,7 @@
       lastMs: 900,         // ① 最后一步停多久：谁跟注 / 过牌 / 弃牌了，筹码推进底池的动画放完；AI 走的这一步也在桌上、操作栏里停这么久（毫秒）
       judgeMs: 1200,       // ② 「判定中」停多久：底池、桌上两张牌背、场上天气留着，牌背轻轻抖、底池发光，不亮牌（毫秒）；弃牌不用判定，没有这一段
       reducedJudgeMs: 500, // 开着「减少动态效果」：不抖、不发光，「判定中」缩短成这么久；① 的文字照样停 lastMs（毫秒）
-      verbs: { check: "过牌", call: "跟注", fold: "弃牌", bet: "下注", raise: "加注" },   // 座位上标的「刚走的这一步」
+      verbs: { check: "过牌", call: "跟注", fold: "弃牌", bet: "下注", raise: "加注", allIn: "全押" },   // 座位上标的「刚走的这一步」（全押：Flux Hold'em 跟不起时押上剩下的全部，#525）
       judge: "判定中",
       judgeNote: "不亮牌：系统按克制表和场上天气直接判胜负",
       skip: "直接看结算",
@@ -478,68 +480,33 @@
       + `<span class="cc-winbar" aria-hidden="true"><i></i></span></div>`;
   }
 
-  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：① 最后一步 → ② 判定中 → 结算横幅 ----------
-   * 以前一看到新的结算就弹横幅，最后一步（尤其是 AI 走的）一闪就进了结算。现在先停在最后一步（谁跟注 / 过牌 / 弃牌、筹码推进底池），
-   * 再「判定中」（两张牌背轻轻抖、底池发光，不亮牌），最后才弹横幅；弃牌不用判定，① 之后直接弹。过渡中 AI 不走、人也没有按钮可点，
-   * 点一下桌面（或操作栏的「直接看结算」）直接看结算。时长在 UI_CONFIG.settle；开着「减少动态效果」时动画去掉、判定中缩短，① 的文字照样停。
-   * 跟注后的追加窗口（#496）：第二轮下注跟注后先开窗口倒计时，窗口关上（双方都不追加 / 到时间）才结算，所以过渡从关窗之后才开始，倒计时期间不会进过渡；
-   *   这时 ① 从开窗的那一下跟注写起（lastSteps）。
-   * S.settle = { res（这一轮的结算）, pre（做最后一步之前的画面）, steps（最后一步的记录）, logEnd（记录停在哪）, acted（座位上标的那一步）, phase: "last" | "judge", timer } */
-  function settleStart(res, pre) {
-    if (S.fast || !pre) { S.banner = res; return; }
-    const log = CC().view(S.game, S.human).log;
-    const end = log.findIndex(e => e.t === "result" && e.res && e.res.r === res.r);
-    const logEnd = end < 0 ? log.length : end;
-    const steps = lastSteps(log, pre.log.length, logEnd);
-    const st = S.settle = { res, pre, steps, logEnd, acted: actedOf(steps), phase: "last", timer: null };
-    const rv = steps.find(e => e.t === "pw" && e.op === "reveal");
-    if (rv) S.anim.reveal = rv.weather;   // 翻到相位直接全押结算：翻牌、闪光放在过渡里（以前一结算就看不到了）
-    st.timer = setTimeout(() => settleNext(st), UI_CONFIG.settle.lastMs);
+  /* ---------- 结算前的过渡：共用的部分（#525：High Flux 的这一套抽出来，Flux Duel / Flux Hold'em（flux-ui.js）、猜大猜小也用这一份） ----------
+   * 一段过渡 = 几步「停一下」（st.beats：每一步的名字，"last" 最后一步、"flip" 又翻开一张牌、"show" 亮牌……，每步停 UI_CONFIG.settle.lastMs）
+   *   →「判定中」（st.judge 为真才有：停 judgeMs，开着「减少动态效果」停 reducedJudgeMs；弃牌这种不用判定的没有这一段）→ host.end()（弹结算横幅）。
+   * 放的时候 st.at = 第几步、st.phase = 这一步的名字（判定中是 "judge"），牌桌按它们画「停在结算之前」的画面。
+   * host（各牌桌给）：live(st)（st 还是不是这张牌桌正在放的那一段：跳过了、换了一局就不是，排着的计时不再往下走）、render()、end()（放完：收起过渡、弹横幅、AI 接着排）。
+   * 跳过（点一下桌面、「直接看结算」、fast）由牌桌直接调自己的 end；收起时 settleStop 停掉计时 */
+  function settleBegin(st, host) {
+    st.at = 0;
+    st.phase = st.beats[0];
+    st.timer = setTimeout(() => settleNext(st, host), UI_CONFIG.settle.lastMs);
+    return st;
   }
-  function settleNext(st) {
-    if (!S || S.settle !== st) return;   // 已经跳过了、换了一局
-    if (st.phase === "last" && st.res.outcome !== "fold") {
-      const T = UI_CONFIG.settle;
+  function settleNext(st, host) {
+    if (!host.live(st)) return;   // 已经跳过了、换了一局
+    const T = UI_CONFIG.settle;
+    if (st.phase !== "judge" && st.at < st.beats.length - 1) {
+      st.at += 1;
+      st.phase = st.beats[st.at];
+      host.render();
+      st.timer = setTimeout(() => settleNext(st, host), T.lastMs);
+    } else if (st.phase !== "judge" && st.judge) {
       st.phase = "judge";
-      render();
-      st.timer = setTimeout(() => settleNext(st), reduced() ? T.reducedJudgeMs : T.judgeMs);
-      return;
-    }
-    settleEnd();
+      host.render();
+      st.timer = setTimeout(() => settleNext(st, host), reduced() ? T.reducedJudgeMs : T.judgeMs);
+    } else host.end();
   }
-  /** 过渡放完（或点了跳过）：弹出结算横幅，赢家那边的筹码堆「收进来」 */
-  function settleEnd() {
-    const st = S && S.settle;
-    if (!st) return;
-    clearTimeout(st.timer);
-    S.settle = null;
-    S.banner = st.res;
-    S.anim.collect = st.res.winner;
-    render();
-    schedule();
-  }
-  /** 不放了（回设置页、换一局、离开牌桌）：停掉计时，当成已经弹出横幅（不画） */
-  function dropSettle() {
-    if (!S || !S.settle) return;
-    clearTimeout(S.settle.timer);
-    S.banner = S.settle.res;
-    S.settle = null;
-  }
-  /** 过渡中的画面：规则层这一步已经结算完、开了下一轮，桌上要停在「最后一步做完、还没结算」——
-   *  两边的筹码和底池 = 做这一步之前的画面 + 这一步推进底池的筹码（结算记下的这一轮下注额 res.bets 减去之前已经下的），
-   *  桌上两张牌背、场上天气、顶栏的轮数照这一轮；手牌、暗弃、天气堆照现在的（结算不动它们）；记录、每轮结算里还没有这一轮的结果 */
-  function settleView(v, st) {
-    const r = st.res, pre = st.pre;
-    const seat = (now, was, k) => Object.assign({}, now, { chips: was.chips == null ? null : was.chips - (r.bets[k] - was.bet), bet: r.bets[k], pot: was.pot });
-    const mine = v.me.history.filter(h => h.r === r.r).pop();
-    return Object.assign({}, v, {
-      round: r.r, over: false, stage: "settle", waiting: [], myTurn: false, legal: [], betting: null, loanAsk: null, peek: null, final: null,
-      allIn: r.allIn, pot: pre.me.pot + pre.opp.pot + r.bets.dealer + r.bets.player,
-      me: Object.assign(seat(v.me, pre.me, S.human), { card: mine ? mine.card : pre.me.card }),
-      opp: Object.assign(seat(v.opp, pre.opp, v.opponent), { played: true }),
-      results: v.results.slice(0, -1), log: v.log.slice(0, st.logEnd)
-    });
-  }
+  function settleStop(st) { if (st && st.timer) { clearTimeout(st.timer); st.timer = null; } }
   /** 最后一步的记录：记录里从 from 到结算那一条（logEnd）之前。追加窗口关了才结算的（这一步只记了一条「追加窗口关闭 / 到时间」）：
    *  从开窗的那一下跟注写起——「庄家跟注 3 枚。追加窗口到时间了，没人加注。」，座位上标「跟注 3 枚」；开窗那一条（规则说明）不写 */
   function lastSteps(log, from, logEnd) {
@@ -559,6 +526,70 @@
       : e.t === "skip" ? "暗弃跳过" : e.t === "normal" ? "打出常态" : e.t === "play" ? "暗出" : "";
     return label ? { side: e.by, label } : null;
   }
+  /** 过渡中的操作栏：每一步写这一步做了什么（text）；判定中写「判定中」，这一步的字还写着、后面接 note。都有「直接看结算」（skip：牌桌自己的按钮） */
+  function settleBar(st, text, note, skip) {
+    const T = UI_CONFIG.settle;
+    const head = st.phase === "judge"
+      ? `<p class="cc-prompt cc-judging">${esc(T.judge)}</p><p class="cc-info">${esc(text)} ${esc(note)}。</p>`
+      : `<p class="cc-prompt cc-last">${esc(text)}</p>`;
+    return `${head}<div class="cc-btns">${skip}</div>`;
+  }
+  /** 判定中贴在桌上的那条胶带（cls：各牌桌摆的位置） */
+  const judgeTag = (cls) => `<b class="cc-judge${cls ? " " + cls : ""}" aria-hidden="true">${esc(UI_CONFIG.settle.judge)}</b>`;
+
+  /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#499）：① 最后一步 → ② 判定中 → 结算横幅 ----------
+   * 以前一看到新的结算就弹横幅，最后一步（尤其是 AI 走的）一闪就进了结算。现在先停在最后一步（谁跟注 / 过牌 / 弃牌、筹码推进底池），
+   * 再「判定中」（两张牌背轻轻抖、底池发光，不亮牌），最后才弹横幅；弃牌不用判定，① 之后直接弹。过渡中 AI 不走、人也没有按钮可点，
+   * 点一下桌面（或操作栏的「直接看结算」）直接看结算。时长在 UI_CONFIG.settle；开着「减少动态效果」时动画去掉、判定中缩短，① 的文字照样停。
+   * 跟注后的追加窗口（#496）：第二轮下注跟注后先开窗口倒计时，窗口关上（双方都不追加 / 到时间）才结算，所以过渡从关窗之后才开始，倒计时期间不会进过渡；
+   *   这时 ① 从开窗的那一下跟注写起（lastSteps）。计时是上面共用的那一份（High Flux 只有一步：最后一步）。
+   * S.settle = { res（这一轮的结算）, pre（做最后一步之前的画面）, steps（最后一步的记录）, logEnd（记录停在哪）, acted（座位上标的那一步）,
+   *   beats: ["last"], judge（弃牌不判定）, at, phase: "last" | "judge", timer } */
+  const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
+  function settleStart(res, pre) {
+    if (S.fast || !pre) { S.banner = res; return; }
+    const log = CC().view(S.game, S.human).log;
+    const end = log.findIndex(e => e.t === "result" && e.res && e.res.r === res.r);
+    const logEnd = end < 0 ? log.length : end;
+    const steps = lastSteps(log, pre.log.length, logEnd);
+    const st = S.settle = { res, pre, steps, logEnd, acted: actedOf(steps), beats: ["last"], judge: res.outcome !== "fold" };
+    const rv = steps.find(e => e.t === "pw" && e.op === "reveal");
+    if (rv) S.anim.reveal = rv.weather;   // 翻到相位直接全押结算：翻牌、闪光放在过渡里（以前一结算就看不到了）
+    settleBegin(st, settleHost);
+  }
+  /** 过渡放完（或点了跳过）：弹出结算横幅，赢家那边的筹码堆「收进来」 */
+  function settleEnd() {
+    const st = S && S.settle;
+    if (!st) return;
+    settleStop(st);
+    S.settle = null;
+    S.banner = st.res;
+    S.anim.collect = st.res.winner;
+    render();
+    schedule();
+  }
+  /** 不放了（回设置页、换一局、离开牌桌）：停掉计时，当成已经弹出横幅（不画） */
+  function dropSettle() {
+    if (!S || !S.settle) return;
+    settleStop(S.settle);
+    S.banner = S.settle.res;
+    S.settle = null;
+  }
+  /** 过渡中的画面：规则层这一步已经结算完、开了下一轮，桌上要停在「最后一步做完、还没结算」——
+   *  两边的筹码和底池 = 做这一步之前的画面 + 这一步推进底池的筹码（结算记下的这一轮下注额 res.bets 减去之前已经下的），
+   *  桌上两张牌背、场上天气、顶栏的轮数照这一轮；手牌、暗弃、天气堆照现在的（结算不动它们）；记录、每轮结算里还没有这一轮的结果 */
+  function settleView(v, st) {
+    const r = st.res, pre = st.pre;
+    const seat = (now, was, k) => Object.assign({}, now, { chips: was.chips == null ? null : was.chips - (r.bets[k] - was.bet), bet: r.bets[k], pot: was.pot });
+    const mine = v.me.history.filter(h => h.r === r.r).pop();
+    return Object.assign({}, v, {
+      round: r.r, over: false, stage: "settle", waiting: [], myTurn: false, legal: [], betting: null, loanAsk: null, peek: null, final: null,
+      allIn: r.allIn, pot: pre.me.pot + pre.opp.pot + r.bets.dealer + r.bets.player,
+      me: Object.assign(seat(v.me, pre.me, S.human), { card: mine ? mine.card : pre.me.card }),
+      opp: Object.assign(seat(v.opp, pre.opp, v.opponent), { played: true }),
+      results: v.results.slice(0, -1), log: v.log.slice(0, st.logEnd)
+    });
+  }
   /** 最后一步的记录（规则层写「玩家 / 庄家……」）：人自己做的改写成「你……」 */
   function stepText(e) {
     const me = sideName(S.human);
@@ -567,11 +598,7 @@
   /** 过渡中的操作栏：① 最后一步做了什么；② 判定中（最后一步还写着）。都有「直接看结算」 */
   function settleHtml() {
     const st = S.settle, T = UI_CONFIG.settle;
-    const last = st.steps.map(stepText).join(" ") || "这一轮的下注结束了。";
-    const head = st.phase === "judge"
-      ? `<p class="cc-prompt cc-judging">${esc(T.judge)}</p><p class="cc-info">${esc(last)} ${esc(T.judgeNote)}。</p>`
-      : `<p class="cc-prompt cc-last">${esc(last)}</p>`;
-    return `${head}<div class="cc-btns">${btn("skipSettle", esc(T.skip), { title: T.skipHint })}</div>`;
+    return settleBar(st, st.steps.map(stepText).join(" ") || "这一轮的下注结束了。", T.judgeNote, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
   }
 
   /* ---------- 画面 ---------- */
@@ -711,7 +738,7 @@
         <div class="cc-slots${J}">
           <div class="cc-slot">${opp.played ? backHtml({ cls: "cc-down" + (anim.oppThrow ? " cc-thrown" : "") }) : `<span class="cc-empty">${oppName}还没出牌</span>`}</div>
           <div class="cc-slot">${me.card ? backHtml({ mine: me.card, cls: "cc-down" + (anim.myThrow ? " cc-thrown" : "") }) : `<span class="cc-empty">你还没出牌</span>`}</div>
-          ${judging ? `<b class="cc-judge" aria-hidden="true">${esc(UI_CONFIG.settle.judge)}</b>` : ""}
+          ${judging ? judgeTag() : ""}
         </div>
       </div>
       <div class="cc-seat cc-me">
@@ -1040,6 +1067,8 @@
     UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
     cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
     cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
+    // 结算前的过渡的共用部分（#525）：Flux Duel / Hold'em（flux-ui.js）、猜大猜小（counter-cards-guess-ui.js）也用，时长、字读上面的 UI_CONFIG.settle
+    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag },
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };

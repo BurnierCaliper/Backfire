@@ -219,8 +219,8 @@ function playLosingBoth(pa, pb, step) {
 test("赌命桌界面：坚毅剩 1 点和剩 100 点，每一步的画面（整块 HTML）和能做的操作完全一样——不变灰、不提示「坚毅不足」、选项一样多", () => {
   const A = grit(1), B = grit(100);
   const pa = page(), pb = page();
-  pa.UI.startLife({ seat: SEAT, settle: A.settle, seed: "same", deals: [DEAL] });
-  pb.UI.startLife({ seat: SEAT, settle: B.settle, seed: "same", deals: [DEAL] });
+  pa.UI.startLife({ seat: SEAT, settle: A.settle, seed: "same", deals: [DEAL], fast: true });   // fast：结算前不停（过渡在 counter-cards-guess-ui.test.js 查）
+  pb.UI.startLife({ seat: SEAT, settle: B.settle, seed: "same", deals: [DEAL], fast: true });
   let steps = 0;
   const same = () => {
     steps++;
@@ -250,8 +250,8 @@ test("赌命桌界面：坚毅剩 1 点和剩 100 点，每一步的画面（整
 test("赌命桌界面：押注过程一步一步比（剩 5 点和剩 100 点都扛得住这一手）：连结算横幅都一模一样", () => {
   const A = grit(5), B = grit(100);
   const pa = page(), pb = page();
-  pa.UI.startLife({ seat: SEAT, settle: A.settle, seed: "s5", deals: [DEAL, DEAL] });
-  pb.UI.startLife({ seat: SEAT, settle: B.settle, seed: "s5", deals: [DEAL, DEAL] });
+  pa.UI.startLife({ seat: SEAT, settle: A.settle, seed: "s5", deals: [DEAL, DEAL], fast: true });
+  pb.UI.startLife({ seat: SEAT, settle: B.settle, seed: "s5", deals: [DEAL, DEAL], fast: true });
   const same = () => assert.equal(pa.$("#scr-ccg").innerHTML, pb.$("#scr-ccg").innerHTML);
   same();
   const steps = [];
@@ -270,7 +270,7 @@ test("赌命桌界面：押注过程一步一步比（剩 5 点和剩 100 点都
 test("赌命桌的画面、记录里没有剩余坚毅，也没有扣了多少：押注写「押上 N 点坚毅」（固定代价），结算只写「坚毅受创」", () => {
   const A = grit(7319, 9241);
   const p = page();
-  p.UI.startLife({ seat: SEAT, settle: A.settle, seed: "num", deals: [DEAL] });
+  p.UI.startLife({ seat: SEAT, settle: A.settle, seed: "num", deals: [DEAL], fast: true });
   const htmls = [];
   playLosing(p, () => htmls.push(p.$("#scr-ccg").innerHTML));
   assert.equal(A.unit.shp, 7315);
@@ -292,7 +292,7 @@ test("押中了赢奖品：横幅写赢得多少奎支 / 材料（奎支不是�
   const A = grit(10);
   const p = page();
   const score = p.G.outcome(DEAL.element, DEAL.layer, DEAL.weather);
-  p.UI.startLife({ seat: SEAT, settle: A.settle, seed: "win", deals: [DEAL] });
+  p.UI.startLife({ seat: SEAT, settle: A.settle, seed: "win", deals: [DEAL], fast: true });
   click(p.$(`#ccg-board button.ccg-cell[data-result="${score}"]`));
   click(p.$('#ccg-actions [data-ccg="bet"]'));
   click(p.$('#ccg-actions [data-ccg="pass"]'));
