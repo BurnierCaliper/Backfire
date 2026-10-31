@@ -58,7 +58,7 @@
    *   Flux Hold'em：人坐第一个座位，其余座位是这张桌子难度的 AI（赌场的人：开局筹码和你的买入一样多，由赌场出），没有主持人坐庄；
    *   猜大猜小：人坐 GUESS_CONFIG.casino.seat，庄家是赌场（筹码无限，只抽牌、不用做决定，没有 AI 要走，也没有主持人坐庄）。
    *     赌场里的一局就是一手：入场费坐下时从钱包收（这一手不再从桌上扣，entryPaid），「再来一局」= 离桌结算再坐下。
-   * 玩家对赌（pvp*）现在只有 High Flux。 */
+   * 玩家对赌（pvp*）：High Flux 和 Flux Duel（#526，见下面 PVP_MODES）。 */
   const GAMES = {
     highflux: {
       has: () => !!root.CounterCards,
@@ -72,9 +72,10 @@
       name: () => root.FluxDuel.DUEL_CONFIG.name,
       tables: () => clone(root.FluxDuel.DUEL_CONFIG.casino.tables),
       gm: true,
+      // opt.names：记录里两方的称呼（联机跑团按角色名、主持人坐庄写「主持人」，#526；不给就是配置里的「你 / 赌场」）
       start(t, n, opt) {
         const D = root.FluxDuel, c = D.DUEL_CONFIG.casino;
-        return D.newGame({ seed: opt.seed, deck: opt.deck, first: c.seat, chipsBy: { [c.seat]: n }, house: D.other(c.seat), names: c.names });
+        return D.newGame({ seed: opt.seed, deck: opt.deck, first: c.seat, chipsBy: { [c.seat]: n }, house: D.other(c.seat), names: Object.assign({}, c.names, opt.names || {}) });
       },
       side: () => root.FluxDuel.DUEL_CONFIG.casino.seat,
       ai: (g) => [root.FluxDuel.other(g.casino.side)]
@@ -268,6 +269,7 @@
     const s = w.seat;
     if (!s) fail("没坐在桌上");
     if (s.kind === "pvp") fail("玩家对赌的桌子要用 pvpLeave 离桌");
+    if (s.kind === "holdem") fail("多人桌要用 holdemLeave 离桌");
     const out = cashOut(s.game);
     const back = out.chips * s.rate;
     const paid = payBack(w, s.stake, back);
@@ -294,9 +296,9 @@
   /** 人坐赌场桌的哪一方：High Flux 是玩家，Flux 记在对局的 casino.side */
   const humanOf = (g) => (gameOf(g) === "highflux" ? "player" : g.casino && g.casino.side);
   /** 登记：这个钱包坐着的赌场桌（AI / 主持人坐庄），人那一方不够时从这个钱包补。
-   *  这个钱包已经离开这一局（离桌了、又坐了别的桌）就不补 */
+   *  这个钱包已经离开这一局（离桌了、又坐了别的桌）就不补。对赌桌、多人桌由模式登记（pvpBind / holdemBind） */
   function bind(w) {
-    const s = w.seat, g = s && s.kind !== "pvp" ? s.game : null;
+    const s = w.seat, g = s && (s.kind === "ai" || s.kind === "gm") ? s.game : null;
     if (g && typeof g === "object") SOURCE.set(g, (side, gap) => (w.seat && w.seat.game === g && side === humanOf(g) ? topUp(w, gap) : 0));
   }
   /** 从钱包补 gap 枚（桌上的枚数）到坐着的这一桌：补到够用为止，钱包不够就有多少补多少。返回补了几枚（钱包空了 = 0）。
@@ -305,7 +307,11 @@
     const s = w.seat, want = Math.max(0, Math.floor(Number(gap) || 0)), F = CASINO_CONFIG.face;
     if (!s || !want) return 0;
     let n = 0;
-    if (s.kind !== "pvp") {
+    if (s.kind === "holdem") {
+      // Flux Hold'em 多人桌（#526）：同买入只用普通筹码，按桌子的倍率折算，补上来的算进买入
+      n = Math.min(want, Math.floor(Math.max(0, w.normal) / s.rate));
+      if (n > 0) { w.normal -= n * s.rate; s.stake.normal += n * s.rate; s.buyIn += n; }
+    } else if (s.kind !== "pvp") {
       n = Math.min(want, Math.floor(Math.max(0, w.gift + w.normal) / s.rate));
       if (n > 0) {
         const got = take(w, n * s.rate);   // 同买入：先拿赠送的，再拿普通的
@@ -339,8 +345,9 @@
 
   /** 赌场桌的庄家是 AI 时：轮到赌场那几方就让 AI 走（各玩法 AI 的 step，只看那一方的 view），直到轮到人或者这一局结束。
    *  High Flux 是庄家；Flux Duel 是人对面那一方；Flux Hold'em 是人以外的座位（人出局了就由 AI 打到结束）。
+   *  seats：Flux Hold'em 多人桌（#526）由 AI 走的那几个座位（空座位、托管的；不给就按赌场桌的算法）。
    *  随机数按种子和记录条数派生（联机时由房主跑，存档、刷新以后接着走结果一样）。返回走了几步 */
-  function runAi(g, level) {
+  function runAi(g, level, seats) {
     const kind = gameOf(g);
     if (!RULES[kind][1]) return 0;         // 猜大猜小：庄家只抽牌，不用做决定
     const R = root[RULES[kind][0]], AIm = root[RULES[kind][1]];
@@ -353,7 +360,7 @@
       }
       return n;
     }
-    const ai = GAMES[kind].ai(g);
+    const ai = seats || GAMES[kind].ai(g);
     let n = 0;
     for (let moved = true; moved && !g.over && n < 3000;) {
       moved = false;
@@ -370,23 +377,52 @@
    *   还不上的借款也只扣普通筹码。
    * 押奎支（stakeKind "kuizhi"）：桌上 1 枚 = CASINO_CONFIG.face（200）奎支，底注 200 奎支、最低下注 = 轮数 × 200……；
    *   奎支由模式自己从钱包里扣、加（pvpSit 返回要扣多少，pvpLeave 返回要加多少，负数 = 还不上的借款）。
-   * 桌子：{ id, stakeKind, start, seats: { dealer, player }（坐着的是谁：模式自己的 key，跑团是角色 kit）, game（两边都坐下才开局） } */
+   * 桌子：{ id, stakeKind, start, seats: { dealer, player }（坐着的是谁：模式自己的 key，跑团是角色 kit）, game（两边都坐下才开局） }
+   * Flux Duel 也能对赌（#526）：桌子另记 mode: "duel"，两方是甲 / 乙（seats: { a, b }，第 1 轮甲先手），开局各 start 枚、没有庄（两边都是人），
+   *   钱的算法和 High Flux 的对赌一模一样（押筹码 / 押奎支、不收入场费、打到一半离桌算认输）；没有 mode 的旧桌子是 High Flux */
   const STAKE_KINDS = ["chips", "kuizhi"];
   const SIDES = ["dealer", "player"];
-  const pvpStart = () => Math.max(1, Math.floor(Number(CASINO_CONFIG.pvpStart || CC().CC_CONFIG.startChips) || 1));
-  /** 开一张对赌桌（还没人坐） */
-  function pvpTable(id, stakeKind) {
+  /** 对赌能打的玩法：两方叫什么（sides）、开局几枚（没设 CASINO_CONFIG.pvpStart 时）、结算说明里怎么称呼一方（name）、怎么开局（newGame） */
+  const PVP_MODES = {
+    highflux: {
+      has: () => !!root.CounterCards, sides: () => SIDES, start: () => CC().CC_CONFIG.startChips, name: (side) => CC().sideName(side),
+      newGame: (t, opt) => CC().newGame({ seed: opt.seed, deck: opt.deck, dealerChips: t.start, playerChips: t.start })
+    },
+    duel: {
+      has: () => !!root.FluxDuel, sides: () => root.FluxDuel.SEATS, name: (side) => root.FluxDuel.DUEL_CONFIG.seatNames[side] || side,
+      start: () => (root.FluxDuel.DUEL_CONFIG.startChips != null ? root.FluxDuel.DUEL_CONFIG.startChips : CC().CC_CONFIG.startChips),
+      // opt.names：记录里两方的称呼（跑团按角色名）；天气堆照样按种子洗
+      newGame: (t, opt) => root.FluxDuel.newGame({ seed: opt.seed, deck: opt.deck, chipsBy: { a: t.start, b: t.start }, names: opt.names })
+    }
+  };
+  /** 这张对赌桌打哪种玩法（旧桌子没有 mode = High Flux） */
+  const pvpMode = (t) => (t && t.mode && PVP_MODES[t.mode] ? t.mode : "highflux");
+  /** 这张对赌桌的两方（High Flux：庄家 / 玩家；Flux Duel：甲 / 乙） */
+  const pvpSides = (t) => PVP_MODES[pvpMode(t)].sides().slice();
+  const pvpOther = (t, side) => { const s = pvpSides(t); return side === s[0] ? s[1] : s[0]; };
+  /** 结算说明里怎么称呼这一方 */
+  const pvpSideName = (t, side) => PVP_MODES[pvpMode(t)].name(side);
+  const pvpStart = (mode) => Math.max(1, Math.floor(Number(CASINO_CONFIG.pvpStart || PVP_MODES[mode || "highflux"].start()) || 1));
+  /** 开一张对赌桌（还没人坐）。mode：打哪种玩法（"highflux" 默认 / "duel"，#526） */
+  function pvpTable(id, stakeKind, mode) {
     if (STAKE_KINDS.indexOf(stakeKind) < 0) fail("开桌要选押筹码还是押奎支");
-    return { id: String(id), stakeKind, start: pvpStart(), seats: { dealer: null, player: null }, game: null };
+    const m = mode || "highflux";
+    if (!PVP_MODES[m] || !PVP_MODES[m].has()) fail("没有这种对赌玩法：" + m);
+    const seats = {};
+    PVP_MODES[m].sides().forEach(k => { seats[k] = null; });
+    const t = { id: String(id), stakeKind, start: pvpStart(m), seats, game: null };
+    if (m !== "highflux") t.mode = m;
+    return t;
   }
   /** 坐上对赌桌的一方：押筹码从钱包的普通筹码里拿；押奎支要 kuizhi（这一方现在有多少奎支）够，返回要从奎支里扣多少（押筹码返回 0）。
-   *  两边都坐下就开局（opt.seed / opt.deck 测试用） */
+   *  两边都坐下就开局（opt.seed / opt.deck 测试用；opt.names：Flux Duel 记录里两方的称呼） */
   function pvpSit(t, side, key, w, kuizhi, opt) {
     opt = opt || {};
     wallet(w);
-    if (SIDES.indexOf(side) < 0) fail("没有这一方：" + side);
+    const sides = pvpSides(t);
+    if (sides.indexOf(side) < 0) fail("没有这一方：" + side);
     if (t.game || t.seats[side]) fail("这个位置已经有人了");
-    if (SIDES.some(k => t.seats[k] === key)) fail("已经坐在这张桌子上了");
+    if (sides.some(k => t.seats[k] === key)) fail("已经坐在这张桌子上了");
     if (w.seat) fail("已经坐在桌上了，先离桌");
     const v = t.start * CASINO_CONFIG.face;
     let pay = 0;
@@ -402,7 +438,7 @@
     }
     t.seats[side] = key;
     // 天气堆按种子洗：带上开局的时刻，同一个编号的桌子每次洗出来不一样（猜不到天气的顺序）
-    if (t.seats.dealer && t.seats.player) t.game = CC().newGame({ seed: opt.seed != null ? opt.seed : `pvp|${t.id}|${Date.now()}`, deck: opt.deck, dealerChips: t.start, playerChips: t.start });
+    if (sides.every(k => t.seats[k])) t.game = PVP_MODES[pvpMode(t)].newGame(t, { seed: opt.seed != null ? opt.seed : `pvp|${t.id}|${Date.now()}`, deck: opt.deck, names: opt.names });
     return pay;
   }
   /** 对赌这一方离桌时桌上剩多少枚：打完了 = 最终筹码（扣还借款之后）；还没开局 = 原样退回；
@@ -411,7 +447,7 @@
     const g = t.game;
     if (!g) return t.start;
     if (g.over) return g.final.chips[side];
-    const s = g.sides[side], o = g.sides[side === "dealer" ? "player" : "dealer"];
+    const s = g.sides[side], o = g.sides[pvpOther(t, side)];
     const hand = s.chips - s.owe;
     return side === leaver ? hand : hand + s.bet + s.pot + o.bet + o.pot;
   }
@@ -433,13 +469,142 @@
     const unit = s.stakeKind === "chips" ? "枚筹码" : "奎支";
     const amount = (n) => (s.stakeKind === "chips" ? fmt(Math.abs(n) * CASINO_CONFIG.face) : String(Math.abs(n) * CASINO_CONFIG.face));
     res.text = !t.game ? `对赌还没开局就离桌，押的原样退回。`
-      : `对赌结算（${CC().sideName(side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚${topUp ? `，中途从钱包补了 ${topUp} 枚` : ""}），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
+      : `对赌结算（${pvpSideName(t, side)}）：桌上剩 ${back} 枚（开局 ${t.start} 枚${topUp ? `，中途从钱包补了 ${topUp} 枚` : ""}），${net >= 0 ? "赢" : "输"} ${amount(net)} ${unit}。`;
     return res;
+  }
+  /** 这种玩法的赌场桌能不能由主持人坐庄（High Flux、Flux Duel 能；Flux Hold'em 只有 AI） */
+  const gmDealer = (game) => !!(GAMES[game] && GAMES[game].gm);
+
+  /* ---------- 联机多人桌：Flux Hold'em（#526）——几名玩家坐同一桌，空着的座位由这张桌子难度的 AI 补，主持人也能坐一个座位 ----------
+   * 桌子照 Flux Hold'em 的赌场桌（HOLDEM_CONFIG.casino.tables：倍率 rate、最低买入、入场费、AI 难度）；流程照对赌桌：
+   *   开桌（holdemTable，开桌的人 holdemSit 坐第 1 个座位，定每人买入多少、几人桌）→ 别人坐空着的座位（holdemSit）、主持人坐一个（holdemGm）
+   *   → 开桌的人（或主持人）开局（holdemStart：空着的座位由 AI 补）。
+   * 钱：每个座位开局一样多（开桌的人定的买入，不少于这张桌子的最低买入）。人坐的座位从自己的钱包交入场费（每局一次、不退，先拿赠送的）
+   *   和买入——买入只能用普通筹码（桌上有别的玩家，同对赌：免得几个账号互相输赢把赠送筹码洗成普通筹码），按桌子的倍率折算；
+   *   AI 的座位、主持人的座位是赌场的人，开局筹码由赌场出。牌局里桌上不够时先从钱包补（只补普通筹码，holdemBind），托管中不补。
+   * 离桌（holdemLeave）：还没开局 = 买入、入场费原样退回；开了局打到一半 = 这个座位交给 AI 托管（牌局不动，打完由模式调 holdemSettle 结算回钱包）；
+   *   打完了 = 桌上剩下的（扣还借款之后）按倍率回钱包（还不上的借款只扣普通筹码，同对赌）。
+   * 桌子：{ id, kind: "holdem", table（配置里的桌子 id）, name, rate, difficulty, buyIn, fee, size, host（开桌的人）,
+   *   seats: [{ id: "p1"…, who: 模式自己的 key（跑团是角色 kit）| "gm"（主持人）| null（AI）, auto（托管）}], game }
+   * 钱包里的座位：{ kind: "holdem", table, side（座位 id）, name, rate, buyIn, fee, stake, feePaid（入场费怎么交的，没开局离桌照原样退） } */
+  const HOLDEM_GM = "gm";
+  function holdemConfig(tableId) {
+    const t = tables().find(x => x.id === tableId && x.game === "holdem");
+    if (!t) fail("没有这张 Flux Hold'em 桌子：" + tableId);
+    return t;
+  }
+  /** 开一张多人桌（还没人坐）：tableId = 配置里的 Flux Hold'em 桌子，buyIn = 每人买入几枚，size = 几人桌（2–4，默认桌子配置的人数） */
+  function holdemTable(id, tableId, buyIn, size, host) {
+    const t = holdemConfig(tableId), H = root.FluxHoldem.HOLDEM_CONFIG;
+    const n = Math.floor(Number(buyIn));
+    if (!Number.isFinite(n) || n < t.minBuyIn) fail(`${t.name}最低买入 ${t.minBuyIn} 枚`);
+    const k = Math.max(H.minPlayers, Math.min(H.maxPlayers, Math.floor(Number(size) || Number(t.players) || H.maxPlayers)));
+    return { id: String(id), kind: "holdem", table: t.id, name: t.name, rate: t.rate, difficulty: t.difficulty, buyIn: n, fee: t.entryFee, size: k, host: host || null,
+      seats: Array.from({ length: k }, (_, i) => ({ id: "p" + (i + 1), who: null, auto: false })), game: null };
+  }
+  const holdemSeatOf = (t, who) => (t && Array.isArray(t.seats) ? t.seats.find(s => s.who === who) || null : null);
+  const freeSeat = (t, seatId) => {
+    const s = seatId ? t.seats.find(x => x.id === seatId) : t.seats.find(x => !x.who);
+    if (!s || s.who) fail(seatId ? "这个座位已经有人了" : "这一桌已经满了");
+    return s;
+  };
+  /** 人坐一个空座位（seatId 不给 = 第一个空的）：交入场费（先拿赠送的）+ 买入（只能用普通筹码）。返回坐了哪个座位 */
+  function holdemSit(t, seatId, key, w) {
+    wallet(w);
+    if (t.game) fail("这一桌已经开局了");
+    if (w.seat) fail("已经坐在桌上了，先离桌");
+    if (holdemSeatOf(t, key)) fail("已经坐在这张桌子上了");
+    const s = freeSeat(t, seatId);
+    const value = t.buyIn * t.rate, feeValue = t.fee * t.rate;
+    if (w.normal < value) fail(`多人桌的买入只能用普通筹码（赠送的不能押）：买入 ${t.buyIn} 枚要 ${fmt(value)} 枚普通筹码，现有 ${fmt(Math.max(0, w.normal))} 枚`);
+    if (w.gift + w.normal - value < feeValue) fail(`筹码不够交入场费 ${t.fee} 枚（${fmt(feeValue)} 枚筹码）`);
+    w.normal -= value;
+    const feePaid = take(w, feeValue);
+    w.seat = { kind: "holdem", table: t.id, side: s.id, name: t.name, rate: t.rate, buyIn: t.buyIn, fee: t.fee, stake: { gift: 0, normal: value }, feePaid };
+    s.who = key; s.auto = false;
+    return s.id;
+  }
+  /** 主持人坐一个空座位（赌场的人：开局筹码由赌场出，不动钱包）。返回坐了哪个座位 */
+  function holdemGm(t, seatId) {
+    if (t.game) fail("这一桌已经开局了");
+    if (holdemSeatOf(t, HOLDEM_GM)) fail("主持人已经坐在这一桌了");
+    const s = freeSeat(t, seatId);
+    s.who = HOLDEM_GM; s.auto = false;
+    return s.id;
+  }
+  /** 开局：空着的座位由 AI 补，每个座位开局都是买入那么多。opt.names（{ 座位: 记录里的称呼 }，模式给）、opt.seed，
+   *  测试用：hands / elements / layers / weathers（同 FluxHoldem.newGame） */
+  function holdemStart(t, opt) {
+    opt = opt || {};
+    if (t.game) fail("这一桌已经开局了");
+    if (!t.seats.some(s => s.who && s.who !== HOLDEM_GM)) fail("还没有玩家坐下");
+    const names = opt.names || {};
+    t.game = root.FluxHoldem.newGame({ seed: opt.seed != null ? opt.seed : `holdem|${t.id}|${Date.now()}`,
+      players: t.seats.map(s => ({ id: s.id, name: names[s.id] || s.id, chips: t.buyIn })),
+      hands: opt.hands, elements: opt.elements, layers: opt.layers, weathers: opt.weathers });
+    return t.game;
+  }
+  /** 由 AI 走的座位：空座位（AI）和托管的 */
+  const holdemAiSeats = (t) => t.seats.filter(s => !s.who || s.auto).map(s => s.id);
+  /** 打完了：这个座位桌上剩下的（扣还借款之后）按倍率回钱包（同赌场桌离桌；还不上的借款只扣普通筹码，同对赌）。
+   *  返回 { side, chips, buyIn, topUp, net（桌上净输赢，枚）, netChips（钱包净变化）, text } */
+  function holdemSettle(t, side, w) {
+    wallet(w);
+    const g = t.game, s = w.seat, seat = t.seats.find(x => x.id === side);
+    if (!g || !g.over) fail("这一桌还没打完");
+    if (!s || s.kind !== "holdem" || s.table !== t.id || s.side !== side) fail("没坐在这一桌的这个座位");
+    const chips = g.final.chips[side], topUp = s.topUp || 0;
+    const paid = payBack(w, s.stake, chips * t.rate, { noGift: true });
+    w.seat = null;
+    if (seat) { seat.who = null; seat.auto = false; }
+    const net = chips - s.buyIn;
+    return { side, chips, buyIn: s.buyIn, topUp, net, netChips: toChips(paid.net),
+      text: `离开${t.name}：桌上剩 ${chips} 枚（买入 ${s.buyIn} 枚${topUp ? `，含从钱包补的 ${topUp} 枚` : ""}，${net >= 0 ? "赢" : "输"} ${Math.abs(net)} 枚），钱包${paid.net >= 0 ? "多了" : "少了"} ${fmt(Math.abs(paid.net))} 枚筹码。` };
+  }
+  /** 离开多人桌：还没开局 → 买入、入场费原样退回；打完了 → 结算（holdemSettle）；打到一半 → 托管（AI 替他打完，打完由模式结算）。
+   *  key = 坐着的人（主持人是 "gm"，w 不用给）。返回 { refund / auto / 结算的那些, text } */
+  function holdemLeave(t, key, w) {
+    const seat = holdemSeatOf(t, key);
+    if (!seat) fail("没坐在这一桌");
+    const gm = key === HOLDEM_GM;
+    if (!gm) wallet(w);
+    if (!t.game) {
+      const s = w && w.seat;
+      if (!gm && s && s.kind === "holdem" && s.table === t.id) {
+        w.normal += s.stake.normal;
+        if (s.feePaid) { w.gift += s.feePaid.gift; w.normal += s.feePaid.normal; }
+        w.seat = null;
+      }
+      seat.who = null; seat.auto = false;
+      return { refund: true, text: `离开${t.name}（还没开局）：${gm ? "座位空出来了" : "买入、入场费原样退回"}。` };
+    }
+    if (!t.game.over) { seat.auto = true; return { auto: true, text: `离开${t.name}：牌局还没打完，这个座位交给 AI 托管，打完自动结算${gm ? "" : "回钱包"}。` }; }
+    if (gm) { seat.who = null; seat.auto = false; return { text: `离开${t.name}。` }; }
+    return holdemSettle(t, seat.id, w);
+  }
+  /** 托管中的人回来接着打（牌局还没打完） */
+  function holdemBack(t, key) {
+    const seat = holdemSeatOf(t, key);
+    if (!seat) fail("没坐在这一桌");
+    if (!t.game || t.game.over) fail("这一桌没在打");
+    seat.auto = false;
+    return seat.id;
+  }
+  /** 多人桌：模式动这一桌之前登记——人坐的座位（没托管）不够时从这个人的钱包补（walletOf(key) = 他的钱包） */
+  function holdemBind(t, walletOf) {
+    if (!t || !t.game) return;
+    SOURCE.set(t.game, (side, gap) => {
+      const seat = t.seats.find(x => x.id === side);
+      if (!seat || !seat.who || seat.who === HOLDEM_GM || seat.auto) return 0;
+      const w = walletOf(seat.who), s = w && w.seat;
+      return s && s.kind === "holdem" && s.table === t.id && s.side === side ? topUp(w, gap) : 0;
+    });
   }
 
   const api = { CONFIG: CASINO_CONFIG, toChips, fmt, wallet, welcome, chips, buy, sell, sellable, games, gameOf, tables, sit, cashOut, leave, payBack, runAi,
-    topUp, refill, pvpBind,
-    STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle };
+    topUp, refill, pvpBind, gmDealer,
+    STAKE_KINDS, pvpTable, pvpSit, pvpBack, pvpSettle, pvpMode, pvpSides, pvpOther, pvpSideName,
+    HOLDEM_GM, holdemTable, holdemSit, holdemGm, holdemStart, holdemAiSeats, holdemSettle, holdemLeave, holdemBack, holdemBind };
   // 桌上不够时先从钱包补（#520）：把 refill 注入三种玩法共用的下注 / 借贷代码（counter-cards.js · bet.setTopUp），
   // 猜大猜小另有自己的一份（counter-cards-guess.js · setTopUp，#528；game.html 里先加载猜大猜小、再加载 casino.js）
   if (root.CounterCards && root.CounterCards.bet && root.CounterCards.bet.setTopUp) root.CounterCards.bet.setTopUp(refill);

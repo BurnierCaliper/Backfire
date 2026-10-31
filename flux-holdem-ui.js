@@ -94,7 +94,8 @@
     const S = T.state(), H = FH().HOLDEM_CONFIG;
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮 · ${nameIn(v, v.dealer)}坐庄`;
     const head = `<b class="cc-brand">${esc(H.name)}</b><span class="cc-round">${esc(status)}</span>`;
-    if (S.casino) return `${head}<span class="cc-role">${esc(S.casino.label || "赌场")} · 对手：${esc(levelName(S.level))} AI</span><span class="cc-spacer"></span>${T.btn("leave", "离桌", { title: S.casino.leaveTitle || "" })}`;
+    // 联机牌桌（#526）：who 写这一桌是谁（多人桌写几名玩家 + AI），另有「返回赌场」
+    if (S.casino) return `${head}<span class="cc-role">${esc(S.casino.label || "赌场")} · ${esc(S.casino.who || `对手：${levelName(S.level)} AI`)}</span><span class="cc-spacer"></span>${T.casinoBtns()}`;
     return `${head}<span class="cc-role">${v.order.length} 人桌 · 对手：${esc(levelName(S.level))} AI</span><span class="cc-spacer"></span>${T.btn("setup", "换人数 / 难度")}${T.btn("title", "回到标题")}`;
   }
   /** 庄 / 小盲 / 大盲的小牌子 */
@@ -108,7 +109,7 @@
     const played = s.shown ? T.handCard(s.shown, { cls: "fh-small fh-face" + (flip ? " cc-flip" : "") })
       : s.played ? T.back({ cls: "fh-small cc-down" + (T.bump("thrown:" + s.id, v.round) ? " cc-thrown" : "") }) : `<span class="cc-empty">${s.out ? "" : "还没盖牌"}</span>`;
     return `<div class="fh-seat${turn ? " turn" : ""}${s.folded ? " folded" : ""}${s.out ? " out" : ""}" data-seat="${s.id}">
-      <div class="fh-name"><b>${esc(s.name)}</b><small>${esc(levelName(S.levels[s.id]))} AI</small>${badges(s)}</div>
+      <div class="fh-name"><b>${esc(s.name)}</b><small>${esc(S.seatTag ? S.seatTag(s.id) : `${levelName(S.levels[s.id])} AI`)}</small>${badges(s)}</div>
       ${T.chips(s.chips, { title: s.name + "的筹码", anim: T.bump("chips:" + s.id, s.chips), cls: T.collecting(s.id) ? "cc-collect" : "" })}
       <small class="fh-bet">本轮押 ${s.bet}${status ? ` · ${status}` : ""}</small>
       <div class="cc-hand cc-hand-back fh-backs" title="手牌 ${s.handCount} 张">${backs}</div>
@@ -244,7 +245,7 @@
       <p class="cc-deltas fh-final">${rows}</p>
       <p class="cc-tier">按最终筹码数（扣还借款之后）比，最多的赢。</p>
       <div class="cc-btns">${S.casino
-        ? `${T.btn("casinoAgain", esc(S.casino.againText || "再来一局"), { primary: true })}${T.bannerChartBtn()}${T.btn("leave", "离桌")}`
+        ? T.casinoFinalBtns()
         : `${T.btn("again", "再来一局", { primary: true })}${T.btn("setup", "换人数 / 难度")}${T.bannerChartBtn()}${T.btn("title", "回到标题")}`}</div>
     </div>`;
   }

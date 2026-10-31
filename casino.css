@@ -41,3 +41,13 @@
 .cso-private { color: var(--gold, #d8b25a); }
 .cso-final { font-size: 14px; }
 .cso-deal { border-top: 1px solid rgba(255, 255, 255, .12); padding-top: 6px; }
+.cso .crq-row > div { min-width: 0; overflow-wrap: anywhere; }
+/* 手机竖屏（#526）：开桌那几栏一栏一行，下拉框占满一行，不横向溢出 */
+@media (max-width: 600px) {
+  .cso-ex label, .cso-pvp label, .cso-table label { white-space: normal; }
+  .cso-pvp label { flex: 1 1 100%; }
+  .cso select { width: 100%; }
+}
+/* 联机牌桌（#526）：本机那几张牌桌（.scr-cc：High Flux、Flux Duel / Hold'em、猜大猜小）压在联机画面上面
+ * （casino-online-ui.js 打开时加 .cc-online；联机玩家页 online.css 放行它）；赌场大厅（.ovl）打开牌桌时收起 */
+.scr-cc.cc-online { z-index: 92; }

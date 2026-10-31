@@ -10,9 +10,12 @@
  *   点一下桌面（或「直接看结算」）直接看结算；每一步画成什么样由各玩法给（spec.settle）。
  * 每张牌桌的画面（设置页、桌面、结算横幅……）由各自的文件给（flux-duel-ui.js / flux-holdem-ui.js），交给 FluxUI.table(spec)。
  * 页面骨架在 game.html 的 #scr-fd / #scr-fh；没有 Screens（测试里）时自己切 hidden。
+ * 记录按时间顺序，最新的在最下面，在底部时有新记录接着贴底（同 High Flux，#526；以前最新的在最上面）。
+ * 联机牌桌（#526，casino-online-ui.js 打开）：T.remote(src) 同一张牌桌接联机的这一局，牌局在房主那边——用法、src 的字段同 High Flux 的
+ *   CounterCardsUI.remote（counter-cards-ui.js「联机牌桌」）；Flux Hold'em 另有 src.seatTag(座位) 写这个座位上是玩家 / 主持人 / 几级 AI。
  *
  *   const T = FluxUI.table({ key: "fd", screen: "fluxDuel", rules: () => FluxDuel, ai: () => FluxDuelAI, begin, setupHtml, topHtml, boardHtml, ... });
- *   T.open() / T.start(opt) / T.render() / T.state() / T.view() / T.act(操作)
+ *   T.open() / T.start(opt) / T.render() / T.state() / T.view() / T.act(操作) / T.remote(src) / T.remoteSync() / T.remoteClose()
  */
 (function (root) {
   "use strict";
@@ -57,6 +60,8 @@
     const R = () => spec.rules(), AIm = () => spec.ai();
     const CS = () => CUI().settle;   // 结算前的过渡：High Flux 那一份共用的计时、操作栏（counter-cards-ui.js）
     let S = null, bound = false;
+    /** 现在这一局（人这一方）的 view：本机按规则现算，联机牌桌是最近一包房主发来的（#526） */
+    const curView = () => (S.remote ? S.rv : R().view(S.game, S.human));
 
     function btn(act, label, o) {
       o = o || {};
@@ -93,11 +98,11 @@
       doc().body.dataset.screen = "title";
     }
     function renderSetup() { const box = el("setup"); if (box) box.innerHTML = spec.setupHtml(api); }
-    function open() { bind(); stopAll(); enterScreen(); renderSetup(); show("setup"); }
+    function open() { bind(); stopAll(); remoteOff(); enterScreen(); renderSetup(); show("setup"); }
     /** 开一局：opt 交给 spec.begin（种子没给就现编一个）；opt.fast：AI 不等（测试用）；opt.casino：赌场桌（离桌 / 再来一局交回模式，每一步叫 onChange） */
     function start(opt) {
       opt = opt || {};
-      bind(); stopAll();
+      bind(); stopAll(); remoteOff();
       const seed = String(opt.seed || (K + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
       const s = spec.begin(Object.assign({}, opt, { seed }));
       S = Object.assign({ seed, rng: {}, banner: null, settle: null, amount: null, msg: "", sel: {}, fast: !!opt.fast, timer: null, win: null, tip: null,
@@ -114,7 +119,9 @@
 
     /* ---------- 推进：人做一步 → 看有没有新的结算（有就先放结算前的过渡）→ AI 接着走 ---------- */
     function humanAct(a) {
-      if (!S || S.game.over || S.settle) return;
+      if (!S || S.settle) return;
+      if (S.remote) { remoteAct(a); return; }   // 联机牌桌：发指令，新的一包到了再画（remoteSync）
+      if (S.game.over) return;
       const pre = R().view(S.game, S.human);   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
       try { R().act(S.game, S.human, a); } catch (e) { S.msg = e.message; render(); return; }
       S.amount = null; S.msg = ""; S.sel = {};
@@ -136,7 +143,7 @@
      * fast（测试用）、没给 spec.settle 的玩法不停，直接弹横幅 */
     const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
     function settleStart(res, pre) {
-      const st = !S.fast && pre && spec.settle ? spec.settle.beats(api, pre, R().view(S.game, S.human), res) : null;
+      const st = !S.fast && pre && spec.settle ? spec.settle.beats(api, pre, curView(), res) : null;
       if (!st) { S.banner = res; return; }
       S.settle = Object.assign(st, { res, pre });
       CS().begin(S.settle, settleHost);
@@ -161,7 +168,7 @@
     }
     /** 现在桌上画的那一份：过渡中是停在结算之前的那一步，平时就是规则给的 view */
     function shownView() {
-      const v = R().view(S.game, S.human);
+      const v = curView();
       return S.settle ? spec.settle.view(api, v, S.settle) : v;
     }
     /** 过渡中的操作栏（High Flux 那一份）：这一步做了什么 / 判定中（说明读 st.note，没有就是 spec.settle.note），「直接看结算」 */
@@ -173,17 +180,17 @@
       if (!S || !S.casino || typeof S.casino[name] !== "function") return;
       try { S.casino[name](); } catch (e) { if (S) { S.msg = e.message; render(); } }
     }
-    /** 现在轮到的 AI（人以外、有难度的那几方） */
-    function aiSeats() { return S ? R().toAct(S.game).filter(k => k !== S.human && S.levels && S.levels[k]) : []; }
+    /** 现在轮到的 AI（人以外、有难度的那几方）；联机牌桌的 AI 在房主那边走 */
+    function aiSeats() { return S && !S.remote ? R().toAct(S.game).filter(k => k !== S.human && S.levels && S.levels[k]) : []; }
     // 结算前的过渡、结算横幅开着时 AI 不走
     function schedule() {
       stopTimer();
-      if (!S || S.banner || S.settle || S.game.over || !aiSeats().length) return;
+      if (!S || S.remote || S.banner || S.settle || S.game.over || !aiSeats().length) return;
       if (S.fast) { aiStep(); return; }
       S.timer = setTimeout(aiStep, Math.max(UI_CONFIG.aiDelay, (S.holdUntil || 0) - Date.now()));
     }
     function aiStep() {
-      if (!S) return;
+      if (!S || S.remote) return;
       S.timer = null;
       if (S.banner || S.settle || S.game.over) return;
       const who = aiSeats()[0];
@@ -201,7 +208,8 @@
     const windowKey = (v) => (v.betting && v.betting.window ? `${v.round}:${v.betting.street}:${v.betting.window.n}` : "");
     function syncWindow(v) {
       const k = S.banner || v.over ? "" : windowKey(v);
-      if (!k) { stopWindow(); return; }
+      // 联机牌桌：自己这一份到时间了（已经发了「不加注」），同一个窗口不再从头数
+      if (!k || (S.remote && k === S.winGone)) { stopWindow(); return; }
       if (S.win && S.win.key === k) return;
       stopWindow();
       S.win = { key: k, until: Date.now() + v.betting.window.sec * 1000, sec: v.betting.window.sec, timer: null };
@@ -220,8 +228,16 @@
     function stopWindow() { if (S && S.win) { if (S.win.timer) clearTimeout(S.win.timer); S.win = null; } }
     /** 倒计时到了：关窗，进入下一步；关窗就结算的，结算前的过渡从关窗之前的画面接着画 */
     function expireWindow() {
+      const gone = S && S.win ? S.win.key : "";
       stopWindow();
       if (!S || S.settle) return;
+      // 联机牌桌：关窗由房主的规则层来（能下注的都不加注才关）：到时间就替自己发「不加注」，同到时间
+      if (S.remote) {
+        S.winGone = gone;
+        const v = curView();
+        if (v.myTurn && v.legal.some(o => o.type === "pass")) remoteAct({ type: "pass" }); else render();
+        return;
+      }
       const pre = R().view(S.game, S.human);
       if (!R().closeWindow(S.game)) return;
       S.amount = null; S.msg = "";
@@ -330,7 +346,8 @@
       if (board) board.innerHTML = spec.boardHtml(api, v);
       if (actions) actions.innerHTML = actionsHtml(v);
       tickWindow();
-      if (side) side.innerHTML = spec.sideHtml(api, v);
+      // 记录：在底部就滚到底看新记录，往上翻着看旧的就停在原处（同 High Flux 的 logScroll / stickLog）
+      if (side) { const was = CUI().logScroll(side); side.innerHTML = spec.sideHtml(api, v); CUI().stickLog(side, was); }
       if (banner) {
         const h = S.banner ? spec.bannerHtml(api, S.banner, v) : v.over ? spec.finalHtml(api, v) : "";
         banner.innerHTML = h;
@@ -358,16 +375,31 @@
         + `<i class="cc-corner">${esc(name)}</i><span class="cc-ico">${ui.cardIcon(card)}</span><b class="cc-name">${esc(name)}</b>`
         + `${o.note ? `<small class="cc-note">${esc(o.note)}</small>` : ""}</${tag}>`;
     }
+    /** 赌场桌顶栏右边的按钮：「返回赌场」（联机牌桌，#526）、「离桌」（模式给了才有：主持人替玩家坐庄的那一桌没有） */
+    function casinoBtns() {
+      const c = S && S.casino;
+      if (!c) return "";
+      return (c.onBack ? btn("back", "返回赌场", { title: "回到赌场大厅，牌局接着在桌上（不离桌）" }) : "") + (c.onLeave ? btn("leave", "离桌", { title: c.leaveTitle || "" }) : "");
+    }
+    /** 赌场桌总结算的按钮：再来一局（本机赌场才有）、克制表、离桌、返回赌场 */
+    function casinoFinalBtns() {
+      const c = S.casino;
+      return `${c.onAgain ? btn("casinoAgain", esc(c.againText || "再来一局"), { primary: true }) : ""}${bannerChartBtn()}${c.onLeave ? btn("leave", "离桌", { primary: !c.onAgain }) : ""}${c.onBack ? btn("back", "返回赌场") : ""}`;
+    }
+    /** 对手（Duel）座位上写什么：联机牌桌给了 oppTag 就照它（主持人 / 玩家），不然是几级 AI */
+    const oppTag = (lvName) => (S && S.casino && S.casino.oppTag) || `${lvName} AI`;
     /** 向主持方借了多少、结束时要还多少（公开的） */
     function loanTag(s, who) {
       return s && s.loan ? `<small class="cc-loan" title="${esc(who)}向主持方借了 ${s.loan} 枚，对局结束时还 ${s.owe} 枚">借 ${s.loan} 枚 · 结束时还 ${s.owe} 枚</small>` : "";
     }
+    /** 侧栏的记录：按时间顺序，最新的在最下面（#526，同 High Flux；以前最新的在最上面） */
     function logHtml(v) {
-      return v.log.slice(-UI_CONFIG.logLines).reverse().map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
+      return v.log.slice(-UI_CONFIG.logLines).map(e => `<li class="${e.to ? "cc-private" : ""}">${esc(e.text)}</li>`).join("");
     }
 
     /* ---------- 克制表（得分）：和平时同一个浮层（matchup-ui.js），只读 ---------- */
-    const gameShown = () => { const g = el("game"); return !!(S && g && !g.hidden && doc().body.dataset.screen === spec.screen); };
+    // 联机牌桌（#526）不切 Screens：看 #scr-… 自己露没露出来
+    const gameShown = () => { const g = el("game"), scr = $("scr-" + K); return !!(S && g && !g.hidden && (S.remote ? !!(scr && !scr.hidden) : doc().body.dataset.screen === spec.screen)); };
     function chartOpen() {
       const m = MU(), box = $("mu-overlay"), scr = $("scr-" + K);
       return !!(m && m.isOpen() && box && scr && scr.contains(box));
@@ -397,7 +429,7 @@
     const tipAnchor = (card) => { const b = el("board"); return b ? b.querySelector(`[${TIP}="${card}"]`) : null; };
     function showTip(card, via) {
       const box = tipBox(), a = tipAnchor(card);
-      if (!S || !box || !a || S.banner || S.game.over || !gameShown() || chartOpen()) { hideTip(); return; }
+      if (!S || !box || !a || S.banner || curView().over || !gameShown() || chartOpen()) { hideTip(); return; }
       const v = shownView();
       S.tip = { card, via };
       box.innerHTML = spec.tipHtml(api, card, v);
@@ -481,8 +513,10 @@
         case "skipSettle": settleEnd(); return;   // 结算前的过渡：直接看结算
         case "chart": openChart(); return;
         case "leave": casinoHook("onLeave"); return;
+        case "back": casinoHook("onBack"); return;   // 联机牌桌（#526）：回赌场大厅，不离桌
         case "casinoAgain": casinoHook("onAgain"); return;
       }
+      if (S && S.busy && act !== "pick" && act !== "set") return;   // 联机牌桌：上一步的指令还没回来
       if (spec.click && spec.click(api, act, d)) return;
       if (!S) return;
       switch (act) {
@@ -490,13 +524,77 @@
         case "bet": case "raise": humanAct({ type: act, amount: S.amount }); break;
         case "borrow": humanAct({ type: "borrow", amount: Number(d.amount) }); break;
         case "amt": {
-          const v = R().view(S.game, S.human), o = v.legal.find(x => x.type === "bet" || x.type === "raise");
+          const v = curView(), o = v.legal.find(x => x.type === "bet" || x.type === "raise");
           if (!o) return;
           S.amount = d.set === "max" ? o.max : Math.max(o.min, Math.min(o.max, (S.amount || o.min) + Number(d.d || 0)));
           render();
           break;
         }
       }
+    }
+    /* ---------- 联机牌桌（#526）：同一张牌桌，牌局在房主那边（用法同 High Flux 的 CounterCardsUI.remote） ----------
+     * 人做一步发指令；新的一包到了（remoteSync）才往下画，多了一轮结算先放结算前的过渡（上一包 = 做最后一步之前的画面，记录按 logFrom 对齐）；
+     * AI 在房主那边走；追加窗口到时间替自己发「不加注」；画面挂在 #scr-… 上（加 .cc-online），不切 Screens */
+    function remote(src) {
+      bind(); stopAll();
+      const v = src && src.view();
+      if (!v) return false;
+      S = { game: null, remote: src, rv: v, human: v.side, level: src.level || "normal", levels: Object.assign({}, src.levels || {}),
+        get seatTag() { return src.seatTag || null; },
+        seed: "", rng: {}, banner: null, settle: null, amount: null, msg: "", sel: {}, fast: !!src.fast, timer: null, win: null, tip: null,
+        anim: { deal: true }, last: {}, holdUntil: 0, busy: false, winGone: "", seen: (v.results || []).length,
+        casino: { get label() { return src.label; }, get who() { return src.who; }, get oppTag() { return src.oppTag; }, leaveTitle: src.leaveTitle,
+          onLeave: src.leave ? () => src.leave() : null, onBack: () => remoteBack() } };
+      const scr = $("scr-" + K);
+      if (scr) { scr.classList.add("cc-online"); scr.hidden = false; }
+      show("game");
+      render();
+      return true;
+    }
+    /** 新的一包到了：接着画（多了一轮结算先放过渡）；不坐这一桌了就收起 */
+    function remoteSync() {
+      if (!S || !S.remote) return;
+      const v = S.remote.view();
+      if (!v) { remoteClose(); return; }
+      if (v === S.rv) return;   // 还是同一包（联机画面别的地方重画）
+      const pre = S.rv;
+      S.rv = v;
+      if (v.results.length > S.seen) { S.seen = v.results.length; settleStart(v.results[v.results.length - 1], CS().align(pre, v)); }
+      else S.seen = v.results.length;
+      render();
+    }
+    /** 人做一步：发指令（回来之前不再发）；没做成写在操作栏里 */
+    function remoteAct(a) {
+      if (!S || !S.remote || S.busy) return;
+      const src = S.remote;
+      S.busy = true; S.msg = "";
+      const done = (r, e) => {
+        if (!S || S.remote !== src) return;
+        S.busy = false;
+        if (e || (r && r.ok === false)) S.msg = (e && e.message) || (r && r.error) || "没做成";
+        else { S.amount = null; S.sel = {}; }
+        render();
+      };
+      let p;
+      try { p = Promise.resolve(src.act(a)); } catch (e) { done(null, e); return; }
+      p.then(r => done(r), e => done(null, e));
+    }
+    function remoteBack() {
+      const src = S && S.remote;
+      remoteClose();
+      if (src && src.back) src.back();
+    }
+    function remoteClose() {
+      if (!S || !S.remote) return;
+      leave();
+      remoteOff();
+      S = null;
+    }
+    function remoteOff() {
+      const scr = $("scr-" + K);
+      if (!scr || !scr.classList.contains("cc-online")) return;
+      scr.classList.remove("cc-online");
+      scr.hidden = true;
     }
     function bind() {
       if (bound || !doc()) return;
@@ -536,13 +634,15 @@
     const collecting = (side) => !!(S && S.anim.collect && S.anim.collect.indexOf(side) >= 0);
 
     const api = {
-      spec, UI_CONFIG, btn, esc, signed, bump, loanTag, logHtml, chartBtn, bannerChartBtn, windowLeft, handCard, weatherColor, miniWeather,
+      spec, UI_CONFIG, btn, esc, signed, bump, loanTag, logHtml, chartBtn, bannerChartBtn, windowLeft, handCard, weatherColor, miniWeather, casinoBtns, casinoFinalBtns, oppTag,
       judging, actedTag, collecting, judgeTag: (cls) => CS().tag(cls),
       open, start, render, renderSetup, toTitle, act: humanAct, dismiss, setFast,
       openChart, closeChart, chartOpen, showTip, hideTip,
+      // 联机牌桌（#526）
+      remote, remoteSync, remoteClose, isRemote: () => !!(S && S.remote),
       // stop：停掉 AI 等着走的那一步和追加窗口的倒计时（测试用）
       stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } },
-      state: () => S, view: () => (S ? R().view(S.game, S.human) : null),
+      state: () => S, view: () => (S ? curView() : null),
       card: (c, o) => CUI().cardHtml(c, o), back: (o) => CUI().backHtml(o), weatherCard: (w, o) => CUI().weatherCardHtml(w, o), chips: (n, o) => CUI().chipsHtml(n, o),
       tipAttr: TIP
     };

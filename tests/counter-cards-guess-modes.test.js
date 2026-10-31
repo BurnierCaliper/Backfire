@@ -196,7 +196,7 @@ test("跑团接上界面：坚毅剩 1 点和满的，牌桌每一步完全一�
 
 /* ---------- 入口 ---------- */
 
-test("入口：长线养成的任务板、跑团的「商人」页都有黑市（只给名字，不读坚毅）；联机开着房间 / 本机热座时只写「联机不开赌命桌」", () => {
+test("入口：长线养成的任务板、跑团的「商人」页都有黑市（只给名字，不读坚毅）；联机开着房间 / 本机热座时这里不开（联机玩家在「赌场」里上桌，#526）", () => {
   const rogueUi = read("rogue-ui.js"), trpgUi = read("trpg-ui.js");
   assert.match(rogueUi, /\$\{renderBlackMarket\(\)\}/);
   assert.match(rogueUi, /CounterCardsGuessUI\.blackMarketHtml\(run\.party\.map\(h => \(\{ id: h\.kit, name: Rogue\.heroName\(h\.kit\) \}\)\)/);
@@ -216,16 +216,16 @@ test("入口：长线养成的任务板、跑团的「商人」页都有黑市�
   const html = read("game.html"), at = f => html.indexOf(`<script src="${f}"></script>`);
   assert.ok(at("counter-cards-guess.js") > 0 && at("counter-cards-guess-ui.js") > at("counter-cards-ui.js"));
   assert.ok(at("counter-cards-guess-ui.js") < at("rogue-ui.js") && at("counter-cards-guess-ui.js") < at("trpg-ui.js"));
-  // 联机 / 热座：没有上桌的按钮，startLife 也不开
+  // 联机 / 热座：本机的入口没有上桌的按钮，startLife 也不开（联机玩家在探索环节的「赌场」里上桌，#526：casino-online-ui.js）
   const p = page(), seats = [{ id: "kolt", name: "柯尔特" }];
   assert.match(p.UI.blackMarketHtml(seats), /data-ccg-black="kolt"/);
   assert.match(p.UI.blackMarketHtml(seats), /押坚毅永远能下/);
   p.w.HotseatGame = { isActive: () => true };
   const off = p.UI.blackMarketHtml(seats);
-  assert.match(off, /联机不开赌命桌/);
+  assert.match(off, /联机时玩家在探索环节的「赌场」里上赌命桌，这里不开/);
   assert.doesNotMatch(off, /data-ccg-black/);
-  assert.throws(() => p.UI.startLife({ seat: seats[0] }), /联机不开/);
+  assert.throws(() => p.UI.startLife({ seat: seats[0] }), /这里不开/);
   p.w.HotseatGame = { isActive: () => false };
   p.w.OnlineGame = { getView: () => ({ active: true }) };
-  assert.match(p.UI.blackMarketHtml(seats), /联机不开赌命桌/);
+  assert.match(p.UI.blackMarketHtml(seats), /联机时玩家在探索环节的「赌场」里上赌命桌/);
 });

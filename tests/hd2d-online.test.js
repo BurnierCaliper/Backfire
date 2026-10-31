@@ -410,5 +410,6 @@ test("样式：联机的战斗画面开着新画面时盖住旧的区和单位�
   const css = read("hd2d/hd2d.css"), ol = read("online.css");
   assert.match(css, /\.ol-battle\.hd2d-on > \.g-field \{ visibility: hidden;/);
   assert.match(css, /\.ol-battle\.hd2d-on > \.g-field > \.hd2d-field, \.ol-battle\.hd2d-on > \.g-field > \.g-topstack, \.ol-battle\.hd2d-on > \.g-field > \.hd2d-mist \{ visibility: visible; \}/);
-  assert.match(ol, /body\.online-player > :not\(\.ol-ui\)[^{]*:not\(#hd2d-pop\) \{ display: none !important; \}/, "#hd2d-pop 不被联机玩家画面藏掉");
+  // 后面还可以再排别的例外（#526 加了 .cc-online：联机赌场的牌桌）
+  assert.match(ol, /body\.online-player > :not\(\.ol-ui\)[^{]*:not\(#hd2d-pop\)[^{]*\{ display: none !important; \}/, "#hd2d-pop 不被联机玩家画面藏掉");
 });

@@ -305,7 +305,7 @@ test("押中了赢奖品：横幅写赢得多少奎支 / 材料（奎支不是�
   assert.equal(A.unit.shp, 10);
 });
 
-test("离桌回到原来的画面（还没结算的这一手不算，什么都不扣）；联机开着房间时不开赌命桌", () => {
+test("离桌回到原来的画面（还没结算的这一手不算，什么都不扣）；联机开着房间时本机的赌命桌不开（联机玩家在赌场里上桌，#526）", () => {
   const A = grit(10);
   const p = page();
   let back = 0;
@@ -320,7 +320,7 @@ test("离桌回到原来的画面（还没结算的这一手不算，什么都�
   assert.equal(back, 1);
   assert.equal(A.calls.length, 0, "没结算：接入层什么都没扣");
   assert.equal(p.UI.state(), null);
-  // 联机：开着房间（主持人或玩家）时不开
+  // 联机：开着房间（主持人或玩家）时本机的这一张不开——联机玩家在探索环节的「赌场」里上桌（#526，这一手在房主那边）
   p.w.OnlineGame = { getView: () => ({ active: true }) };
-  assert.throws(() => p.UI.startLife({ seat: SEAT, settle: A.settle }), /联机不开赌命桌/);
+  assert.throws(() => p.UI.startLife({ seat: SEAT, settle: A.settle }), /联机时玩家在探索环节的「赌场」里上赌命桌，这里不开/);
 });

@@ -20,12 +20,16 @@
  *   顶栏写桌子、买入（含牌局里从钱包补的）和「离桌」，没有换桌 / 回到标题；结算横幅「再来一手 / 离桌」交回打开牌桌的模式
  *   （再来一手 = 离桌结算、同一张桌子同样买入再坐下，再交入场费）；每走一步叫 casino.onChange（模式存档）。
  *   庄家是赌场（筹码无限，不用做决定）；桌上不够这一轮的最低注时规则层先从钱包补（记录里写「从钱包补了 N 枚到桌上」）。
+ * 联机牌桌（#526，casino-online-ui.js 打开）：remote(src) 同一张牌桌接联机的这一手（押筹码的赌场桌、黑市赌命桌），这一手在房主那边——
+ *   用法同 High Flux 的 CounterCardsUI.remote，见下面「联机牌桌」。赌命桌的包里没有坚毅的数字，扣坚毅、真死都在房主那边算（trpg.js · trpgBlackMarketAct），
+ *   这边只收到结论（死没死），横幅照它写「永久死亡」。
  * 页面骨架在 game.html 的 #scr-ccg；没有 Screens（测试里）时自己切 hidden。
  *
  *   CounterCardsGuessUI.open()                                         打开设置页（选桌）
  *   CounterCardsGuessUI.start({ table: "street", chips: 50, seed, deals, fast })   直接坐下开一手（deals：测试用，按顺序指定每一手的三张牌；fast：结算前不停，测试用）
  *   CounterCardsGuessUI.start({ game, side, casino: { label, againText, leaveTitle, onChange, onLeave, onAgain }, fast })   赌场桌（casino-ui.js 打开）
  *   CounterCardsGuessUI.startLife({ seat: { id, name }, settle(bill) → { dead, notes }, back(), seed, deals, fast })   坐上赌命桌
+ *   CounterCardsGuessUI.remote(src) / remoteSync() / remoteClose()     联机牌桌（#526）
  */
 (function (root) {
   "use strict";
@@ -36,8 +40,10 @@
     historyLines: 10,      // 侧栏「每手结算」显示最近几手
     // 每一轮下注时桌上是什么情况（提示语）
     roundText: { 1: "三张都盖着", 2: "元素翻开了", 3: "天气也翻开了，只剩层牌" },
-    // 赌命桌的字：结算只写「坚毅受创」，不写数字
-    life: { hurt: "坚毅受创", safe: "坚毅无损", dead: "坚毅耗尽——永久死亡", online: "联机不开赌命桌" },
+    // 赌命桌的字：结算只写「坚毅受创」，不写数字。online：联机开着房间 / 本机热座时这里（本机的入口）不开——联机玩家在探索环节的「赌场」里上桌（#526）
+    life: { hurt: "坚毅受创", safe: "坚毅无损", dead: "坚毅耗尽——永久死亡", online: "联机时玩家在探索环节的「赌场」里上赌命桌，这里不开" },
+    // 联机牌桌（#526）：押了还没结算不能离桌（押坚毅只在结算时出账）
+    remote: { back: "返回赌场", backHint: "回到赌场大厅，这一手接着在桌上（不离桌）", stuck: "押了还没结算，不能离桌：可以先返回赌场，这一手留在桌上" },
     // 结算前的过渡（#525）：时长读 High Flux 的 CounterCardsUI.UI_CONFIG.settle，这里是猜大猜小自己的字（判定中那一行的说明）
     settle: { judgeNote: "元素打层牌，按克制表和天气算这一手的得分" }
   };
@@ -80,10 +86,13 @@
   const SETUP = { table: null };
   let S = null;   // { table, chips, seed, n（第几手）, hand, draft（这一轮还没交的押注 { 结果: 押多少 }）, msg, banner（这一手结算过了：账记了、该弹横幅了）, last（上次画的，放动画用）, history, deals,
                   //   life（赌命桌才有：{ seat: { id, name }, settle, back, outcome（这一手结算后接入层说的：{ dead, notes }）, dead }）,
-                  //   casino（赌场桌才有，#528：{ label, againText, leaveTitle, onChange, onLeave, onAgain }）, side（赌场桌：你坐的位置 id）,
-                  //   settle（结算前的过渡，见 settleStart；放着的时候横幅先不画）, fast（测试用：结算前不停）}
+                  //   casino（赌场桌才有，#528：{ label, againText, leaveTitle, onChange, onLeave, onAgain }；联机牌桌另有 who、onBack）, side（赌场桌：你坐的位置 id）,
+                  //   settle（结算前的过渡，见 settleStart；放着的时候横幅先不画）, fast（测试用：结算前不停）；
+                  //   联机牌桌（#526）另有 remote（src）、raw（最近一包）、rv（最近一包补好规则文字的 view，见 fromPacket）、busy（指令还没回来）}
   let bound = false;
   const meId = () => (S && S.life ? S.life.seat.id : S && S.side ? S.side : ME);
+  /** 现在这一手（你这一方）的 view：本机按规则现算，联机牌桌是最近一包房主发来的（#526） */
+  const curView = () => (S.remote ? S.rv : G().view(S.hand, meId()));
 
   function show(name) {
     const setup = $("ccg-setup"), game = $("ccg-game");
@@ -104,6 +113,7 @@
   function open() {
     bind();
     dropSettle();
+    remoteOff();
     enterScreen();
     renderSetup();
     show("setup");
@@ -118,6 +128,7 @@
     if (table === G().GUESS_CONFIG.life.id) throw new Error("赌命桌从长线养成 / 跑团进（startLife）");
     SETUP.table = table;
     dropSettle();
+    remoteOff();
     S = { table, chips: opt.chips != null ? Math.max(0, Math.floor(Number(opt.chips) || 0)) : startChips(), seed: seedOf(opt), n: 0, hand: null, draft: {}, msg: "",
       banner: false, last: {}, anim: {}, history: [], deals: (opt.deals || []).slice(), life: null, settle: null, fast: !!opt.fast };
     enterScreen();
@@ -133,6 +144,7 @@
   function startCasino(opt) {
     bind();
     dropSettle();
+    remoteOff();
     const h = opt.game, side = String(opt.side != null ? opt.side : (h.casino && h.casino.side) || ME);
     if (!h.players.some(p => p.id === side)) throw new Error("这一手里没有你坐的位置");
     S = { table: h.table.id, chips: 0, seed: h.seed, n: 1, hand: h, draft: {}, msg: "", banner: false, last: { shown: Object.assign({}, h.shown) }, anim: { deal: true },
@@ -154,6 +166,7 @@
     if (!opt.seat || opt.seat.id == null) throw new Error("赌命桌要有押注的角色");
     bind();
     dropSettle();
+    remoteOff();
     S = { table: G().GUESS_CONFIG.life.id, chips: null, seed: seedOf(opt), n: 0, hand: null, draft: {}, msg: "", banner: false, last: {}, anim: {}, history: [],
       deals: (opt.deals || []).slice(), settle: null, fast: !!opt.fast,
       life: { seat: { id: String(opt.seat.id), name: String(opt.seat.name || opt.seat.id) }, dealer: opt.dealer ? String(opt.dealer) : null,
@@ -181,22 +194,26 @@
     sync();
     return true;
   }
-  /** 这一手的筹码写回带上桌的筹码；结算了记一笔。赌命桌：结算了把账交给接入的那一边（扣坚毅、发奖、真死），记下它说的结果 */
+  /** 这一手的筹码写回带上桌的筹码；结算了记一笔。赌命桌：结算了把账交给接入的那一边（扣坚毅、发奖、真死），记下它说的结果。
+   *  都读你这一方的 view（联机牌桌只有这个）；联机的赌命桌账在房主那边结算的那一下就交出去了，包里只有结论（src.dead） */
   function sync() {
-    const h = S.hand, me = h.players.find(p => p.id === meId()) || h.players[0];
+    const v = curView(), me = v.me;
     if (!S.life) S.chips = me.chips;
-    if (!h.over || S.banner) return;
+    if (!v.over || S.banner) return;
     S.banner = true;
     if (S.life) {
-      const bill = G().lifeBill(h, me.id);
       let out = null;
-      try { out = S.life.settle ? S.life.settle(bill) : null; } catch (e) { S.msg = e.message; }
+      if (S.remote) out = { dead: !!S.remote.dead };
+      else {
+        const bill = G().lifeBill(S.hand, meId());
+        try { out = S.life.settle ? S.life.settle(bill) : null; } catch (e) { S.msg = e.message; }
+      }
       S.life.outcome = { dead: !!(out && out.dead), notes: ((out && out.notes) || []).map(String) };
       if (S.life.outcome.dead) S.life.dead = true;
-      S.history.push({ n: S.n, score: h.result.score, bet: me.slips.length > 0, hits: me.slips.filter(x => x.win).length, hurt: !!me.hurt, dead: S.life.dead });
+      S.history.push({ n: S.n, score: v.result.score, bet: me.slips.length > 0, hits: me.slips.filter(x => x.win).length, hurt: !!me.hurt, dead: S.life.dead });
       return;
     }
-    S.history.push({ n: S.n, score: h.result.score, net: me.net, bet: me.slips.length > 0 });
+    S.history.push({ n: S.n, score: v.result.score, net: me.net, bet: me.slips.length > 0 });
   }
   function toTitle() {
     leave();
@@ -223,6 +240,7 @@
   const betOpt = (v) => v.legal.find(o => o.type === "bet") || null;
   const draftTotal = () => Object.keys(S.draft).reduce((s, k) => s + S.draft[k], 0);
   function humanAct(a) {
+    if (S && S.remote) { if (!S.settle && !S.rv.over) remoteAct(a); return; }   // 联机牌桌：发指令，新的一包到了再画（remoteSync）
     if (!S || !S.hand || S.hand.over) return;
     const pre = G().view(S.hand, meId());   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
     try { G().act(S.hand, meId(), a); } catch (e) { S.msg = e.message; render(); return; }
@@ -233,10 +251,16 @@
     // 赌场桌（#528）：这一手走了一步（开下一轮时可能还从钱包补了筹码），交给模式存档
     if (S.casino && S.casino.onChange) S.casino.onChange(S.hand);
   }
-  /** 赌场桌的「离桌」「再来一手」：交给打开牌桌的模式（casino-ui.js）；没做成（筹码不够再来一手）把原因写在操作栏 */
+  /** 赌场桌的「离桌」「再来一手」：交给打开牌桌的模式（casino-ui.js）；没做成（筹码不够再来一手）把原因写在操作栏。
+   *  联机牌桌（#526）的「离桌」是发指令（返回 Promise）：没做成的原因回来了也写在操作栏 */
   function casinoHook(name) {
     if (!S || !S.casino || typeof S.casino[name] !== "function") return;
-    try { S.casino[name](); } catch (e) { if (S) { S.msg = e.message; render(); } }
+    const was = S;
+    const later = (msg) => { if (S && S === was) { S.msg = msg || "没做成"; render(); } };   // 指令回来之前换了牌桌就不写
+    try {
+      const r = S.casino[name]();
+      if (r && typeof r.then === "function") r.then(x => { if (x && x.ok === false) later(x.error); }, e => later(e && e.message));
+    } catch (e) { if (S) { S.msg = e.message; render(); } }
   }
 
   /* ---------- 结算前的过渡（主人 10/30 试玩反馈，#525）：翻开的牌一张一步 → 判定中 → 结算横幅 ----------
@@ -247,7 +271,7 @@
   const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
   function settleStart(pre) {
     if (S.fast) return;
-    const log = G().view(S.hand, meId()).log, from = pre.log.length;
+    const log = curView().log, from = pre.log.length;
     const end = log.findIndex((e, i) => i >= from && e.t === "result");
     const frames = [];
     let shown = Object.assign({}, pre.shown), lines = [];
@@ -291,7 +315,7 @@
     return CUI().settle.bar(st, st.texts[st.at], UI_CONFIG.settle.judgeNote, btn("skipSettle", esc(T.skip), { title: T.skipHint }));
   }
   function pick(result) {
-    const v = G().view(S.hand, meId()), o = betOpt(v);
+    const v = curView(), o = betOpt(v);
     if (!v.myTurn || !o) return;
     const cell = o.cells.find(x => x.result === result);
     if (!cell) return;
@@ -304,7 +328,7 @@
   }
   function adjust(result, d) {
     if (S.life) return;
-    const v = G().view(S.hand, meId()), o = betOpt(v);
+    const v = curView(), o = betOpt(v);
     if (!o || S.draft[result] == null) return;
     const room = o.max - draftTotal() + S.draft[result];
     S.draft[result] = Math.max(o.min, Math.min(room, S.draft[result] + d));
@@ -352,8 +376,8 @@
     return (cat[id] && cat[id].name) || id;
   }
   function render() {
-    if (!S || !S.hand) return;
-    const now = G().view(S.hand, meId()), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
+    if (!S || (!S.hand && !S.remote)) return;
+    const now = curView(), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
     const app = $("ccg-game");
     if (!app) return;
     app.dataset.weather = v.shown.weather || "none";
@@ -377,6 +401,14 @@
   }
   function topHtml(v) {
     const status = v.over ? "这一手结束" : `第 ${v.round} / ${v.rounds} 轮下注`;
+    // 联机牌桌（#526）：桌子、对面是谁（赌场 / 主持人坐庄），「返回赌场」（不离桌）、「离桌」（赌命桌押了还没结算不能离桌）
+    if (S.remote) {
+      const R = UI_CONFIG.remote, can = remoteCanLeave();
+      const leave = S.casino.onLeave ? btn("leave", "离桌", { title: can ? S.casino.leaveTitle || "" : R.stuck, disabled: !can }) : "";
+      return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(S.life ? v.table.name : G().GUESS_CONFIG.name)}</b><span class="cc-round">${status}</span>`
+        + `<span class="cc-role">${esc(S.casino.label || "")}${S.casino.who ? ` · ${esc(S.casino.who)}` : ""}</span>`
+        + `<span class="cc-spacer"></span>${btn("back", esc(R.back), { title: R.backHint })}${leave}`;
+    }
     if (S.life) {
       return `<b class="cc-brand">${esc(CC().CC_CONFIG.name)} · ${esc(v.table.name)}</b><span class="cc-round">${status}</span>`
         + `<span class="cc-role"><b>${esc(S.life.seat.name)}</b>下注 · 第 ${S.n} 手 · 庄家：${esc(S.life.dealer || v.table.dealer)}</span>`
@@ -506,7 +538,7 @@
       const grit = me.slips.length ? (me.hurt ? L.hurt : L.safe) : "";
       const tone = out.dead || me.hurt ? "lose" : hits.length ? "win" : "";
       const dead = out.dead ? `<p class="ccg-dead">${esc(S.life.seat.name)} ${esc(L.dead)}</p>${out.notes.map(t => `<p class="cc-quiet">${esc(t)}</p>`).join("")}` : "";
-      const btns = out.dead ? btn("leave", "离桌", { primary: true }) : btn("again", "再来一手", { primary: true }) + btn("leave", "离桌");
+      const btns = S.remote ? remoteBannerBtns() : out.dead ? btn("leave", "离桌", { primary: true }) : btn("again", "再来一手", { primary: true }) + btn("leave", "离桌");
       return `<div class="cc-banner-card ccg-result ${tone}" role="dialog" aria-label="第 ${S.n} 手结算">
       <small>第 ${S.n} 手结算 · ${esc(v.table.name)}</small>
       <h3>结果 ${esc(G().label(r.score))}</h3>
@@ -521,8 +553,10 @@
     const tone = me.net > 0 ? "win" : me.net < 0 ? "lose" : "";
     const line = !me.slips.length ? "这一手你没押。" : hits.length ? `押中 ${hits.length} 格，连本带利拿回 ${me.won} 枚。` : "没押中。";
     const entry = v.table.entry, can = S.chips >= entry;
-    // 赌场桌（#528）：「再来一手 / 离桌」交回模式（再来一手 = 离桌结算、同一张桌子同样买入再坐下，再交入场费）；桌上剩的离桌时回钱包
-    const btns = S.casino ? btn("casinoAgain", esc(S.casino.againText || "再来一手"), { primary: true }) + btn("leave", "离桌", { title: S.casino.leaveTitle || "" })
+    // 赌场桌（#528）：「再来一手 / 离桌」交回模式（再来一手 = 离桌结算、同一张桌子同样买入再坐下，再交入场费）；桌上剩的离桌时回钱包。
+    // 联机牌桌（#526）：「离桌」「返回赌场」（同联机的另外几张牌桌，没有「再来一手」：回赌场大厅再坐下）
+    const btns = S.remote ? remoteBannerBtns()
+      : S.casino ? btn("casinoAgain", esc(S.casino.againText || "再来一手"), { primary: true }) + btn("leave", "离桌", { title: S.casino.leaveTitle || "" })
       : `${btn("again", can ? `再来一手（入场费 ${entry}）` : `筹码不够入场费 ${entry} 枚`, { primary: can, disabled: !can })}${btn("setup", can ? "换桌" : "重新坐下", { primary: !can })}${btn("title", "回到标题")}`;
     return `<div class="cc-banner-card ccg-result ${tone}" role="dialog" aria-label="${S.casino ? "这一手" : `第 ${S.n} 手`}结算">
       <small>${S.casino ? "这一手" : `第 ${S.n} 手`}结算 · ${esc(v.table.name)}</small>
@@ -552,6 +586,117 @@
     return `<div class="ccg-bm">${head}<p class="r-hint">${rules}</p><div class="r-choices">${btns || `<span class="r-hint">没有能上桌的角色。</span>`}</div></div>`;
   }
 
+  /* ---------- 联机牌桌（#526）：同一张牌桌，这一手在房主那边 ----------
+   * CounterCardsGuessUI.remote(src)：打开牌桌接联机的这一手（押筹码的赌场桌、黑市赌命桌）。src（casino-online-ui.js 给）：
+   *   view() → 你这一方的 view（房主发来、过了 online-view.js 白名单的那一份；不坐这一桌了是 null）、act(操作) → Promise（发联机指令，{ ok, error }）、
+   *   leave()（离桌）、back()（回赌场大厅，不离桌）、label / who / leaveTitle（顶栏写什么，每次重画都读）、fast（测试用：结算前不停）；
+   *   赌命桌另有 dealer（谁坐庄：主持人）、dead（结算后这名角色死了没有——房主那边 trpgBlackMarketSettle 算的结论，横幅照它写「永久死亡」）。
+   * 画法和本机一样（押注先在格子上攒好、「押注」一次交上去；结算前的过渡、结算横幅、记录最新的在最下面），用法同 High Flux 的 CounterCardsUI.remote。
+   * 不同的只有：规则不在这里跑——押注 / 不押是发指令，新的一包到了（remoteSync）才往下画，这一手结算了先放结算前的过渡
+   * （上一包 = 押最后一轮之前的画面，记录按 logFrom 对齐）；赌命桌押了还没结算不能离桌（「离桌」灰掉，房主那边也拦）。
+   * 画面挂在 #scr-ccg 上（加 .cc-online，联机玩家页放行、压在联机画面上面），不切 Screens */
+  function remote(src) {
+    bind();
+    dropSettle();
+    const raw = src && src.view();
+    if (!raw || !raw.me || !raw.table) return false;
+    const v = fromPacket(raw);
+    S = { table: v.table.id, chips: 0, seed: "", n: 1, hand: null, draft: {}, msg: "", banner: false, last: { shown: Object.assign({}, v.shown) }, anim: { deal: true },
+      history: [], deals: [], settle: null, fast: !!src.fast, remote: src, raw, rv: v, side: v.me.id, busy: false,
+      life: v.table.life ? { seat: { id: v.me.id, name: v.me.name }, dealer: src.dealer || null, settle: null, back: null, outcome: null, dead: false } : null,
+      casino: { get label() { return src.label; }, get who() { return src.who; }, leaveTitle: src.leaveTitle,
+        onLeave: src.leave ? () => src.leave() : null, onBack: () => remoteBack() } };
+    sync();   // 打开时这一手已经结算了（刷新、从大厅点「看结算」）：直接是结算横幅
+    const scr = $("scr-ccg");
+    if (scr) { scr.classList.add("cc-online"); scr.hidden = false; }
+    show("game");
+    render();
+    return true;
+  }
+  /** 新的一包到了：接着画（这一手结算了先放过渡）；同一个座位上换了一手（再上桌）从头画；不坐这一桌了就收起 */
+  function remoteSync() {
+    if (!S || !S.remote) return;
+    const raw = S.remote.view();
+    if (!raw || !raw.me || !raw.table) { remoteClose(); return; }
+    if (raw === S.raw) return;   // 还是同一包（联机画面别的地方重画）
+    const pre = S.rv, v = fromPacket(raw);
+    S.raw = raw; S.rv = v;
+    if (pre.over && !v.over) {
+      dropSettle();
+      S.n += 1; S.banner = false; S.draft = {}; S.msg = ""; S.last.shown = null; S.anim = { deal: true };
+      if (S.life) S.life.outcome = null;
+    } else if (v.round !== pre.round) S.draft = {};
+    sync();
+    if (v.over && !pre.over) settleStart(CUI().settle.align(pre, v));
+    render();
+  }
+  /** 押注 / 不押：发指令（一次只发一个，回来之前不再发）；没做成写在操作栏里，攒好的押注留着 */
+  function remoteAct(a) {
+    if (!S || !S.remote || S.busy) return;
+    const src = S.remote;
+    S.busy = true; S.msg = "";
+    const done = (r, e) => {
+      if (!S || S.remote !== src) return;
+      S.busy = false;
+      if (e || (r && r.ok === false)) S.msg = (e && e.message) || (r && r.error) || "没做成";
+      else S.draft = {};
+      render();
+    };
+    let p;
+    try { p = Promise.resolve(src.act(a)); } catch (e) { done(null, e); return; }
+    p.then(r => done(r), e => done(null, e));
+  }
+  function remoteBack() {
+    const src = S && S.remote;
+    remoteClose();
+    if (src && src.back) src.back();
+  }
+  /** 收起联机牌桌（回大厅、离桌了） */
+  function remoteClose() {
+    if (!S || !S.remote) return;
+    leave();
+    remoteOff();
+    S = null;
+  }
+  /** #scr-ccg 不再挂联机牌桌（本机开局、回设置页之前也调：先把联机的收起来） */
+  function remoteOff() {
+    const scr = $("scr-ccg");
+    if (!scr || !scr.classList.contains("cc-online")) return;
+    scr.classList.remove("cc-online");
+    scr.hidden = true;
+  }
+  /** 能不能离桌：赌命桌押了还没结算不能（押坚毅只在结算时出账，房主那边 trpg.js · trpgBlackMarketLeave 也拦）；押筹码的随时能走 */
+  function remoteCanLeave() {
+    const v = curView();
+    return !S.life || v.over || !v.me.slips.length;
+  }
+  function remoteBannerBtns() {
+    const R = UI_CONFIG.remote;
+    return `${S.casino.onLeave ? btn("leave", "离桌", { primary: true, title: S.casino.leaveTitle || "" }) : ""}${btn("back", esc(R.back), { title: R.backHint })}`;
+  }
+  /** 房主发来的这一手：赌命桌的包里没有坚毅的数字（online-view.js · projectGuessGame）——每格押上几点照规则配置补回来（规则文字，同本机的牌桌）；
+   *  带「坚毅」两个字、过不了联机白名单的那几条记录（开局说明、押注、押输了的结算）照规则层（counter-cards-guess.js）同一句话写回来
+   *  （标点照白名单的写法 NFKC：同一张记录里别的几条是白名单规整过的） */
+  function fromPacket(raw) {
+    if (!raw.table.life) return raw;
+    const t = G().tableOf(G().GUESS_CONFIG.life.id), at = (r) => t.stake[Math.max(0, Math.min(t.stake.length - 1, (Number(r) || 1) - 1))];
+    const v = Object.assign({}, raw, { table: Object.assign({}, raw.table, { minBet: t.stake.slice(), dealer: raw.table.dealer || t.dealer }), minBet: at(raw.round),
+      legal: raw.legal.map(o => (o.type === "bet" ? Object.assign({}, o, { stake: at(o.round || raw.round) }) : o)),
+      me: Object.assign({}, raw.me, { slips: raw.me.slips.map(x => Object.assign({}, x, { stake: at(x.round) })) }) });
+    v.log = raw.log.map(e => (e.text ? e : Object.assign({}, e, { text: lifeLine(e, v).normalize("NFKC") })));
+    return v;
+  }
+  function lifeLine(e, v) {
+    const me = v.me;
+    if (e.t === "open") return `${v.table.name}：${v.table.dealer}抽了一张元素、一张天气、一张层牌，都盖在桌上。押的是坚毅生命，每格押上固定的点数。`;
+    if (e.t === "bet") return `${me.name}押上坚毅：${me.slips.filter(x => x.round === e.r).map(x => `${G().label(x.result)}（${x.odds} 倍，押上 ${x.stake} 点）`).join("、")}。`;
+    if (e.t === "pay") {
+      const hits = me.slips.filter(x => x.win);
+      return `${me.name}：${[hits.length ? `押中 ${hits.length} 格，赢得 ${G().prizeText(me.prize || { kuizhi: 0, items: [] })}` : "没押中", me.hurt ? UI_CONFIG.life.hurt : ""].filter(Boolean).join("；")}。`;
+    }
+    return "";
+  }
+
   /* ---------- 点击 ---------- */
   function onClick(e) {
     const b = e.target && e.target.closest ? e.target.closest("[data-ccg]") : null;
@@ -565,12 +710,13 @@
       case "start": start({ table: SETUP.table }); return;
       case "setup": open(); return;
       case "title": toTitle(); return;
-      case "leave": if (S && S.casino) casinoHook("onLeave"); else leaveLife(); return;   // 赌场桌：离桌结算回钱包（#528）
+      case "leave": if (S && S.casino) casinoHook("onLeave"); else leaveLife(); return;   // 赌场桌：离桌结算回钱包（#528）；联机牌桌：发离桌指令（#526）
+      case "back": casinoHook("onBack"); return;                                            // 联机牌桌（#526）：回赌场大厅，不离桌
       case "casinoAgain": casinoHook("onAgain"); return;                                    // 赌场桌：同一张桌子再来一手（再交入场费）
     }
-    if (!S || !S.hand) return;
+    if (!S || (!S.hand && !S.remote)) return;
     switch (d.ccg) {
-      case "again": if (deal()) render(); else if (S.life) render(); else { renderSetup(); show("setup"); } break;
+      case "again": if (S.remote) break; if (deal()) render(); else if (S.life) render(); else { renderSetup(); show("setup"); } break;
       case "pick": pick(Number(d.result)); break;
       case "amt": adjust(Number(d.result), Number(d.d) || 0); break;
       case "bet": humanAct({ type: "bet", bets: Object.assign({}, S.draft) }); break;
@@ -598,6 +744,8 @@
 
   root.CounterCardsGuessUI = {
     UI_CONFIG, open, start, startLife, blackMarketHtml, online: onlineNow, render, weatherFace,
-    state: () => S, view: () => (S && S.hand ? G().view(S.hand, meId()) : null), act: humanAct
+    // 联机牌桌（#526）
+    remote, remoteSync, remoteClose, isRemote: () => !!(S && S.remote),
+    state: () => S, view: () => (S && (S.hand || S.remote) ? curView() : null), act: humanAct
   };
 })(typeof window !== "undefined" ? window : globalThis);
