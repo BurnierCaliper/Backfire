@@ -5,7 +5,8 @@
 //   不行动（只走回合流转：回合开始 / 结束的结算照常）。
 // 角色：走单局的升级流程（主属性加点、第一个合法奖励），武器等级 = clamp(round(等级 × 0.6), 1, 10)，满血，没有义体、不用道具。
 // 搜索：束搜索。每一步列出所有合法动作（角色和在场武器人的每个技能 × 每种分步选择 × 每个目标、移动、结束回合），
-//   在沙盒里试跑，按「累计伤害」排序；同一种资源状态只留伤害最高的一个，免得束里塞满同一条路的变体、把攒资源的路线挤掉。
+//   在沙盒里试跑，按「累计伤害」排序（列动作、存取局面、试跑、平行世界是规则环境里共用的 BattleSearch，sim-search.js；
+//   看情况用技能的打法 BattleSim.SKILL_POLICY 用的是同一份）；同一种资源状态只留伤害最高的一个，免得束里塞满同一条路的变体、把攒资源的路线挤掉。
 //   每个候选在几组不同的骰子（平行世界）下各跑一遍取平均，同一步的所有候选用同一批种子（公平比较）；
 //   最后把找到的序列换新的种子重放取平均，作为报告的 DPT（不会比搜索时更「走运」）。
 // 只算伤害（假人掉的血）；击破、治疗另算。协助攻击、失衡等要队友触发的收益不算。
@@ -52,25 +53,25 @@ function refillDummy(S) {
   });
 }
 
-/* ---------- 局面存取（state + LEDGER） ---------- */
+/* ---------- 局面存取、列动作、试跑：规则环境里的 BattleSearch（sim-search.js，和 BattleSim.SKILL_POLICY 共用） ---------- */
+// 存局面前清掉战斗日志（只是记录，规则不读；搜索要存几万份局面）
 function snap(c) {
   const S = c.S.state;
   S.logPages = []; S.log = [];
-  return { state: structuredClone(S), ledger: c.S.LEDGER.save() };
+  return c.BattleSearch.snap();
 }
-function load(c, s) {
-  const S = c.S.state;
-  const st = structuredClone(s.state);
-  Object.keys(S).forEach(k => { if (!(k in st)) delete S[k]; });
-  Object.assign(S, st);
-  c.S.LEDGER.load(JSON.parse(JSON.stringify(s.ledger)));
-}
+function load(c, s) { c.BattleSearch.load(s); }
+const signature = (c) => c.BattleSearch.signature();
+// 记录 / 重放用的编号：单位编号换成「@kit」（假人是 @dummy），重放时再换回当时场上的编号（武器人每次唤出编号都不一样）
+const DUMMY_ALIAS = {
+  token: u => (u.name === "训练假人" ? "@dummy" : "@" + u.kit),
+  find: (tok, live) => (tok === "@dummy" ? live.find(x => x.name === "训练假人") : undefined)
+};
+const tokenize = (c, cmd) => c.BattleSearch.tokenize(cmd, DUMMY_ALIAS);
+const resolve = (c, cmd) => c.BattleSearch.resolve(cmd, DUMMY_ALIAS);
+/** 列出合法动作：角色和在场武器人的每个技能 × 每种分步选择 × 每个目标、移动 */
+const candidateActions = (c) => c.BattleSearch.candidateActions();
 
-/** 用来判断「这一下有没有真的做了什么」以及去重 */
-function signature(S) {
-  return JSON.stringify(S.units.filter(u => !u._removed).map(u => [u.id, u.zone, u.hidden ? 1 : 0, u.dead ? 1 : 0, u.ap, u.bonus,
-    (u.layers || []).map(l => l.current), u.def, u.statuses, u.instant, u.self, u.resources, u.highEnergy, u.focuses]));
-}
 /** 资源状态（不含伤害）：同一种资源状态只留伤害最高的那个 */
 function bucketKey(S) {
   return JSON.stringify(S.units.filter(u => !u._removed).map(u => [u.kit, u.zone, u.hidden ? 1 : 0, u.dead ? 1 : 0,
@@ -78,77 +79,9 @@ function bucketKey(S) {
     + JSON.stringify(S.fields || {}) + JSON.stringify(S.weaponFallen || {});
 }
 
-/* ---------- 列出合法动作 ---------- */
-function actors(c) {
-  return c.S.state.units.filter(u => u.isPlayer && !u.hidden && !u.dead && !u._removed && !u.fused &&
-    ((u.ap || 0) > 0 || (u.bonus || 0) > 0) && !u.stunned);
-}
-function flowPicks(c, id, actor, picks, depth, out) {
-  if (out.length > 40) return;
-  let steps = [];
-  try { steps = c.skillFlowSteps(id, actor, picks) || []; } catch (e) { steps = []; }
-  const step = steps.find(s => picks[s.key] === undefined);
-  if (!step || depth > 6) { out.push(Object.assign({}, picks)); return; }
-  let vals = [];
-  if (step.type === "unit") vals = (step.units || []).map(u => u.id);
-  else if (step.type === "zone") vals = (step.zones || []).map(Number);
-  else vals = (step.options || []).map(o => o.value);
-  if (step.optional || !vals.length) vals = vals.concat([null]);
-  vals.forEach(v => flowPicks(c, id, actor, Object.assign({}, picks, { [step.key]: v }), depth + 1, out));
-}
-function candidateActions(c) {
-  const S = c.S.state, out = [];
-  actors(c).forEach(a => {
-    let list = [];
-    try { list = c.skillList(a) || []; } catch (e) { list = []; }
-    list.forEach(sk => {
-      const cost = c.skillCost(sk.id) || {};
-      if ((cost.ap || 0) > (a.ap || 0) || (cost.bonus || 0) > (a.bonus || 0)) return;
-      if (c.skillRequirementError(a, sk.id)) return;
-      const picksList = [];
-      flowPicks(c, sk.id, a, {}, 0, picksList);
-      picksList.forEach(picks => {
-        const flowTarget = picks.target;
-        const targets = flowTarget !== undefined ? [flowTarget] :
-          [null].concat(S.units.filter(u => !u.hidden && !u.dead && !u._removed).map(u => u.id));
-        targets.forEach(t => out.push({ type: "skill", actor: a.id, skill: sk.id, target: t || null, picks, label: `${a.name}·${sk.name}` }));
-      });
-    });
-    if ((a.bonus || 0) > 0 || (a.ap || 0) > 0) {
-      (c.zoneNeighbors(a.zone) || []).forEach(z => out.push({ type: "move", actor: a.id, dest: Number(z), label: `${a.name}·移动到${z}区` }));
-    }
-  });
-  return out;
-}
-/** 记录 / 重放用：单位编号换成「@kit」（假人是 @dummy），重放时再换回当时场上的编号（武器人每次唤出编号都不一样） */
-function tokenOf(S, id) {
-  const u = S.units.find(x => x.id === id);
-  if (!u) return id;
-  return u.name === "训练假人" ? "@dummy" : "@" + u.kit;
-}
-function idOf(S, tok) {
-  if (typeof tok !== "string" || tok[0] !== "@") return tok;
-  const live = S.units.filter(u => !u._removed);
-  const u = tok === "@dummy" ? live.find(x => x.name === "训练假人") : (live.find(x => x.kit === tok.slice(1) && !x.hidden) || live.find(x => x.kit === tok.slice(1)));
-  return u ? u.id : tok;
-}
-function tokenize(S, cmd) {
-  const out = Object.assign({}, cmd, { actor: tokenOf(S, cmd.actor) });
-  if (cmd.target) out.target = tokenOf(S, cmd.target);
-  if (cmd.picks) { out.picks = {}; Object.keys(cmd.picks).forEach(k => { out.picks[k] = typeof cmd.picks[k] === "string" ? tokenOf(S, cmd.picks[k]) : cmd.picks[k]; }); }
-  return out;
-}
-function resolve(S, cmd) {
-  const out = Object.assign({}, cmd, { actor: idOf(S, cmd.actor) });
-  if (cmd.target) out.target = idOf(S, cmd.target);
-  if (cmd.picks) { out.picks = {}; Object.keys(cmd.picks).forEach(k => { out.picks[k] = idOf(S, cmd.picks[k]); }); }
-  return out;
-}
+/** 照战斗指令执行一次（格挡 / 协助按 BASIC_POLICY 选），再看假人要不要补满 */
 function execute(c, cmd) {
-  const plain = JSON.parse(JSON.stringify(cmd)); delete plain.label;
-  if (plain.type === "move") { delete plain.target; delete plain.picks; delete plain.skill; }
-  try { c.BattleCommands.execute(plain); } catch (e) { return false; }
-  try { c.BattleSim.resolveQueues(c.BattleSim.BASIC_POLICY); } catch (e) { /* 结算队列出错就当这一步无效 */ }
+  if (!c.BattleSearch.execute(cmd)) return false;
   refillDummy(c.S.state);
   return true;
 }
@@ -227,7 +160,7 @@ function search(kit, level, opt) {
   const turns = opt.turns, width = opt.beam;
   // 指定开局（做对照用）：先按顺序做完这几个动作，剩下的再搜
   const opening = (opt.opening || []).map(tok => Object.assign({ turn: 1, label: tok.label || tok.skill }, tok));
-  opening.forEach(tok => execute(c, resolve(S, tok)));
+  opening.forEach(tok => execute(c, resolve(c, tok)));
   const base = snap(c);
   let beam = [{ snaps: Array.from({ length: W }, () => base), dmg: dummyDamage(S), path: opening, turnDmg: [] }];
   const maxSteps = 10;   // 每回合最多几个动作（防止不耗行动的开关来回切）
@@ -266,23 +199,18 @@ function search(kit, level, opt) {
         ended.push({ style: styleKey(S), snaps: endSnaps, dmg: dEnd, pfut, score: dEnd + Math.max(pfut, gfut), path: node.path.concat([{ turn, end: true }]), turnDmg: node.turnDmg.concat([dEnd - node.start]), key });
         if (node.steps >= maxSteps) return;
         load(c, node.snaps[0]);
-        const before0 = signature(S);
+        const before0 = signature(c);
         const mark0 = dummyMark(S);
         // 先在基准世界里把编号换成「@kit」：各个世界里唤出的武器人编号不一样
-        const cands = candidateActions(c).map(cmd => tokenize(S, cmd));
+        const cands = candidateActions(c).map(cmd => tokenize(c, cmd));
         cands.forEach(tok => {
-          const snaps = [], ds = [];
-          let key0 = null;
-          for (let w = 0; w < W; w++) {
-            load(c, node.snaps[w]);
-            const before = w === 0 ? before0 : signature(S);
-            c.S.RNG.install(`dpt:${kit}:${level}:t${turn}:s${step}:w${w}`);
-            const ok = execute(c, resolve(S, tok));
-            if (w === 0 && (!ok || signature(S) === before)) return;          // 基准世界里没做成的不要
-            if (S.units.some(u => u.isPlayer && !u.weaponOf && u.dead)) return;   // 把自己打死的不要
-            ds.push(dummyDamage(S)); snaps.push(snap(c));
-            if (w === 0) key0 = bucketKey(S);
-          }
+          // 每个平行世界各跑一遍（BattleSearch.trial）：基准世界里没做成的不要，把自己打死的不要
+          const r = c.BattleSearch.trial(node.snaps, tok, {
+            before0, alias: DUMMY_ALIAS, seed: w => `dpt:${kit}:${level}:t${turn}:s${step}:w${w}`, exec: cmd => execute(c, cmd),
+            reject: () => S.units.some(u => u.isPlayer && !u.weaponOf && u.dead), measure: () => dummyDamage(S), snap: () => snap(c), onBase: () => bucketKey(S)
+          });
+          if (!r) return;
+          const snaps = r.snaps, ds = r.vals, key0 = r.base;
           // 回合中途也往后看：这一步给假人挂上 / 改了会持续打伤害的东西（当下几乎没伤害），
           // 只按当回合伤害排序的话还没到回合结束就被剪掉了。只在基准世界里看一次（省时间）
           let future = node.future || 0;
@@ -339,8 +267,8 @@ function replay(kit, level, path, seed, turns) {
   let start = 0, skipped = 0;
   for (const a of path) {
     if (a.end) { endTurn(c); const d = dummyDamage(S); perTurn.push(d - start); start = d; continue; }
-    const before = signature(S);
-    if (!execute(c, resolve(S, a)) || signature(S) === before) skipped++;
+    const before = signature(c);
+    if (!execute(c, resolve(c, a)) || signature(c) === before) skipped++;
   }
   while (perTurn.length < turns) { endTurn(c); const d = dummyDamage(S); perTurn.push(d - start); start = d; }
   return { total: dummyDamage(S), perTurn, skipped };
