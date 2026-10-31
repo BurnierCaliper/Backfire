@@ -1,5 +1,5 @@
-// 联机牌桌的画面（#526 第 3 步）：联机跑团坐着的那一局用本机那几张牌桌画（High Flux：counter-cards-ui.js，Flux Duel / Hold'em：flux-ui.js），
-// 操作发联机指令；结算前的过渡、结算横幅、记录（最新的在最下面）和本机一样。
+// 联机牌桌的画面（#526 第 3 步）：联机跑团坐着的那一局用本机那几张牌桌画（High Flux：counter-cards-ui.js，Flux Duel / Hold'em：flux-ui.js，
+// 猜大猜小：counter-cards-guess-ui.js，第 4 步），操作发联机指令；结算前的过渡、结算横幅、记录（最新的在最下面）和本机一样。
 // 一边是真的联机房间（HotseatGame + online-view.js 白名单，tests/casino-online.helper.js），一边是 game.html 的牌桌（tests/mini-dom.js），
 // 牌桌只拿玩家真的收到的那一份包（src.view），每走一步再拿新的一包（remoteSync）。
 "use strict";
@@ -14,7 +14,7 @@ function page() {
   const html = read("game.html"), body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"));
   const P = MD.create(body, { media: (q) => /prefers-reduced-motion: reduce/.test(q) });
   const ctx = vm.createContext(P.window);
-  ["engine.js", "icons.js", "weather-fx.js", "pause-menu.js", "matchup-ui.js"].concat(X.RULES, ["counter-cards-ui.js", "flux-ui.js", "flux-duel-ui.js", "flux-holdem-ui.js", "casino-online-ui.js"])
+  ["engine.js", "icons.js", "weather-fx.js", "pause-menu.js", "matchup-ui.js"].concat(X.RULES, ["counter-cards-ui.js", "flux-ui.js", "flux-duel-ui.js", "flux-holdem-ui.js", "counter-cards-guess-ui.js", "casino-online-ui.js"])
     .forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
   const doc = P.document;
   return { w: P.window, doc, $: (s) => doc.querySelector(s), $$: (s) => Array.from(doc.querySelectorAll(s)) };
@@ -33,6 +33,23 @@ function seatSrc(r, who, kit, extra) {
     leave: () => { r.send(who, { op: "leave", kit }); pull(); },
     back: () => { src.backs = (src.backs || 0) + 1; },
     label: "桌子", who: "对手：谁", oppTag: "主持人", level: "normal"
+  }, extra || {});
+  return { src, pull, sent };
+}
+/** 黑市赌命桌（#526）那一手接到牌桌上：view 是玩家真的收到的那一份包里 life 的那一手，dead 是包里的结论（房主那边算的） */
+function lifeSrc(r, who, kit, extra) {
+  let cur = null, row = null;
+  const sent = [];
+  const pull = () => { row = (r.casino(who).life || []).find(x => x.kit === kit) || null; cur = row ? plain(row.game) : null; return cur; };
+  pull();
+  const res = (ack) => Promise.resolve(ack.ok ? { ok: true } : { ok: false, error: ack.error });
+  const src = Object.assign({
+    view: () => cur,
+    act: (a) => { sent.push(plain(a)); return res(r.send(who, { op: "act", kit, action: a })); },
+    leave: () => { const ack = r.send(who, { op: "leave", kit }); pull(); return res(ack); },
+    back: () => { src.backs = (src.backs || 0) + 1; },
+    get dead() { return !!(row && row.dead); },
+    label: "瑞比下注", who: "庄家：主持人", dealer: "主持人"
   }, extra || {});
   return { src, pull, sent };
 }
@@ -202,6 +219,91 @@ test("Flux Hold'em · 多人桌的联机牌桌：每个座位写坐的是玩家 
   UI.remoteClose();
 });
 
+test("猜大猜小 · 押筹码的联机牌桌（counter-cards-guess-ui.js 的那一张）：点格子攒押注、「押注」一次交上去 = 发联机指令；这一手结算了先放结算前的过渡、再弹结算横幅（离桌、返回赌场，没有「再来一手」）；记录最新的在最下面", async () => {
+  const r = room("CASINO-TABLE-GUESS"), p = page(), UI = p.w.CounterCardsGuessUI;
+  ok(r.send("p2", { op: "open", kit: "ruby" }));
+  ok(r.send("p2", { op: "sit", kit: "ruby", table: "guess-hall", buyIn: 40, dealer: "ai" }));
+  r.book().wallets.ruby.seat.game.secret = { element: "fire", weather: "heat", layer: "flesh" };   // +2（第一轮 18 倍）
+  const { src, pull, sent } = seatSrc(r, "p2", "ruby", { label: "猜大猜小 · 大厅 · 买入 40 枚", who: "庄家：赌场" });
+  assert.equal(UI.remote(src), true);
+  const scr = p.$("#scr-ccg");
+  assert.ok(scr.classList.contains("cc-online") && !scr.hidden, "牌桌露出来，挂上 .cc-online（联机玩家页放行它）");
+  assert.ok(!p.$("#ccg-game").hidden && p.$("#ccg-setup").hidden);
+  assert.match(p.$("#ccg-top").textContent, /猜大猜小 · 大厅 · 买入 40 枚 · 庄家：赌场/);
+  assert.ok(p.$('#ccg-top [data-ccg="back"]') && p.$('#ccg-top [data-ccg="leave"]'), "顶栏有「返回赌场」「离桌」");
+  assert.equal(p.$$("#ccg-board .ccg-slot .cc-back").length, 3, "三张都盖着");
+  // 点 +2 那一格（默认最低注 2 枚），「+」加到 3 枚，「押注 3 枚」一次交上去 = 发联机指令
+  click(p.$('#ccg-board button[data-ccg="pick"][data-result="2"]'), "+2 那一格");
+  click(p.$('#ccg-actions button[data-ccg="amt"][data-d="1"]'), "多一枚");
+  click(p.$('#ccg-actions [data-ccg="bet"]'), "押注");
+  assert.deepEqual(sent, [{ type: "bet", bets: { "2": 3 } }]);
+  await tick(); pull(); UI.remoteSync();
+  assert.equal(UI.view().round, 2);
+  assert.ok(p.$('#ccg-board .ccg-slot[data-slot="element"].up'), "翻开元素");
+  assert.match(p.$("#ccg-board").textContent, /3 枚 ×18/, "押过的注摆在格子上（锁定的赔率）");
+  // 后两轮不押：第三轮那一下结算——先放过渡
+  click(p.$('#ccg-actions [data-ccg="pass"]'));
+  await tick(); pull(); UI.remoteSync();
+  click(p.$('#ccg-actions [data-ccg="pass"]'));
+  await tick(); pull(); UI.remoteSync();
+  assert.ok(UI.state().settle, "先放结算前的过渡（不是一下就弹横幅）");
+  assert.ok(p.$("#ccg-banner").hidden, "过渡中横幅还没弹");
+  assert.ok(p.$('#ccg-actions [data-ccg="skipSettle"]'), "过渡中的操作栏：「直接看结算」（High Flux 那一份 CounterCardsUI.settle）");
+  click(p.$('#ccg-actions [data-ccg="skipSettle"]'));
+  const banner = p.$("#ccg-banner");
+  assert.ok(!banner.hidden, "跳过：弹出结算横幅");
+  assert.match(banner.textContent, /结果 \+2/); assert.match(banner.textContent, /押中 1 格，连本带利拿回 54 枚/);
+  assert.ok(banner.querySelector('[data-ccg="leave"]') && banner.querySelector('[data-ccg="back"]'), "离桌、返回赌场");
+  assert.ok(!banner.querySelector('[data-ccg="casinoAgain"]') && !banner.querySelector('[data-ccg="again"]'), "联机没有「再来一手」");
+  const items = p.$$("#ccg-side .cc-log li").map(li => li.textContent), log = src.view().log;
+  assert.equal(items[items.length - 1], log[log.length - 1].text, "记录最新的在最下面");
+  // 离桌：包里没有这一手了，牌桌自己收起
+  click(banner.querySelector('[data-ccg="leave"]'));
+  await tick(); UI.remoteSync();
+  assert.ok(scr.hidden && !scr.classList.contains("cc-online"), "离桌了：牌桌收起");
+  assert.match(r.mine("p2", "ruby").last, /离开猜大猜小 · 大厅/);
+});
+
+test("黑市赌命桌 · 联机牌桌：每格写「押上 1 点」（规则文字，照配置补回来——包里没有这个数）；押了还没结算「离桌」灰掉；结算横幅只写「坚毅受创」，死了写「永久死亡」，画面上没有坚毅的数字", async () => {
+  const r = room("CASINO-TABLE-LIFE"), p = page(), UI = p.w.CounterCardsGuessUI;
+  r.hero("ruby").shp = 1;
+  ok(r.send("p2", { op: "lifeSit", kit: "ruby" }));
+  r.book().life.ruby.hand.secret = { element: "fire", weather: "heat", layer: "armor" };   // 0：押 +2 的那一格输
+  const { src, pull, sent } = lifeSrc(r, "p2", "ruby");
+  assert.equal(UI.remote(src), true);
+  const top = () => p.$("#ccg-top");
+  assert.match(top().textContent, /黑市赌命桌/); assert.match(top().textContent, /瑞比下注 · 庄家：主持人/);
+  assert.match(p.$("#ccg-board").textContent, /主持人坐庄/);
+  assert.equal(top().querySelector('[data-ccg="leave"]').disabled, false, "还没押：能走");
+  click(p.$('#ccg-board button[data-ccg="pick"][data-result="2"]'), "+2 那一格");
+  assert.match(p.$("#ccg-actions").textContent, /押上 1 点坚毅/, "每格押上几点照规则配置写");
+  click(p.$('#ccg-actions [data-ccg="bet"]'), "押上坚毅");
+  assert.deepEqual(sent, [{ type: "bet", bets: { "2": 1 } }]);
+  await tick(); pull(); UI.remoteSync();
+  assert.equal(top().querySelector('[data-ccg="leave"]').disabled, true, "押了还没结算：离桌灰掉");
+  assert.match(p.$("#ccg-board").textContent, /押上 1 点 ×\d+/);
+  const recs = () => p.$$("#ccg-side .cc-log li").map(li => li.textContent);
+  assert.ok(recs().some(t => /^瑞比押上坚毅:\+2\(\d+(\.5)? 倍,押上 1 点\)。$/.test(t)), "过不了白名单的那条押注记录照规则层同一句话写回来：" + recs().join(" / "));
+  click(p.$('#ccg-actions [data-ccg="pass"]'));
+  await tick(); pull(); UI.remoteSync();
+  click(p.$('#ccg-actions [data-ccg="pass"]'));
+  await tick(); pull(); UI.remoteSync();
+  assert.equal(r.hero("ruby").dead, true, "房主那边：坚毅扣光，真死");
+  assert.ok(UI.state().settle, "先放结算前的过渡");
+  click(p.$('#ccg-actions [data-ccg="skipSettle"]'));
+  const banner = p.$("#ccg-banner").textContent;
+  assert.match(banner, /坚毅受创/);
+  assert.match(banner, /瑞比 坚毅耗尽——永久死亡/, "只照房主给的结论写永久死亡");
+  // 去掉规则文字（每格押上几点）以后，和坚毅挨着的地方不能有数字（同 tests/counter-cards-guess-modes.test.js）
+  const rest = p.$("#scr-ccg").textContent.replace(/押上 [124] 点坚毅|押上 [124] 点|第[一二三]轮 [124] 点|每格押上 [124 \/]+点/g, "");
+  assert.doesNotMatch(rest, /\d+\s*点坚毅|坚毅\s*[−\-+]?\d|剩\s*\d/);
+  assert.ok(p.$('#ccg-banner [data-ccg="leave"]') && p.$('#ccg-banner [data-ccg="back"]'));
+  click(p.$('#ccg-banner [data-ccg="leave"]'));
+  await tick(); UI.remoteSync();
+  assert.ok(p.$("#scr-ccg").hidden, "看完离桌：牌桌收起");
+  assert.equal((r.casino("p2").life || []).length, 0);
+});
+
 test("赌场大厅（casino-online-ui.js）接牌桌：坐下就开局的直接打开牌桌、收起大厅；牌桌上「返回赌场」回大厅（不离桌）；大厅里「打开牌桌」再打开", async () => {
   const r = room("CASINO-TABLE-LOBBY"), p = page();
   ok(r.send("p2", { op: "open", kit: "ruby" }));
@@ -268,7 +370,8 @@ test.after(async () => { if (browser) await browser.close(); if (cdp) await cdp.
 
 /** 页面上搭一个联机房间（自己当房主）、挂赌场大厅 */
 function setupOnline() {
-  Object.assign(CounterCardsUI.UI_CONFIG.settle, { lastMs: 60, judgeMs: 60, reducedJudgeMs: 60 });
+  // 结算前的过渡拨快（翻牌 / 亮牌那几步用 flipMs，#532）
+  Object.assign(CounterCardsUI.UI_CONFIG.settle, { lastMs: 60, flipMs: 60, judgeMs: 60, reducedJudgeMs: 60 });
   BattleSim.setup({ party: ["ruby", "helu", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "ONLINE-CASINO-UI" });
   TRPG.active = true;
   LEDGER.purse = { ruby: 30000, helu: 30000 };
@@ -285,7 +388,8 @@ function setupOnline() {
     open: c => trpgCasinoOpen(c.kit), buy: c => trpgCasinoBuy(c.n, c.kit, c.kit), sell: c => trpgCasinoSell(c.n, c.kit, c.kit),
     sit: c => trpgCasinoSitAt(c.kit, c.table, c.buyIn, { dealer: c.dealer === "gm" ? "gm" : "ai" }),
     act: c => trpgCasinoAct(c.kit, c.action, {}), leave: c => trpgCasinoLeave(c.kit),
-    holdemOpen: c => trpgCasinoHoldemOpen(c.kit, c.table, c.buyIn, c.size), holdemStart: c => trpgCasinoHoldemStart(c.table, c.kit)
+    holdemOpen: c => trpgCasinoHoldemOpen(c.kit, c.table, c.buyIn, c.size), holdemStart: c => trpgCasinoHoldemStart(c.table, c.kit),
+    lifeSit: c => trpgBlackMarketSit(c.kit)   // 黑市赌命桌（#526）
   };
   let view = null, x = null;
   const pull = () => {
@@ -303,17 +407,29 @@ function setupOnline() {
   window.__cso = x;
   x.sync();
 }
-/** 牌桌上一步（K = cc / fd / fh）：过渡中等着；横幅点「继续」；轮到自己出牌点牌（Duel 层牌、元素牌各一张再暗出）；下注点过牌 / 跟注 / 不加注…… */
+/** 牌桌上一步（K = cc / fd / fh / ccg）：过渡中等着；横幅点「继续」；轮到自己出牌点牌（Duel 层牌、元素牌各一张再暗出）；下注点过牌 / 跟注 / 不加注……；
+ *  猜大猜小：第一轮点一格再「押注」，后两轮不押，横幅就是这一手的结算 */
 function tableStep(K) {
   const q = (s) => document.querySelector(s), A = "data-" + K, scr = q("#scr-" + K);
   const box = window.__cso.el;
   const overflow = Math.max(scr.scrollWidth, document.documentElement.scrollWidth, box && !box.hidden ? box.scrollWidth : 0) - innerWidth;
-  const UI = { cc: CounterCardsUI, fd: FluxDuelUI, fh: FluxHoldemUI }[K], S = UI.state();
+  const UI = { cc: CounterCardsUI, fd: FluxDuelUI, fh: FluxHoldemUI, ccg: CounterCardsGuessUI }[K], S = UI.state();
   const shown = !!(scr.classList.contains("cc-online") && getComputedStyle(scr).display !== "none");
   if (!S || !S.remote) return { closed: true, overflow };
   if (S.settle) return { settle: S.settle.phase, overflow, shown };
   if (S.busy) return { wait: true, overflow, shown };
   const banner = q("#" + K + "-banner");
+  if (K === "ccg") {
+    if (!banner.hidden) return { done: true, overflow, shown };
+    const v = UI.view();
+    if (!v || !v.myTurn) return { wait: true, overflow, shown };
+    const go = q('#ccg-actions [data-ccg="bet"]'), cell = q('#ccg-board button[data-ccg="pick"]');
+    if (v.round === 1 && go && !go.disabled) { go.click(); return { overflow, shown }; }
+    if (v.round === 1 && cell) { cell.click(); return { overflow, shown }; }
+    const pass = q('#ccg-actions [data-ccg="pass"]');
+    if (pass) { pass.click(); return { overflow, shown }; }
+    return { wait: true, overflow, shown };
+  }
   if (!banner.hidden) {
     if (banner.querySelector(".cc-final")) return { done: true, overflow, shown };
     banner.querySelector(`[${A}="dismiss"]`).click();
@@ -337,12 +453,12 @@ function tableStep(K) {
 async function waitIn(page, fn, arg, what) {
   try { await page.waitForFunction(fn, arg, { timeout: 5000 }); } catch (e) {
     const at = await page.evaluate(() => ({ lobby: window.__cso.el.hidden ? "（大厅收着）" : window.__cso.el.textContent.slice(0, 300),
-      tables: ["cc", "fd", "fh"].map(k => k + ":" + document.querySelector("#scr-" + k).className + " " + (document.querySelector("#" + k + "-actions") || {}).textContent) }));
+      tables: ["cc", "fd", "fh", "ccg"].map(k => k + ":" + document.querySelector("#scr-" + k).className + " " + (document.querySelector("#" + k + "-actions") || {}).textContent) }));
     throw new Error(`等「${what}」超时：${JSON.stringify(at)}`);
   }
 }
 
-test("真浏览器（手机 390×844）：联机玩家页上从赌场大厅坐下，High Flux、Flux Duel、Flux Hold'em（赌场桌、多人桌）各打一局——用本机那几张牌桌、结算前的过渡照常放，不报错、没有横向溢出", { timeout: 300000 }, async (t) => {
+test("真浏览器（手机 390×844）：联机玩家页上从赌场大厅坐下，High Flux、Flux Duel、Flux Hold'em（赌场桌、多人桌）、猜大猜小（押筹码的赌场桌、黑市赌命桌）各打一局——用本机那几张牌桌、结算前的过渡照常放，不报错、没有横向溢出", { timeout: 300000 }, async (t) => {
   const b = await uiBrowser();
   if (!b) { t.skip(skipWhy); return; }
   const context = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -356,12 +472,15 @@ test("真浏览器（手机 390×844）：联机玩家页上从赌场大厅坐�
     { K: "cc", sit: '[data-cso="sit"][data-table="hall"][data-dealer="ai"]' },
     { K: "fd", sit: '[data-cso="sit"][data-table="duel-hall"][data-dealer="ai"]' },
     { K: "fh", sit: '[data-cso="sit"][data-table="holdem-hall"][data-dealer="ai"]' },
-    { K: "fh", multi: true }
+    { K: "fh", multi: true },
+    // 猜大猜小（#526 第 4 步）：押筹码的赌场桌、黑市赌命桌（押坚毅，上桌就打开牌桌）
+    { K: "ccg", sit: '[data-cso="sit"][data-table="guess-hall"][data-dealer="ai"]' },
+    { K: "ccg", life: true, sit: '[data-cso="lifeSit"]' }
   ];
   const bad = [], phases = new Set();
   for (const gm of games) {
     // 打开大厅、坐下（多人桌：开一桌两人桌，开桌的人开局，空座位 AI 补）——坐下就开局的直接打开牌桌
-    const name = gm.K + (gm.multi ? "（多人桌）" : "");
+    const name = gm.K + (gm.multi ? "（多人桌）" : gm.life ? "（赌命桌）" : "");
     // 直接打开（页面上 online-ui.js 自己挂的那一份也在听「赌场」按钮，它没连上房间，会先把按钮收掉）
     await page.evaluate(() => window.__cso.open());
     await waitIn(page, () => !window.__cso.el.hidden, null, name + "：打开大厅");
@@ -382,15 +501,16 @@ test("真浏览器（手机 390×844）：联机玩家页上从赌场大厅坐�
       done = !!m.done;
       if (m.settle || m.wait) await page.waitForTimeout(20); else await page.waitForTimeout(5);
     }
-    if (over > 1) bad.push(`${gm.K}${gm.multi ? "（多人桌）" : ""}：横向溢出 ${over}px`);
-    assert.ok(done, `${gm.K}${gm.multi ? "（多人桌）" : ""}：打完了，有总结算`);
+    if (over > 1) bad.push(`${name}：横向溢出 ${over}px`);
+    assert.ok(done, `${name}：打完了，有总结算`);
     // 离桌：牌桌收起，回大厅
     await page.evaluate((K) => document.querySelector(`#${K}-banner [data-${K}="leave"]`).click(), gm.K);
     await waitIn(page, () => !window.__cso.el.hidden, null, name + "：离桌回到大厅");
     const back = await page.evaluate((K) => ({ table: document.querySelector("#scr-" + K).classList.contains("cc-online"), lobby: !window.__cso.el.hidden,
       overflow: Math.max(window.__cso.el.scrollWidth, document.documentElement.scrollWidth) - innerWidth, last: window.__cso.el.textContent.includes("上一局：") }), gm.K);
-    assert.ok(!back.table && back.lobby, `${gm.K}：离桌回到大厅`);
-    assert.ok(back.last, `${gm.K}：大厅写着上一局的结算`);
+    assert.ok(!back.table && back.lobby, `${name}：离桌回到大厅`);
+    // 赌命桌离了桌就没有了（结算写在横幅上；坚毅受创这种字联机包里不放），别的桌子大厅写着上一局的结算
+    if (!gm.life) assert.ok(back.last, `${name}：大厅写着上一局的结算`);
     if (back.overflow > 1) bad.push(`大厅横向溢出 ${back.overflow}px`);
     await page.evaluate(() => window.__cso.el.querySelector('[data-cso="close"]').click());
   }

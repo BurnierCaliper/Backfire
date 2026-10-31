@@ -901,7 +901,7 @@
       <h3>商人</h3>${list.map(m => merchantEdit && merchantEdit.id === m.id ? merchantEditorHtml(merchantEdit) : card(m)).join("") || '<p class="r-hint">还没有商人。</p>'}
       ${blackMarketHtml()}`;
   };
-  /* ---------- 黑市赌命桌（#489，counter-cards-guess-ui.js）：主持人当庄，角色押坚毅；联机开着房间时不开 ---------- */
+  /* ---------- 黑市赌命桌（#489，counter-cards-guess-ui.js）：主持人当庄，角色押坚毅；联机开着房间时这里不开（联机玩家在探索环节的「赌场」里上桌，#526） ---------- */
   function blackMarketHtml() {
     if (!window.CounterCardsGuessUI) return "";
     return `<h3>黑市</h3>${CounterCardsGuessUI.blackMarketHtml(heroes().filter(h => !h.dead).map(h => ({ id: h.kit, name: h.name })),

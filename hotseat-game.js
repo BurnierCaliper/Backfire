@@ -373,8 +373,9 @@
     if ((u.attrPicks || []).length >= 1 && (u.attrPicks || []).includes(c.attr)) fail("8 级的属性点不能加在曾经加过的同一项上");
     return u;
   }
-  /* ---------- 赌场（#487）：联机跑团的探索环节里去赌场打 High Flux、Flux Duel（#526） ----------
-   * 规则在 trpg.js · trpgCasino…（钱在 casino.js，牌局在 counter-cards.js / flux-duel.js）。每位玩家的筹码钱包按操控的角色记（LEDGER.casino.wallets[kit]），
+  /* ---------- 赌场（#487）：联机跑团的探索环节里去赌场打 High Flux、Flux Duel、Flux Hold'em、猜大猜小（#526） ----------
+   * 规则在 trpg.js · trpgCasino…（钱在 casino.js，牌局在 counter-cards.js / flux-duel.js / flux-holdem.js / counter-cards-guess.js）；
+   * 黑市赌命桌（押坚毅，#526）在 trpg.js · trpgBlackMarket…，扣坚毅、真死都在房主这边算。每位玩家的筹码钱包按操控的角色记（LEDGER.casino.wallets[kit]），
    * 买筹码 / 卖筹码、押奎支都走这名角色的私人钱包。三种桌子：AI 坐庄、主持人坐庄（赌场桌，收入场费）、玩家对赌（不收入场费）。
    * 玩家只能动自己角色的钱包、自己坐着的那一局；主持人替主持人坐庄的那几桌出庄家那一方，也能让任何人离桌（卡住的桌子）。
    * 每一步都写进存档（rememberCampaign）；不进小队聊天——谁赢谁输、钱包剩多少只给自己看。 */
@@ -382,19 +383,33 @@
   function casinoView(id) {
     if (typeof trpgCasinoPacket !== "function" || typeof TRPG === "undefined" || !TRPG.active || config.mode !== "trpg" || !session) return null;
     const kits = heroes().filter(u => !u.dead && session.ownerOf(u.id) === id).map(u => u.kit);
-    try { return trpgCasinoPacket(kits, id === gm()); } catch (e) { return null; }
+    // 死了的角色只用来看黑市赌命桌上这一手的结果（#526：死在桌上的，看完离桌），钱包、别的桌子不再列（会话的行动名单里没有死了的，按角色卡归谁）
+    const gone = heroes().filter(u => u.dead && deadOwner(u) === id).map(u => u.kit);
+    try { return trpgCasinoPacket(kits, id === gm(), gone); } catch (e) { return null; }
   }
+  /** 死了的角色归谁操控：会话的行动名单里已经没有他了，按角色卡记的（ownerByKit） */
+  const deadOwner = (u) => ownerByKit[u.kit] || gm();
   function casinoExploring() {
     if (typeof trpgCasinoPacket !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有联机跑团有赌场");
     if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能去赌场");
     if (typeof Screens !== "undefined" && Screens && typeof Screens.is === "function" && Screens.is("battle")) fail("先回到探索环节再去赌场");
   }
-  /** 牌局里的一步：只拷规则认的字段（各玩法的 act 再查合不合法；Flux Duel 暗出要 layer + element，#526） */
+  /** 牌局里的一步：只拷规则认的字段（各玩法的 act 再查合不合法；Flux Duel 暗出要 layer + element，#526）。
+   *  猜大猜小的押注 bets（#526）：{ 结果: 押几枚 }，赌命桌每格写 true；押哪几格、押多少对不对由规则层查 */
   function casinoAction(a) {
     const out = {};
     if (!a || typeof a !== "object") return out;
     for (const k of ["type", "op", "where", "card", "layer", "element"]) if (typeof a[k] === "string") out[k] = a[k];
     if (a.amount != null && Number.isFinite(Number(a.amount))) out.amount = Number(a.amount);
+    const b = a.bets;
+    if (b && typeof b === "object" && !Array.isArray(b)) {
+      out.bets = {};
+      Object.keys(b).slice(0, 12).forEach(k => {
+        if (!/^[-+]?\d{1,2}$/.test(k)) return;
+        if (b[k] === true) out.bets[k] = true;
+        else if (Number.isFinite(Number(b[k]))) out.bets[k] = Number(b[k]);
+      });
+    }
     return out;
   }
   /** 主持人自己坐的 Flux Hold'em 多人桌座位（#526）：坐下、开局、出牌、离桌、托管后接着打——不用角色，c.table = 哪一桌 */
@@ -419,8 +434,11 @@
     casinoExploring();
     if (c.asGm) return casinoGmSeat(c);
     const kit = String(c.kit || ""), u = heroes().find(h => h.kit === kit && !h.dead), isGM = sender === gm();
+    // 死在黑市赌命桌上的角色（#526）：操控他的玩家看完这一手的结果离桌（别的都不能做）
+    const dead = !u ? heroes().find(h => h.kit === kit && h.dead) : null;
+    const gone = !!dead && c.op === "leave" && deadOwner(dead) === sender && typeof trpgBlackMarketSeat === "function" && !!trpgBlackMarketSeat(kit);
     // 坐着的角色死了 / 离队了：主持人照样能让他离桌（不然那一桌一直卡着）
-    if (!u && !(isGM && c.op === "leave")) fail("没有这名角色");
+    if (!u && !(isGM && c.op === "leave") && !gone) fail("没有这名角色");
     const mine = !!u && session.ownerOf(u.id) === sender;
     const own = () => { if (!mine) fail("只能用自己角色的钱包"); };
     const op = String(c.op || "");
@@ -445,12 +463,15 @@
         case "holdemJoin": own(); notes = trpgCasinoHoldemJoin(kit, String(c.table || ""), c.seat ? String(c.seat) : null); break;
         case "holdemStart": own(); notes = trpgCasinoHoldemStart(String(c.table || ""), kit); break;
         case "holdemBack": own(); notes = trpgCasinoHoldemBack(String(c.table || ""), kit); break;
+        // 黑市赌命桌（#526）：自己的角色上桌（这一手结算了再点 = 再来一手），押注走下面的 act；结算在房主这边（trpg.js · trpgBlackMarketAct）
+        case "lifeSit": own(); notes = trpgBlackMarketSit(kit); break;
         case "act":
           if (c.asDealer) { if (!isGM) fail("只有主持人能替主持人坐庄的那一桌出牌"); }
           else own();
           notes = trpgCasinoAct(kit, casinoAction(c.action), { asDealer: !!c.asDealer });
           break;
-        case "leave": if (!mine && !isGM) fail("只能让自己的角色离桌"); notes = trpgCasinoLeave(kit); break;
+        // force：主持人让别人离桌（赌命桌押了还没结算也能走，这一手不算）
+        case "leave": if (!mine && !isGM && !gone) fail("只能让自己的角色离桌"); notes = trpgCasinoLeave(kit, { force: isGM && !mine }); break;
         default: fail("没有这种赌场操作");
       }
     } catch (e) { fail(e.message); }

@@ -1,14 +1,15 @@
-/* Antlerscale: Backfire · 联机跑团的赌场（#487）：探索环节里打 High Flux、Flux Duel、Flux Hold'em（#526）
- * 规则：hotseat-game.js · casinoCommand（指令 { type: "casino", op, kit, … }），trpg.js · trpgCasino…（钱包按角色记），
- *       casino.js（钱）、counter-cards.js / flux-duel.js / flux-holdem.js（牌局）。数据只用 view.casino（online-view.js · projectCasino 白名单）：
- *       自己角色的钱包、自己那一方的牌局 view；主持人另有自己坐庄的那几桌（庄家那一方）、自己坐的多人桌座位和谁坐在哪桌（公开的，没有牌）。
+/* Antlerscale: Backfire · 联机跑团的赌场（#487）：探索环节里打 High Flux、Flux Duel、Flux Hold'em、猜大猜小（#526）
+ * 规则：hotseat-game.js · casinoCommand（指令 { type: "casino", op, kit, … }），trpg.js · trpgCasino…（钱包按角色记）/ trpgBlackMarket…（黑市赌命桌），
+ *       casino.js（钱）、counter-cards.js / flux-duel.js / flux-holdem.js / counter-cards-guess.js（牌局）。数据只用 view.casino（online-view.js · projectCasino 白名单）：
+ *       自己角色的钱包、自己那一方的牌局 view、自己角色坐着的赌命桌（这一手和结论：死没死，坚毅的数字一个都没有）；
+ *       主持人另有自己坐庄的那几桌（庄家那一方）、自己坐的多人桌座位和谁坐在哪桌（公开的，没有牌）。
  *   赌场大厅（这个浮层）：
  *   玩家：探索环节标题工具栏「赌场」→ 浮层：选自己的角色（钱包按角色记）→ 钱包、兑换（从这名角色的钱包付 / 收奎支）；
- *         没坐桌时：赌场桌（AI 坐庄 / 主持人坐庄，收入场费）、开一桌对赌（High Flux 坐庄家或玩家、Flux Duel 坐甲或乙，押筹码 / 押奎支）、
- *         坐上别人开的对赌桌、Flux Hold'em 多人桌（开桌 / 坐下 / 开局）；坐着时：这一局的一行概况、「打开牌桌」「离桌」。
+ *         没坐桌时：赌场桌（AI 坐庄 / 主持人坐庄，收入场费；猜大猜小是赌场坐庄）、开一桌对赌（High Flux 坐庄家或玩家、Flux Duel 坐甲或乙，押筹码 / 押奎支）、
+ *         坐上别人开的对赌桌、Flux Hold'em 多人桌（开桌 / 坐下 / 开局）、黑市赌命桌（押坚毅，主持人坐庄）；坐着时：这一局的一行概况、「打开牌桌」「离桌」。
  *   主持人：探索顶栏「进入战斗环节」旁边「赌场」→ 浮层：自己坐庄的那几桌、多人桌（坐一个座位、开局）、谁坐在哪桌（可以让人离桌）。
- *   牌桌（#526）：「打开牌桌」用本机那张牌桌画（counter-cards-ui.js / flux-ui.js 的 remote：结算前的过渡、结算横幅、记录和本机一样），
- *   操作发联机指令；牌桌顶栏「返回赌场」回到这里（不离桌）。坐下就开局的（赌场桌、坐上对赌桌、开桌的人开局）做成了直接打开牌桌。
+ *   牌桌（#526）：「打开牌桌」用本机那张牌桌画（counter-cards-ui.js / flux-ui.js / counter-cards-guess-ui.js 的 remote：结算前的过渡、结算横幅、记录和本机一样），
+ *   操作发联机指令；牌桌顶栏「返回赌场」回到这里（不离桌）。坐下就开局的（赌场桌、坐上对赌桌、开桌的人开局、赌命桌上桌）做成了直接打开牌桌。
  *   浮层带 .ovl（联机玩家页 online.css 只放行 .ol-ui / .ovl 等，牌桌另加 .cc-online）；按钮沿用申请检定（.crq-*）的 44px。
  *   const x = CasinoOnlineUI.mount({ api, view: () => view, own, call }); x.sync(); x.destroy() */
 (function (root) {
@@ -20,15 +21,25 @@
   const PVP_SIDES = { highflux: [["dealer", "庄家"], ["player", "玩家"]], duel: [["a", "甲（第 1 轮先手）"], ["b", "乙"]] };
   const num = n => String(Math.round((Number(n) || 0) * 1000) / 1000);
   const btn = (attrs, label, o) => `<button type="button" class="g-btn ol-button crq-btn${o && o.primary ? " ol-primary" : ""}" ${attrs}${o && o.disabled ? " disabled" : ""}${o && o.title ? ` title="${esc(o.title)}"` : ""}>${label}</button>`;
-  const GAME_NAME = { highflux: "High Flux", duel: "Flux Duel", holdem: "Flux Hold'em" };
-  const gameName = (mode) => (mode === "highflux" && CC() ? CC().CC_CONFIG.name : GAME_NAME[mode] || GAME_NAME.highflux);
+  const GAME_NAME = { highflux: "High Flux", duel: "Flux Duel", holdem: "Flux Hold'em", guess: "猜大猜小" };
+  const GUESS = () => root.CounterCardsGuess || null;
+  const gameName = (mode) => (mode === "highflux" && CC() ? CC().CC_CONFIG.name : mode === "guess" && GUESS() ? GUESS().GUESS_CONFIG.name : GAME_NAME[mode] || GAME_NAME.highflux);
+  /** 赌命桌的字（结论只写「永久死亡」，不写数字）：读 counter-cards-guess-ui.js 的那一份 */
+  const lifeText = (k, dflt) => { const u = root.CounterCardsGuessUI; return (u && u.UI_CONFIG && u.UI_CONFIG.life && u.UI_CONFIG.life[k]) || dflt; };
 
   /** 坐着的这一局在大厅里写一行：第几轮、自己的筹码、底池、轮没轮到自己，后面是「打开牌桌」（open = 按钮的 data-cso 属性）。
-   *  牌桌画面（#526）在本机那几张牌桌上画（High Flux：counter-cards-ui.js，Flux Duel / Hold'em：flux-ui.js），见 openTable */
+   *  牌桌画面（#526）在本机那几张牌桌上画（High Flux：counter-cards-ui.js，Flux Duel / Hold'em：flux-ui.js，猜大猜小：counter-cards-guess-ui.js），见 openTable */
   function gameHtml(g, m, open) {
     if (!g) return "";
     const me = g.me || {}, chips = me.chips == null ? "∞" : me.chips;
     const state = g.over ? "这一局打完了" : g.myTurn ? "<b>轮到你</b>" : "等别人";
+    // 猜大猜小（#526）：一局就是一手——第几轮下注、押了几枚（赌命桌只写押了几格：坚毅的数字一个都不写）
+    if (g.mode === "guess") {
+      const life = !!(g.table && g.table.life), slips = me.slips || [];
+      const line = life ? `押了 ${slips.length} 格` : `桌上 ${esc(chips)} 枚 · 这一手押了 ${slips.reduce((s, x) => s + (Number(x.amount) || 0), 0)} 枚`;
+      return `<div class="cso-game"><p class="cso-line"><b>${esc(life ? g.table.name : gameName("guess"))}</b> · ${g.over ? "这一手结束" : `第 ${g.round} / ${g.rounds} 轮下注`} · ${line} · ${g.over ? "这一手打完了" : state}</p>
+        ${open ? `<div class="crq-state">${btn(open, g.over ? "看结算" : "打开牌桌", { primary: true })}</div>` : ""}</div>`;
+    }
     return `<div class="cso-game"><p class="cso-line"><b>${esc(gameName(g.mode || "highflux"))}</b> · ${g.over ? "对局结束" : `第 ${g.round} / ${g.rounds} 轮`} · 你 ${esc(chips)} 枚 · 底池 ${g.pot || 0} · ${state}</p>
       ${open ? `<div class="crq-state">${btn(open, g.over ? "看总结算" : "打开牌桌", { primary: true })}</div>` : ""}</div>`;
   }
@@ -40,6 +51,8 @@
       ${row.last ? `<p class="cso-line ol-muted">上一局：${esc(row.last)}</p>` : ""}`;
     const ex = `<div class="crq-state cso-ex"><label>买 <input type="number" min="1" step="1" value="${esc(m.draft.buy)}" data-cso-in="buy"> 枚</label>${btn(`data-cso="buy" ${data}`, `买（每枚 ${cfg.buy} 奎支）`, { disabled: row.purse < cfg.buy })}
       <label>卖 <input type="number" min="1" step="1" value="${esc(m.draft.sell)}" data-cso-in="sell"> 枚</label>${btn(`data-cso="sell" ${data}`, `卖（每枚 ${cfg.sell} 奎支）`, { disabled: !row.sellable, title: row.sellable ? "" : "赠送的筹码不能换成奎支" })}</div>`;
+    const life = (c.life || []).find(x => x.kit === k);
+    if (life) return wallet + lifeSeatHtml(life, m);   // 坐在黑市赌命桌上（#526）
     if (seat && seat.kind === "holdem") return wallet + holdemSeatHtml(row, c, m);
     if (seat) {
       // 牌局里桌上不够时从钱包补的（#520）：赌场桌算进买入，对赌写补了几枚
@@ -51,9 +64,12 @@
     }
     const tables = (c.tables || []).map(t => {
       const v = Math.max(t.minBuyIn, Number(m.draft.buyIn[t.id]) || t.minBuyIn);
-      return `<li class="crq-row cso-table"><div><b>${esc(t.name)}</b><small class="ol-muted"> · 桌上每枚 ${t.rate} 奎支 · 最低买入 ${t.minBuyIn} 枚（${num(t.minBuyInChips)} 枚筹码）· 入场费 ${t.entryFee} 枚（${num(t.entryFeeChips)} 枚筹码，每局一次）· AI 是${esc(LEVEL[t.difficulty] || "")}</small></div>
+      // 猜大猜小（#526）：庄家是赌场（只抽牌、不用做决定，没有 AI 也没有主持人坐庄），写每轮每格最低注；这里的一局就是一手
+      const guess = t.game === "guess";
+      const who = guess ? `庄家是赌场 · 每格最低注 ${esc((t.minBet || []).join(" / "))} 枚（一局就是一手）` : `AI 是${esc(LEVEL[t.difficulty] || "")}`;
+      return `<li class="crq-row cso-table"><div><b>${esc(t.name)}</b><small class="ol-muted"> · 桌上每枚 ${t.rate} 奎支 · 最低买入 ${t.minBuyIn} 枚（${num(t.minBuyInChips)} 枚筹码）· 入场费 ${t.entryFee} 枚（${num(t.entryFeeChips)} 枚筹码，每局一次）· ${who}</small></div>
         <div class="crq-state"><label>买入 <input type="number" min="${t.minBuyIn}" step="1" value="${v}" data-cso-buyin="${esc(t.id)}"> 枚</label>
-        ${btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="ai"`, "坐下（AI 坐庄）", { primary: true })}${t.gm === false ? "" : btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="gm"`, "坐下（主持人坐庄）")}</div></li>`;
+        ${btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="ai"`, guess ? "坐下（赌场坐庄）" : "坐下（AI 坐庄）", { primary: true })}${t.gm === false ? "" : btn(`data-cso="sit" ${data} data-table="${esc(t.id)}" data-dealer="gm"`, "坐下（主持人坐庄）")}</div></li>`;
     }).join("");
     // 对赌（#526：High Flux 坐庄家 / 玩家，Flux Duel 坐甲 / 乙）：等人坐的桌子写开桌的人、空着哪一方
     const open = (c.open || []).map(t => {
@@ -69,7 +85,26 @@
       ${btn(`data-cso="pvpOpen" ${data}`, "开一桌对赌")}</div>`;
     return `${wallet}${ex}<h3>赌场桌（收入场费）</h3><ul class="crq-list">${tables}</ul>
       <h3>玩家对赌（不收入场费）</h3>${pvp}${open ? `<ul class="crq-list">${open}</ul>` : '<p class="ol-muted">现在没有等人坐的对赌桌。</p>'}
-      ${holdemLobbyHtml(row, c, m)}`;
+      ${holdemLobbyHtml(row, c, m)}${lifeLobbyHtml(row)}`;
+  }
+  /* ---------- 黑市赌命桌（#526）：猜大猜小押坚毅，主持人坐庄（庄家只抽牌、不用做决定）----------
+   * 规则文字照配置写（每格押上几点是固定代价，同本机 counter-cards-guess-ui.js · blackMarketHtml）；不写、也根本拿不到这名角色还剩多少坚毅：
+   * 按钮不会因为坚毅变灰（押坚毅永远能下）。扣坚毅、真死都在房主那边算，这边只看到结论 */
+  function lifeLobbyHtml(row) {
+    const G = GUESS();
+    if (!G || !G.GUESS_CONFIG.life) return "";
+    const L = G.GUESS_CONFIG.life, C = CC() ? CC().CC_CONFIG.name : "High Flux";
+    return `<h3>${esc(L.name)}（押坚毅，主持人坐庄）</h3>
+      <p class="ol-muted">${esc(`${G.GUESS_CONFIG.name}（${C}），押的是坚毅生命：每格押上 ${L.stake.join(" / ")} 点（第一 / 二 / 三轮），押坚毅永远能下；不收入场费。`
+        + `押输了坚毅受创，坚毅扣光即真正死亡（状态记成死亡）。押中按赔率赢奎支，赔率高另给稀有材料。押了还没结算不能离桌。`)}</p>
+      <div class="crq-state">${btn(`data-cso="lifeSit" data-kit="${esc(row.kit)}"`, `${esc(row.name)} 上桌`)}</div>`;
+  }
+  /** 坐在赌命桌上：这一手的一行概况、「打开牌桌」、离桌（押了还没结算不能离桌）；死在桌上的写「永久死亡」（主持人那边算的结论） */
+  function lifeSeatHtml(s, m) {
+    const g = s.game || {}, data = `data-kit="${esc(s.kit)}"`, stuck = !g.over && ((g.me && g.me.slips) || []).length > 0;
+    return `<p class="cso-line"><b>${esc(s.name || "")}坐在${esc((g.table && g.table.name) || "")}</b>（押坚毅，主持人坐庄）${s.dead ? ` · <b class="ol-bad">${esc(lifeText("dead", "永久死亡"))}</b>` : ""}</p>
+      ${gameHtml(g, m, `data-cso="tableLife" ${data}`)}
+      <div class="crq-state">${btn(`data-cso="leave" ${data}`, "离桌", { disabled: stuck, title: stuck ? "押了还没结算，不能离桌：这一手留在桌上，回来接着押" : "" })}</div>`;
   }
   /* ---------- Flux Hold'em 多人桌（#526）：几名玩家同桌，空座位由这张桌子难度的 AI 补，主持人也能坐一个座位 ---------- */
   /** 一桌的座位：谁坐在哪（名字就写着是主持人 / AI；空着的写「空座位」，开局后由 AI 补；托管中的写出来） */
@@ -122,10 +157,13 @@
     const c = m.casino, head = `<header><h2>赌场</h2>${btn('data-cso="close"', "关闭")}</header>`;
     if (!c) return `<div class="ol-card crq-card cso-card">${head}<p class="ol-muted">只有联机跑团的探索环节能去赌场。</p></div>`;
     const mine = c.mine || [];
-    if (!mine.length) return `<div class="ol-card crq-card cso-card">${head}<p class="ol-muted">你还没有操控的角色：筹码钱包按角色记。</p></div>`;
+    // 死在黑市赌命桌上的角色（#526）：钱包不再列，只有这一手的结果（永久死亡），看完离桌
+    const gone = (c.life || []).filter(x => !mine.some(r => r.kit === x.kit)).map(x => `<section class="cso-deal">${lifeSeatHtml(x, m)}</section>`).join("");
+    const err = m.error ? `<p class="ol-bad" role="alert">${esc(m.error)}</p>` : "";
+    if (!mine.length) return `<div class="ol-card crq-card cso-card">${head}${gone || '<p class="ol-muted">你还没有操控的角色：筹码钱包按角色记。</p>'}${err}</div>`;
     const row = mine.find(r => r.kit === m.kit) || mine[0];
     const pick = mine.length > 1 ? `<div class="crq-state">${mine.map(r => btn(`data-cso="pick" data-kit="${esc(r.kit)}"`, esc(r.name), { primary: r.kit === row.kit })).join("")}</div>` : "";
-    return `<div class="ol-card crq-card cso-card">${head}${pick}${walletHtml(row, c, m)}${m.error ? `<p class="ol-bad" role="alert">${esc(m.error)}</p>` : ""}
+    return `<div class="ol-card crq-card cso-card">${head}${pick}${walletHtml(row, c, m)}${gone}${err}
       <p class="ol-muted cso-rule">赠送筹码只能和赌场对局下注、不能换成奎支；输的先扣赠送筹码，赢来的都是普通筹码。玩家对赌只能押普通筹码或奎支。
       牌局里桌上的筹码不够时先自动从钱包补到够用（对赌押筹码的只补普通筹码，押奎支的补奎支），钱包空了才问借不借。</p></div>`;
   }
@@ -134,8 +172,13 @@
     const c = m.casino, head = `<header><h2>赌场</h2>${btn('data-cso="close"', "关闭")}</header>`;
     if (!c) return `<div class="ol-card crq-card cso-card">${head}<p class="ol-muted">只有联机跑团的探索环节有赌场。</p></div>`;
     const dealing = (c.dealing || []).map(d => `<section class="cso-deal"><h3>你给 ${esc(d.name)} 坐庄 · ${esc(d.tableName || "")}</h3>${gameHtml(d.game, m, `data-cso="tableDeal" data-kit="${esc(d.kit)}"`)}</section>`).join("");
-    const seated = (c.seated || []).map(s => `<li class="crq-row"><div><b>${esc(s.name)}</b> · ${s.kind === "pvp" ? `${s.mode === "duel" ? "Flux Duel " : ""}对赌（${s.stakeKind === "chips" ? "押筹码" : "押奎支"}）对手 ${esc(s.opponent || "还没坐下")}` : s.kind === "holdem" ? `${esc(s.tableName || "")} · 多人桌${s.auto ? " · AI 托管中" : ""}` : `${esc(s.tableName || "")} · ${s.kind === "gm" ? "你坐庄" : "AI 坐庄"}`} · ${s.over ? "打完了" : s.round ? `第 ${s.round} 轮` : "等人"}</div>
-      <div class="crq-state">${btn(`data-cso="leave" data-kit="${esc(s.kit)}"`, "让他离桌", { title: "卡住的桌子：按离桌结算（打到一半的对赌算他认输）" })}</div></li>`).join("");
+    // 黑市赌命桌（kind "life"，#526）：你坐庄，庄家不用做决定；让他离桌 = 这一手押了还没结算的不算（同本机离桌）
+    const where = (s) => s.kind === "pvp" ? `${s.mode === "duel" ? "Flux Duel " : ""}对赌（${s.stakeKind === "chips" ? "押筹码" : "押奎支"}）对手 ${esc(s.opponent || "还没坐下")}`
+      : s.kind === "holdem" ? `${esc(s.tableName || "")} · 多人桌${s.auto ? " · AI 托管中" : ""}`
+      : s.kind === "life" ? `${esc(s.tableName || "")} · 你坐庄（押坚毅，庄家不用做决定）`
+      : `${esc(s.tableName || "")} · ${s.kind === "gm" ? "你坐庄" : s.mode === "guess" ? "赌场坐庄" : "AI 坐庄"}`;
+    const seated = (c.seated || []).map(s => `<li class="crq-row"><div><b>${esc(s.name)}</b> · ${where(s)} · ${s.over ? "打完了" : s.round ? `第 ${s.round} 轮` : "等人"}</div>
+      <div class="crq-state">${btn(`data-cso="leave" data-kit="${esc(s.kit)}"`, "让他离桌", { title: s.kind === "life" ? "卡住的桌子：让他离开赌命桌（押了还没结算的这一手不算）" : "卡住的桌子：按离桌结算（打到一半的对赌算他认输）" })}</div></li>`).join("");
     return `<div class="ol-card crq-card cso-card">${head}${dealing || '<p class="ol-muted">现在没有要你坐庄的桌子。玩家选「主持人坐庄」坐下时，这一桌出现在这里，由你出庄家那一方。</p>'}
       ${holdemGmHtml(c, m)}
       <h3>谁坐在哪桌</h3>${seated ? `<ul class="crq-list">${seated}</ul>` : '<p class="ol-muted">没有人坐桌。</p>'}${m.error ? `<p class="ol-bad" role="alert">${esc(m.error)}</p>` : ""}
@@ -147,6 +190,7 @@
   function tableWho(seat) {
     if (seat.kind === "pvp") return `对手：${seat.opponent || "还没坐下"}`;
     if (seat.kind === "holdem") return `${seat.size || ""} 人桌 · ${seat.side || ""} 号座位`;
+    if (seat.mode === "guess") return "庄家：赌场";   // 猜大猜小（#526）：庄家只抽牌、不用做决定
     if (seat.mode === "holdem") return `对手：${levelAi(seat.level)}`;
     return `${seat.mode === "duel" ? "对手" : "庄家"}：${seat.kind === "gm" ? "主持人" : levelAi(seat.level)}`;
   }
@@ -154,15 +198,16 @@
 
   const TOOLS = "#online-stage .ol-stage-heading .ol-info-tools";
   const OPENERS = '#online-stage [data-cso="open-box"], #tr-casino';
-  /** 联机牌桌（#526）用本机的哪一张牌桌：High Flux（counter-cards-ui.js）、Flux Duel / Hold'em（flux-ui.js 的两张），都有 remote 那一套 */
-  const TABLE_UI = { highflux: () => root.CounterCardsUI, duel: () => root.FluxDuelUI, holdem: () => root.FluxHoldemUI };
+  /** 联机牌桌（#526）用本机的哪一张牌桌：High Flux（counter-cards-ui.js）、Flux Duel / Hold'em（flux-ui.js 的两张）、
+   *  猜大猜小（counter-cards-guess-ui.js：押筹码的赌场桌、黑市赌命桌），都有 remote 那一套 */
+  const TABLE_UI = { highflux: () => root.CounterCardsUI, duel: () => root.FluxDuelUI, holdem: () => root.FluxHoldemUI, guess: () => root.CounterCardsGuessUI };
   /** o：{ api, view, own, call }；fast（测试用：牌桌上结算前不停） */
   function mount(o) {
     const doc = root.document;
     const box = doc.createElement("section"); box.id = "online-casino"; box.className = "ol-ui ol-overlay ol-bag ovl cso"; box.setAttribute("role", "dialog"); box.setAttribute("aria-label", "赌场"); box.hidden = true;
     doc.body.appendChild(box);
     let open = false, busy = false, last = "", error = "", kit = null;
-    let table = null;   // 开着的联机牌桌（#526）：{ ref: { kind: "mine" 自己的角色 | "deal" 主持人替玩家坐庄 | "gm" 主持人自己的多人桌座位, kit / table }, ui }
+    let table = null;   // 开着的联机牌桌（#526）：{ ref: { kind: "mine" 自己的角色 | "life" 自己角色的黑市赌命桌 | "deal" 主持人替玩家坐庄 | "gm" 主持人自己的多人桌座位, kit / table }, ui }
     const opened = new Set();   // 已经替哪些角色领过赠送筹码（第一次打开时发一次 open）
     const draft = { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips", mode: "highflux", holdem: { table: null, buyIn: 0, size: 4 } }, amount = {};
     const v = () => o.view() || {}, hs = () => (v().packet && v().packet.view) || {};
@@ -176,7 +221,8 @@
     }
     const waiting = () => {
       const c = casino(); if (!c) return false;
-      return v().isHost ? (c.dealing || []).concat(c.gmSeats || []).some(d => d.game && d.game.myTurn) : (c.mine || []).some(r => r.seat && r.seat.game && r.seat.game.myTurn);
+      return v().isHost ? (c.dealing || []).concat(c.gmSeats || []).some(d => d.game && d.game.myTurn)
+        : (c.mine || []).some(r => r.seat && r.seat.game && r.seat.game.myTurn) || (c.life || []).some(x => x.game && x.game.myTurn);
     };
     const label = () => (waiting() ? (v().isHost ? "赌场 · 等你坐庄" : "赌场 · 轮到你") : "赌场");
     function hostButton(on) {
@@ -199,6 +245,7 @@
       const c = casino();
       if (!c) return null;
       if (ref.kind === "mine") { const r = (c.mine || []).find(x => x.kit === ref.kit); return r && r.seat && r.seat.game ? { seat: r.seat, game: r.seat.game } : null; }
+      if (ref.kind === "life") { const x = (c.life || []).find(y => y.kit === ref.kit); return x && x.game ? { seat: x, game: x.game } : null; }
       if (ref.kind === "deal") { const d = (c.dealing || []).find(x => x.kit === ref.kit); return d && d.game ? { seat: d, game: d.game } : null; }
       const s = (c.gmSeats || []).find(x => x.table === ref.table);
       return s && s.game ? { seat: s, game: s.game } : null;
@@ -230,15 +277,19 @@
         back: () => { table = null; open = true; error = ""; last = ""; sync(); },
         get label() {
           const s = seat();
+          if (ref.kind === "life") return `${s.name || ""}下注`;   // 黑市赌命桌（#526）
           if (ref.kind === "deal") return `${s.tableName || ""} · 你给 ${s.name || ""} 坐庄`;
           if (s.kind === "pvp") return `${gameName(s.mode)} 对赌 · ${s.stakeKind === "kuizhi" ? "押奎支" : "押筹码"} · 开局各 ${s.start} 枚`;
           return `${s.tableName || ""}${multi ? " · 多人桌" : ""} · 买入 ${s.buyIn} 枚`;
         },
-        get who() { const s = seat(); return ref.kind === "deal" ? `对手：${s.name || ""}` : tableWho(ref.kind === "gm" ? Object.assign({ kind: "holdem" }, s) : s); },
+        get who() { const s = seat(); return ref.kind === "life" ? "庄家：主持人" : ref.kind === "deal" ? `对手：${s.name || ""}` : tableWho(ref.kind === "gm" ? Object.assign({ kind: "holdem" }, s) : s); },
+        // 黑市赌命桌（#526）：谁坐庄（写在庄家那一格）、结论（这一手结算后这名角色死了没有：房主那边算的，包里只有这一个结论）
+        dealer: ref.kind === "life" ? "主持人" : null,
+        get dead() { return ref.kind === "life" && !!seat().dead; },
         // 对手座位上的小字：主持人替玩家坐庄 → 玩家的角色名；对赌 → 对手的角色名；主持人坐庄 → 主持人；AI 坐庄 → 几级 AI
         get oppTag() { const s = seat(); return ref.kind === "deal" ? s.name || "玩家" : s.kind === "pvp" ? s.opponent || "玩家" : s.kind === "gm" ? "主持人" : levelAi(s.level); },
         seatTag: multi ? (id) => seatTagOf(ref.kind === "gm" ? ref.table : seat().table, id) : null,
-        levels, level: first.level || "normal", leaveTitle: LEAVE_TITLE, fast: !!o.fast
+        levels, level: first.level || "normal", leaveTitle: ref.kind === "life" ? "离开黑市赌命桌（押了还没结算不能离桌）" : LEAVE_TITLE, fast: !!o.fast
       };
     }
     /** 打开 ref 那一局的牌桌（收起赌场大厅）；画不了（没加载那张牌桌）返回 false */
@@ -289,11 +340,14 @@
       if (a === "pick") { kit = d.kit; error = ""; last = ""; paint(); welcome(); return; }
       if (a === "buy") { draft.buy = numIn('[data-cso-in="buy"]', 1); return void submit({ type: "casino", op: "buy", kit: d.kit, n: draft.buy }); }
       if (a === "sell") { draft.sell = numIn('[data-cso-in="sell"]', 1); return void submit({ type: "casino", op: "sell", kit: d.kit, n: draft.sell }); }
-      // 坐下就开局的（赌场桌、坐上别人开的对赌桌、开桌的人点开局）：做成了直接打开牌桌
-      const andPlay = (cmd, who) => submit(cmd).then(done => { if (done) openTable({ kind: "mine", kit: who }); });
+      // 坐下就开局的（赌场桌、坐上别人开的对赌桌、开桌的人点开局、赌命桌上桌）：做成了直接打开牌桌（ref 不给 = 这名角色坐着的那一局）
+      const andPlay = (cmd, who, ref) => submit(cmd).then(done => { if (done) openTable(ref || { kind: "mine", kit: who }); });
       if (a === "table") return void openTable({ kind: "mine", kit: d.kit });
+      if (a === "tableLife") return void openTable({ kind: "life", kit: d.kit });
       if (a === "tableDeal") return void openTable({ kind: "deal", kit: d.kit });
       if (a === "tableGm") return void openTable({ kind: "gm", table: d.table });
+      // 黑市赌命桌（#526）：自己的角色上桌（押坚毅，主持人坐庄），上了桌直接打开牌桌
+      if (a === "lifeSit") return void andPlay({ type: "casino", op: "lifeSit", kit: d.kit }, d.kit, { kind: "life", kit: d.kit });
       if (a === "sit") { draft.buyIn[d.table] = numIn(`[data-cso-buyin="${d.table}"]`, 0); return void andPlay({ type: "casino", op: "sit", kit: d.kit, table: d.table, buyIn: draft.buyIn[d.table], dealer: d.dealer }, d.kit); }
       if (a === "pvpOpen") {
         const mode = PVP_SIDES[draft.mode] ? draft.mode : "highflux", sides = PVP_SIDES[mode].map(([k]) => k);

@@ -598,16 +598,18 @@
   /* 赌场（#487）：hotseat-game.js · casinoView 按收件人造好（trpg.js · trpgCasinoPacket：自己角色的钱包、自己那一方的牌局；
    * 主持人另有自己坐庄的那几桌——庄家那一方），这里只按白名单一项项拷。牌局照 counter-cards.js · view 的字段拷：
    * 对方的手牌、暗出 / 暗弃的牌、庄家偷看到的天气本来就只在那一方的 view 里；记录只拷文字。没登记的字段一律丢掉 */
-  const CASINO_CAP = { tables: 12, open: 20, mine: 6, dealing: 12, seated: 24, hand: 12, history: 8, log: 60, results: 8, legal: 40, gone: 10 };
+  // tables：四种玩法各三张赌场桌（#526 加了猜大猜小）还有富余
+  const CASINO_CAP = { tables: 16, open: 20, mine: 6, dealing: 12, seated: 24, hand: 12, history: 8, log: 60, results: 8, legal: 40, gone: 10 };
   const CC_SIDES = ["dealer", "player"];
   const sideOf = v => (CC_SIDES.includes(v) ? v : null);
   const nullableNum = v => (v === null ? null : number(v));
   function projectSidePair(o, fn, sides = CC_SIDES) { if (!obj(o)) return null; const out = {}; sides.forEach(k => { const v = fn(get(o, k)); if (v !== undefined) out[k] = v; }); return out; }
-  /** 牌局按玩法投影（#526）：High Flux 的对局没有 mode；Flux Duel 是 "duel" */
+  /** 牌局按玩法投影（#526）：High Flux 的对局没有 mode；Flux Duel 是 "duel"、Flux Hold'em 是 "holdem"、猜大猜小是 "guess" */
   function projectCasinoGame(g) {
     if (!obj(g)) return null;
     if (get(g, "mode") === "duel") return projectDuelGame(g);
     if (get(g, "mode") === "holdem") return projectHoldemGame(g);
+    if (get(g, "mode") === "guess") return projectGuessGame(g);
     return projectFluxHigh(g);
   }
   /** 牌局的记录（各玩法 view 里已经只剩这一方看得到的）：文字、第几轮，另带结算前的过渡要用的几项——
@@ -819,17 +821,92 @@
     }
     return out;
   }
+  /* 猜大猜小（#526，counter-cards-guess.js · view）：一手只有这一个人（赌场桌、黑市赌命桌都是各坐各的，没有 others）。
+   * 没翻开的牌（secret）、种子本来就不在 view 里；翻开的牌、赔率表、自己的押注（下注那一刻锁定的赔率）、记录是公开的。
+   * 赌命桌（table.life）押的是坚毅生命：包里不放任何和坚毅有关的数字——每格押上的固定点数（slips / legal 的 stake）、
+   * 每轮的固定代价（minBet）也不放，牌桌照规则配置（GUESS_CONFIG.life.stake，规则文字）写；押输了一共几点（due / lifeBill）view 里本来就没有，
+   * 坚毅剩多少规则层根本不知道。结算只有押中没有（win）、奖品（prize：奎支、材料）、坚毅受没受创（hurt）。
+   * 记录里带「坚毅」两个字的那几条（开局说明、押注、押输了的结算）文字过不了 text()：只发哪一种（t）、第几轮、谁，牌桌按公开的押注自己写 */
+  const GUESS_CARDS = ["element", "weather", "layer"];
+  const guessResult = v => (Number.isInteger(v) && Math.abs(v) <= 9 ? v : undefined);
+  function projectGuessLog(list, out, life) {
+    const all = arr(list), from = Math.max(0, all.length - CASINO_CAP.log);
+    out.logFrom = from;
+    out.log = all.slice(from).flatMap(e => {
+      if (!obj(e) || get(e, "to") != null) return [];   // 只给某一方看的记录猜大猜小没有：有也不放
+      const d = { r: number(get(e, "r")) || 0 };
+      const kind = id(get(e, "t")); if (kind) d.t = kind;
+      const by = id(get(e, "by")); if (by) d.by = by;
+      // 结算前的过渡要用：翻开的是哪一张（card）、是什么（value）；结果（score）；押筹码的桌子从钱包补了几枚（amount）
+      if (kind === "reveal") { if (GUESS_CARDS.includes(get(e, "card"))) d.card = get(e, "card"); const v = id(get(e, "value")); if (v) d.value = v; }
+      if (kind === "result") { const s = guessResult(get(e, "score")); if (s !== undefined) d.score = s; }
+      if (kind === "topUp" && !life) { const n = number(get(e, "amount")); if (n !== undefined) d.amount = n; }
+      const t = text(get(e, "text"), 160);
+      if (t) d.text = t;
+      else if (!(life && ["open", "bet", "pay"].includes(kind))) return [];
+      return [d];
+    });
+  }
+  function projectGuessGame(g) {
+    const t = get(g, "table"), me = get(g, "me");
+    if (!obj(t) || !obj(me) || !id(get(me, "id"))) return null;
+    const life = get(t, "life") === true;
+    const out = copyFields(g, { mode: "guess" }, ["stage"], ["round", "rounds"], ["over", "myTurn"]);
+    out.table = Object.assign(identifiers(t, copyFields(t, {}, ["name", "dealer"], life ? [] : ["entry"]), ["id"]), { life });
+    if (!life) {
+      out.table.minBet = arr(get(t, "minBet")).map(number).filter(n => n !== undefined).slice(0, 3);
+      const mb = number(get(g, "minBet")); if (mb !== undefined) out.minBet = mb;
+    }
+    const shown = get(g, "shown");
+    out.shown = {}; GUESS_CARDS.forEach(k => { out.shown[k] = id(get(shown, k)); });
+    const b = get(g, "board");
+    out.board = { N: number(get(b, "N")) || 0, cells: arr(get(b, "cells")).slice(0, 9).flatMap(c => {
+      const r = obj(c) ? guessResult(get(c, "result")) : undefined;
+      if (r === undefined) return [];
+      const odds = number(get(c, "odds"));
+      return [{ result: r, k: number(get(c, "k")) || 0, odds: odds === undefined ? null : odds, open: get(c, "open") === true }];
+    }) };
+    out.waiting = arr(get(g, "waiting")).map(id).filter(Boolean).slice(0, 8);
+    // 能做的：押注（开盘的格子、锁定前的赔率；押筹码的另有每格至少 / 一共最多押多少）、不押
+    const cells = list => arr(list).slice(0, 9).flatMap(c => { const r = obj(c) ? guessResult(get(c, "result")) : undefined; return r === undefined ? [] : [Object.assign({ result: r }, selected(c, ["odds", "k"]))]; });
+    out.legal = arr(get(g, "legal")).slice(0, 4).flatMap(o => {
+      if (!obj(o)) return [];
+      if (get(o, "type") === "pass") return [{ type: "pass" }];
+      if (get(o, "type") !== "bet") return [];
+      return [Object.assign({ type: "bet", cells: cells(get(o, "cells")) }, selected(o, life ? ["round"] : ["round", "min", "max"]))];
+    });
+    const acted = get(me, "acted"), act = {};
+    [1, 2, 3].forEach(r => { const v = get(acted, String(r)); if (v === "bet" || v === "pass") act[r] = v; });
+    const slip = s => {
+      const r = obj(s) ? guessResult(get(s, "result")) : undefined;
+      if (r === undefined) return [];
+      const d = Object.assign({ result: r }, selected(s, life ? ["round", "odds", "win"] : ["round", "odds", "amount", "win", "pay"]));
+      return [d];
+    };
+    out.me = { id: get(me, "id"), name: text(get(me, "name"), 40) || "", in: get(me, "in") !== false, acted: act, slips: arr(get(me, "slips")).slice(0, 24).flatMap(slip) };
+    if (life) {
+      const p = get(me, "prize");
+      if (obj(p)) out.me.prize = { kuizhi: number(get(p, "kuizhi")) || 0, items: arr(get(p, "items")).slice(0, 8).flatMap(x => obj(x) && id(get(x, "id")) && number(get(x, "n")) > 0 ? [{ id: get(x, "id"), n: get(x, "n") }] : []) };
+      if (typeof get(me, "hurt") === "boolean") out.me.hurt = get(me, "hurt");
+    } else Object.assign(out.me, selected(me, ["chips", "paid", "won", "net", "topUp"]));
+    const res = get(g, "result"), score = obj(res) ? guessResult(get(res, "score")) : undefined;
+    out.result = score === undefined ? null : Object.assign({ score }, identifiers(res, {}, GUESS_CARDS));
+    projectGuessLog(get(g, "log"), out, life);
+    return out;
+  }
   /** 坐着的那一局的桌子信息（公开的：哪种桌子、押什么、对手名字）+ 这一方的牌局。
    *  buyIn = 总买入、topUp = 牌局里桌上不够时从钱包补了几枚（#520）；mode = 哪种玩法（#526） */
-  const CASINO_MODES = ["highflux", "duel", "holdem"];
+  const CASINO_MODES = ["highflux", "duel", "holdem", "guess"];
   const SEAT_SIDES = [...CC_SIDES, ...DUEL_SIDES];
-  // Flux Hold'em 多人桌（kind "holdem"）另有：size 几人桌、host 自己是不是开桌的人、auto 托管中、started 开局了没有
+  // Flux Hold'em 多人桌（kind "holdem"）另有：size 几人桌、host 自己是不是开桌的人、auto 托管中、started 开局了没有；
+  // 黑市赌命桌（kind "life"，只在主持人的 seated 里）：谁坐着、第几轮（#526）
   function projectCasinoSeat(s, withGame) {
     if (!obj(s)) return null;
     const out = identifiers(s, copyFields(s, {}, ["tableName", "opponent"], ["rate", "buyIn", "fee", "start", "round", "topUp", "size"], ["over", "host", "auto", "started"]), ["table", "level"]);
-    enumField(s, out, "kind", ["ai", "gm", "pvp", "holdem"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]); enumField(s, out, "mode", CASINO_MODES);
+    enumField(s, out, "kind", ["ai", "gm", "pvp", "holdem", "life"]); enumField(s, out, "stakeKind", ["chips", "kuizhi"]); enumField(s, out, "mode", CASINO_MODES);
     if (!out.kind) return null;
-    const side = get(s, "side"); if (SEAT_SIDES.includes(side) || holdemId(side)) out.side = side;
+    // 人坐哪一方：High Flux 庄家 / 玩家、Flux Duel 甲 / 乙、Flux Hold'em 座位；猜大猜小是配置里的座位 id（GUESS_CONFIG.casino.seat）
+    const side = get(s, "side"); if (SEAT_SIDES.includes(side) || holdemId(side) || (out.mode === "guess" && id(side))) out.side = side;
     if (withGame) out.game = projectCasinoGame(get(s, "game"));
     return out;
   }
@@ -852,12 +929,13 @@
     if (!obj(c)) return null;
     const cfg = get(c, "config");
     const out = { config: obj(cfg) ? selected(cfg, ["buy", "sell", "face", "gift"]) : {} };
-    // 桌子：game = 哪种玩法、gameName 玩法名、short 配置里的桌名、gm = 能不能由主持人坐庄（#526）
+    // 桌子：game = 哪种玩法、gameName 玩法名、short 配置里的桌名、gm = 能不能由主持人坐庄（#526）；猜大猜小另有每轮每格最低注 minBet
     out.tables = arr(get(c, "tables")).slice(0, CASINO_CAP.tables).flatMap(t => {
       if (!obj(t) || !id(get(t, "id"))) return [];
       const d = identifiers(t, copyFields(t, {}, ["name", "gameName", "short"], ["rate", "minBuyIn", "entryFee", "minBuyInChips", "entryFeeChips", "perChip", "players"], ["gm"]), ["id"]);
       enumField(t, d, "difficulty", ["easy", "normal", "hard"]);
       enumField(t, d, "game", CASINO_MODES);
+      if (d.game === "guess") d.minBet = arr(get(t, "minBet")).map(number).filter(n => n !== undefined).slice(0, 3);
       return [d];
     });
     // 等人坐的对赌桌：每一方坐着谁的名字（High Flux：dealer / player；Flux Duel：a / b，空着的是 null）
@@ -892,6 +970,12 @@
     out.gmSeats = arr(get(c, "gmSeats")).slice(0, CASINO_CAP.dealing).flatMap(m => {
       const seat = projectCasinoSeat(m, true);
       return seat && seat.kind === "holdem" && seat.table ? [seat] : [];
+    });
+    // 自己角色坐着的黑市赌命桌（#526）：这一手（projectGuessGame：坚毅的数字一个都不放）、结论 dead（这名角色死了没有）
+    out.life = arr(get(c, "life")).slice(0, CASINO_CAP.mine).flatMap(m => {
+      if (!obj(m) || !id(get(m, "kit"))) return [];
+      const game = projectCasinoGame(get(m, "game"));
+      return game && game.mode === "guess" && game.table.life ? [Object.assign(identifiers(m, copyFields(m, {}, ["name"]), ["kit"]), { dead: get(m, "dead") === true, game })] : [];
     });
     return out;
   }
