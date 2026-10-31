@@ -201,18 +201,23 @@ test("牌名（#509）· 猜大猜小、赌场、联机赌场浮层：翻开的�
   assert.ok(p.UI.state().casino, "坐下进了牌桌的赌场模式");
   p.UI.setFast(true);
   playAll(p, () => noOld(p.$("#scr-cc").innerHTML, `赌场的牌桌（第 ${p.UI.state().game.round} 轮 · ${p.UI.state().game.stage}）`));
-  // 联机跑团的赌场浮层（casino-online-ui.js）：主持人坐庄那一桌手里的层牌、自己暗出的那张；玩家那一方手里的元素牌
+  // 联机跑团的赌场（#526 起牌桌用本机那张画：CounterCardsUI.remote，casino-online-ui.js 打开）：主持人坐庄那一桌手里的层牌、自己暗出的那张；玩家那一方手里的元素牌
   const g = CC.newGame({ seed: "牌名-联机" });
   CC.act(g, "dealer", { type: "weather", op: "pass" });
-  const html = (side) => p.OUI.gameHtml(J(CC.view(g, side)), { amount: {}, oppName: side === "dealer" ? "瑞比" : "主持人" }, side === "dealer" ? "gm:ruby" : "ruby");
-  let h = html("dealer");
-  C.layers.forEach(ly => assert.match(h, new RegExp(`data-card="${ly}"[^>]*>${LAYER[ly]}</button>`), `主持人手里的〔${LAYER[ly]}〕`));
-  noOld(h, "联机赌场浮层（主持人坐庄）");
+  const remote = (side) => {
+    p.UI.remote({ view: () => J(CC.view(g, side)), act: () => Promise.resolve({ ok: true }), back() {}, label: "联机", who: side === "dealer" ? "对手：瑞比" : "庄家：主持人", oppTag: side === "dealer" ? "瑞比" : "主持人" });
+    return p.$("#scr-cc").innerHTML;
+  };
+  const face = (c) => p.$(`#cc-board .cc-me [data-face="${c}"] .cc-name`).textContent;
+  let h = remote("dealer");
+  C.layers.forEach(ly => assert.equal(face(ly), LAYER[ly], `主持人手里的〔${LAYER[ly]}〕`));
+  noOld(h, "联机赌场的牌桌（主持人坐庄）");
   CC.act(g, "dealer", { type: "play", card: "sand" });
-  h = html("dealer");
-  assert.ok(h.includes(`你暗出了〔${LAYER.sand}〕`), "主持人看得到自己暗出的那张");
-  noOld(h, "联机赌场浮层（主持人暗出以后）");
-  h = html("player");
-  C.elements.forEach(el => assert.match(h, new RegExp(`data-card="${el}"[^>]*>${ELE[el]}</button>`), `玩家手里的〔${ELE[el]}〕`));
-  noOld(h, "联机赌场浮层（玩家那一方）");
+  h = remote("dealer");
+  assert.ok(p.$("#cc-board .cc-slots .cc-peek").textContent.includes(LAYER.sand), "主持人看得到自己暗出的那张");
+  noOld(h, "联机赌场的牌桌（主持人暗出以后）");
+  h = remote("player");
+  C.elements.forEach(el => assert.equal(face(el), ELE[el], `玩家手里的〔${ELE[el]}〕`));
+  noOld(h, "联机赌场的牌桌（玩家那一方）");
+  p.UI.remoteClose();
 });

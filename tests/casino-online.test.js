@@ -225,7 +225,7 @@ test("主持人能让人离桌（卡住的桌子、坐着的角色死了）；�
   no(send("p2", { op: "buy", kit: "ruby", n: 1 }), /战斗中不能去赌场/);
 });
 
-test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌子、对赌；坐下以后按规则给的操作出按钮（手牌能出的才能点），对手的牌不画；主持人看到自己坐庄的那一桌", () => {
+test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌子、对赌；坐下以后写一行概况和「打开牌桌」（牌桌用本机那张画，#526），对手的牌不画；主持人看到自己坐庄的那一桌", () => {
   const { c, send, casino } = room();
   vm.runInContext(read("casino-online-ui.js"), c, { filename: "casino-online-ui.js" });
   const UI = c.CasinoOnlineUI, model = (who, extra) => Object.assign({ casino: casino(who), kit: null, busy: false, error: "", draft: { buy: 1, sell: 1, buyIn: {}, side: "player", stake: "chips" }, amount: {} }, extra || {});
@@ -243,17 +243,14 @@ test("联机浮层（casino-online-ui.js）：玩家看到钱包、兑换、桌�
   ok(send("host", { op: "act", kit: "ruby", asDealer: true, action: { type: "play", card: "flesh" } }));
   h = UI.playerHtml(model("p2"));
   assert.match(h, /坐在桌上/); assert.match(h, /庄家：主持人/);
-  const playable = [...h.matchAll(/data-cso="act" data-cso-key="ruby" data-type="play" data-card="(\w+)"/g)].map(m => m[1]);
-  assert.equal(playable.length, 7, "7 张元素牌能出（常态不能当出牌）");
-  assert.ok(!/data-card="normal"/.test(h), "常态不能点");
+  assert.match(h, /第 1 \/ 5 轮 · 你 39 枚 · 底池 2 · <b>轮到你<\/b>/, "大厅里写一行概况");
+  assert.match(h, /data-cso="table" data-kit="ruby"[^>]*>打开牌桌/, "出牌、下注在牌桌上（本机那张牌桌，见 tests/casino-online-table.test.js）");
   assert.ok(!/肉体|"flesh"/.test(h), "主持人暗出的层牌不画");
   assert.match(h, /离桌（打到一半算认输）/);
   const g = UI.gmHtml(model("host"));
   assert.match(g, /你给 瑞比 坐庄/);
-  assert.match(g, /data-cso-game="gm:ruby"/);
-  assert.match(g, /你暗出了〔肉体〕/, "主持人看得到自己（庄家）暗出的牌");
-  assert.ok(!/data-type="play"/.test(g), "庄家已经出过牌了：主持人这边没有出牌按钮");
-  assert.match(g, /等瑞比/);
+  assert.match(g, /data-cso="tableDeal" data-kit="ruby"/);
+  assert.match(g, /等别人/);
   assert.match(g, /让他离桌/);
 });
 
@@ -282,7 +279,7 @@ test("联机跑团的赌场桌：牌局里桌上不够时先从这名角色的�
   assert.deepEqual([casino("host").seated[0].buyIn, casino("host").seated[0].topUp], [41, 1], "主持人看到的谁坐在哪桌也写总买入");
   const h = c.CasinoOnlineUI.playerHtml(uiModel(casino, "p2"));
   assert.match(h, /买入 41 枚（含从钱包补的 1 枚，入场费 2 枚）/, "浮层的座位上写总买入");
-  assert.match(h, /玩家从钱包补了 1 枚到桌上/, "浮层的记录里写着");
+  // 「玩家从钱包补了 1 枚到桌上」写在牌桌的记录里（#526：牌桌用本机那张画，见 tests/casino-online-table.test.js），包里有这一条（上面查过）
   assert.match(h, /牌局里桌上的筹码不够时先自动从钱包补到够用/);
   ok(send("p2", { op: "leave", kit: "ruby" }));                                        // 打到一半离桌：底注押进去了，不退
   // 联机包里的文字过了 online-view.js 的 NFKC：全角标点变成半角

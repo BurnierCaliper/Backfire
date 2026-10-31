@@ -92,7 +92,8 @@
     const S = T.state(), D = FD().DUEL_CONFIG;
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮 · ${v.lead === v.side ? "你先手" : "对手先手"}`;
     const head = `<b class="cc-brand">${esc(D.name)}</b><span class="cc-round">${status}</span>`;
-    if (S.casino) return `${head}<span class="cc-role">${esc(S.casino.label || "赌场")} · 对手：${esc(levelName(S.level))} AI</span><span class="cc-spacer"></span>${T.btn("leave", "离桌", { title: S.casino.leaveTitle || "" })}`;
+    // 联机牌桌（#526）：who 写对手是谁（主持人坐庄、对赌的对手名字），另有「返回赌场」
+    if (S.casino) return `${head}<span class="cc-role">${esc(S.casino.label || "赌场")} · ${esc(S.casino.who || `对手：${levelName(S.level)} AI`)}</span><span class="cc-spacer"></span>${T.casinoBtns()}`;
     return `${head}<span class="cc-role">对手：${esc(levelName(S.level))} AI</span><span class="cc-spacer"></span>${T.btn("setup", "换座位 / 难度")}${T.btn("title", "回到标题")}`;
   }
   function boardHtml(T, v) {
@@ -118,7 +119,7 @@
     const faces = (s, flip) => [s.layer, s.element].map(c => T.handCard(c, { cls: "cc-down" + (flip ? " cc-flip" : "") })).join("");
     const collect = (k) => (T.collecting(k) ? "cc-collect" : "");
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>对手</b><small>${esc(levelName(S.level))} AI</small>${T.loanTag(opp, "对手")}${T.actedTag(v.opponent)}</div>
+        <div class="cc-who"><b>对手</b><small>${esc(T.oppTag(levelName(S.level)))}</small>${T.loanTag(opp, "对手")}${T.actedTag(v.opponent)}</div>
         <div class="fd-backs"><div class="cc-hand cc-hand-back" title="层牌 ${opp.layerCount} 张">${backs(opp.layerCount, 0)}</div><small>层牌 ${opp.layerCount}</small>
           <div class="cc-hand cc-hand-back" title="元素牌 ${opp.elementCount} 张">${backs(opp.elementCount, opp.layerCount)}</div><small>元素牌 ${opp.elementCount}</small></div>
         ${T.chips(opp.chips, { title: "对手的筹码", label: opp.infinite ? "筹码无限" : "", anim: anim.opp, cls: collect(v.opponent) })}
@@ -218,7 +219,7 @@
       <p class="cc-deltas"><span class="${{ win: "up", lose: "down", tie: "" }[res]}">你 ${fin[me]} 枚</span><span>对手 ${theirs} 枚</span></p>
       <p class="cc-tier">${esc(rule)}${repaid.length ? `；已扣还借款：${esc(repaid.join("，"))}` : ""}。</p>
       <div class="cc-btns">${S.casino
-        ? `${T.btn("casinoAgain", esc(S.casino.againText || "再来一局"), { primary: true })}${T.bannerChartBtn()}${T.btn("leave", "离桌")}`
+        ? T.casinoFinalBtns()
         : `${T.btn("again", "再来一局", { primary: true })}${T.btn("swap", S.human === "a" ? "换成后手" : "换成先手")}${T.btn("setup", "换难度")}${T.bannerChartBtn()}${T.btn("title", "回到标题")}`}</div>
     </div>`;
   }

@@ -791,6 +791,9 @@
     out.me = seat(get(g, "me"), true); out.opp = seat(get(g, "opp"), false);
     const b = get(g, "betting");
     out.betting = obj(b) ? Object.assign(selected(b, ["street", "raises", "toCall"]), { toAct: sideOf(get(b, "toAct")) }) : null;
+    // 跟注后的追加窗口（#496）：第几个、谁跟的注、几秒、自己放弃追加了没有（对方放没放弃不发）——牌桌按它倒计时（#526）
+    const w = obj(b) ? get(b, "window") : null;
+    if (out.betting) out.betting.window = obj(w) ? Object.assign(selected(w, ["n", "sec", "passed"]), { by: sideOf(get(w, "by")) }) : null;
     out.results = arr(get(g, "results")).slice(-CASINO_CAP.results).flatMap(r => {
       if (!obj(r)) return [];
       const d = copyFields(r, {}, [], ["r", "tier", "extra", "pot"], ["allIn", "refund", "rollover"]);
@@ -800,13 +803,9 @@
       d.bets = projectSidePair(get(r, "bets"), number); d.delta = projectSidePair(get(r, "delta"), number); d.chips = projectSidePair(get(r, "chips"), nullableNum);
       return [d];
     });
-    out.log = arr(get(g, "log")).slice(-CASINO_CAP.log).flatMap(e => { const t = obj(e) && text(get(e, "text"), 160); return t ? [{ r: number(get(e, "r")) || 0, text: t, mine: !!get(e, "to") }] : []; });
-    out.legal = arr(get(g, "legal")).slice(0, CASINO_CAP.legal).flatMap(o => {
-      if (!obj(o) || !id(get(o, "type"))) return [];
-      const d = Object.assign({ type: get(o, "type") }, selected(o, ["min", "max", "step", "need", "amount"]));
-      for (const k of ["op", "where", "card"]) { const v = id(get(o, k)); if (v) d[k] = v; }
-      return [d];
-    });
+    // 记录：同 Flux 两种牌桌（结算前的过渡要用 t / by / op……，#526；只给自己看的只带文字）
+    projectCasinoLog(get(g, "log"), CC_SIDES, out);
+    out.legal = projectLegal(get(g, "legal"));
     const f = get(g, "final");
     out.final = obj(f) ? { rounds: number(get(f, "rounds")) || 0, winner: sideOf(get(f, "winner")), chips: projectSidePair(get(f, "chips"), nullableNum), net: projectSidePair(get(f, "net"), number),
       loans: projectSidePair(get(f, "loans"), l => (obj(l) ? selected(l, ["loan", "owe"]) : undefined)), busted: arr(get(f, "busted")).filter(s => CC_SIDES.includes(s)) } : null;

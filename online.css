@@ -104,7 +104,9 @@
 body.online-player { overflow: hidden; }
 /* #hd2d-pop：新画面（HD-2D，#289）的纸片风数字那一层（hd2d/hd2d-play.js 挂在 body 上），联机玩家开着新画面时也要看得到 */
 /* .pm-overlay：暂停页面（pause-menu.js，#298），联机玩家也要看得到 */
-body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl):not(.pm-overlay):not(#hd2d-pop) { display: none !important; }
+/* .cc-online：联机赌场的牌桌（#526，本机那几张牌桌的画面：#scr-cc / #scr-fd / #scr-fh / #scr-ccg，casino-online-ui.js 打开时才挂上） */
+body.online-player > :not(.ol-ui):not(.hs-ui):not(.hs-sheet):not(.ar-sheet):not(.wm):not(#sk-tip):not(.sk-tip):not(.unit-tip):not(.mech-tip):not(.rr-overlay):not(.ovl):not(.pm-overlay):not(#hd2d-pop):not(.cc-online) { display: none !important; }
+body.online-player > .cc-online[hidden] { display: none !important; }
 /* 玩家看自己的角色资料 / 武器页：压在联机舞台上面 */
 body.online-player .hs-sheet, body.online-player .ar-sheet { z-index: 95; }
 /* 玩家右侧栏：战斗（记录）/ 小队 两个频道 */

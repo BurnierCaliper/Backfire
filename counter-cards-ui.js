@@ -30,6 +30,7 @@
  *   CounterCardsUI.start({ game, side: "player", level, casino: { label, againText, onChange, onLeave, onAgain } })
  *                                                        赌场桌（#487，casino-ui.js 打开）：顶栏「离桌」、总结算「再来一局 / 离桌」交回给模式，
  *                                                        牌局每走一步叫 onChange（模式存档）；不能换边 / 换难度
+ *   CounterCardsUI.remote(src) / remoteSync() / remoteClose()   联机牌桌（#526，casino-online-ui.js 打开）：同一张牌桌，牌局在房主那边，见下面「联机牌桌」
  */
 (function (root) {
   "use strict";
@@ -180,8 +181,10 @@
   const SETUP = { side: "player", level: "normal" };
   let S = null;           // 当前这一局：{ game, human, ai, level, rng, seen, banner, mode, amount, anim, fast, timer, revealKey, msg, chartWeather（克制表上次按哪个天气画的），
                           //   tip（开着的悬停预览）、tipSwallow（长按松手后不算的那一下点击）、win（跟注后追加窗口的倒计时：{ key, until, sec, timer }）、
-                          //   settle（结算前的过渡，见 settleStart） }
+                          //   settle（结算前的过渡，见 settleStart）；联机牌桌（#526）另有 remote（src）、rv（最近一包的 view）、busy（指令还没回来）、winGone（到时间了的窗口） }
   let bound = false;
+  /** 现在这一局（这一方）的 view：本机按规则现算，联机牌桌是最近一包房主发来的 */
+  const curView = () => (S.remote ? S.rv : CC().view(S.game, S.human));
 
   function show(name) {
     const setup = $("cc-setup"), game = $("cc-game");
@@ -207,6 +210,7 @@
     dropSettle();
     closeChart();
     stopTip();
+    remoteOff();
     enterScreen();
     renderSetup();
     show("setup");
@@ -218,6 +222,7 @@
     stopWindow();
     dropSettle();
     stopTip();
+    remoteOff();
     const side = opt.side === "dealer" ? "dealer" : "player";
     const level = AI().LEVELS.indexOf(opt.level) >= 0 ? opt.level : "normal";
     const seed = String(opt.seed || ("cc" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36)));
@@ -255,10 +260,13 @@
   const MU = () => root.MatchupUI || null;
   const PM = () => root.PauseMenu || null;
   const screenNow = () => (doc() && doc().body ? doc().body.dataset.screen : "");
-  /** 牌桌开着（不是设置页） */
-  function gameShown() { const g = $("cc-game"); return !!(S && g && !g.hidden && screenNow() === "counter"); }
+  /** 牌桌开着（不是设置页）。联机牌桌（#526）不切 Screens：看 #scr-cc 自己露没露出来 */
+  function gameShown() {
+    const g = $("cc-game"), scr = $("scr-cc");
+    return !!(S && g && !g.hidden && (S.remote ? !!(scr && !scr.hidden) : screenNow() === "counter"));
+  }
   /** 场上的天气（公开的，从人这一方的 view 取；null = 没有天气） */
-  function chartWeather() { return S ? CC().view(S.game, S.human).weather || null : null; }
+  function chartWeather() { return S ? curView().weather || null : null; }
   /** 开着的克制表是不是牌桌上的这一张（挂在 #scr-cc 里） */
   function chartOpen() {
     const m = MU(), box = $("mu-overlay"), scr = $("scr-cc");
@@ -316,7 +324,7 @@
   /** 打开 / 重画预览：按现在场上的天气写，摆到这张牌上面。牌不在手里了（出掉、弃掉）、结算横幅或克制表盖着、不在牌桌上就收起 */
   function showTip(card, via) {
     const box = tipBox(), el = tipAnchor(card);
-    if (!S || !box || !el || S.banner || S.game.over || !gameShown() || chartOpen()) { hideTip(); return; }
+    if (!S || !box || !el || S.banner || curView().over || !gameShown() || chartOpen()) { hideTip(); return; }
     const w = chartWeather();
     S.tip = { card, via };
     box.innerHTML = tipHtml(card, w);
@@ -391,7 +399,9 @@
 
   /* ---------- 推进：人做一步 → 看有没有新的结算 / 新翻的天气 → AI 接着走 ---------- */
   function humanAct(a) {
-    if (!S || S.game.over || S.settle) return;
+    if (!S || S.settle) return;
+    if (S.remote) { remoteAct(a); return; }   // 联机牌桌：发指令，新的一包到了再画（remoteSync）
+    if (S.game.over) return;
     const pre = CC().view(S.game, S.human);   // 做这一步之前的画面：这一步要是结算了，过渡中桌上从这里接着画
     try { CC().act(S.game, S.human, a); } catch (e) { S.msg = e.message; render(); return; }
     S.mode = null; S.amount = null; S.msg = "";
@@ -414,13 +424,13 @@
   }
   function schedule() {
     stopTimer();
-    if (!S || S.banner || S.settle || S.game.over) return;
+    if (!S || S.remote || S.banner || S.settle || S.game.over) return;   // 联机牌桌：AI 在房主那边走
     if (CC().toAct(S.game).indexOf(S.ai) < 0) return;
     if (S.fast) { aiStep(); return; }
     S.timer = setTimeout(aiStep, Math.max(UI_CONFIG.aiDelay, (S.holdUntil || 0) - Date.now()));
   }
   function aiStep() {
-    if (!S) return;
+    if (!S || S.remote) return;
     S.timer = null;
     if (S.banner || S.settle || S.game.over) return;
     const pre = CC().view(S.game, S.human);
@@ -444,7 +454,8 @@
   /** 画面之前：窗口开着就记下这个窗口什么时候到时间（同一个窗口不重记）；窗口关了、横幅盖着、对局结束就停掉倒计时 */
   function syncWindow(v) {
     const key = S.banner || v.over ? "" : windowKey(v);
-    if (!key) { stopWindow(); return; }
+    // 联机牌桌：自己这一份到时间了（已经发了「不加注」），同一个窗口不再从头数
+    if (!key || (S.remote && key === S.winGone)) { stopWindow(); return; }
     if (S.win && S.win.key === key) return;
     stopWindow();
     S.win = { key, until: Date.now() + v.betting.window.sec * 1000, sec: v.betting.window.sec, timer: null };
@@ -465,8 +476,16 @@
   function stopWindow() { if (S && S.win) { if (S.win.timer) clearTimeout(S.win.timer); S.win = null; } }
   /** 倒计时到了：关窗（还没表态的都算放弃追加），进入下一步。第二轮下注的窗口关了就结算：结算前的过渡（#499）从关窗之前的画面接着画 */
   function expireWindow() {
+    const gone = S && S.win ? S.win.key : "";
     stopWindow();
     if (!S || S.settle) return;
+    // 联机牌桌：关窗由房主的规则层来（双方都不加注才关）：到时间就替自己发「不加注」，同到时间
+    if (S.remote) {
+      S.winGone = gone;
+      const v = curView();
+      if (v.myTurn && v.legal.some(o => o.type === "pass")) remoteAct({ type: "pass" }); else render();
+      return;
+    }
     const pre = CC().view(S.game, S.human);
     if (!CC().closeWindow(S.game)) return;
     S.mode = null; S.amount = null; S.msg = "";
@@ -548,7 +567,7 @@
   const settleHost = { live: (st) => !!S && S.settle === st, render: () => render(), end: () => settleEnd() };
   function settleStart(res, pre) {
     if (S.fast || !pre) { S.banner = res; return; }
-    const log = CC().view(S.game, S.human).log;
+    const log = curView().log;
     const end = log.findIndex(e => e.t === "result" && e.res && e.res.r === res.r);
     const logEnd = end < 0 ? log.length : end;
     const steps = lastSteps(log, pre.log.length, logEnd);
@@ -640,7 +659,7 @@
   }
   function render() {
     if (!S) return;
-    const now = CC().view(S.game, S.human), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
+    const now = curView(), v = S.settle ? settleView(now, S.settle) : now;   // 结算前的过渡：桌上停在结算之前
     const app = $("cc-game");
     if (!app) return;
     app.dataset.weather = v.weather || "none";
@@ -666,13 +685,20 @@
   }
   function topHtml(v) {
     const status = v.over ? "对局结束" : `第 ${v.round} / ${v.rounds} 轮`;
-    // 赌场桌（#487）：写上桌子，不能换边 / 换难度，「回到标题」换成「离桌」（回到打开牌桌的模式）
+    // 赌场桌（#487）：写上桌子，不能换边 / 换难度，「回到标题」换成「离桌」（回到打开牌桌的模式）。
+    // 联机牌桌（#526）：who 写对手是谁（主持人坐庄、对赌的对手名字……），另有「返回赌场」（不离桌）；主持人替玩家坐庄的那一桌没有「离桌」
     if (S.casino) return `${menuBtn()}<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
-      + `<span class="cc-role">${esc(S.casino.label || "赌场")} · 庄家：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
-      + `<span class="cc-spacer"></span>${btn("leave", "离桌", { title: S.casino.leaveTitle || "" })}`;
+      + `<span class="cc-role">${esc(S.casino.label || "赌场")} · ${esc(S.casino.who || `庄家：${AI().LEVEL_NAMES[S.level]} AI`)}</span>`
+      + `<span class="cc-spacer"></span>${casinoBtns()}`;
     return `${menuBtn()}<b class="cc-brand">${esc(CC().CC_CONFIG.name)}</b><span class="cc-round">${status}</span>`
       + `<span class="cc-role">你是<b>${sideName(S.human)}</b> · 对手：${esc(AI().LEVEL_NAMES[S.level])} AI</span>`
       + `<span class="cc-spacer"></span><button type="button" class="cc-btn" data-cc="setup">换边 / 难度</button><button type="button" class="cc-btn" data-cc="title">回到标题</button>`;
+  }
+  /** 赌场桌顶栏右边的按钮：「返回赌场」（联机牌桌）、「离桌」（模式给了才有） */
+  function casinoBtns() {
+    const c = S.casino;
+    return (c.onBack ? btn("back", "返回赌场", { title: "回到赌场大厅，牌局接着在桌上（不离桌）" }) : "")
+      + (c.onLeave ? btn("leave", "离桌", { title: c.leaveTitle || "" }) : "");
   }
   /** 庄家看过的天气（#502，偷看按顺序往下看）：放在天气堆旁边，只有人当庄家时画（view 里只有庄家有 deckSeen）。
    *  堆顶往下：从堆顶数连续看过的几张；堆底往上：压到牌堆底的几张，第一张在最底下 */
@@ -718,7 +744,7 @@
     // 庄家偷看出来的那张（#502）：用排得下的牌（#499 第 4 项），标签不会被牌里的东西挡住
     const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small class="cc-peeklabel">只有你看得到</small>${weatherCardHtml(v.peek.card, { fit: true })}</div>` : "";
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>${oppName}</b><small>${esc(AI().LEVEL_NAMES[S.level])} AI</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${acted(v.opponent)}</div>
+        <div class="cc-who"><b>${oppName}</b><small>${esc(S.casino && S.casino.oppTag || `${AI().LEVEL_NAMES[S.level]} AI`)}</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${acted(v.opponent)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
         ${chipsHtml(opp.chips, { title: oppName + "的筹码", label: opp.infinite ? "庄家筹码无限" : "", anim: anim.opp, cls: collect(v.opponent) })}
       </div>
@@ -986,7 +1012,7 @@
       <p class="cc-deltas"><span class="${tone}">你 ${fin[me]} 枚</span><span>${sideName(op)} ${theirs} 枚</span></p>
       <p class="cc-tier">${esc(rule)}${repaid.length ? `；已扣还借款：${esc(repaid.join("，"))}` : ""}。</p>
       <div class="cc-btns">${S.casino
-        ? `${btn("casinoAgain", esc(S.casino.againText || "再来一局"), { primary: true })}${bannerChartBtn()}${btn("leave", "离桌")}`
+        ? `${S.casino.onAgain ? btn("casinoAgain", esc(S.casino.againText || "再来一局"), { primary: true }) : ""}${bannerChartBtn()}${S.casino.onLeave ? btn("leave", "离桌", { primary: !S.casino.onAgain }) : ""}${S.casino.onBack ? btn("back", "返回赌场") : ""}`
         : `${btn("again", "再来一局", { primary: true })}${btn("swap", `换成${sideName(CC().other(S.human))}`)}${btn("setup", "换难度")}${bannerChartBtn()}${btn("title", "回到标题")}`}</div>
     </div>`;
   }
@@ -1012,9 +1038,11 @@
       case "skipSettle": settleEnd(); return;   // 结算前的过渡：直接看结算
       case "chart": openChart(); return;   // 只开克制表，不动对局和操作栏
       case "leave": casinoHook("onLeave"); return;          // 赌场桌：离桌
+      case "back": casinoHook("onBack"); return;            // 联机牌桌（#526）：回赌场大厅，不离桌
       case "casinoAgain": casinoHook("onAgain"); return;    // 赌场桌：同一张桌子再开一局（再交入场费）
     }
     if (!S) return;
+    if (S.busy) return;   // 联机牌桌：上一步的指令还没回来
     switch (act) {
       case "weather": humanAct({ type: "weather", op: d.op }); break;
       case "place": humanAct({ type: "place", where: d.where }); break;
@@ -1025,13 +1053,93 @@
       case "skip": case "normal": humanAct({ type: act, card: d.card }); break;
       case "mode": S.mode = d.mode || null; render(); break;
       case "amt": {
-        const v = CC().view(S.game, S.human), o = v.legal.find(x => x.type === "bet" || x.type === "raise");
+        const v = curView(), o = v.legal.find(x => x.type === "bet" || x.type === "raise");
         if (!o) return;
         S.amount = d.set === "max" ? o.max : Math.max(o.min, Math.min(o.max, (S.amount || o.min) + Number(d.d || 0)));
         render();
         break;
       }
     }
+  }
+  /* ---------- 联机牌桌（#526）：同一张牌桌，牌局在房主那边 ----------
+   * CounterCardsUI.remote(src)：打开牌桌接联机的这一局。src（casino-online-ui.js 给）：
+   *   view() → 这一方的 view（房主发来、过了 online-view.js 白名单的那一份；不坐这一桌了是 null）、act(操作) → Promise（发联机指令，{ ok, error }）、
+   *   leave()（离桌，没有就不画「离桌」：主持人替玩家坐庄的那一桌）、back()（回赌场大厅，不离桌）、
+   *   label / who / oppTag / leaveTitle（顶栏、对手座位上写什么，每次重画都读）、level（AI 的难度，写 AI 的时候用）、fast（测试用：结算前不停）。
+   * 画法和本机一样（结算前的过渡、结算横幅、记录最新的在最下面）。不同的只有：规则不在这里跑——人做一步是发指令，新的一包到了（remoteSync）
+   * 才往下画：多了一轮结算就先放结算前的过渡（「做最后一步之前的画面」= 上一包，记录按 logFrom 对齐，alignLog）；AI 在房主那边走；
+   * 追加窗口到时间替自己发「不加注」（关窗由房主的规则层来）；画面挂在 #scr-cc 上（加 .cc-online，联机玩家页放行、压在联机画面上面），不切 Screens。 */
+  /** 两包之间对齐记录：联机包里的记录只发最后几十条（logFrom = 前面丢掉了几条），做最后一步之前那一包的记录换成「这一包里的前 k 条」，
+   *  这样结算前的过渡照本机的算法（pre.log.length = 这一步从第几条记录起）。本机的 view 没有 logFrom，原样返回（Flux、猜大猜小也用这个） */
+  function alignLog(pre, now) {
+    if (!pre || !now || pre.logFrom == null || now.logFrom == null) return pre;
+    const k = Math.max(0, Math.min(now.log.length, pre.logFrom + pre.log.length - now.logFrom));
+    return Object.assign({}, pre, { log: now.log.slice(0, k) });
+  }
+  function remote(src) {
+    bind();
+    stopTimer(); stopWindow(); dropSettle(); closeChart(); stopTip();
+    const v = src && src.view();
+    if (!v) return false;
+    S = { game: null, remote: src, rv: v, human: v.side, ai: v.opponent, level: src.level || "normal", rng: null, seen: (v.results || []).length, banner: null, settle: null,
+      mode: null, amount: null, anim: { deal: true }, fast: !!src.fast, timer: null, revealKey: v.revealed ? v.round + ":" + v.revealed : "", msg: "", last: {}, holdUntil: 0,
+      busy: false, winGone: "",
+      casino: { get label() { return src.label; }, get who() { return src.who; }, get oppTag() { return src.oppTag; }, leaveTitle: src.leaveTitle,
+        onLeave: src.leave ? () => src.leave() : null, onBack: () => remoteBack() } };
+    const scr = $("scr-cc");
+    if (scr) { scr.classList.add("cc-online"); scr.hidden = false; }
+    show("game");
+    render();
+    return true;
+  }
+  /** 新的一包到了：接着画（多了一轮结算先放过渡）；不坐这一桌了就收起 */
+  function remoteSync() {
+    if (!S || !S.remote) return;
+    const v = S.remote.view();
+    if (!v) { remoteClose(); return; }
+    if (v === S.rv) return;   // 还是同一包（联机画面别的地方重画）
+    const pre = S.rv;
+    S.rv = v;
+    if (v.results.length > S.seen) { S.seen = v.results.length; settleStart(v.results[v.results.length - 1], alignLog(pre, v)); }
+    else S.seen = v.results.length;
+    const key = v.revealed ? v.round + ":" + v.revealed : "";
+    if (key && key !== S.revealKey) { S.revealKey = key; S.anim.reveal = v.revealed; }
+    render();
+  }
+  /** 人做一步：发指令（一次只发一个，回来之前不再发）；没做成写在操作栏里 */
+  function remoteAct(a) {
+    if (!S || !S.remote || S.busy) return;
+    const src = S.remote;
+    S.busy = true; S.msg = "";
+    const done = (r, e) => {
+      if (!S || S.remote !== src) return;
+      S.busy = false;
+      if (e || (r && r.ok === false)) S.msg = (e && e.message) || (r && r.error) || "没做成";
+      else { S.mode = null; S.amount = null; }
+      render();
+    };
+    let p;
+    try { p = Promise.resolve(src.act(a)); } catch (e) { done(null, e); return; }
+    p.then(r => done(r), e => done(null, e));
+  }
+  function remoteBack() {
+    const src = S && S.remote;
+    remoteClose();
+    if (src && src.back) src.back();
+  }
+  /** 收起联机牌桌（回大厅、离桌了） */
+  function remoteClose() {
+    if (!S || !S.remote) return;
+    leave();
+    remoteOff();
+    S = null;
+  }
+  /** #scr-cc 不再挂联机牌桌（本机开局、回设置页之前也调：先把联机的收起来） */
+  function remoteOff() {
+    const scr = $("scr-cc");
+    if (!scr || !scr.classList.contains("cc-online")) return;
+    scr.classList.remove("cc-online");
+    scr.hidden = true;
   }
   function bind() {
     if (bound || !doc()) return;
@@ -1067,9 +1175,12 @@
     UI_CONFIG, open, start, render, stop: () => { stopTimer(); if (S && S.win && S.win.timer) { clearTimeout(S.win.timer); S.win.timer = null; } }, setFast,
     cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
     cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
-    // 结算前的过渡的共用部分（#525）：Flux Duel / Hold'em（flux-ui.js）、猜大猜小（counter-cards-guess-ui.js）也用，时长、字读上面的 UI_CONFIG.settle
-    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag },
+    // 结算前的过渡的共用部分（#525）：Flux Duel / Hold'em（flux-ui.js）、猜大猜小（counter-cards-guess-ui.js）也用，时长、字读上面的 UI_CONFIG.settle；
+    // align：联机牌桌两包之间对齐记录（#526）
+    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag, align: alignLog },
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
-    state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
+    // 联机牌桌（#526）
+    remote, remoteSync, remoteClose, isRemote: () => !!(S && S.remote),
+    state: () => S, view: () => (S ? curView() : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
 })(typeof window !== "undefined" ? window : globalThis);
