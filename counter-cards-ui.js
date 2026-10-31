@@ -60,8 +60,9 @@
     },
     // 结算前的过渡（主人 10/30 试玩反馈，#499）：① 最后一步 → ② 判定中 → 结算横幅；过渡中点一下桌面（或「直接看结算」）直接看结算。fast（测试用）不停
     settle: {
-      lastMs: 900,         // ① 最后一步停多久：谁跟注 / 过牌 / 弃牌了，筹码推进底池的动画放完；AI 走的这一步也在桌上、操作栏里停这么久（毫秒）
-      judgeMs: 1200,       // ② 「判定中」停多久：底池、桌上两张牌背、场上天气留着，牌背轻轻抖、底池发光，不亮牌（毫秒）；弃牌不用判定，没有这一段
+      lastMs: 1200,        // ① 最后一步停多久：谁跟注 / 过牌 / 弃牌了，筹码推进底池的动画放完；AI 走的这一步也在桌上、操作栏里停这么久（毫秒；主人 10/31 嫌快，900 → 1200）
+      flipMs: 1500,        // 之后每翻开一张牌（"flip"）、亮牌（"show"）各停多久：一张牌至少看清一秒（主人 10/31，以前和 lastMs 一样 900）（毫秒）
+      judgeMs: 1500,       // ② 「判定中」停多久：底池、桌上两张牌背、场上天气留着，牌背轻轻抖、底池发光，不亮牌（毫秒；主人 10/31，1200 → 1500）；弃牌不用判定，没有这一段
       reducedJudgeMs: 500, // 开着「减少动态效果」：不抖、不发光，「判定中」缩短成这么久；① 的文字照样停 lastMs（毫秒）
       verbs: { check: "过牌", call: "跟注", fold: "弃牌", bet: "下注", raise: "加注", allIn: "全押" },   // 座位上标的「刚走的这一步」（全押：Flux Hold'em 跟不起时押上剩下的全部，#525）
       judge: "判定中",
@@ -400,6 +401,7 @@
   function afterChange(pre) {
     const g = S.game;
     if (g.results.length > S.seen) { S.seen = g.results.length; settleStart(g.results[g.results.length - 1], pre); }
+    else if (!S.fast) S.holdUntil = Math.max(S.holdUntil || 0, holdAfterFlip(pre, CC().view(S.game, S.human)));
     const key = g.revealed ? g.round + ":" + g.revealed : "";
     if (key && key !== S.revealKey) { S.revealKey = key; S.anim.reveal = g.revealed; }
     render();
@@ -481,15 +483,24 @@
   }
 
   /* ---------- 结算前的过渡：共用的部分（#525：High Flux 的这一套抽出来，Flux Duel / Flux Hold'em（flux-ui.js）、猜大猜小也用这一份） ----------
-   * 一段过渡 = 几步「停一下」（st.beats：每一步的名字，"last" 最后一步、"flip" 又翻开一张牌、"show" 亮牌……，每步停 UI_CONFIG.settle.lastMs）
+   * 一段过渡 = 几步「停一下」（st.beats：每一步的名字，"last" 最后一步停 UI_CONFIG.settle.lastMs；"flip" 又翻开一张牌、"show" 亮牌……停 flipMs，见 beatMs）
    *   →「判定中」（st.judge 为真才有：停 judgeMs，开着「减少动态效果」停 reducedJudgeMs；弃牌这种不用判定的没有这一段）→ host.end()（弹结算横幅）。
    * 放的时候 st.at = 第几步、st.phase = 这一步的名字（判定中是 "judge"），牌桌按它们画「停在结算之前」的画面。
    * host（各牌桌给）：live(st)（st 还是不是这张牌桌正在放的那一段：跳过了、换了一局就不是，排着的计时不再往下走）、render()、end()（放完：收起过渡、弹横幅、AI 接着排）。
    * 跳过（点一下桌面、「直接看结算」、fast）由牌桌直接调自己的 end；收起时 settleStop 停掉计时 */
+  /** 牌局里（不是结算前的过渡）这一步翻开了新的公共牌（天气 / 层牌）：AI 至少等 flipMs 才接着走，让人看清这张牌（主人 10/31）。
+   *  pre / now = 做这一步前后的 view；同一轮里翻开的张数变多了才算。返回 AI 最早能走的时间（Date.now() 计），没翻牌返回 0 */
+  function holdAfterFlip(pre, now) {
+    const faces = (v) => (v.layers || []).length + (v.weathers || []).length + (v.weather ? 1 : 0);
+    if (!pre || !now || pre.round !== now.round || faces(now) <= faces(pre)) return 0;
+    return Date.now() + UI_CONFIG.settle.flipMs;
+  }
+  /** 这一步停多久：最后一步 lastMs，之后翻开的每一张牌、亮牌 flipMs（主人 10/31：一张牌至少看清一秒） */
+  const beatMs = (beat) => (beat === "last" ? UI_CONFIG.settle.lastMs : UI_CONFIG.settle.flipMs);
   function settleBegin(st, host) {
     st.at = 0;
     st.phase = st.beats[0];
-    st.timer = setTimeout(() => settleNext(st, host), UI_CONFIG.settle.lastMs);
+    st.timer = setTimeout(() => settleNext(st, host), beatMs(st.phase));
     return st;
   }
   function settleNext(st, host) {
@@ -499,7 +510,7 @@
       st.at += 1;
       st.phase = st.beats[st.at];
       host.render();
-      st.timer = setTimeout(() => settleNext(st, host), T.lastMs);
+      st.timer = setTimeout(() => settleNext(st, host), beatMs(st.phase));
     } else if (st.phase !== "judge" && st.judge) {
       st.phase = "judge";
       host.render();
@@ -1068,7 +1079,7 @@
     cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
     cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
     // 结算前的过渡的共用部分（#525）：Flux Duel / Hold'em（flux-ui.js）、猜大猜小（counter-cards-guess-ui.js）也用，时长、字读上面的 UI_CONFIG.settle
-    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag },
+    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag, holdAfterFlip },
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
