@@ -1068,7 +1068,7 @@
     cardHtml, backHtml, weatherCardHtml, chipsHtml, outcomeOf, weatherMods, logScroll, stickLog,
     cardIcon, cardColor,   // 牌面零件：Flux Duel / Hold'em 的牌桌也用（#488）
     // 结算前的过渡的共用部分（#525）：Flux Duel / Hold'em（flux-ui.js）、猜大猜小（counter-cards-guess-ui.js）也用，时长、字读上面的 UI_CONFIG.settle
-    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag, reduced },
+    settle: { begin: settleBegin, stop: settleStop, lastSteps, actedOf, bar: settleBar, tag: judgeTag },
     openChart, closeChart, chartOpen, tipHtml, showTip, hideTip,
     state: () => S, view: () => (S ? CC().view(S.game, S.human) : null), act: humanAct, dismiss: () => { if (S) { S.banner = null; render(); schedule(); } }
   };
