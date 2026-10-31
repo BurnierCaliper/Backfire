@@ -15,6 +15,7 @@ const PHASE_FIRST = ["phase", "heat", "snow", "acid", "thunder", "sand", "glow"]
 function fresh(seed, opt) {
   const c = H.load();
   for (const f of ["counter-cards.js", "counter-cards-ai.js", "casino.js"]) vm.runInContext(read(f), c, { filename: f });
+  c.CounterCards.CC_CONFIG.dealerCall.enabled = false;   // 这里的测试按没有叫牌那一步（#503）的流程写：叫牌默认开以后单独关掉；叫牌另见 tests/counter-cards-dealer-call*.test.js
   const run = c.Rogue.newRun(Object.assign({ party: ["kolt", "helu"], seed, growth: true }, opt || {}));
   return { c, run, R: c.Rogue, CC: c.CounterCards, K: c.Casino, st: c.S.state };
 }

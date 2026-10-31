@@ -83,6 +83,9 @@
 .cc-who b { font-size: 16px; text-shadow: 1px 1px 0 #000; }
 .cc-who small { color: #b9c8b8; font-size: 12px; }
 .cc-who .cc-loan { color: #ffb38a; }
+/* 庄家叫牌（#503）：座位上写还能不能叫、叫过的结果 */
+.cc-who .cc-calltag { color: #ffd76a; }
+.cc-who .cc-calltag.used { color: #b9c8b8; }
 .cc-hand { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 .cc-hand .cc-card { -webkit-touch-callout: none; }   /* 手机长按手里的牌看预览：不弹系统的长按菜单 */
 .cc-hand-back .cc-card + .cc-card { margin-left: -34px; }

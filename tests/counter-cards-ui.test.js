@@ -28,6 +28,7 @@ function page() {
   const P = MD.create(body, { media: (q) => /prefers-reduced-motion: reduce/.test(q) });
   const ctx = vm.createContext(P.window);
   ["engine.js", "icons.js", "weather-fx.js", "pause-menu.js", "matchup-ui.js", "counter-cards.js", "counter-cards-ai.js", "counter-cards-ui.js"].forEach(f => vm.runInContext(read(f), ctx, { filename: f }));
+  P.window.CounterCards.CC_CONFIG.dealerCall.enabled = false;   // 这里的测试按没有叫牌那一步（#503）的流程写：叫牌默认开以后单独关掉；叫牌另见 tests/counter-cards-dealer-call*.test.js
   const doc = P.document;
   return { w: P.window, doc, $: (s) => doc.querySelector(s), $$: (s) => doc.querySelectorAll(s), UI: P.window.CounterCardsUI, CC: P.window.CounterCards };
 }
@@ -1489,6 +1490,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     // 同上面 keptGame：第 3 轮轮到人做庄家天气行动，场上是雷鸣，堆顶的微光第 2 轮看过
     await page.evaluate(() => {
       const A = (g, side, type, extra) => CounterCards.act(g, side, Object.assign({ type }, extra || {}));
@@ -1597,6 +1599,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     const em = await page.evaluate(useCjkFont, cjkFontCss());
     assert.ok(em > 0.97 && em < 1.06, "量排版用的中文字体换上了，一个汉字一个字宽：" + em);
     for (const w of Object.keys(PEEK_CARDS)) {
@@ -1644,6 +1647,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     page.on("console", m => { if (m.type() === "error") errors.push(m.text()); });
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.click("#t-local");
     await page.click("#t-cc");
     await page.waitForSelector("#cc-setup:not([hidden])");
@@ -1713,6 +1717,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     const game = () => page.evaluate(() => JSON.stringify(CounterCardsUI.state().game));
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.click("#t-local", T);
     await page.click("#t-cc", T);
     await page.waitForSelector("#cc-setup:not([hidden])", T);
@@ -1789,6 +1794,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     const page = await context.newPage(), errors = [], T = { timeout: 20000 };
     page.on("pageerror", e => errors.push(e.message));
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.evaluate(settleSetup, { seed: "过渡-真浏览器", ms: 2500 });
     await page.click('#cc-actions [data-cc="check"]', T);
     const m1 = await page.evaluate(measureSettle);
@@ -1854,6 +1860,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     await page.emulateMedia({ reducedMotion: "reduce" });   // 不放发牌动画：量位置时牌已经在手里
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.evaluate(() => { CounterCardsUI.start({ side: "player", level: "normal", seed: "预览", fast: true }); });   // 庄家（AI）走完，轮到人出牌
     const sel = '#cc-board .cc-me [data-face="fire"]', played = () => page.evaluate(() => CounterCardsUI.state().game.sides.player.card);
     await page.waitForSelector('#cc-board button.cc-can[data-card="fire"]', T);
@@ -1922,6 +1929,7 @@ for (const vp of [{ width: 1400, height: 900, tag: "桌面" }, { width: 390, hei
     page.on("pageerror", e => errors.push(e.message));
     const press = (sel) => (vp.mobile ? page.tap(sel, T) : page.click(sel, T));
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.evaluate(windowSetup);
     await press('#cc-actions [data-cc="call"]');
     await page.waitForSelector("#cc-actions .cc-count", T);
@@ -1971,6 +1979,7 @@ for (const vp of [{ width: 390, height: 844, tag: "手机 390×844", mobile: tru
     page.on("pageerror", e => errors.push(e.message));
     await page.emulateMedia({ reducedMotion: "reduce" });   // 不放发牌动画：量位置时牌已经在桌上
     await page.goto(GAME_URL);
+    await page.evaluate(() => { CounterCards.CC_CONFIG.dealerCall.enabled = false; });   // 同上面 load()：按没有叫牌那一步的流程写
     await page.evaluate(windowSetup);   // 下注：庄家下注 1 枚，轮到人跟注 / 加注 / 弃牌（两行按钮）
     await page.waitForSelector('#cc-actions [data-cc="fold"]', T);
     const bet = await page.evaluate(measureDock);

@@ -630,7 +630,7 @@
       d.mine = false;
       const op = id(get(e, "op")); if (op) d.op = op;
       for (const k of ["amount", "street", "count"]) { const v = number(get(e, k)); if (v !== undefined) d[k] = v; }
-      for (const k of ["weather", "layer"]) { const v = id(get(e, k)); if (v) d[k] = v; }
+      for (const k of ["weather", "layer", "element"]) { const v = id(get(e, k)); if (v) d[k] = v; }   // element：庄家叫的那张（#503，公开）
       const res = get(e, "res"); if (obj(res) && number(get(res, "r")) !== undefined) d.res = { r: get(res, "r") };
       return [d];
     });
@@ -824,8 +824,20 @@
       enumField(r, d, "outcome", ["dealer", "player", "tie", "fold"]);
       d.winner = sideOf(get(r, "winner")); const folded = sideOf(get(r, "folded")); if (folded) d.folded = folded;
       d.bets = projectSidePair(get(r, "bets"), number); d.delta = projectSidePair(get(r, "delta"), number); d.chips = projectSidePair(get(r, "chips"), nullableNum);
+      // 叫牌的一轮（#503）：叫了哪张、叫对没有（公开的）
+      const call = get(r, "call"); if (obj(call) && id(get(call, "element"))) d.call = { element: get(call, "element"), correct: get(call, "correct") === true };
       return [d];
     });
+    // 庄家叫牌（#503）：能不能叫、叫过没有、叫了哪张、叫对没有是公开的；叫错时亮出的层牌（revealed）只发给玩家那一方
+    const dc = get(g, "dealerCall");
+    if (obj(dc)) {
+      out.dealerCall = copyFields(dc, {}, [], [], ["enabled", "used", "available"]);
+      out.dealerCall.round = nullableNum(get(dc, "round")); if (out.dealerCall.round === undefined) out.dealerCall.round = null;
+      out.dealerCall.element = id(get(dc, "element"));
+      const ok = get(dc, "correct"); out.dealerCall.correct = typeof ok === "boolean" ? ok : null;
+      out.dealerCall.revealed = out.side === "player" ? arr(get(dc, "revealed")).slice(0, CASINO_CAP.history).flatMap(x => obj(x) && id(get(x, "layer")) ? [{ r: number(get(x, "r")) || 0, layer: get(x, "layer") }] : []) : [];
+    }
+    out.dealerCallUsed = get(g, "dealerCallUsed") === true;
     // 记录：同 Flux 两种牌桌（结算前的过渡要用 t / by / op……，#526；只给自己看的只带文字）
     projectCasinoLog(get(g, "log"), CC_SIDES, out);
     out.legal = projectLegal(get(g, "legal"));

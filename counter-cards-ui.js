@@ -582,7 +582,7 @@
     const end = log.findIndex(e => e.t === "result" && e.res && e.res.r === res.r);
     const logEnd = end < 0 ? log.length : end;
     const steps = lastSteps(log, pre.log.length, logEnd);
-    const st = S.settle = { res, pre, steps, logEnd, acted: actedOf(steps), beats: ["last"], judge: res.outcome !== "fold" };
+    const st = S.settle = { res, pre, steps, logEnd, acted: actedOf(steps), beats: ["last"], judge: res.outcome !== "fold" && !res.call };
     const rv = steps.find(e => e.t === "pw" && e.op === "reveal");
     if (rv) S.anim.reveal = rv.weather;   // 翻到相位直接全押结算：翻牌、闪光放在过渡里（以前一结算就看不到了）
     settleBegin(st, settleHost);
@@ -658,7 +658,8 @@
     return `<details class="cc-rules"><summary>${esc(C.name)} 规则</summary><ul>
       <li><b>牌</b>：庄家 ${C.layers.length} 张层牌（${C.layers.map(CC().cardName).join("、")}），每轮必须打出一张；玩家 ${C.elements.length} 张元素牌（${C.elements.map(CC().cardName).join("、")}）+ 1 张常态（每局一次）；天气堆 ${C.weathers.length} 张（${C.weathers.map(CC().weatherName).join("、")}），开局洗混，抽完就没了，新翻的天气顶替旧天气。</li>
       <li><b>计分</b>：按游戏里的克制表，克制 +1、劣势 −1、其余 0；天气修正每 25% 记 ±1（微光里能量以外的克制反转；酸雨里酸、冰以外的元素打装甲另 +1）。总分为正玩家赢，为负庄家赢，0 平局。</li>
-      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 不亮牌，系统直接判胜负结算。</li>
+      <li><b>每轮</b>：（筹码不够的一方先决定借不借，见「借贷」）① 双方各下 ${C.ante} 枚底注 ② 庄家天气行动：场上有天气时弃掉或保留，保留以后还可以接着偷看下一张；场上没天气时偷看下一张。偷看完放回原位或压到牌堆底（也可以不看）。偷看按顺序往下看：看的是庄家自己还没看过的下一张，不会重复看同一张，堆里剩下的都看过了就不能再偷看。玩家看得到庄家做了哪种（弃掉 / 保留 / 偷看后放回原位 / 偷看后压到牌堆底），看不到那张牌 ③ 双方暗出一张牌 ④ 第一轮下注，玩家先 ⑤ 玩家翻开一张新天气，或暗弃任意一张手牌跳过（弃的牌不公开）；之后还可以用常态清掉天气，代价是暗弃一张元素牌，常态不能覆盖相位 ⑥ 第二轮下注，庄家先 ⑦ 庄家可以叫牌（见「叫牌」） ⑧ 不亮牌，系统直接判胜负结算。</li>
+      <li><b>叫牌</b>：下注结束以后、结算以前（相位全押那一轮也可以），庄家可以叫出玩家这一轮暗出的元素牌，整局只能叫一次。叫对：这一轮不比分，算庄家赢，按差 1 结算，庄家这一轮出的层牌收回手上，之后还能再出；叫错：这一轮算玩家赢，按差 1 结算，庄家这一轮出的层牌亮给玩家看。叫了哪张、叫对没有是公开的。</li>
       <li><b>下注</b>：每轮最低下注额 = 轮数，每个下注回合最多加注 ${C.maxRaises} 次；没人下注时可以过牌；弃牌立即判负，输掉自己已下的筹码（包括自己在滚存底池里的那一份）。平局底池滚存到下一轮，第 ${C.rounds} 轮打平各自拿回。</li>
       <li><b>下注不封顶</b>：想押多少押多少，只受自己手上的筹码（含借来的）限制；对方押得比你手上的还多时，要跟就先向主持方借（借到补上缺口），不借只能弃牌。只有相位全押照旧按筹码较少一方封顶。</li>
       <li><b>跟注后追加</b>：一方跟注后有 ${C.callWindowSec} 秒追加窗口，双方都还可以加注或弃牌；有人加注就照常轮到对方跟注、加注或弃牌，对方跟注后再开一次窗口；${C.callWindowSec} 秒内没人动作，这个下注回合结束。窗口里的加注也算进每回合最多加注 ${C.maxRaises} 次，次数用完以后跟注直接结束。</li>
@@ -755,7 +756,7 @@
     // 庄家偷看出来的那张（#502）：用排得下的牌（#499 第 4 项），标签不会被牌里的东西挡住
     const peek = v.peek && v.peek.card && v.stage === "dealerPeek" ? `<div class="cc-peekcard"><small class="cc-peeklabel">只有你看得到</small>${weatherCardHtml(v.peek.card, { fit: true })}</div>` : "";
     return `${flash}<div class="cc-seat cc-opp">
-        <div class="cc-who"><b>${oppName}</b><small>${esc(S.casino && S.casino.oppTag || `${AI().LEVEL_NAMES[S.level]} AI`)}</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${acted(v.opponent)}</div>
+        <div class="cc-who"><b>${oppName}</b><small>${esc(S.casino && S.casino.oppTag || `${AI().LEVEL_NAMES[S.level]} AI`)}</small>${opp.discardCount ? `<small>暗弃 ${opp.discardCount} 张</small>` : ""}${loanTag(opp, oppName)}${callTag(v, v.opponent)}${acted(v.opponent)}</div>
         <div class="cc-hand cc-hand-back">${oppHand}</div>
         ${chipsHtml(opp.chips, { title: oppName + "的筹码", label: opp.infinite ? "庄家筹码无限" : "", anim: anim.opp, cls: collect(v.opponent) })}
       </div>
@@ -781,10 +782,17 @@
       <div class="cc-seat cc-me">
         ${chipsHtml(me.chips, { title: "你的筹码", anim: anim.me, cls: collect(S.human) })}
         <div class="cc-hand">${myHand || `<span class="cc-empty">手牌打完了</span>`}</div>
-        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}${loanTag(me, "你")}${acted(S.human)}</div>
+        <div class="cc-who"><b>你（${sideName(S.human)}）</b>${S.human === "player" && me.discards.length ? `<small>暗弃过：${me.discards.map(d => esc(CC().cardName(d.card))).join("、")}</small>` : ""}${loanTag(me, "你")}${callTag(v, S.human)}${acted(S.human)}</div>
       </div>`;
   }
   /** 向主持方借了多少、结束时要还多少（公开的） */
+  /** 庄家座位上的叫牌情况（#503）：还能叫 / 第几轮叫了哪张、叫对没有（公开的）；关掉叫牌的对局不写 */
+  function callTag(v, side) {
+    const c = v.dealerCall;
+    if (side !== "dealer" || !c || !c.enabled) return "";
+    if (!c.used) return `<small class="cc-calltag" title="庄家整局可以叫一次牌：下注结束后叫玩家这一轮暗出的元素牌">还能叫牌 1 次</small>`;
+    return `<small class="cc-calltag used">第 ${c.round} 轮叫〔${esc(CC().cardName(c.element))}〕· ${c.correct ? "叫对" : "叫错"}</small>`;
+  }
   function loanTag(s, who) {
     return s.loan ? `<small class="cc-loan" title="${esc(who)}向主持方借了 ${s.loan} 枚，对局结束时还 ${s.owe} 枚">借 ${s.loan} 枚 · 结束时还 ${s.owe} 枚</small>` : "";
   }
@@ -830,7 +838,8 @@
     if (!v.myTurn) {
       // 追加窗口里自己放弃追加了：等对方（或者到时间）
       if (v.betting && v.betting.window) return `${windowClock()}<p class="cc-prompt cc-wait">你不加注了，等${oppName}……</p>${infoLine(v)}${msg}`;
-      const wait = v.stage === "play" && v.me.card ? `你已经暗出了牌，等${oppName}出牌……` : `${oppName}正在想……`;
+      const wait = v.stage === "play" && v.me.card ? `你已经暗出了牌，等${oppName}出牌……`
+        : v.stage === "dealerCall" ? `下注结束了，${oppName}在想要不要叫牌……` : `${oppName}正在想……`;
       return `<p class="cc-prompt cc-wait">${wait}</p>${infoLine(v)}${msg}`;
     }
     const has = (t) => v.legal.find(o => o.type === t);
@@ -864,6 +873,18 @@
         const pk = v.peek || {};
         p = `${pk.at ? `天气堆从上往下第 ${pk.at + 1} 张` : "堆顶"}是〔${esc(CC().weatherName(pk.card))}〕。放回原位，还是压到牌堆底？`;
         b = btn("place", "放回原位", { data: { where: "top" }, primary: true }) + btn("place", "压到牌堆底", { data: { where: "bottom" } });
+        break;
+      }
+      case "dealerCall": {
+        // 庄家叫牌（#503）：下注结束、结算以前，整局一次（相位轮也可以）
+        const els = v.legal.filter(o => o.type === "callElement");
+        if (S.mode === "call") {
+          p = "叫玩家这一轮暗出的是哪张元素牌？叫对：这一轮算你赢，你这一轮出的层牌收回手上；叫错：这一轮算玩家赢，你这一轮出的层牌亮给玩家看。都按差 1 结算。";
+          b = els.map(o => btn("callElement", esc(CC().cardName(o.element)), { data: { element: o.element }, cls: "cc-callbtn" })).join("") + btn("mode", "取消", { data: { mode: "" } });
+        } else {
+          p = "下注结束了。要不要叫牌？叫玩家这一轮暗出的元素牌，整局只能叫一次；不叫就照常比分。";
+          b = btn("noCall", "不叫，直接比分", { primary: true }) + btn("mode", "叫牌…", { data: { mode: "call" }, disabled: !els.length });
+        }
         break;
       }
       case "play":
@@ -984,6 +1005,7 @@
   function outcomeOf(r, side) {
     const tier = `差 ${r.tier}`;
     if (r.outcome === "fold") return r.folded === side ? { cls: "lose", text: "你弃牌" } : { cls: "win", text: "对手弃牌" };
+    if (r.call) return { cls: r.winner === side ? "win" : "lose", text: `${r.winner === side ? "你赢" : "你输"} · 叫牌${r.call.correct ? "叫对" : "叫错"}` };
     if (r.outcome === "tie") return { cls: "tie", text: r.refund ? (r.allIn ? "相位平局，各自退回" : "平局，各自拿回") : "平局，底池滚存" };
     return r.winner === side ? { cls: "win", text: `你赢 · ${tier}` } : { cls: "lose", text: `你输 · ${tier}` };
   }
@@ -992,6 +1014,7 @@
     const big = { win: "你赢了", lose: "你输了", tie: "平局" }[o.cls];
     const tierText = r.outcome === "fold" ? (r.folded === S.human ? "你弃牌，输掉自己已下的筹码" : "对手弃牌，底池归你")
       : r.outcome === "tie" ? (r.refund ? (r.allIn ? "相位轮打平：各自退回自己下的筹码" : "最后一轮打平：各自拿回自己的筹码") : `底池 ${r.pot} 枚滚存到下一轮`)
+      : r.call ? callText(r, v)
       : (r.tier >= 2 ? "差 2：输家再赔出自己下注额的 0.5 倍" : "差 1：赢家拿走底池");
     const mine = r.delta[S.human], theirs = r.delta[CC().other(S.human)];
     return `<div class="cc-banner-card ${o.cls}" role="dialog" aria-label="第 ${r.r} 轮结算">
@@ -1002,6 +1025,13 @@
       <p class="cc-quiet">不亮牌：谁出了什么都不公开。</p>
       <div class="cc-btns">${btn("dismiss", v.over ? "看总结算" : "继续", { primary: true })}${bannerChartBtn()}</div>
     </div>`;
+  }
+  /** 叫牌那一轮的横幅（#503）：叫了哪张、叫对没有；叫对庄家收回层牌，叫错玩家看得到庄家那一轮的层牌（revealed 只有玩家那一方有） */
+  function callText(r, v) {
+    const el = CC().cardName(r.call.element), me = S.human === "dealer";
+    if (r.call.correct) return `${me ? "你" : "庄家"}叫〔${el}〕叫对了：不比分，算庄家赢，按差 1 结算；${me ? "你" : "庄家"}这一轮出的层牌收回手上。`;
+    const shown = ((v.dealerCall && v.dealerCall.revealed) || []).find(x => x.r === r.r);
+    return `${me ? "你" : "庄家"}叫〔${el}〕叫错了：不比分，算玩家赢，按差 1 结算；${me ? "你这一轮出的层牌亮给了玩家" : `庄家这一轮出的是〔${shown ? CC().cardName(shown.layer) : "？"}〕`}。`;
   }
   /** 结算横幅盖住了顶栏的「菜单」：横幅上也放一个克制表的按钮 */
   function bannerChartBtn() {
@@ -1058,7 +1088,8 @@
       case "weather": humanAct({ type: "weather", op: d.op }); break;
       case "place": humanAct({ type: "place", where: d.where }); break;
       case "play": humanAct({ type: "play", card: d.card }); break;
-      case "check": case "call": case "fold": case "pass": case "reveal": case "noNormal": case "noLoan": humanAct({ type: act }); break;
+      case "check": case "call": case "fold": case "pass": case "reveal": case "noNormal": case "noLoan": case "noCall": humanAct({ type: act }); break;
+      case "callElement": humanAct({ type: "callElement", element: d.element }); break;
       case "bet": case "raise": humanAct({ type: act, amount: S.amount }); break;
       case "borrow": humanAct({ type: "borrow", amount: Number(d.amount) }); break;
       case "skip": case "normal": humanAct({ type: act, card: d.card }); break;

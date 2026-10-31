@@ -30,8 +30,13 @@ function toCall(g, dealerCard, playerCard, o) {
 }
 const fresh = (deck) => CC.newGame({ seed: "call", deck: (deck || DECK).slice(), dealerCall: true });
 
-test("默认关：不进叫牌阶段，老流程不变", () => {
-  const g = CC.newGame({ seed: "x", deck: DECK.slice() });
+test("默认开（界面接好了，#503）：新开的对局下注结束后进叫牌阶段；newGame({ dealerCall: false }) 关掉时不进叫牌阶段，老流程不变", () => {
+  assert.equal(CC.CC_CONFIG.dealerCall.enabled, true);
+  const on = CC.newGame({ seed: "x", deck: DECK.slice() });
+  toCall(on, "flesh", "fire");
+  assert.equal(on.stage, "dealerCall");
+  assert.equal(CC.view(on, "dealer").dealerCall.enabled, true);
+  const g = CC.newGame({ seed: "x", deck: DECK.slice(), dealerCall: false });
   toCall(g, "flesh", "fire");
   assert.notEqual(g.stage, "dealerCall");
   assert.equal(g.results.length, 1);

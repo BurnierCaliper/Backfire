@@ -15,6 +15,7 @@ const c = H.load();
 vm.runInContext(read("counter-cards.js"), c, { filename: "counter-cards.js" });
 vm.runInContext(read("counter-cards-ai.js"), c, { filename: "counter-cards-ai.js" });
 const CC = c.CounterCards;
+CC.CC_CONFIG.dealerCall.enabled = false;   // 这里的测试按没有叫牌那一步（#503）的流程写：叫牌默认开以后单独关掉；叫牌另见 tests/counter-cards-dealer-call*.test.js
 const AI = c.CounterCardsAI;
 const J = v => JSON.parse(JSON.stringify(v));
 const A = (g, side, type, extra) => CC.act(g, side, Object.assign({ type }, extra || {}));

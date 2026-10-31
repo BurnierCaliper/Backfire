@@ -17,6 +17,7 @@ const read = f => fs.readFileSync(path.join(H.ROOT, f), "utf8");
 function room() {
   const c = H.load();
   for (const f of ["counter-cards.js", "counter-cards-ai.js", "casino.js"]) vm.runInContext(read(f), c, { filename: f });
+  c.CounterCards.CC_CONFIG.dealerCall.enabled = false;   // 这里的测试按没有叫牌那一步（#503）的流程写：叫牌默认开以后单独关掉；叫牌另见 tests/counter-cards-dealer-call*.test.js
   c.BattleSim.setup({ party: ["ruby", "helu", "kolt"], enemies: [{ id: "thug_knife", lv: 1, zone: 2 }], seed: "CASINO-ONLINE" });
   let saves = 0;
   c.GAME = { depth: 0, sim: false, tape: null, ended: false, level: 1, undo: [], disarm() {}, refresh() {}, resumeHotseat() {}, rememberCampaign() { saves++; } };
