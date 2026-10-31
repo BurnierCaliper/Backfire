@@ -10,6 +10,7 @@
  *
  * 敌人用 ai.js 的 EnemyAI（与战斗画面同一份）。玩家一方用 policy 决定，
  * 默认的 BASIC_POLICY 很朴素：能打到就普攻血最少的，打不到就走近一格。
+ * SKILL_POLICY 会看情况用技能（列出合法动作、沙盒里试跑、按打分挑，sim-search.js）：BattleSim.run({ policy: BattleSim.SKILL_POLICY })。
  */
 const BattleSim = (function () {
   "use strict";
@@ -299,6 +300,48 @@ const BattleSim = (function () {
     }
   };
 
+  /* ---------- 看情况用技能的打法（SKILL_POLICY，issue #538） ----------
+   * 只给模拟、测试、工具用（游戏里玩家这边没有 AI）。哪一边都能用（PvP 两队、PvE 我方），从轮到的那个单位自己这一边看局面。
+   * 轮到一个单位：列出它所有的合法动作（技能 × 分步选择 × 目标、移动、道具、召唤武器人），在沙盒里几个平行世界各试跑一遍，
+   * 一个回合之内往前看几步（束搜索），按打分挑最好的那一步做（sim-search.js · BattleSearch.plan；宽度、深度、平行世界数、权重在 SKILL_POLICY_CFG）。
+   * 倒地起身、协助格挡 / 协助攻击照 BASIC_POLICY。随机数照旧走战斗种子：试跑用自己的种子，真实的骰子一个都不动，同一种子结果一样。
+   * skillPolicy(opt) 造一份新的（opt.cfg 改设置），stats 里记它做了什么：用了哪些技能、召唤、道具、移动、试跑了多少个候选 */
+  function skillPolicy(opt) {
+    opt = opt || {};
+    const base = typeof SKILL_POLICY_CFG !== "undefined" ? SKILL_POLICY_CFG : {};
+    const cfg = Object.assign({}, base, opt.cfg || {}, { w: Object.assign({}, base.w || {}, (opt.cfg && opt.cfg.w) || {}) });
+    const stats = { decisions: 0, tried: 0, ok: 0, actions: 0, skills: {}, names: {}, summons: 0, items: 0, moves: 0 };
+    const pol = Object.assign({}, BASIC_POLICY, {
+      name: "skill",
+      cfg, stats,
+      act(u) {
+        if (u.dying && !isWeapon(u)) return BASIC_POLICY.act(u);   // 倒地：照 BASIC_POLICY 起身
+        if (u.stunned || ((u.ap || 0) <= 0 && (u.bonus || 0) <= 0)) return null;
+        const tok = BattleSearch.plan(u.id, pol, cfg);
+        stats.decisions++;
+        const last = BattleSearch.plan.last || {};
+        stats.tried += last.tried || 0; stats.ok += last.ok || 0;
+        if (!tok) return null;
+        return () => {
+          const cmd = BattleSearch.resolve(tok);
+          stats.actions++;
+          if (cmd.type === "move") stats.moves++;
+          else if (cmd.type === "useItem") stats.items++;
+          else {
+            stats.skills[cmd.skill] = (stats.skills[cmd.skill] || 0) + 1;
+            if (/_summon$/.test(cmd.skill)) stats.summons++;
+            // 报告里写技能名用：谁用的、叫什么
+            const a = unitById(cmd.actor);
+            if (a && !stats.names[cmd.skill]) stats.names[cmd.skill] = { kit: a.kit, unit: a.name, name: typeof skillDisplayName === "function" ? skillDisplayName(a, cmd.skill) : cmd.skill };
+          }
+          BattleSearch.execute(cmd, pol);
+        };
+      }
+    });
+    return pol;
+  }
+  const SKILL_POLICY = skillPolicy();
+
   /* ---------- 回合 ---------- */
   const sig = (u) => u ? `${u.ap}|${u.bonus}|${u.zone}|${u.dying}|${u.upOnShp}` : "gone";
 
@@ -383,5 +426,5 @@ const BattleSim = (function () {
     return out;
   }
 
-  return { setup, run, outcome, resolveQueues, standCheck, BASIC_POLICY };
+  return { setup, run, outcome, resolveQueues, standCheck, BASIC_POLICY, SKILL_POLICY, skillPolicy };
 })();

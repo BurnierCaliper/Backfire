@@ -86,6 +86,73 @@ test("只改 AI 的对照「先手第一回合原地等」：先手的人第 1 �
   assert.equal(typeof hold.act(unit("kolt")), "function", "第 2 回合起照常走过去");
 });
 
+test("技能版（#538，--policy skill）：抽样计划带上打法；一场打完记下用了哪些技能、同一场重跑一样；沙盒里试跑的事不记进失衡 / 倒地 / 再起不能", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], policy: "skill" });
+  assert.ok(jobs.length === 2 && jobs.every(j => j.policy === "skill"));
+  assert.ok(P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"] }).every(j => !("policy" in j)), "普攻版的计划和以前一样");
+  const job = Object.assign({}, jobs[0], { seed: "T538-ROW" });
+  const a = P.runJob(job), b = P.runJob(job);
+  assert.deepEqual(a, b, "固定种子：结果一样");
+  assert.ok(["F", "S", "D"].includes(a.w) && !a.err && !a.bugs, JSON.stringify(a));
+  assert.equal(a.p, "skill");
+  assert.ok(a.dec > 0 && a.tr > 0 && Object.keys(a.use).length > 0, "记下了技能版做了什么：" + JSON.stringify(a.use));
+  assert.ok(Object.values(a.nm).every(n => n.name && n.unit), "技能名（汇总进 report.skillNames，不写进 rows）");
+  const { nm, ...kept } = a;
+  const noNull = o => Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(o))).filter(([, v]) => v != null));   // 解包本来就不留空的项
+  assert.deepEqual(P.unpackRow(JSON.parse(JSON.stringify(P.packRow(kept)))), noNull(kept), "新加的几项照样能打包 / 解包");
+  // 沙盒（BattleSearch.sandbox）里发生的再起不能不记；真的发生才记
+  const { c, S, rec } = P.prepare(Object.assign({}, job, { a: ["kolt"], b: ["ruby"] }));
+  c.startCombat();
+  const ruby = S.units.find(u => u.kit === "ruby");
+  c.BattleSearch.sandbox(() => { c.pvpDuelKnockOut(c.unitById(ruby.id)); });
+  assert.equal(rec.outs.length, 0, "试跑的不记");
+  assert.ok(!ruby.pvpOut, "试跑完局面还回去了");
+  c.pvpDuelKnockOut(ruby);
+  assert.equal(rec.outs.length, 1, "真的发生才记");
+});
+
+test("遭遇战对照（--pve）：两种打法同一个种子各打一场；汇总胜率、回合、剩余血量", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], pve: 1 }).filter(j => j.kind === "pve");
+  assert.equal(jobs.length, P.PVE_SCENARIOS.length * 2);
+  const [x, y] = jobs.filter(j => j.id === "P1");
+  assert.deepEqual([x.policy, y.policy, x.seed === y.seed], ["basic", "skill", true]);
+  const r = P.runJob(x);
+  assert.ok(["W", "L", "T"].includes(r.w) && r.k === "pve" && r.r >= 1 && r.hp >= 0 && r.hp <= 1, JSON.stringify(r));
+  const s = P.pveSummary([{ k: "pve", id: "P1", p: "skill", w: "W", r: 4, hp: 0.5 }, { k: "pve", id: "P1", p: "skill", w: "L", r: 6, hp: 0 }, { k: "pve", id: "P1", p: "basic", w: "E" }]);
+  assert.deepEqual([s["P1|skill"].n, s["P1|skill"].won, s["P1|skill"].rate, s["P1|skill"].rounds, s["all|skill"].n], [2, 1, 0.5, 5, 2]);
+  assert.equal(s["P1|basic"].err, 1);
+  assert.ok(!Object.keys(P.summarizeAll([{ k: "pve", id: "P1", p: "skill", w: "W" }])).length, "决斗的汇总不算遭遇战");
+});
+
+test("技能版 vs 普攻版对打（--h2h）：同一对阵容 4 场（先后手 × 哪一队用技能版都对调）；汇总只算分出胜负的", () => {
+  const jobs = P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0, variants: ["base"], h2h: 1 }).filter(j => j.kind === "h2h");
+  assert.deepEqual(jobs.map(j => j.first + j.swap), ["a0", "a1", "b0", "b1"]);
+  assert.ok(jobs.every(j => j.seed === jobs[0].seed && j.a.join() === jobs[0].a.join()), "同一对阵容、同一个种子");
+  const r = P.runH2h(jobs[1]);
+  assert.ok(["X", "Y", "D"].includes(r.w) && r.k === "h2h" && r.x === 1 && r.dec > 0, JSON.stringify(r));
+  const s = P.h2hSummary([{ k: "h2h", s: 1, w: "X", r: 3 }, { k: "h2h", s: 1, w: "Y", r: 5 }, { k: "h2h", s: 2, w: "X", r: 4 }, { k: "h2h", s: 2, w: "D", r: 10 }]);
+  assert.deepEqual([s.all.n, s.all.dec, s.all.won, s[2].draws], [4, 3, 2, 1]);
+  assert.ok(!Object.keys(P.summarizeAll([{ k: "h2h", s: 1, w: "X" }])).length, "决斗的汇总不算对打");
+});
+
+test("技能版报告：写明样本多少、跑了多久，并按每场的平均用时估算加大样本（同一条命令只改 --pairs / --h2h / --pve）要多久", () => {
+  const o = { sizes: [1, 4], levels: [3, 10], pairs: 2, variants: ["base", "noLate"], workers: 4, h2h: 1, pve: 1 };
+  const many = (n, k) => Array.from({ length: n }, () => ({ k }));
+  // 决斗 2 种情况 × 2 种人数 × 2 个等级 × 2 对 × 先后手 = 32 场；对打 2 × 2 × 1 对 × 4 = 16 场；遭遇战 6 种 × 1 个种子 × 两种打法 = 12 场
+  const rows = many(32, "random").concat(many(16, "h2h"), many(P.PVE_SCENARIOS.length * 2, "pve"));
+  // 一场平均：1v1 1 秒、4v4 5 秒；对打 1v1 2 秒、4v4 4 秒；遭遇战普攻版 0.5 秒、技能版 3.5 秒
+  const timing = { "1v1": { meanMs: 1000 }, "4v4": { meanMs: 5000 }, "h2h:1v1": { meanMs: 2000 }, "h2h:4v4": { meanMs: 4000 }, "pve:basic": { meanMs: 500 }, "pve:skill": { meanMs: 3500 } };
+  const t = P.sampleText({ options: o, rows, seconds: 125, timing });
+  ["决斗 32 场", "对打 16 场", "遭遇战 12 场", "一共 60 场", "4 个线程跑了 2.1 分钟（125 秒）"].forEach(s => assert.ok(t.includes(s), s + "：" + t));
+  // 每加 1 多跑多久（4 个线程）：--pairs (1 + 5) 秒 × 2 种情况 × 2 个等级 × 2 场 ÷ 4 = 12 秒；--h2h (2 + 4) × 2 个等级 × 4 场 ÷ 4 = 12 秒；--pve (0.5 + 3.5) × 6 种 ÷ 4 = 6 秒
+  ["`--pairs` 每加 1（决斗每格多 1 对）约多 0.2 分钟", "`--h2h` 每加 1（对打每格多 1 对）约多 0.2 分钟", "`--pve` 每加 1（每种遭遇多 1 个种子）约多 0.1 分钟"].forEach(s => assert.ok(t.includes(s), s + "：" + t));
+  const big = P.CONFIG.bigSample, est = 0.2 * big.pairs + 0.2 * big.h2h + 0.1 * big.pve;
+  assert.ok(t.includes(`\`--pairs ${big.pairs} --h2h ${big.h2h} --pve ${big.pve}\` 约 ${est.toFixed(1)} 分钟`), t);
+  // 没跑对打、遭遇战：不写那两项，例子也只改 --pairs
+  const t2 = P.sampleText({ options: Object.assign({}, o, { h2h: 0, pve: 0 }), rows: many(32, "random"), seconds: 60, timing: { "1v1": { meanMs: 1000 }, "4v4": { meanMs: 5000 } } });
+  assert.ok(!/对打|遭遇战|--h2h|--pve/.test(t2) && t2.includes(`\`--pairs ${big.pairs}\` 约 ${(0.2 * big.pairs).toFixed(1)} 分钟`), t2);
+});
+
 test("汇总：先手胜率只算分出胜负的场次，平局、超时、异常另列；差值带区间", () => {
   const row = (w, extra) => Object.assign({ v: "base", k: "random", s: 2, L: 10, i: 0, f: "a", w, r: 5 }, extra || {});
   const rows = [row("F", { st: "F", stR: 1, dn: "F", dnR: 2 }), row("F", { st: "S", stR: 2 }), row("S", { st: "S", stR: 1 }), row("D"), row("T"), row("E")];
