@@ -177,6 +177,20 @@ test("离开房间的人让出位置；房主刷新页面（checkpoint / restore
   assert.equal(g.c.OnlineBrawl.inBattle(), true);
 });
 
+test("打完、队伍档案换回去以后（联机房主的结算画面、回到房间时场上还是争斗的角色）：画面读这些角色的武器耐久不往换回去的档案里写", () => {
+  const c = H.load();
+  const e = kit => plain(c.brawlSimEntry(kit, 1));
+  c.LEDGER.dur.mint = 3;   // 玩家自己的档案：瑞比的明特耐久 3
+  const before = JSON.stringify(c.LEDGER.save());
+  c.brawlSetup({ tier: 1, size: 1, teams: { "1队": [e("ruby")], "2队": [e("ruby")] }, seed: "BRAWL560-DUR" });
+  const S = c.S.state, units = S.units.filter(u => u.isPlayer && !u.weaponOf);
+  units.forEach(u => (u.linkedKits || []).forEach(k => c.weaponDur(k, u)));   // 打的时候读：记在争斗那一份里
+  assert.equal(c.pvpDuelRestore([]), true);
+  assert.equal(JSON.stringify(c.LEDGER.save()), before, "打完换回争斗前的档案");
+  units.forEach(u => (u.linkedKits || []).forEach(k => assert.ok(c.weaponDur(k, u) > 0, "照样读得到耐久")));
+  assert.equal(JSON.stringify(c.LEDGER.save()), before, "读完档案没变（以前会写进「mint@1队」这些键）");
+});
+
 test("选养成的菜单（brawl.js · brawlChoices）：照等级段一步一步列——Lv20 三点属性（8 级那点不能重复）、四项专长（每级只列够得着的）、改造的上限照选完属性算；前面改了后面不合法的写原因", () => {
   const c = H.load();
   const ch = plain(c.brawlChoices("xia", 0, {}));

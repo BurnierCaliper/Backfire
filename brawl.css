@@ -2,7 +2,10 @@
  * 房间画面铺满一屏，在「房间码 · 菜单」按钮（.ol-dock，z-index 78 / 82）下面一层；房间面板（.ol-overlay 90）、菜单（8800）都在它上面。
  * 手机竖屏（390 宽）：两队、每一步都排成一列，选单撑满一行，不横向溢出；按钮 44px。 */
 .brawl-room { position: fixed; inset: 0; z-index: 76; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
-  background: linear-gradient(180deg, #17120e, #0b0806); color: var(--sk-bone, #efe3c8); padding: 56px 16px 32px; display: flex; justify-content: center; }
+  background: linear-gradient(180deg, #17120e, #0b0806); color: var(--sk-bone, #efe3c8); padding: 56px 16px 88px; display: flex; justify-content: center; align-items: flex-start; }
+/* 勾选框：正常大小、贴着文字（整行 44px 高，手指好点） */
+.brawl-room input[type="checkbox"] { width: 22px; height: 22px; min-height: 0; margin: 0; flex: none; }
+.brawl-room label:has(> input[type="checkbox"]) { justify-content: flex-start; }
 .brawl-room[hidden] { display: none; }
 .brawl-card { width: 100%; max-width: 920px; min-width: 0; box-sizing: border-box; overflow-wrap: anywhere; }
 .brawl-card h2 { margin: 2px 0 6px; }
@@ -54,7 +57,7 @@
 @keyframes brawl-flip { from { transform: rotateY(0deg) translateY(0); } 50% { transform: rotateY(calc(var(--brawl-end, 1440deg) / 2)) translateY(-28px); } to { transform: rotateY(var(--brawl-end, 1440deg)) translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .brawl-coin { animation: none; transform: rotateY(var(--brawl-end, 0deg)); } }
 @media (max-width: 760px) {
-  .brawl-room { padding: 52px 8px 24px; }
+  .brawl-room { padding: 52px 8px 88px; }   /* 底下留出「房间码 · 菜单」按钮的位置 */
   .brawl-opts label { flex: 1 1 100%; }
   .brawl-opts select { flex: 1; }
   .brawl-foot .crq-btn { flex: 1 1 40%; }

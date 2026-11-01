@@ -283,7 +283,12 @@ function unitWeaponMod(u) {
 /** 现在的耐久。who：谁的这把（不给就按 kit 找；争斗两队同一个角色时各记各的，ledgerKitKey） */
 function weaponDur(kit, who) {
   const key = ledgerKitKey(kit, who);
-  if (LEDGER.dur[key] == null) LEDGER.dur[key] = weaponDurMax(kit, who);
+  if (LEDGER.dur[key] == null) {
+    const max = weaponDurMax(kit, who);
+    // 争斗打完、队伍档案已经换回争斗前的那一份（brawl.js · brawlLedgerFrozen）：场上的争斗角色读耐久不往档案里写（#560）
+    if (typeof brawlLedgerFrozen === "function" && brawlLedgerFrozen()) return Math.max(0, Number(max) || 0);
+    LEDGER.dur[key] = max;
+  }
   return Math.max(0, Number(LEDGER.dur[key]) || 0);
 }
 function weaponBroken(kit, who) { return weaponDur(kit, who) <= 0; }

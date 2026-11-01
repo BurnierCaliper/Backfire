@@ -323,6 +323,9 @@ function brawlRestore() {
 }
 /** 收起来的还没放回去（测试用） */
 function brawlStashed() { return !!BRAWL_STASH; }
+/** 争斗打完、收起来的那一份已经放回去了，场上却还是争斗的角色（联机房主的结算画面、回到房间之后）：
+ *  这时画面读这些角色的耐久这类按 kit 记的东西，不往放回去的那份档案里写（ledger.js · weaponDur）——争斗不读也不写存档 */
+function brawlLedgerFrozen() { const d = brawlOn() && typeof pvpDuelState === "function" ? pvpDuelState() : null; return !!(d && d.restored); }
 /** 联机房主刷新页面（#543 第 2 步，online-brawl.js · checkpoint / restore）：收起来的那一份跟着房主本机的联机存档走，
  *  恢复以后打完照样放回去（不然打完会把争斗用的那份空档案当成队伍档案留下）。只在房主本机，不发给玩家 */
 function brawlStashSave() { return BRAWL_STASH ? JSON.parse(JSON.stringify(BRAWL_STASH)) : null; }
