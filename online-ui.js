@@ -95,6 +95,7 @@
     rollBox.hidden = true;
     let checkReq = null;   // 申请检定（check-request-ui.js）：玩家申请 / 主持人批准的浮层，下面 mount
     let duelUi = null;     // 决斗（duel-ui.js，#472）：探索环节申请 / 准备（选队、选项）的浮层，下面 mount
+    let brawlUi = null;    // 争斗（brawl-ui.js，#543）：大厅的房间画面、开打时的翻硬币，下面 mount
     let casinoUi = null;   // 赌场（casino-online-ui.js，#487）：探索环节打 High Flux 的浮层，下面 mount
     let loreUi = null;     // NPC 资料（lore-ui.js）：主持人编辑 / 玩家只读的浮层，下面 mount
     const rollForm = { unit: "", prof: "", note: "", secret: false };
@@ -404,7 +405,7 @@
     }
     function entryMarkup() {
       const slots = typeof api.slots === "function" ? api.slots() : [];
-      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><details class="ol-relay"${form.url.trim() ? " open" : ""}><summary>转发服务：${form.url.trim() ? "自定义" : "默认"}（一般不用改）</summary><label>转发服务地址（空着 = 默认）<input id="ol-url" data-field="url" type="url" placeholder="${esc(DEFAULT_RELAY)}" value="${esc(form.url)}" autocomplete="url"></label></details><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">${entry === "create" ? "创建后把房间码发给朋友。" : "填朋友发来的房间码就能进去。"}大家都用默认的转发服务就行。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${pending && api.cancelConnect ? button("取消", "cancelConnect") : ""}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
+      return `<div class="ol-card"><header><h2>${entry === "create" ? "联机开房" : "加入房间"}</h2>${button("关闭", "close")}</header><div class="ol-entry-tabs">${button("我来主持", "createTab", "", pending, entry === "create")}${button("加入朋友", "joinTab", "", pending, entry === "join")}</div><details class="ol-relay"${form.url.trim() ? " open" : ""}><summary>转发服务：${form.url.trim() ? "自定义" : "默认"}（一般不用改）</summary><label>转发服务地址（空着 = 默认）<input id="ol-url" data-field="url" type="url" placeholder="${esc(DEFAULT_RELAY)}" value="${esc(form.url)}" autocomplete="url"></label></details><label>昵称<input id="ol-name" data-field="name" maxlength="24" value="${esc(form.name)}" autocomplete="nickname"></label>${entry === "create" ? `<label>玩法<select id="ol-mode" data-field="mode">${option("trpg", "跑团（我当主持人）", form.mode !== "rogue" && form.mode !== "brawl")}${option("rogue", "联机单局（Roguelike，一起闯）", form.mode === "rogue")}${option("brawl", "争斗（单独开一局的 PvP）", form.mode === "brawl")}</select></label>` : ""}${entry === "create" && form.mode === "rogue" ? `<p class="ol-muted">联机单局：创建后你先选队伍出发，再把角色分给进房间的朋友。路线大家投票决定，钱各算各的，战利品按需求分。</p>` : entry === "create" && form.mode === "brawl" ? `<p class="ol-muted">争斗：两队人数一样（1v1 ~ 4v4），固定等级段，开局各自选角色和养成，翻硬币开打；可以打朋友，也可以把一整队交给 AI（一个人也能打）。不读也不写存档。</p>` : entry === "create" ? `<label>跑团存档<select id="ol-slot" data-field="slot">${slots.map(s => option(s.index, `${s.index + 1} · ${s.name}`, String(s.index) === form.slot)).join("")}</select></label><label>新团名称<input id="ol-campaign" data-field="campaignName" maxlength="40" placeholder="空白存档使用此名称" value="${esc(form.campaignName)}"></label>` : `<label>房间码<input id="ol-code" data-field="roomCode" maxlength="16" autocapitalize="characters" spellcheck="false" placeholder="六位房间码" value="${esc(form.roomCode)}"></label>`}<p class="ol-muted">${entry === "create" ? "创建后把房间码发给朋友。" : "填朋友发来的房间码就能进去。"}大家都用默认的转发服务就行。进入房间后，断线会自动尝试重连。</p><footer>${button(pending ? "连接中…" : entry === "create" ? "创建房间" : "加入", "connect", "", pending, true)}${pending && api.cancelConnect ? button("取消", "cancelConnect") : ""}${api.hasSaved?.() ? button("恢复上次房间", "resume", "", pending) : ""}</footer><p class="ol-notice" role="status">${esc(notice)}</p></div>`;
     }
     function rosterMarkup() {
       const heroes = view.heroes || [], mayAssign = view.isHost && ["lobby", "exploration", "ended"].includes(view.screen);
@@ -458,7 +459,7 @@
     function roomMarkup() {
       if (lobbyView && view.screen !== "lobby") return lobbyCardMarkup();
       const starting = view.screen === "lobby", canClose = !starting || view.isHost && view.mode === "rogue";
-      return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost ? button(view.mode === "rogue" ? "开始" : "开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) + (view.mode === "rogue" && !(view.heroes || []).length ? '<p class="ol-muted">先在单局画面选好队伍、点「出发」，这里才能把角色分给大家。</p>' : "") : '<p class="ol-muted">等待房主分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
+      return `<div class="ol-card"><header><div><span class="ol-muted">${starting ? "大厅" : "联机房间"}</span><div class="ol-code-row"><h2 class="ol-code">${esc(view.roomCode)}</h2>${view.roomCode ? button("复制房间码", "copyCode") : ""}</div></div>${canClose ? button("收起", "close") : ""}</header><p class="ol-connection" role="status">${esc(paused() ? view.status?.connected ? "房主离线，等待恢复" : "连接中断，正在重连" : "已连接")}</p>${rosterMarkup()}${starting ? `<footer>${view.isHost && view.mode === "brawl" ? '<p class="ol-muted">争斗：在房间画面里定设定、等大家选好角色和养成，都准备好了点「开打」。</p>' : view.isHost ? button(view.mode === "rogue" ? "开始" : "开始跑团", "start", "", disabled() || !players().some(p => !p.gm && p.online), true) + (view.mode === "rogue" && !(view.heroes || []).length ? '<p class="ol-muted">先在单局画面选好队伍、点「出发」，这里才能把角色分给大家。</p>' : "") : view.packet?.mode === "brawl" ? '<p class="ol-muted">争斗：在房间画面里选位置、角色和养成，点「准备好」。</p>' : '<p class="ol-muted">等待房主分配角色并开始。</p>'}</footer>` : ""}${starting ? lobbyChatMarkup() : ""}${messagesMarkup()}<footer>${button("重新连接", "reconnect", "", pending)}${button(view.isHost ? "离开并保存" : "离开房间", "leave", "", pending)}</footer><p class="ol-notice" role="status">${esc(notice || view.notice || view.packet?.systemNotice || (view.storageError ? "本机保存失败，请保持页面打开并检查存储空间。" : ""))}</p></div>`;
     }
     function lobbyChatMarkup() {
       return `<section class="ol-messages ol-lobby-chat"><h3>大厅交流${dotMarkup(lobbyUnread, " ol-badge")}</h3><ol aria-live="polite" data-keep-scroll="lobby">${(hs().chat || []).map(m => `<li><b>${esc(m.name || m.operatorName || "玩家")}</b><p${artAttr(m.text)}>${esc(m.text)}</p></li>`).join("") || '<li class="ol-muted">在这里与所有人商量准备事项。</li>'}</ol><form id="ol-lobby-chat"><label class="ol-sr-only" for="ol-lobby-text">大厅聊天</label><input id="ol-lobby-text" data-field="chatText" maxlength="500" value="${esc(form.chatText)}" placeholder="所有人都能看到…"><button class="ol-button" type="submit"${disabled() ? " disabled" : ""}>发送到大厅</button></form></section>`;
@@ -615,7 +616,7 @@
       const winners = Array.isArray(result.winners) ? result.winners.map(w => w && w.name).filter(Boolean) : [];
       const heading = duel ? (duel.winner ? `${DUEL_TEAM_NAMES[duel.winner] || ""}获胜` : "平局") : winners.length ? `${winners.join("、")} 获胜` : { win: "战斗胜利", lose: "战斗失败", retreat: "队伍撤退" }[result.outcome] || "遭遇结束";
       const d = result.drops, dropText = d ? [d.kuizhi ? `${d.kuizhi} 奎支` : "", ...(d.items || []).map(x => `${x.name} ×${x.qty}`)].filter(Boolean).join("、") : "";
-      return `<section class="ol-result" aria-label="战斗结算"><h2>${esc(heading)}</h2>${duel ? duelResultLine(duel) : ""}${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}${dropText ? `<p class="ol-drops">战斗掉落：<b>${esc(dropText)}</b>（已放进队伍背包）</p>` : ""}${teamScoresMarkup(result.teams)}<div class="ol-info-tools">${button("查看这场的战斗记录", "showLog")}${button("最近 10 场战绩", "info", 'data-info="record"', pending)}</div><p class="ol-muted">${view.packet?.mode === "rogue" ? "等房主点「继续」回到单局。" : "等待主持人返回探索。"}</p></section>`;
+      return `<section class="ol-result" aria-label="战斗结算"><h2>${esc(heading)}</h2>${duel ? duelResultLine(duel) : ""}${["D", "C", "B", "A", "S", "SS", "SSS"].includes(grade.grade) ? `<p class="ol-result-grade">评价 ${esc(grade.grade)}${grade.score == null ? "" : ` · ${esc(grade.score)} 分`}</p>` : ""}${grade.xpMult == null ? "" : `<p>战斗经验倍率 ×${esc(grade.xpMult)}</p>`}${dropText ? `<p class="ol-drops">战斗掉落：<b>${esc(dropText)}</b>（已放进队伍背包）</p>` : ""}${teamScoresMarkup(result.teams)}<div class="ol-info-tools">${button("查看这场的战斗记录", "showLog")}${button("最近 10 场战绩", "info", 'data-info="record"', pending)}</div><p class="ol-muted">${view.packet?.mode === "rogue" ? "等房主点「继续」回到单局。" : view.packet?.mode === "brawl" ? "争斗打完了：不给经验、奎支、掉落。等房主点「回到房间」，再来一局（设定、位置、养成都留着）。" : "等待主持人返回探索。"}</p></section>`;
     }
     const ATTRS = { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" };
     /** 升级的属性点：玩家自己选，主持人确认后才加上 */
@@ -1497,7 +1498,9 @@
       if (myAsk && view.screen !== "lobby") { panelOpen = false; suppliesOpen = false; closeMyBag(); if (loreUi) loreUi.close(); if (global.PauseMenu) global.PauseMenu.close(); }
       // 离开房间 / 被移出 / 变成房主：玩家打开的背包浮层（keep: true 不会自己收）收起来
       if (!(view.active && !view.isHost)) closeMyBag();
-      panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost);
+      // 争斗（#543）的大厅是房间画面（brawl-ui.js），房间面板不挡着（菜单里的「消息与成员」照样打得开）
+      const brawlLobby = view.active && view.screen === "lobby" && (view.isHost ? view.mode === "brawl" : view.packet?.mode === "brawl");
+      panel.hidden = !(panelOpen || view.active && view.screen === "lobby" && !rogueHost && !brawlLobby);
       if (panel.hidden) lobbyView = false;
       // 暂停页面：联机时标题写「菜单」、说明不会真的暂停；在哪个画面都能开（主持人、玩家）
       if (global.PauseMenu) global.PauseMenu.setOnline(view.active ? { host: !!view.isHost } : null);
@@ -1528,6 +1531,7 @@
       paintSupplies();
       if (checkReq) checkReq.sync();
       if (duelUi) duelUi.sync();
+      if (brawlUi) brawlUi.sync();
       if (casinoUi) casinoUi.sync();
       if (loreUi) loreUi.sync();
       paperDress();   // 纸片画面（#308）：画完再贴纸纹（量得到大小）
@@ -1555,7 +1559,7 @@
       global.PauseMenu.register({ id: "room", visible: () => !!view.active, badge: () => privUnread + lobbyUnread,
         label: () => `${view.roomCode || DOCK_TEXT.room} · ${paused() ? DOCK_TEXT.reconnecting : global.PauseMenu.CONFIG.items.room.label}`, run: () => openPanel("room") }),
       global.PauseMenu.register({ id: "lobby", visible: () => !!view.active && view.screen !== "lobby", run: () => openPanel("lobby") }),
-      global.PauseMenu.register({ id: "assign", visible: () => !!(view.active && view.isHost && view.mode !== "rogue" && ["exploration", "ended"].includes(view.screen)), run: () => openPanel("assign") }),
+      global.PauseMenu.register({ id: "assign", visible: () => !!(view.active && view.isHost && view.mode !== "rogue" && view.mode !== "brawl" && ["exploration", "ended"].includes(view.screen)), run: () => openPanel("assign") }),
       // 联机玩家的克制表：房主算好发来的 view.matchup（不含坚毅）；主持人用单机那一项（matchup-ui.js）
       global.PauseMenu.register({ id: "matchupOnline", config: "matchup", visible: () => !!(view.active && !view.isHost && view.screen === "battle" && matchupOf()),
         run: () => { if (global.MatchupUI) global.MatchupUI.open(() => matchupOf()); } }),
@@ -1889,6 +1893,7 @@
           const opts = { url: form.url.trim() || DEFAULT_RELAY, name: form.name.trim() || (entry === "create" ? "主持人" : "玩家") };
           try { if (form.name.trim()) localStorage.setItem(NAME_KEY, form.name.trim()); } catch (e) { /* 存不了就算了 */ }
           if (entry === "create" && form.mode === "rogue") opts.mode = "rogue";
+          else if (entry === "create" && form.mode === "brawl") opts.mode = "brawl";   // 争斗（#543，online-brawl.js）：不用跑团存档
           else if (entry === "create") Object.assign(opts, { slot: Number(form.slot), campaignName: form.campaignName.trim() || "联机跑团" });
           else opts.roomCode = form.roomCode.replace(/[^0-9a-z]/gi, "").toUpperCase();   // 粘贴时带的空格、标点去掉
           if (await call(() => api[entry === "create" ? "create" : "join"](opts))) { panelOpen = false; assignments = {}; render(); }
@@ -2239,6 +2244,8 @@
       units: () => view.isHost ? ((displayState || view.state || {}).units || []).filter(u => u.isPlayer && !u.weaponOf && u.kit) : rollUnits() });
     // 决斗（PvP 第三步，#472，duel-ui.js）：探索环节的申请 / 准备浮层；主持人点「开始决斗」由房主本机布置战场（trpg-ui.js · toDuel）
     if (global.DuelUI) duelUi = global.DuelUI.mount({ api, view: () => view, own, call, playerName, toDuel: () => global.TrpgFlow.toDuel() });
+    // 争斗（#543，brawl-ui.js）：大厅是争斗的房间画面（设定、两队的位置、自己角色的养成、准备好 / 开打），开打时翻硬币
+    if (global.BrawlUI) brawlUi = global.BrawlUI.mount({ api, view: () => view, own, call });
     // 赌场（#487，casino-online-ui.js）：玩家的钱包 / 兑换 / 坐桌 / 对赌 / 出牌，主持人坐庄；数据只用 view.casino（online-view.js · projectCasino）
     if (global.CasinoOnlineUI) casinoUi = global.CasinoOnlineUI.mount({ api, view: () => view, own, call });
     // NPC 资料：规则在 lore.js（主持人的写入走 api.submit），玩家看 packet.lore、点开一条用 api.loreEntry 要详细内容
@@ -2248,7 +2255,7 @@
     if (typeof api.onPacket === "function") unsubs.push(api.onPacket(playPacket));
     render();
     const instance = { render, open(which = "join") { entry = which; panelOpen = true; render(); }, destroy() {
-      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (duelUi) { duelUi.destroy(); duelUi = null; } if (casinoUi) { casinoUi.destroy(); casinoUi = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
+      destroyed = true; closeMyBag(); if (checkReq) { checkReq.destroy(); checkReq = null; } if (duelUi) { duelUi.destroy(); duelUi = null; } if (brawlUi) { brawlUi.destroy(); brawlUi = null; } if (casinoUi) { casinoUi.destroy(); casinoUi = null; } if (loreUi) { loreUi.destroy(); loreUi = null; } paintField3d(null); if (battle) { battle.destroy(); battle = null; } playbackGeneration++; actionGeneration++; historyGeneration++; clearTimeout(toastTimer);
       document.removeEventListener("compositionstart", onCompStart, true); document.removeEventListener("compositionend", onCompEnd, true);
       document.removeEventListener("click", onRollOpen); document.removeEventListener("scroll", onListScroll, true); clearTimeout(titleTimer);
       document.removeEventListener("click", onPaperOutside, true); document.removeEventListener("keydown", onPaperKey, true); if (paperWatch) paperWatch.disconnect(); if (paperSizer) paperSizer.disconnect(); paintPaperTheme(null);

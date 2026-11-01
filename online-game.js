@@ -21,10 +21,15 @@
   // 主持人放弃战斗（abandonBattle）时加一：之前排队、还没执行的主持人操作（gm.* 指令、旧面板的编辑）一律作废，不落到之后摆的新战场上
   let battleEpoch = 0;
   let pausedAt = null, resumeAI = false, awaitingResync = false;
-  // 房间玩法：trpg 跑团（有主持人） / rogue 联机单局（online-rogue.js：投票、各人钱包、按需求分战利品）
+  // 房间玩法：trpg 跑团（有主持人） / rogue 联机单局（online-rogue.js：投票、各人钱包、按需求分战利品） /
+  // brawl 争斗（online-brawl.js，#543：单独开一局的 PvP，房间里选人数 / 角色 / 养成，打真人或整队 AI）
   let mode = "trpg";
   const rogue = () => mode === "rogue" && !!root.OnlineRogue;
+  const brawl = () => mode === "brawl" && !!root.OnlineBrawl;
+  const trpgMode = () => mode === "trpg";
   const rogueTypes = ["rogue.vote", "rogue.need", "rogue.act", "rogue.force"];
+  // 争斗房间里的指令（online-brawl.js · TYPES：设定、选位置、养成草稿、准备好、AI 队的角色）
+  const brawlTypes = ["brawl.set", "brawl.seat", "brawl.build", "brawl.ready", "brawl.ai"];
   /** 这名角色（kit）归哪个玩家：联机单局按单局里记的，跑团按热座分配；没分配的归房主 */
   function ownerOfKit(kit) {
     if (rogue()) return OnlineRogue.ownerOf(kit);
@@ -43,6 +48,8 @@
   function notify() { for (const fn of listeners) { try { fn(); } catch (e) { console.error(e); } } }
   function error(message) { throw new Error(message); }
   function roster() { return status.roster.map(p => ({ id: p.id, name: p.name, gm: p.role === "host", online: !!p.online })); }
+  /** 会话（hotseat.js）里的操作者：房间里的人；争斗有 AI 队时再加上 AI（online-brawl.js · operators，不在转发服务的名单里） */
+  function operators() { return brawl() ? roster().concat(OnlineBrawl.operators()) : roster(); }
   function liveScreen() { return !started ? "lobby" : GAME.ended && Screens.is("battle") ? "ended" : Screens.is("battle") ? "battle" : "exploration"; }
   /** 联机单局的角色分配按角色 kit（场上单位每次重摆 id 都会变） */
   function rogueHeroes() {
@@ -52,7 +59,8 @@
   function getView() {
     return { active, mode, isHost: isHost(), identity: copy(identity), status: copy(status), notice, storageError,
       screen: isHost() ? liveScreen() : remote?.screen || screen, roomCode: identity?.roomCode || "", players: roster(),
-      packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice } : remote,
+      packet: isHost() ? { state, view: HotseatGame.getView(), messages: messages.slice(-300), publicLogs: OnlineView.projectLogs(publicLogs), systemNotice, mode,
+        brawl: brawl() ? OnlineBrawl.viewFor(identity.id) : null } : remote,
       state: isHost() ? state : remote?.state, messages: isHost() ? messages.slice(-300) : remote?.messages || [],
       heroes: isHost() ? (rogue() ? rogueHeroes() : HotseatGame.getView().heroes) : remote?.view?.heroes || [], offlineWait: copy(isHost() ? offlineWait : remote?.offlineWait || null),
       manualPhase: isHost() ? manualPhase : !!remote?.manualPhase,
@@ -74,7 +82,7 @@
     if (!endpoint || !identity || leftRoom) return;
     const data = { version: 1, credentials: endpoint.credentials(), identity, requestNo, savedAt: Date.now() };
     if (isHost()) Object.assign(data, { mode, levelUps: typeof LevelUp !== "undefined" ? LevelUp.save() : [], game: GAME.onlineCheckpoint(), hotseat: HotseatGame.checkpoint(pausedAt ?? Date.now()),
-      trpg: rogue() ? null : TrpgFlow.onlineCheckpoint(), rogue: rogue() ? RunFlow.onlineCheckpoint() : null,
+      trpg: trpgMode() ? TrpgFlow.onlineCheckpoint() : null, rogue: rogue() ? RunFlow.onlineCheckpoint() : null, brawl: brawl() ? OnlineBrawl.checkpoint() : null,
       gm: GMCommands.snapshot(), screen: Screens.current(), started, seq, messageNo, messages, publicLogs, settledResult, systemNotice, offlineWait, requests: [...requests].slice(-200), requestHighWater: [...requestHighWater] });
     try { localStorage.setItem(KEY, JSON.stringify(data)); storageError = false; } catch (_) { storageError = true; }
   }
@@ -90,21 +98,23 @@
     // 战斗所在的区域、场景、光影（只是画面）：光影跟着时钟、场景跟着场上的场地（沙珊瑚台地），推进时间、换了场地以后发包前重算；
     // 主持人选过的照选的（world-data.js · battleLookSync）
     if (typeof battleLookSync === "function") battleLookSync();
-    const view = HotseatGame.getViewFor(id); view.players = roster(); view.network = true;
+    const view = HotseatGame.getViewFor(id); view.players = operators(); view.network = true;
     return { protocol: PROTOCOL, build: BUILD, type, seq, state, tape, result: result || settledResult, view, screen: liveScreen(),
       fx,   // 这一下的攻击演出（谁打谁、哪种招式；game.js · strikePlan），玩家画面照着播出手和弹道
       roomCode: identity.roomCode, hostName: identity.name, paused: isPaused(), messages, publicLogs, manualPhase, systemNotice,
       offlineWait: offlineWait ? { ...offlineWait, remainingMs: Math.max(0, offlineWait.deadline - Date.now()) } : null,
       mode, matchup: matchupNow(), rogue: rogue() ? OnlineRogue.viewFor(id) : null, levelUps: levelUpsFor(id),
+      // 争斗（online-brawl.js）：房间的设定、两队的位置；别人的养成只给「选好没有」，自己的位置才带草稿（online-view.js · projectBrawl 白名单）
+      brawl: brawl() ? OnlineBrawl.viewFor(id) : null,
       // 义体（单局诊所）：自己操控的角色的义体视图和诊所目录（online-rogue.js · cyberwareFor；online-view.js · projectCyberware 白名单 + scrubHidden）
       // 跑团：诊所开着时同样的 { heroes:[{kit,name,purse,view,shop,previews}] }（trpg.js · trpgCyberwarePacket）
       cyberware: rogue() ? (OnlineRogue.cyberwareFor ? OnlineRogue.cyberwareFor(id) : null)
         : typeof trpgCyberwarePacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? trpgCyberwareFor(id, id === identity.id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
-      quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
+      quests: trpgMode() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 角色资料（跑团，lore.js）：只有已发布条目的索引，不带详细内容（玩家点开一条时才要，见 receive 的 loreEntry）；
       // 没变时 online-wire.js 只带 loreUnchanged，改了只发改了的条目
-      lore: !rogue() && typeof lorePublicIndex === "function" ? lorePublicIndex() : null,
+      lore: trpgMode() && typeof lorePublicIndex === "function" ? lorePublicIndex() : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
       purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
       // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
@@ -117,8 +127,8 @@
       smith: !rogue() && typeof trpgSmithPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.smithOpen ? trpgPacketsFor(id, id === identity.id, trpgSmithPacket) : null,
       workshop: !rogue() && typeof trpgWorkshopPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.workshopOpen ? trpgPacketsFor(id, id === identity.id, trpgWorkshopPacket) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
-      rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
-      camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
+      rest: trpgMode() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
+      camp: trpgMode() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
       // 跑团探索的队伍卡（party-cards.js · heroDto，gm:false：根本不带坚毅生命字段）；online-view.js · projectParty 再按白名单过一遍
       // 只在探索 / 结算时发：战斗里玩家画面不画队伍卡（online-ui.js · partyMarkup），每个结算包都整份带上会白占 50 KiB 预算
       party: liveScreen() !== "battle" && !rogue() && typeof TRPG !== "undefined" && TRPG.active && typeof trpgHeroes === "function" && root.PartyCards ? trpgHeroes().map(h => PartyCards.heroDto(h, { gm: false })) : null,
@@ -133,7 +143,7 @@
   function publish(tape = [], result = null, fx = null) {
     if (!isHost() || !HotseatGame.isActive()) return;
     if (manualResolve && GAME.ended) { const finish = manualResolve; manualResolve = null; manualPhase = false; finish(); }
-    if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== roster().map(p => p.id).join("|")) setupOperators();
+    if ((!state.combatStarted || GAME.ended) && HotseatGame.getView().players.map(p => p.id).join("|") !== operators().map(p => p.id).join("|")) setupOperators();
     seq++; dirty = false;
     for (const p of status.roster) if (p.role !== "host" && p.online) sendProjected(p.id, rawPacket(p.id, "result", tape, result, fx));
     save(); notify();
@@ -181,8 +191,10 @@
     // 联机单局：角色归谁记在单局里（按角色 kit），场上的单位每次重摆 id 都会变
     // 已经离开房间（座位被释放）的玩家不在名单里：他的角色回到房主
     const ids = roster().map(p => p.id);
-    const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf)) : Object.fromEntries(old.filter(u => ids.includes(u.owner)).map(u => [u.id, u.owner])));
-    const ack = HotseatGame.enableOnline({ mode: "trpg", players: roster(), assignments: next });
+    // 争斗：角色归谁按开打时房间里的位置记（online-brawl.js · assignments：按单位 id，两队可以有同一个角色；AI 那一队归 AI 操作者）
+    const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf))
+      : brawl() ? OnlineBrawl.assignments(ids) : Object.fromEntries(old.filter(u => ids.includes(u.owner)).map(u => [u.id, u.owner])));
+    const ack = HotseatGame.enableOnline({ mode: "trpg", players: operators(), assignments: next });
     if (!ack.ok) error(ack.error);
   }
   function mountOrder() {
@@ -219,8 +231,9 @@
         else if (!isPaused() && pausedAt !== null) { const elapsed = Date.now() - pausedAt; pausedAt = null; HotseatGame.extendAsk(elapsed); if (offlineWait) offlineWait.deadline += elapsed; }
       }
       if (isHost() && !restoring) {
+        if (brawl()) OnlineBrawl.changed();   // 争斗：离开房间的人让出位置
         const oldIds = (HotseatGame.isActive() ? HotseatGame.getView().players : []).map(p => p.id).join("|");
-        const newIds = roster().map(p => p.id).join("|");
+        const newIds = operators().map(p => p.id).join("|");
         if ((!state.combatStarted || GAME.ended) && oldIds !== newIds) {
           try { setupOperators(); } catch (e) { notice = e.message; }
         }
@@ -243,6 +256,7 @@
   async function create(options) {
     if (active) error("请先离开当前房间");
     if (options.mode === "rogue") return createRogue(options);
+    if (options.mode === "brawl") return createBrawl(options);
     const index = Number(options.slot);
     if (!Number.isInteger(index) || index < 0 || index > 2) error("请选择跑团存档空位");
     const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD, signal: connectSignal() });
@@ -261,6 +275,17 @@
     state.units = [];
     RunFlow.startOnline();   // 选队伍画面（在热座会话接管指令之前）
     GMCommands.reset(); restoring = true; bind(ep); OnlineRogue.enable(true, identity.id); configureGM(); configureActions(); setupOperators(); restoring = false;
+    started = false; screen = "lobby"; await ready(); publish(); return getView();
+  }
+  /** 争斗（#543，online-brawl.js）：开房后房主在房间画面定设定，大家选位置、角色、养成，都准备好了房主点「开打」。
+   *  不读也不写跑团、单局的存档（规则层开打时把队伍档案收起来，brawl.js · brawlStash） */
+  async function createBrawl(options) {
+    if (!root.OnlineBrawl || !root.GAME || typeof GAME.setupBrawl !== "function") error("这个版本没有争斗");
+    const ep = await RelayTransport.createHost({ ...options, protocol: PROTOCOL, build: BUILD, signal: connectSignal() });
+    mode = "brawl";
+    if (typeof TRPG !== "undefined") TRPG.active = false;
+    state.units = [];
+    GMCommands.reset(); restoring = true; bind(ep); OnlineBrawl.enable(true, identity.id); configureGM(); configureActions(); setupOperators(); restoring = false;
     started = false; screen = "lobby"; await ready(); publish(); return getView();
   }
   async function join(options) {
@@ -284,10 +309,11 @@
       if (c.role === "host") {
         const ep = await RelayTransport.resumeHost({ ...c, hostToken: c.token });
         bind(ep); configureGM(); configureActions();
-        mode = saved.mode === "rogue" ? "rogue" : "trpg";
+        mode = saved.mode === "rogue" ? "rogue" : saved.mode === "brawl" ? "brawl" : "trpg";
         if (rogue()) { OnlineRogue.enable(true, identity.id); RunFlow.restoreOnline(saved.rogue); }
+        if (brawl()) { OnlineBrawl.enable(true, identity.id); OnlineBrawl.restore(saved.brawl); if (typeof TRPG !== "undefined") TRPG.active = false; }
         if (typeof LevelUp !== "undefined") LevelUp.load(saved.levelUps || []);
-        GAME.restoreOnline(saved.game); if (!rogue()) TrpgFlow.restoreOnline(saved.trpg); HotseatGame.restoreOnline(saved.hotseat); GMCommands.restore(saved.gm, gmContext);
+        GAME.restoreOnline(saved.game); if (trpgMode()) TrpgFlow.restoreOnline(saved.trpg); HotseatGame.restoreOnline(saved.hotseat); GMCommands.restore(saved.gm, gmContext);
         started = saved.started; seq = saved.seq || 0; messages = saved.messages || []; publicLogs = saved.publicLogs || []; settledResult = saved.settledResult || null; systemNotice = saved.systemNotice || "";
         messageNo = Math.max(0, Number.isSafeInteger(saved.messageNo) ? saved.messageNo : 0,
           ...messages.map(m => /^msg-\d+$/.test(m.id) ? Number(m.id.slice(4)) : 0).filter(Number.isSafeInteger));
@@ -297,7 +323,7 @@
           requests.set(key, entry);
         }
         requestHighWater.clear(); for (const [id, number] of saved.requestHighWater || []) requestHighWater.set(id, number);
-        HotseatGame.system({ type: "screen", action: "show", name: saved.screen || (rogue() ? "run" : "trpg") });
+        HotseatGame.system({ type: "screen", action: "show", name: saved.screen || (rogue() ? "run" : brawl() ? "title" : "trpg") });
         // 单局战斗打到一半刷新：结算面板的「继续」重新接回单局
         if (rogue() && Screens.is("battle") && RunFlow.battleSpecLite()) GAME.resumeRogueBattle(RunFlow.battleSpecLite(), RunFlow.battleEnd);
         // 单局在战斗外恢复：存档里可能还带着上一场战斗的状态（combatStarted / 已结束），
@@ -306,7 +332,9 @@
         if (outOfBattle) { const panel = root.document && document.getElementById("g-result"); if (panel) panel.classList.remove("show");
           const reopen = root.document && document.getElementById("g-reopen"); if (reopen) reopen.classList.remove("show"); }
         restoring = false; await ready(); publish();
-        if (!outOfBattle) (saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
+        // 争斗布置好了、翻硬币的时候房主刷新（还没开战）：接着开战
+        const brawlStart = brawl() && OnlineBrawl.needsStart();
+        if (!outOfBattle) (brawlStart || saved.hotseat?.openingChoice && !state.combatStarted ? GAME.startOrEnd() : GAME.resumeOnline()).catch(reportError);
       } else { restoring = false; return join({ ...c, name: saved.identity.name, resumeToken: c.token }); }
     } finally { restoring = false; }
     return getView();
@@ -319,6 +347,15 @@
   function enqueue(fn) { const next = queue.then(fn, fn); queue = next.catch(() => {}); return next; }
   /** 行动结算完（game.js 已经经 onActionSettled 发过一包）：之后状态没再变就不重复整包 publish（#340 第 9 条：一次行动发两个完整包） */
   function settled(before) { if (seq === before || dirty) publish(); }
+  /** 争斗开打（房主点「开打」，#543）：房间里都准备好了 → 布置战场、按位置分角色（AI 那一队归 AI 操作者，online-brawl.js · start）→
+   *  发包（大家的画面放翻硬币动画，brawl-ui.js）→ 动画放完开战（照决斗：开战时后手补偿 1 个附赠，行动顺序照会话排） */
+  function startBrawl() {
+    const assign = OnlineBrawl.start();   // 还不能开打（有空位、有人没准备好、养成不合法）就抛出原因，什么都不动
+    setupOperators(assign);
+    started = true; publish();
+    setTimeout(() => { if (active && isHost() && brawl() && OnlineBrawl.needsStart()) Promise.resolve(GAME.startOrEnd()).catch(reportError); }, OnlineBrawl.CFG.tossMs);
+    return { ok: true };
+  }
   async function execute(cmd, sender) {
     if (isPaused()) error("房主离线，房间暂停");
     if (!cmd || typeof cmd.type !== "string") error("无效指令");
@@ -330,6 +367,11 @@
     if (rogueTypes.includes(cmd.type)) {
       if (!rogue()) error("这个房间不是联机单局");
       const result = OnlineRogue.handle(sender, cmd); publish(); return result && result.ok === false ? result : { ok: true };
+    }
+    // 争斗房间（online-brawl.js）：设定、选位置、养成草稿、准备好；不碰战场
+    if (brawlTypes.includes(cmd.type)) {
+      if (!brawl()) error("这个房间不是争斗");
+      OnlineBrawl.handle(sender, cmd); publish(); return { ok: true };
     }
     Commands.validate(cmd);
     // 角色资料（lore.js）：只有主持人能建、改、发布（玩家发来的在 receive 那里就挡掉了，这里按房主绑定的身份再查一次）；联机单局没有。
@@ -434,7 +476,7 @@
   }
   /** 一条资料的详细内容：只给已发布的（草稿、没有这条都是 null，不告诉玩家有没有这条草稿） */
   function lorePacket(entryId) {
-    const entry = !rogue() && typeof lorePublicEntry === "function" && typeof entryId === "string" ? lorePublicEntry(entryId) : null;
+    const entry = trpgMode() && typeof lorePublicEntry === "function" && typeof entryId === "string" ? lorePublicEntry(entryId) : null;
     return { type: "loreEntry", protocol: PROTOCOL, build: BUILD, entry };
   }
   function messagePage(sender, request = {}) {
@@ -453,7 +495,7 @@
   // 角色资料改完（在 lore 指令的执行里）写进跑团存档
   if (typeof LoreCommands !== "undefined") LoreCommands.onChange = () => { if (isHost()) rememberLore(); };
   // 角色资料不碰战场：不用排在演出、询问后面
-  function immediate(cmd) { return controls.has(cmd.type) || ["gm.msg", "gmReply", "orderStart", "lore"].includes(cmd.type); }
+  function immediate(cmd) { return controls.has(cmd.type) || ["gm.msg", "gmReply", "orderStart", "lore"].includes(cmd.type) || brawlTypes.includes(cmd.type); }
   async function receive(packet, sender) {
     if (!active || !isHost() || !status.roster.some(p => p.id === sender && p.role === "player")) return;
     try {
@@ -469,7 +511,7 @@
         return sendProjected(sender, { ...menu, type: "actionOptions", requestId: packet.requestId, protocol: PROTOCOL, build: BUILD });
       }
       if (packet.type !== "cmd") error("未知消息");
-      if (!packet.command || ![...controls, ...rogueTypes, "levelup.seen", "skill", "move", "standUp", "useItem", "endTurn", "gmReply"].includes(packet.command.type)) error("只有主持人可以执行此操作");
+      if (!packet.command || ![...controls, ...rogueTypes, ...brawlTypes, "levelup.seen", "skill", "move", "standUp", "useItem", "endTurn", "gmReply"].includes(packet.command.type)) error("只有主持人可以执行此操作");
       const key = sender + ":" + packet.requestId, fingerprint = JSON.stringify(packet.command), previous = requests.get(key);
       if (previous) {
         if (previous.fingerprint !== fingerprint) error("指令编号已经用于另一操作");
@@ -665,7 +707,8 @@
         return;
       }
     }
-    if (view.phase !== "acting" || !unit || status.roster.some(p => p.id === unit.owner && p.online)) { if (offlineWait) { offlineWait = null; publish(); } return; }
+    // 争斗的 AI 那一队不是掉线：房主替它出手（online-brawl.js · tick），不等、不替它结束行动
+    if (view.phase !== "acting" || !unit || status.roster.some(p => p.id === unit.owner && p.online) || (brawl() && OnlineBrawl.isAi(unit.owner))) { if (offlineWait) { offlineWait = null; publish(); } return; }
     if (!offlineWait || offlineWait.actor !== unit.actor) { offlineWait = { actor: unit.actor, name: unit.name, owner: unit.owner, deadline: Date.now() + 60000 }; publish(); }
     if (Date.now() >= offlineWait.deadline && GAME.depth === 0 && !HotseatGame.hasAsk()) { offlineWait = null; HotseatGame.withOperator(unit.owner, () => GAME.endTurn()).catch(reportError); }
   }
@@ -678,6 +721,7 @@
       const value = next();
       if (cmd.type === "battle.finish") {
         settledResult = { ...value, outcome: cmd.outcome };
+        if (brawl() && outer) OnlineBrawl.finished(value);   // 争斗打完：房间进「打完了」，等房主点「回到房间」
         // 战斗结果进公开记录（只写结果，不带评分 / 坚毅数值）；决斗（#472）写哪一队赢 / 平局
         const r = value && value.duel && value.duel.result;
         const kind = r ? "duel" : { win: "victory", lose: "defeat", retreat: "retreat" }[cmd.outcome];
@@ -688,8 +732,9 @@
       if (cmd.type === "startCombat" || cmd.type === "battle.setup") settledResult = null;
       // 决斗（#472）：开战时抛硬币的结果大家都看得到（online-view.js · projectLogs 只认队伍 id，按模板写）
       if (outer && cmd.type === "startCombat" && state.pvpDuel && state.pvpDuel.first) { publicLogs.push({ kind: "duel", event: "toss", first: state.pvpDuel.first, turn: state.turnNo, at: Date.now() }); publicLogs = publicLogs.slice(-100); }
-      // 开始决斗（#472，trpg-ui.js · toDuel）：公开记录写「决斗开始」，不是「调整了队伍物资」
+      // 开始决斗（#472，trpg-ui.js · toDuel）：公开记录写「决斗开始」，不是「调整了队伍物资」；争斗（#543，battle.brawl）写「争斗开始」
       if (outer && cmd.type === "trpg.ui" && cmd.action === "toDuel") { publicLogs.push({ kind: "duel", event: "start", at: Date.now() }); publicLogs = publicLogs.slice(-100); }
+      if (outer && cmd.type === "battle.brawl") { publicLogs.push({ kind: "duel", event: "brawlStart", at: Date.now() }); publicLogs = publicLogs.slice(-100); }
       else if (outer && !GAME.tape && ["trpg", "trpg.ui", "backstage", "calc", "battle.panel"].includes(cmd.type) &&
           !/^(normalize|saveCaptured|recordBattle)/.test(cmd.action || "")) {
         // 战场配置里换所在区域 / 场景 / 光影：写「调整了战场」（不是队伍物资；online-view.js · projectLogs 认这句）
@@ -714,6 +759,7 @@
     savedInfo: () => { const s = readSaved(); return s ? { role: s.credentials?.role || "", roomCode: s.credentials?.roomCode || "", name: s.identity?.name || "", left: !!s.left } : null; }, slots: () => trpgReadSlots().map((s, index) => ({ index, name: s?.name || "空白存档" })),
     assign(assignments) {
       if (!isHost()) error("只有主持人可以分配角色");
+      if (brawl()) error("争斗在房间画面里各自选位置、选角色");
       if (rogue()) {
         const map = assignments || {}, ids = roster().map(p => p.id);
         if (Object.values(map).some(pid => !ids.includes(pid))) error("没有这名玩家");
@@ -750,6 +796,7 @@
     transferState() {
       if (!isHost()) return { ok: false, reason: "只有主持人可以转交角色" };
       if (rogue()) return { ok: false, reason: "联机单局开局后座位固定，不能转交" };
+      if (brawl()) return { ok: false, reason: "争斗开打后位置固定，不能转交（玩家掉线可以先「接管」）" };
       if (!HotseatGame.isActive() || !state.combatStarted || GAME.ended) return { ok: false, reason: "只在战斗中转交；探索时用「角色分配」" };
       return HotseatGame.transferState();
     },
@@ -788,7 +835,7 @@
     },
     /** 联机跑团：主持人能选的队员（大厅 / 探索时换人用）：[{ kit, name, on }] */
     partyChoices() {
-      if (!isHost() || rogue() || typeof livePartyCards !== "function") return [];
+      if (!isHost() || !trpgMode() || typeof livePartyCards !== "function") return [];
       const on = new Set((root.GAME && GAME.partyKits) || []);
       return livePartyCards().filter(c => !c.weaponOf).map(c => ({ kit: c.kit, name: c.name, on: on.has(c.kit) }));
     },
@@ -796,6 +843,7 @@
     setParty(kits) {
       if (!isHost()) error("只有主持人可以换队员");
       if (rogue()) error("联机单局在单局画面选队伍");
+      if (brawl()) error("争斗在房间画面里各自选位置、选角色");
       if (state.combatStarted && !GAME.ended) error("战斗中不能换队员");
       const valid = new Set((typeof livePartyCards === "function" ? livePartyCards() : []).filter(c => !c.weaponOf).map(c => c.kit));
       kits = (Array.isArray(kits) ? kits : []).filter((k, i, a) => valid.has(k) && a.indexOf(k) === i);
@@ -813,7 +861,25 @@
     cancelConnect() { if (connectAbort) { connectAbort.abort(); connectAbort = null; } return { ok: true }; },
     players: () => roster(),
     ownerOfKit,
-    start() { if (!isHost()) error("只有主持人可以开始"); if (rogue() && !RunFlow.current()) error("先选好队伍出发"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true }; },
+    start() {
+      if (!isHost()) error("只有主持人可以开始");
+      if (brawl()) return startBrawl();
+      if (rogue() && !RunFlow.current()) error("先选好队伍出发"); if (!status.roster.some(p => p.role === "player" && p.online)) error("请等待至少一名玩家加入"); started = true; publish(); return { ok: true };
+    },
+    /** 争斗：打完一局，房主点「回到房间」——再来一局（设定、位置、养成都留着，「准备好」要重新按） */
+    brawlAgain() {
+      if (!isHost() || !brawl()) error("这个房间不是争斗");
+      OnlineBrawl.again(identity.id);
+      started = false; settledResult = null;
+      if (root.document) { const r = document.getElementById("g-result"); if (r) r.classList.remove("show"); const ro = document.getElementById("g-reopen"); if (ro) ro.classList.remove("show"); }
+      publish(); return { ok: true };
+    },
+    /** 争斗的 AI 那一队（online-brawl.js · tick）：照玩家发指令的路子（校验、排队、结算、发包）替 AI 操作者执行一条指令。只在房主本机 */
+    actAs(sender, cmd) {
+      if (!isHost() || !brawl() || !OnlineBrawl.isAi(sender)) return Promise.resolve({ ok: false, error: "只有争斗的 AI 能这样出手" });
+      const run = () => execute(cmd, sender);
+      return Promise.resolve().then(() => (immediate(cmd) ? run() : enqueue(run))).catch(e => ({ ok: false, error: e.message }));
+    },
     actionMenu: request => rpc("actionOptions", { request }),
     sheetData: () => isHost() ? Promise.resolve(OnlineView.projectPacket(sheetPacket(identity.id), { recipientId: identity.id, gmId: identity.id })) : rpc("sheetData", {}),
     /** 角色资料：主持人拿整份（草稿、详细内容都在，只在房主本机）；玩家是 null（玩家看 packet.lore 的索引，点开一条用 loreEntry 要） */

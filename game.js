@@ -3434,9 +3434,11 @@
   async function askOpeningChoices() {
     // 等选择的时候主持人放弃了这场战斗（abandonBattle，例：初始刀头分给了玩家、玩家还没选）：不再往场上写
     const gen = G.battleGen;
+    // 争斗两队可以有同一个角色（brawl.js，#543）：每一个都问他自己的操控者（以前按 kit 只问第一个）；场上只有一个时和以前一样
+    const all = kit => (typeof kitUnits === "function" ? kitUnits(kit, state.units) : [typeof findKit === "function" ? findKit(kit, state.units) : null]).filter(u => u && u.isPlayer && !u.weaponOf);
     // 双相冲动+：诺拉自选初始状态
-    const nora = typeof findKit === "function" ? findKit("nora", state.units) : null;
-    if (nora && nora.isPlayer && typeof passivePlus === "function" && passivePlus(nora, 2)) {
+    for (const nora of all("nora")) {
+      if (!(typeof passivePlus === "function" && passivePlus(nora, 2))) continue;
       const opts = [{ label: "温和", value: "gentle" }, { label: "残忍", value: "cruel" }];
       const pick = hotseat() ? await HotseatGame.ownedChoice(nora, "诺拉 · 初始状态", opts)
         : await openChoice("诺拉 · 初始状态", "双相冲动+：开局时可以自行选择初始状态，回合开始时不会再随机改变。", opts, { label: "保持当前", value: (nora.resources || {}).mood || "gentle" });
@@ -3444,8 +3446,11 @@
       systemCommand({ type: "openingChoice", actor: nora.id, mood: pick === "cruel" ? "cruel" : "gentle" });
       addLogPhase(`诺拉 初始状态：${pick === "cruel" ? "残忍" : "温和"}`);
     }
-    const k = typeof findKit === "function" ? findKit("kolt", state.units) : null;
-    if (!k || !k.isPlayer) return;
+    for (const k of all("kolt")) await askKoltBit(k, gen);
+  }
+  /** 开战前柯尔特自选初始刀头（不算「更换刀头」，不触发追击伤害） */
+  async function askKoltBit(k, gen) {
+    if (abandoned(gen)) return;
     const pick = hotseat() ? await HotseatGame.ownedChoice(k, "柯尔特 · 初始刀头", [
       { label: "电钻（电 · 近距离）", value: "drill" }, { label: "酸液炮（酸 · 远距离）", value: "acid" }
     ]) : await openChoice(
@@ -3671,23 +3676,27 @@
     const teamLine = (rewards.teams || []).length ? `各阵营的分数（只是显示）：${pvpTeamScoreText(rewards.teams)}。` : "";
     if (teamLine) addLogPhase(teamLine);
     const ups = rewards.ups;
+    // 争斗（brawl.js，#543）：照决斗结算（battle.afterBattle 把开局收起来的队伍档案、背包放回去），不记队伍记忆、不交给跑团——和存档无关
+    const brawlEnd = typeof brawlOn === "function" && brawlOn();
     // 跑团版的队伍档案只在战斗原型里结算；Roguelike 由单局流程自己记。
     // 训练场不结算也不存档（报告 H15：以前撤退 / 全员倒地照常扣耐久、写队伍记忆，跑团没退出时连跑团空位一起改坏）
     if (!G.rogue && !trainingActive()) {
       const durNotes = systemCommand({ type: "battle.afterBattle" });
-      if (typeof G.onBattleFinished === "function") {
+      if (!brawlEnd && typeof G.onBattleFinished === "function") {
         const g = state.battleGains || { xp: 0, kuizhi: 0 };
         // 决斗（#472）：分数只是显示，不记进战场数据（不带 stats）
         const teams = (rewards.teams || []).length ? { teams: rewards.teams } : {};
         G.onBattleFinished(duelEnd ? { outcome: G.lastOutcome, turn: state.turnNo, xp: 0, kuizhi: 0, xpMult: 1, ups: [], durNotes, stats: [], grade: null, drops: null, duel: duelEnd.text, ...teams }
           : { outcome: G.lastOutcome, turn: state.turnNo, xp: g.xp, kuizhi: g.kuizhi, xpMult: state.xpMult || 1, ups, durNotes, stats: statRows(), grade: gr, drops: rewards.drops || null, ...teams });
       }
-      rememberCampaign();
+      if (!brawlEnd) rememberCampaign();
       durNotes.forEach(t => addLogPhase(t));
     }
     const loot = `背包现有 ${Number(state.kuizhi) || 0} 奎支`;
     const lvline = trpgXpLine + (ups.length ? "升级：" + ups.join("、") + "。" : "") + (rewards.drops ? "战斗掉落：" + battleDropsText(rewards.drops) + "。" : "");
-    box.querySelector("p").textContent = (duelEnd
+    box.querySelector("p").textContent = (duelEnd && brawlEnd
+      ? `第 ${state.turnNo} 回合结束。${duelEnd.text}争斗没有掉落、经验、奎支，不记战场数据；队伍档案、背包换回争斗前的样子（不读也不写存档）。`
+      : duelEnd
       ? `第 ${state.turnNo} 回合结束。${duelEnd.text}决斗没有掉落、经验、奎支；血量、坚毅生命、武器耐久恢复成决斗前的样子（用掉的道具不恢复）。`
       : retreated
       ? `第 ${state.turnNo} 回合撤出战斗。${loot}。${lvline}`
@@ -3823,6 +3832,7 @@
   function setRogueMode(rogue) {
     G.rogue = rogue;
     document.body.classList.toggle("rogue-battle", !!rogue);
+    document.body.classList.remove("brawl-battle");   // 争斗（setupBrawl 布置完再挂上）：开别的战斗时拿掉
     // #340 第 14 条：训练场不走 rogue-battle，以前后台按钮露出来；训练中挂 training-battle 藏后台
     document.body.classList.toggle("training-battle", !rogue && trainingActive());
   }
@@ -3987,6 +3997,34 @@
     idleBox();
     battleIntro("normal");
     return duel;
+  }
+
+  /** 争斗（联机玩法，#543 第 2 步，online-brawl.js · start）：房间里都准备好了，房主点「开打」——照 spec 布置（指令 battle.brawl：
+   *  规则层校验、照养成造两队的角色、3 区制两头站、翻硬币定先手，brawl.js · brawlSetup）。不读也不写队伍记忆、存档（规则层把队伍档案收起来，
+   *  打完放回去；finish 里不记队伍记忆）。之后照常开战（联机房主等翻硬币动画放完自己点）。返回 { brawl, duel } 的公开部分 */
+  function setupBrawl(spec) {
+    if (window.OnlineGame?.isHost() && state.combatStarted && !G.ended) {
+      const error = new Error("战斗中不能开始争斗"); error.code = "HOTSEAT_REJECT"; throw error;
+    }
+    setRogueMode(null);
+    const online = window.OnlineGame?.isHost(), cmd = Object.assign({}, spec, { type: "battle.brawl" });
+    // 和 setupBattle / setupDuel 一样：联机房主先布置（不合法就抛出原因，画面不动），再清画面
+    let out = online ? dispatch(cmd) : null;
+    resetBattleView();
+    if (!online) out = dispatch(cmd);
+    document.body.classList.add("brawl-battle");   // 顶栏的布置、后台这些主持人按钮藏起来（game.css）；结算面板换成「回到房间」
+    G.undo = [];
+    if ($("g-enc-name")) $("g-enc-name").textContent = "争斗";
+    if ($("g-weather-sel")) $("g-weather-sel").value = state.weather;
+    syncFieldDom();
+    setView(snapAll(), false);
+    const tier = (out.brawl && typeof brawlTier === "function" ? brawlTier(out.brawl.tier) : null) || { name: "" };
+    addLogPhase(`争斗 · ${tier.name} · ${out.brawl ? out.brawl.size : ""}v${out.brawl ? out.brawl.size : ""} · 翻硬币：${out.duel && out.duel.first ? (out.duel.first === "1队" ? "1 队先手" : "2 队先手") : ""}`);
+    autoSelect(true);
+    refreshAll();
+    idleBox();
+    battleIntro("normal");
+    return out;
   }
 
   /* ================= 11. HUD / 记录 ================= */
@@ -5842,6 +5880,11 @@
       systemCommand({ type: "battle.continue", outcome }, { continueBattle: r.onEnd });
     };
     $("g-review").onclick = reviewLog;
+    // 争斗（#543）打完：联机房主回到房间再来一局（online-game.js · brawlAgain：设定、位置、养成都留着）
+    if ($("g-brawl-back")) $("g-brawl-back").onclick = () => {
+      if (!G.ended || !window.OnlineGame || typeof OnlineGame.brawlAgain !== "function") return;
+      try { OnlineGame.brawlAgain(); } catch (e) { flashHint(e.message); }
+    };
     $("g-reopen").onclick = () => $("g-result").classList.add("show");
     window.addEventListener("resize", () => { if (G.depth === 0) setView(snapAll(), false); else fitZones(); });
     // 下方选单变高 / 变矮时，战场高度跟着变，重新排一次
@@ -5889,6 +5932,7 @@
   G.snapAll = snapAll;
   G.setupBattle = setupBattle;
   G.setupDuel = setupDuel;   // 决斗（#472，trpg-ui.js · toDuel）
+  G.setupBrawl = setupBrawl;   // 争斗（#543，online-brawl.js · start）
   G.startCustomBattle = startCustomBattle;
   G.startRogueBattle = startRogueBattle;
   // 联机单局：房主刷新页面后，把结算面板的「继续」重新接回单局（rogue-ui.js · battleEnd）

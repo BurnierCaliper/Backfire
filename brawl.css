@@ -1,0 +1,61 @@
+/* 联机玩法「争斗」（#543 第 2 步，brawl-ui.js）：房间画面、翻硬币动画。卡片、列表、按钮沿用申请检定 / 决斗（.crq-* / .duel-*，online.css）。
+ * 房间画面铺满一屏，在「房间码 · 菜单」按钮（.ol-dock，z-index 78 / 82）下面一层；房间面板（.ol-overlay 90）、菜单（8800）都在它上面。
+ * 手机竖屏（390 宽）：两队、每一步都排成一列，选单撑满一行，不横向溢出；按钮 44px。 */
+.brawl-room { position: fixed; inset: 0; z-index: 76; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+  background: linear-gradient(180deg, #17120e, #0b0806); color: var(--sk-bone, #efe3c8); padding: 56px 16px 32px; display: flex; justify-content: center; }
+.brawl-room[hidden] { display: none; }
+.brawl-card { width: 100%; max-width: 920px; min-width: 0; box-sizing: border-box; overflow-wrap: anywhere; }
+.brawl-card h2 { margin: 2px 0 6px; }
+.brawl-card h3 { margin: 10px 0 6px; font-size: 15px; }
+.brawl-card h4 { margin: 10px 0 4px; font-size: 13px; color: var(--sk-mint, #39e6b4); }
+.brawl-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0; }
+.brawl-opts label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; max-width: 100%; }
+.brawl-opts select, .brawl-opts input[type="number"] { min-height: 40px; font: inherit; max-width: 100%; }
+.brawl-opts input[type="number"] { width: 5em; }
+.brawl-opts-text { margin: 4px 0; }
+.brawl-rules summary { cursor: pointer; min-height: 32px; }
+.brawl-teams { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px; margin: 8px 0; }
+.brawl-team { padding: 8px 10px; background: #211c17; border-top: 4px solid #655947; min-width: 0; }
+.brawl-team[data-brawl-team="1队"] { border-top-color: var(--sk-hazard, #f2c230); }
+.brawl-team[data-brawl-team="2队"] { border-top-color: var(--sk-mint, #39e6b4); }
+.brawl-team .crq-list { margin: 0; }
+.brawl-slot select { min-height: 44px; font: inherit; flex: 1 1 160px; min-width: 0; max-width: 100%; }
+.brawl-slot.brawl-mine { border-left-color: var(--sk-mint, #39e6b4); }
+.brawl-slot.brawl-ai { border-left-color: #8a6bd1; }
+.brawl-slot.brawl-empty { opacity: .9; }
+.brawl-done { border-color: var(--sk-mint, #39e6b4); }
+.brawl-ready { border-color: var(--sk-hazard, #f2c230); }
+.brawl-build { margin: 10px 0; padding: 8px 12px 10px; background: #211c17; border-left: 4px solid var(--sk-mint, #39e6b4); min-width: 0; }
+.brawl-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; }
+.brawl-pick { display: grid; gap: 4px; min-width: 0; }
+.brawl-pick select { min-height: 44px; font: inherit; width: 100%; min-width: 0; }
+.brawl-feat-text { color: var(--sk-muted, #a8977b); line-height: 1.4; }
+.brawl-cyber .crq-state label { min-height: 44px; }
+.brawl-cyber input[type="number"] { width: 4.5em; min-height: 40px; font: inherit; }
+.brawl-why { margin: 8px 0 0; }
+.brawl-foot { margin-top: 12px; }
+.brawl-foot .crq-btn { min-width: 120px; }
+.brawl-wait { margin: 6px 0; padding-left: 18px; color: var(--sk-muted, #a8977b); }
+.brawl-error { margin-top: 8px; }
+/* 翻硬币（开打时每局放一次）：盖在战场上面，点不到它（不挡操作），放完自己收起 */
+.brawl-toss { position: fixed; inset: 0; z-index: 8600; display: flex; align-items: center; justify-content: center; pointer-events: none; background: rgba(8, 6, 4, .55); }
+.brawl-toss[hidden] { display: none; }
+.brawl-toss-card { text-align: center; padding: 18px 22px; max-width: min(92vw, 460px); background: #1d1813f2; border-top: 4px solid var(--sk-hazard, #f2c230); }
+.brawl-toss-head { font-size: 26px; font-weight: 700; margin: 12px 0 6px; }
+.brawl-toss-sub { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
+.brawl-coin { position: relative; width: 84px; height: 84px; margin: 0 auto; transform-style: preserve-3d; animation: brawl-flip 1.2s cubic-bezier(.2, .7, .3, 1) both; }
+.brawl-coin span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; font-size: 34px; font-weight: 800;
+  backface-visibility: hidden; border: 4px solid #6b5a2e; color: #2a210d; }
+.brawl-coin-a { background: radial-gradient(circle at 35% 35%, #ffe38a, #d8a72c); }
+.brawl-coin-b { background: radial-gradient(circle at 35% 35%, #b8f5e0, #39b894); transform: rotateY(180deg); }
+/* 落定：1 队先手停在「1」那一面，2 队先手停在「2」那一面 */
+.brawl-toss[data-first="1队"] .brawl-coin { --brawl-end: 1440deg; }
+.brawl-toss[data-first="2队"] .brawl-coin { --brawl-end: 1620deg; }
+@keyframes brawl-flip { from { transform: rotateY(0deg) translateY(0); } 50% { transform: rotateY(calc(var(--brawl-end, 1440deg) / 2)) translateY(-28px); } to { transform: rotateY(var(--brawl-end, 1440deg)) translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .brawl-coin { animation: none; transform: rotateY(var(--brawl-end, 0deg)); } }
+@media (max-width: 760px) {
+  .brawl-room { padding: 52px 8px 24px; }
+  .brawl-opts label { flex: 1 1 100%; }
+  .brawl-opts select { flex: 1; }
+  .brawl-foot .crq-btn { flex: 1 1 40%; }
+}

@@ -86,6 +86,31 @@ function brawlTeams() { return (typeof PVP_DUEL_CFG !== "undefined" ? PVP_DUEL_C
 const brawlFail = (why) => { throw new Error("争斗：" + why); };
 const plainObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
+/** 养成的底子：角色卡的属性、这个等级段的职责（照角色自己的那一条路线：每一级只有一个选项；万一以后打开了路线选择，也只取第一个，不在这里选）。
+ *  brawlBuild 和选养成的菜单（brawlChoices）用同一份 */
+function brawlHeroBase(card, tier) {
+  const R = brawlRewards(tier.level);
+  const h = { kit: card.kit, level: tier.level, attrs: Object.assign({}, card.attrs || {}), attrPicks: [], feats: [], featFull: [], rolePicks: {}, role2: null, role2Picks: [] };
+  R.roles.forEach(L => {
+    const u = spawnLiveCard(card, 1);
+    u.level = L;
+    u.rolePicks = Object.assign({}, h.rolePicks);
+    const opts = typeof roleChoicesAt === "function" ? roleChoicesAt(u, L) : [];
+    if (opts[0]) h.rolePicks[L] = { role: opts[0].role, n: opts[0].n };
+  });
+  return h;
+}
+/** 这一项专长（id）在第 L 级为什么不能选（feats.js · featChoicesFor 不列它的原因；h 是选到这一步的养成） */
+function brawlFeatWhy(h, id, L) {
+  const f = featDef(id);
+  if (!f) return "不认识这项专长";
+  if (!brawlFeatOk(f)) return "探索专长只在跑团规则下提供，争斗不提供";
+  return (FEAT_TIER_LEVEL[f.tier] || 0) > L ? `要 ${FEAT_TIER_LEVEL[f.tier]} 级才能选`
+    : !f.repeatable && featCount(h, id) > 0 ? "已经有了，不能重复"
+    : typeof f.requires === "function" && f.requires(h) ? f.requires(h)
+    : f.dabble ? "已经会这个职责技能了" : "不能选";
+}
+
 /** 一个角色的养成：照规则一项一项做，不合法就拒绝。返回 { kit, name, level, weapon, attrs, attrPicks, feats, featFull, rolePicks, cyberPlan, fleshMax, rate, limit } */
 function brawlBuild(entry, tier, label) {
   const at = label || "";
@@ -95,15 +120,7 @@ function brawlBuild(entry, tier, label) {
   if (!card) brawlFail(`${at}没有这名角色：${entry.kit}`);
   const name = card.name;
   const R = brawlRewards(tier.level);
-  const h = { kit: card.kit, level: tier.level, attrs: Object.assign({}, card.attrs || {}), attrPicks: [], feats: [], featFull: [], rolePicks: {}, role2: null, role2Picks: [] };
-  // 职责：照角色自己的那一条路线（每一级只有一个选项；万一以后打开了路线选择，也只取第一个，不在这里选）
-  R.roles.forEach(L => {
-    const u = spawnLiveCard(card, 1);
-    u.level = L;
-    u.rolePicks = Object.assign({}, h.rolePicks);
-    const opts = typeof roleChoicesAt === "function" ? roleChoicesAt(u, L) : [];
-    if (opts[0]) h.rolePicks[L] = { role: opts[0].role, n: opts[0].n };
-  });
+  const h = brawlHeroBase(card, tier);
   // 属性加点：4 / 8 / 19 级各一点，8 级那点不能加在之前加过的同一项上
   const attrs = entry.attrs;
   if (!Array.isArray(attrs)) brawlFail(`${at}${name} 的属性加点要写成数组（${R.attrs.length} 点）`);
@@ -127,13 +144,7 @@ function brawlBuild(entry, tier, label) {
     if (typeof id !== "string" || !f) brawlFail(`${at}${name} ${L} 级的专长不认识：${id}`);
     if (!brawlFeatOk(f)) brawlFail(`${at}${name} ${L} 级不能选「${f.name}」：探索专长只在跑团规则下提供，争斗不提供`);
     const legal = featChoicesFor(h, L).filter(x => brawlFeatOk(featDef(x)));
-    if (!legal.includes(id)) {
-      const why = (FEAT_TIER_LEVEL[f.tier] || 0) > L ? `要 ${FEAT_TIER_LEVEL[f.tier]} 级才能选`
-        : !f.repeatable && featCount(h, id) > 0 ? "已经有了，不能重复"
-        : typeof f.requires === "function" && f.requires(h) ? f.requires(h)
-        : f.dabble ? "已经会这个职责技能了" : "不能选";
-      brawlFail(`${at}${name} ${L} 级不能选「${f.name}」：${why}`);
-    }
+    if (!legal.includes(id)) brawlFail(`${at}${name} ${L} 级不能选「${f.name}」：${brawlFeatWhy(h, id, L)}`);
     h.feats.push(id);
     const more = typeof f.onTake === "function" ? f.onTake(h) || [] : [];
     more.forEach(x => { if (x.type === "featFull") fullOwed++; });
@@ -163,6 +174,59 @@ function brawlBuild(entry, tier, label) {
   }
   return { kit: card.kit, name, level: tier.level, weapon: tier.weapon, attrs: h.attrs, attrPicks: h.attrPicks, feats: h.feats, featFull: h.featFull,
     rolePicks: h.rolePicks, cyberPlan: plan, fleshMax, rate, limit: cyberConvertLimit(fleshMax, rate) };
+}
+
+/* ---------- 选养成的菜单（#543 第 2 步：联机房间里一项一项选，brawl-ui.js；房主照样用 brawlBuild 校验） ---------- */
+/** kit 在等级段 tierIndex、照草稿 draft（{ attrs, feats, featFull, cyberPlan }，没选的写 null）每一步能选什么。和 brawlBuild 同一套规则、同一个顺序
+ *  （先属性、再专长；前面几步选的算进去）。返回
+ *    { kit, level, attrs: [{ level, noRepeat, pick, options: [属性…], bad }], feats: [{ level, pick, options: [专长 id…], bad }],
+ *      full: { need, picks, options }, cyber: { fleshMax, rate, limit, plan, layers, bad }, error }
+ *  bad：这一步选了、可是照前面的选择已经不能选（写原因，不悄悄换掉）；error：整份交给 brawlBuild 的结果（null = 合法、选完了）。
+ *  只有养成本身的数字（属性、血量层），不含坚毅生命 */
+function brawlChoices(kit, tierIndex, draft) {
+  const tier = brawlTier(tierIndex), card = brawlHeroKits().includes(kit) ? brawlCard(kit) : null;
+  if (!tier || !card) return null;
+  const d = plainObj(draft) ? draft : {};
+  const list = (v) => (Array.isArray(v) ? v : []);
+  const R = brawlRewards(tier.level), h = brawlHeroBase(card, tier);
+  const names = typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES : { str: 1, con: 1, dex: 1, wil: 1, int: 1, sta: 1 };
+  const attrs = R.attrs.map((p, i) => {
+    const v = list(d.attrs)[i];
+    const pick = typeof v === "string" && Object.prototype.hasOwnProperty.call(names, v) ? v : null;
+    const options = Object.keys(names).filter(k => !(p.noRepeat && h.attrPicks.includes(k)));
+    const bad = pick && !options.includes(pick) ? `不能加在之前加过的同一项上（${names[pick]}）` : null;
+    if (pick && !bad) { h.attrs[pick] = (Number(h.attrs[pick]) || 0) + 1; h.attrPicks.push(pick); }
+    return { level: p.level, noRepeat: p.noRepeat, pick, options, bad };
+  });
+  let owed = 0;
+  const feats = R.feats.map((L, i) => {
+    const v = list(d.feats)[i];
+    const pick = typeof v === "string" && featDef(v) ? v : null;
+    const options = featChoicesFor(h, L).filter(x => brawlFeatOk(featDef(x)));
+    const bad = pick && !options.includes(pick) ? brawlFeatWhy(h, pick, L) : null;
+    if (pick && !bad) {
+      h.feats.push(pick);
+      const f = featDef(pick);
+      (typeof f.onTake === "function" ? f.onTake(h) || [] : []).forEach(x => { if (x.type === "featFull") owed++; });
+    }
+    return { level: L, pick, options, bad };
+  });
+  const fullOptions = typeof featFullOptions === "function" ? featFullOptions(h) : [];
+  const full = { need: owed, picks: list(d.featFull).filter(x => typeof x === "string").slice(0, owed), options: fullOptions };
+  const fleshMax = card.attrs ? derivedFromAttrs(h.attrs, tier.level).hp : (card.layers || []).reduce((s, l) => s + (Number(l.hp) || 0), 0);
+  const rate = cyberRateOf(h.attrs, tier.level), limit = cyberConvertLimit(fleshMax, rate);
+  const p = plainObj(d.cyberPlan) ? d.cyberPlan : null;
+  const plan = p ? { armor: Math.max(0, Math.floor(Number(p.armor) || 0)), shield: Math.max(0, Math.floor(Number(p.shield) || 0)), sand: Math.max(0, Math.floor(Number(p.sand) || 0)), spirit: !!p.spirit } : null;
+  const cyber = { fleshMax, rate, limit, plan, layers: cyberLayersFor(fleshMax, plan || {}), bad: plan ? cyberPlanError(plan, fleshMax, rate) : null };
+  let error = null;
+  const missing = attrs.filter(a => !a.pick).length + feats.filter(f => !f.pick).length + Math.max(0, full.need - full.picks.length);
+  if (missing) error = `还没选完：还差 ${missing} 项`;
+  else {
+    const entry = { kit, attrs: attrs.map(a => a.pick), feats: feats.map(f => f.pick), cyberPlan: plan };
+    if (full.need) entry.featFull = full.picks.slice();
+    try { brawlBuild(entry, tier, ""); } catch (e) { error = String(e.message || e).replace(/^争斗：/, ""); }
+  }
+  return { kit, level: tier.level, attrs, feats, full, cyber, error };
 }
 
 /** 校验整份 spec（字段、等级段、人数、队伍、队内不重复、每个角色的养成）。不合法抛出写着原因的错误；合法返回整理好的
@@ -259,6 +323,10 @@ function brawlRestore() {
 }
 /** 收起来的还没放回去（测试用） */
 function brawlStashed() { return !!BRAWL_STASH; }
+/** 联机房主刷新页面（#543 第 2 步，online-brawl.js · checkpoint / restore）：收起来的那一份跟着房主本机的联机存档走，
+ *  恢复以后打完照样放回去（不然打完会把争斗用的那份空档案当成队伍档案留下）。只在房主本机，不发给玩家 */
+function brawlStashSave() { return BRAWL_STASH ? JSON.parse(JSON.stringify(BRAWL_STASH)) : null; }
+function brawlStashLoad(s) { BRAWL_STASH = s && typeof s === "object" ? JSON.parse(JSON.stringify(s)) : null; }
 
 /** 布置一场争斗（指令 battle.brawl）：校验 → 收起存档 → 照养成造两队的角色 → 布置成决斗（3 区制、1 队 1 区 / 2 队 3 区、两个互相敌对的玩家阵营）→ 翻硬币定先手。
  *  之后照常开战（startCombat：后手补偿在这时给）。返回 { brawl: 公开部分, duel: 决斗的公开部分 } */

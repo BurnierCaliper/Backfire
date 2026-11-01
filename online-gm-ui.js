@@ -200,7 +200,8 @@
     function render() {
       view = bridge.getView();
       // 联机单局没有主持人：不放主持人工具
-      if (!view || !view.active || !view.isHost || view.mode === "rogue") { if (container) container.remove(); container = null; open = false; silent = false; return; }
+      // 联机单局、争斗（#543：房主也是一名玩家）没有主持人工具
+      if (!view || !view.active || !view.isHost || view.mode === "rogue" || view.mode === "brawl") { if (container) container.remove(); container = null; open = false; silent = false; return; }
       if (!container) { container = document.createElement("div"); container.id = "online-gm-tools"; container.className = "ogm-ui"; document.body.appendChild(container); container.addEventListener("click", onClick); container.addEventListener("change", onChange); }
       const focused = container.contains(document.activeElement) ? document.activeElement.id : "";
       // Notifications may arrive while the GM types. Preserve the pending form,
@@ -218,7 +219,7 @@
     /** 发一条指令；成功返回 true。静默（不写玩家记录）只对主持人指令（gm.*）有意义，规则指令（battle.playerFaction）不带 */
     async function send(command) {
       if (busy) return false;
-      view = bridge.getView(); if (!view?.active || !view.isHost || view.mode === "rogue") { render(); return false; }
+      view = bridge.getView(); if (!view?.active || !view.isHost || view.mode === "rogue" || view.mode === "brawl") { render(); return false; }
       const form = container.querySelector("#ogm-panel"); if (form && !Array.from(form.querySelectorAll("input")).every(i => i.reportValidity())) return false;
       if (command.type.startsWith("gm.")) command.silent = silent;
       busy = true; notice = "正在执行…";

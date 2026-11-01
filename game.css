@@ -1379,6 +1379,13 @@ body.rogue-battle .g-top label:has(#g-level),
 body.rogue-battle .g-top label:has(#g-weather-sel) { display: none !important; }   /* 这两个 label 带行内 display */
 /* #340 第 14 条：训练场藏后台（顶栏按钮 + 队伍面板里的入口），避免坚毅剩余 / 上限写在后台里 */
 body.training-battle :is(#g-bs, #g-party-backstage) { display: none !important; }
+/* 争斗（#543，game.js · setupBrawl）：房主也是一名玩家——布置、存读档、后台（坚毅剩余 / 上限写在里面）这些主持人按钮都藏起来；
+   结算面板只留「回到房间（再来一局）」和看日志 */
+#g-brawl-back { display: none; }
+body.brawl-battle #g-brawl-back { display: inline-block; }
+body.brawl-battle :is(#g-again, #g-rogue-next, #g-explore-back, #g-to-explore, #g-party-cfg, #g-enc-cfg, #g-field-cfg, #g-bag, #g-rest, #g-save, #g-bs, #g-party-backstage, #g-restart),
+body.brawl-battle .g-top label:has(#g-level),
+body.brawl-battle .g-top label:has(#g-weather-sel) { display: none !important; }
 
 /* ---------- 选队伍 / 单局界面 ---------- */
 .scr-party, .scr-run {

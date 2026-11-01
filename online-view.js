@@ -489,6 +489,7 @@
       if (out.kind === "duel") {
         const ev = get(row, "event"), first = duelTeam(get(row, "first")), win = duelTeam(get(row, "winner"));
         if (ev === "start") out.text = "决斗开始";
+        else if (ev === "brawlStart") out.text = "争斗开始";   // 联机玩法「争斗」（#543）开打
         else if (ev === "toss" && first) out.text = `抛硬币：${first}先手（我方回合行动），${duelTeam(get(row, "first") === "1队" ? "2队" : "1队")}后手（敌人回合行动）`;
         else if (ev === "end") out.text = (get(row, "why") === "rounds" ? "回合上限到了，按剩余血量百分比：" : "") + (win ? `${win}获胜` : "平局");
         else return [];
@@ -592,6 +593,49 @@
       row.name = name;
       enumField(h, row, "team", DUEL_TEAMS);
       return [row];
+    });
+    return out;
+  }
+  /** 争斗的房间（#543，online-brawl.js · viewFor）：第几局、在设定 / 打 / 打完、等级段、每队几人、允许起身、回合上限、哪一队是 AI、
+   *  翻硬币的结果（开打时）、谁按了准备好、能不能开打（不能的原因）、两队每个位置的角色和操控者（选好没有）。
+   *  养成草稿（专长 / 属性 / 兼修 / 改造方案）只放给这个位置的主人（收件人自己的位置）：别人的、AI 那一队的一律不发——开打之前互相看不到养成。
+   *  没有坚毅生命，也没有 AI 的想法、搜索 */
+  function projectBrawl(b, context) {
+    if (!obj(b)) return null;
+    const me = context && context.recipientId;
+    const out = {};
+    for (const k of ["no", "tier", "size"]) { const v = number(get(b, k)); if (Number.isInteger(v) && v >= 0 && v <= 999) out[k] = v; }
+    enumField(b, out, "phase", ["setup", "battle", "ended"]);
+    out.stand = get(b, "stand") !== false;
+    const rounds = number(get(b, "rounds")); out.rounds = Number.isInteger(rounds) && rounds >= 1 && rounds <= 99 ? rounds : null;
+    out.ai = DUEL_TEAMS.includes(get(b, "ai")) ? get(b, "ai") : null;
+    out.host = get(b, "host") === true;
+    const toss = get(b, "toss");
+    out.toss = obj(toss) && DUEL_TEAMS.includes(get(toss, "first")) ? { no: Math.max(0, Math.floor(number(get(toss, "no")) || 0)), first: get(toss, "first") } : null;
+    const res = get(b, "result");
+    out.result = obj(res) ? (() => { const r = { draw: get(res, "draw") === true }; enumField(res, r, "winner", DUEL_TEAMS); enumField(res, r, "why", ["wipe", "rounds"]); return r; })() : null;
+    out.ready = arr(get(b, "ready")).slice(0, 16).map(id).filter(Boolean);
+    const st = get(b, "start");
+    out.start = { ok: obj(st) && get(st, "ok") === true, why: (obj(st) ? arr(get(st, "why")) : []).slice(0, 12).map(t => text(t, 160)).filter(Boolean) };
+    const ids = v => arr(v).slice(0, 8).map(x => id(x));
+    const n = v => { const x = number(v); return x !== undefined && x >= 0 ? Math.min(9999, Math.floor(x)) : 0; };
+    out.teams = {};
+    const teams = get(b, "teams");
+    DUEL_TEAMS.forEach(t => {
+      out.teams[t] = arr(obj(teams) ? get(teams, t) : null).slice(0, 4).filter(obj).map((row, i) => {
+        const r = { index: Number.isInteger(number(get(row, "index"))) ? number(get(row, "index")) : i, kit: id(get(row, "kit")), owner: id(get(row, "owner")) };
+        copyFields(row, r, ["ownerName"], [], ["done", "ai"]);
+        if (r.ownerName === undefined) r.ownerName = "";
+        // 自己的位置才带养成草稿：标了 mine、主人也确实是收件人（拿错了别人的视图也漏不出别人的养成）
+        r.mine = get(row, "mine") === true && !!me && r.owner === me && get(row, "ai") !== true;
+        const bd = get(row, "build");
+        if (r.mine && obj(bd)) {
+          const p = get(bd, "cyberPlan");
+          r.build = { attrs: ids(get(bd, "attrs")), feats: ids(get(bd, "feats")), featFull: ids(get(bd, "featFull")).filter(Boolean),
+            cyberPlan: obj(p) ? { armor: n(get(p, "armor")), shield: n(get(p, "shield")), sand: n(get(p, "sand")), spirit: get(p, "spirit") === true } : null };
+        }
+        return r;
+      });
     });
     return out;
   }
@@ -1244,7 +1288,9 @@
     if (get(packet, "type") === "messageHistory" && out.messages) out.messages = out.messages.slice(-100);
     if (own(packet, "publicLogs")) out.publicLogs = projectLogs(get(packet, "publicLogs"));
     // 联机单局：房主按收件人算好的单局画面（投票、钱包、战利品、自己能做的事），只去掉坚毅生命这类隐藏数值
-    enumField(packet, out, "mode", ["trpg", "rogue"]);
+    enumField(packet, out, "mode", ["trpg", "rogue", "brawl"]);
+    // 争斗（#543，online-brawl.js · viewFor）：房间的设定、两队的位置；养成草稿只有收件人自己的位置才带（开打之前互相看不到养成）
+    if (own(packet, "brawl")) out.brawl = projectBrawl(get(packet, "brawl"), context);
     // 升级提示：房主已经按收件人挑好（只有自己的角色、去掉了坚毅生命那一行）
     if (own(packet, "levelUps")) out.levelUps = arr(get(packet, "levelUps")).slice(0, 10).filter(obj).map(ev => {
       const e = scrubHidden(clone(ev)); e.stats = arr(e.stats).filter(r => obj(r) && r.key !== "shp"); return e;
@@ -1501,7 +1547,7 @@
     });
     return out;
   }
-  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, hideWallets, safeText: text, safeError };
+  const api = { SCHEMA, pickKeys, projectHud, projectPacket, projectBrawl, projectQuests, projectLore, projectLoreEntry, LORE_PUBLIC, LORE_CAP, projectPurse, projectShop, projectShopSell, projectClinic, projectSmith, projectWorkshop, projectCyberware, projectRest, projectCamp, projectParty, projectSheets, projectBagDetail, projectUnit, projectState, projectTape, projectFx, projectMessages, projectLogs, projectView, projectActionMenu, hideWallets, safeText: text, safeError };
   root.OnlineView = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : window);

@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="hotseat.css" />
   <link rel="stylesheet" href="online.css" />
   <link rel="stylesheet" href="online-gm-ui.css" />
+  <link rel="stylesheet" href="brawl.css" />
   <link rel="stylesheet" href="hud-icons.css" />
   <link rel="stylesheet" href="workshop.css" />
   <link rel="stylesheet" href="backpack.css" />
@@ -299,7 +300,7 @@
   </div>
 </div>
 
-<div class="result" id="g-result"><h2></h2><p></p><div class="result-btns"><button class="g-btn" id="g-review">查看日志</button><button class="g-btn" id="g-review-stats">战场数据</button><button class="g-btn" id="g-again">再来一局</button><button class="g-btn" id="g-rogue-next">继续</button><button class="g-btn r-main" id="g-explore-back">回到探索环节</button></div></div>
+<div class="result" id="g-result"><h2></h2><p></p><div class="result-btns"><button class="g-btn" id="g-review">查看日志</button><button class="g-btn" id="g-review-stats">战场数据</button><button class="g-btn" id="g-again">再来一局</button><button class="g-btn" id="g-rogue-next">继续</button><button class="g-btn r-main" id="g-explore-back">回到探索环节</button><button class="g-btn r-main" id="g-brawl-back">回到房间（再来一局）</button></div></div>
 <div class="sheet" id="g-bag-sheet">
   <div class="sheet-card wide">
     <div class="sheet-head"><h3>背包</h3><button class="g-btn" id="g-bag-close">关闭</button></div>
@@ -1050,12 +1051,14 @@ window.GAME_MODE = true;
 <script src="online-wire.js"></script>
 <script src="online-game.js"></script>
 <script src="online-rogue.js"></script>
+<script src="online-brawl.js"></script>
 <script src="online-legacy.js"></script>
 <script src="online-gm-ui.js"></script>
 <script src="online-battle.js"></script>
 <script src="check-request-ui.js"></script>
 <!-- 决斗（PvP 第三步，#472）：联机探索环节的申请 / 准备（选队、选项）浮层 -->
 <script src="duel-ui.js"></script>
+<script src="brawl-ui.js"></script>
 <script src="casino-online-ui.js"></script>
 <script src="lore-ui.js"></script>
 <!-- 纸片风界面（#308 / #339）：纸纹、配色、顶栏、吊牌、收据这些共用的组件在 paper-ui.js，联机玩家（online-paper.js）和单机（game-paper.js）各拿自己的配置用 -->

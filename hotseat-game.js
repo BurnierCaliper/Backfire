@@ -18,6 +18,9 @@
   const active = () => !!(enabled && configured && session && authority && !state.solo);
   const heroes = () => (state.units || []).filter(u => u.isPlayer && !u.weaponOf && !u.isPartner && livePartyCards().some(c => c.kit === u.kit && !c.weaponOf));
   const gm = () => (config.players.find(p => p.gm) || config.players[0]).id;
+  // 角色归谁按「这张角色卡」记（ownerByKit 的键）。争斗（brawl.js，#543）两队可以用同一个角色：键接上队伍（ledger.js · ledgerKitKey 同一套，「xia@1队」），
+  // 两个人各归各的；不是争斗时就是 kit 本身（武器人按持有者的 kit），和以前一样
+  const okey = u => { if (!u) return ""; const kit = u.weaponOf || u.kit; return typeof brawlKitKey === "function" ? brawlKitKey(kit, u) : kit; };
   const fail = text => { throw new Error(text); };
   // （新）#340 第 11 条：小队聊天所有人都看得到，私人钱包余额只能本人和主持人看（README「队友……看不到余额」）。
   // 写进聊天的说明去掉「剩 N / 现有 N / 钱包剩 N」，只留谁付、付多少。
@@ -44,7 +47,7 @@
   // 场上按职业（kit）该归谁：和恢复存档时（restorable）用同一份 ownerByKit，两处结论一致
   function kitAssignments() {
     const out = {};
-    for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) out[u.id] = ownerByKit[u.kit];
+    for (const u of heroes()) if (ownerByKit[okey(u)] && config.players.some(p => p.id === ownerByKit[okey(u)])) out[u.id] = ownerByKit[okey(u)];
     return out;
   }
   // 单局战斗外的查询 / 开战会重摆队伍（rogue.js · withParty → BattleSim.setup），单位 id 全换了，
@@ -64,7 +67,7 @@
     if (authority) authority.close();
     clients = new Map();
     const assignments = {};
-    for (const u of heroes()) if (ownerByKit[u.kit] && config.players.some(p => p.id === ownerByKit[u.kit])) assignments[u.id] = ownerByKit[u.kit];
+    for (const u of heroes()) if (ownerByKit[okey(u)] && config.players.some(p => p.id === ownerByKit[okey(u)])) assignments[u.id] = ownerByKit[okey(u)];
     const keepChat = session ? session.snapshot().chat || [] : [];   // 重建会话时带上小队聊天记录
     const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
     session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
@@ -85,7 +88,9 @@
       if (!enabled || !canConfigure()) fail("战斗中不能重新分配角色");
       if (configured) hostOnly(playerId);
       Commands.validate({ type: "hotseat.configure", value });
-      if (!["trpg", "coop"].includes(value.mode) || !Array.isArray(value.players) || value.players.length < (network ? 1 : 2) || value.players.length > (network ? 5 : 4)) fail(network ? "在线跑团最多 1 名主持人与 4 名玩家" : "热座需要 2–4 名操作者");
+      // 争斗（#543）的 AI 那一队是会话里的一个操作者（online-brawl.js，ai: true），不占房间的人数
+      const people = Array.isArray(value.players) ? value.players.filter(p => !(p && p.ai)) : [];
+      if (!["trpg", "coop"].includes(value.mode) || !Array.isArray(value.players) || people.length < (network ? 1 : 2) || people.length > (network ? 5 : 4)) fail(network ? "在线跑团最多 1 名主持人与 4 名玩家" : "热座需要 2–4 名操作者");
       const ids = value.players.map(p => p.id);
       if (new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !id)) fail("操作者编号必须唯一");
       const assignments = value.assignments || {}, list = heroes();
@@ -95,9 +100,9 @@
       if (value.mode === "coop" && (list.length !== ids.length || ids.some(id => list.filter(u => assignments[u.id] === id).length !== 1))) fail("合作模式需要每名操作者恰好一名角色，请先调整队伍");
       // 不在场的角色（这场战斗没上、被收起来）保留原来的操控者：以前这里整份清空重建，
       // 有人进 / 出房间时（online-game.js · setupOperators 只按场上英雄重新配置）不在场的角色就被悄悄收回给主持人
-      const prevOwners = ownerByKit, keep = {}, onField = new Set(list.map(u => u.kit)), nextGm = (value.players.find(p => p.gm) || value.players[0]).id;
+      const prevOwners = ownerByKit, keep = {}, onField = new Set(list.map(okey)), nextGm = (value.players.find(p => p.gm) || value.players[0]).id;
       for (const kit of Object.keys(prevOwners || {})) if (!onField.has(kit) && ids.includes(prevOwners[kit]) && prevOwners[kit] !== nextGm) keep[kit] = prevOwners[kit];
-      config = copy(value); ownerByKit = keep; for (const u of list) ownerByKit[u.kit] = assignments[u.id] || gm();
+      config = copy(value); ownerByKit = keep; for (const u of list) ownerByKit[okey(u)] = assignments[u.id] || gm();
       if (!ids.includes(playerId)) playerId = gm();
       setupSession(); configured = true; notice = "";
       state.history = []; GAME.undo = []; GAME.disarm(); refresh();
@@ -128,7 +133,7 @@
   function getViewFor(id) {
     const s = session ? (config.players.some(p => p.id === id) ? project(id, session.snapshot()) : { ...session.snapshot(), ask: null }) : null;
     return { enabled: enabled && !state.solo, network, configured, notice, mode: config.mode, playerId: id, hostId: gm(), players: copy(config.players),
-      heroes: heroes().map(u => ({ id: u.id, name: u.name, owner: ownerByKit[u.kit] || gm() })),
+      heroes: heroes().map(u => ({ id: u.id, name: u.name, owner: ownerByKit[okey(u)] || gm() })),
       units: (s?.roster || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
       // 场上所有能操作的单位归谁（#464）：units 只是这一段排进行动顺序的；敌人回合那一段里，在我方回合行动的角色归谁看这一份
       operable: (s?.operable || []).map(r => ({ id: r.unitId, name: r.unitName, owner: r.operatorId })),
@@ -223,8 +228,8 @@
     if (cmd.type === "retreat") { hostOnly(id); if (!state.combatStarted || state.combatPhase !== "player" || GAME.ended || !["selecting", "acting"].includes(session.snapshot().phase)) fail("现在不能撤退"); return; }
     // 联机单局（online-rogue.js）：单局的规则指令和开战 / 结算只由房主的流程执行；玩家的投票、需求、个人购买另走房主校验
     if (["run", "run.query", "run.session", "battle.setupRogue", "battle.continue", "screen"].includes(cmd.type)) { hostOnly(id); return; }
-    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友；布置决斗（battle.duel，#472）也只有房主
-    if (["battle.panel", "battle.setup", "battle.playerFaction", "battle.duel", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
+    // 玩家阵营（battle.playerFaction，PvP 第一步 #445）：只有房主（主持人）能分阵营、设敌友；布置决斗（battle.duel，#472）、争斗（battle.brawl，#543）也只有房主
+    if (["battle.panel", "battle.setup", "battle.playerFaction", "battle.duel", "battle.brawl", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) {
       hostOnly(id);
       if (cmd.type === "calc" && ["move", "skill", "skillPick", "skillCancel", "standUp", "blockAnswer", "assistAnswer", "koltSwap", "startCombat", "endTurn", "blade"].includes(cmd.action)) fail("热座战斗动作必须使用当前单位的技能与询问入口");
       if (config.mode === "coop" && state.combatStarted && !GAME.ended && ["battle.panel", "battle.setup", "battle.playerFaction", "trpg", "trpg.ui", "backstage", "calc"].includes(cmd.type)) fail("合作战斗中没有主持人数据编辑权限");
@@ -247,8 +252,9 @@
   function afterCommand(cmd) {
     executing++;
     try {
-      if (cmd.type === "battle.setup" || cmd.type === "battle.setupRogue" || cmd.type === "trpg.ui" && !state.combatStarted) {
-        session.reset(); const assignments = {}; for (const u of heroes()) assignments[u.id] = ownerByKit[u.kit] || gm(); session.setAssignments(assignments);
+      // 争斗（battle.brawl，#543）和布置战斗一样重摆了队伍：行动顺序回到战前，按角色记的归属重新对齐（房主接着按房间里的位置重新分配）
+      if (cmd.type === "battle.setup" || cmd.type === "battle.setupRogue" || cmd.type === "battle.brawl" || cmd.type === "trpg.ui" && !state.combatStarted) {
+        session.reset(); const assignments = {}; for (const u of heroes()) assignments[u.id] = ownerByKit[okey(u)] || gm(); session.setAssignments(assignments);
       }
       session.reconcile();
     } finally { executing--; }
@@ -257,7 +263,7 @@
   /** 主持人「加入玩家角色」（gm.addHero，#464）加进来的这一个：这张角色卡已经分配给房间里某名玩家的，照旧归他操控
    *  （ownerByKit 记着每张角色卡归谁，不在场的也留着）；没分配过的归主持人。只管这一个——战场配置「加入队员」加进来的照旧归主持人（一切照旧） */
   function adoptAddedHero(unitId) {
-    const u = heroes().find(x => x.id === unitId), owner = u && ownerByKit[u.kit];
+    const u = heroes().find(x => x.id === unitId), owner = u && ownerByKit[okey(u)];
     if (!u || !owner || owner === gm() || !config.players.some(p => p.id === owner)) return;
     if (Object.hasOwn(session.snapshot().assignments || {}, u.id)) return;
     session.adopt(u.id, owner);
@@ -303,7 +309,7 @@
       const sameAsk = previous && previous.kind === kind && previous.jobId === (job.seq || null) && previous.targetId === (job.targetId || null);
       // 联机协助攻击：打出失衡的那名玩家决定谁出手，其他人举手（hotseat.js · answer）
       const breaker = kind === "assist" && network && job.breakerId ? state.units.find(u => u.id === job.breakerId) : null;
-      const breakerKit = breaker && breaker.isPlayer ? (breaker.weaponOf || breaker.kit) : null;
+      const breakerKit = breaker && breaker.isPlayer ? okey(breaker) : null;
       const chooser = breakerKit ? ownerByKit[breakerKit] || gm() : null;
       const reopened = session.openAsk({ kind, jobId: job.seq || null, targetId: job.targetId || null, candidates: eligible().map(u => u.id), chooser, untimed: !network,
         ...(sameAsk ? { remainingMs: previous.remainingMs } : {}) });
@@ -324,7 +330,7 @@
   function ownedChoice(unit, title, options) {
     return new Promise(resolve => {
       // 问的单位倒地 / 不在顺序名单里时 ownerOf 是 null：交给按角色分配的人，再不行交给主持人（以前 owner 是 null，画面一算就出错，整局卡死）
-      const owner = session.ownerOf(unit.id) || ownerByKit[unit.weaponOf || unit.kit] || gm();
+      const owner = session.ownerOf(unit.id) || ownerByKit[okey(unit)] || gm();
       choice = { id: "choice-" + (++choiceNo), title, owner,
         options: options.map((o, index) => Object.assign({ helper: unit.id, label: o.label, sub: o.sub || "", extra: { index } }, choiceTarget(o) ? { target: choiceTarget(o) } : {})),
         finish: index => resolve(options[index].value),
@@ -388,7 +394,7 @@
     try { return trpgCasinoPacket(kits, id === gm(), gone); } catch (e) { return null; }
   }
   /** 死了的角色归谁操控：会话的行动名单里已经没有他了，按角色卡记的（ownerByKit） */
-  const deadOwner = (u) => ownerByKit[u.kit] || gm();
+  const deadOwner = (u) => ownerByKit[okey(u)] || gm();
   function casinoExploring() {
     if (typeof trpgCasinoPacket !== "function" || typeof TRPG === "undefined" || !TRPG.active) fail("只有联机跑团有赌场");
     if (state.combatStarted && !(root.GAME && GAME.ended)) fail("战斗中不能去赌场");
@@ -654,7 +660,7 @@
   onActionSpend(event => { if (active() && executing && !GAME.sim) { if (newRoundSpends) newRoundSpends.push(event); else session.markSpent([event]); } });
   // 友伤开关（enemies.js · setFriendlyFireOwner，#428）：热座 / 联机时每个单位归谁操控——每人的开关只管自己的单位（武器人跟着持有者；
   // 倒地、不在行动顺序名单里的按角色分配，再不行归房主，和 ownedChoice 一样）。没开热座（本机一个人、单人模式）返回 null：规则层按本机那一个开关
-  if (typeof setFriendlyFireOwner === "function") setFriendlyFireOwner(u => (active() && session ? session.ownerOf(u.id) || ownerByKit[u.weaponOf || u.kit] || gm() : null));
+  if (typeof setFriendlyFireOwner === "function") setFriendlyFireOwner(u => (active() && session ? session.ownerOf(u.id) || ownerByKit[okey(u)] || gm() : null));
   setInterval(() => { if (active() && !(network && root.OnlineGame?.isPaused())) session.tick(); }, 250);
   // Legacy panel handlers were written before the command boundary. Surface an
   // expected authorization rejection in the hotseat bar; unrelated errors keep
@@ -695,7 +701,7 @@
       if (!hero) fail("只能转交英雄角色");
       if (!config.players.some(p => p.id === toId)) fail("没有这名玩家");
       session.transfer(gm(), heroId, toId);
-      ownerByKit[hero.kit] = toId;
+      ownerByKit[okey(hero)] = toId;
       if (config.assignments) { if (toId === gm()) delete config.assignments[heroId]; else config.assignments[heroId] = toId; }
       authority.broadcast(); refresh();
       return { ok: true, heroName: hero.name, toName: config.players.find(p => p.id === toId).name };

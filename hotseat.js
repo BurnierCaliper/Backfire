@@ -113,7 +113,8 @@
     }
     function identity(u, all) {
       if (!u) return null;
-      const hero = u.weaponOf ? all.byId.get(u.weaponOf) || all.byKit.get(u.weaponOf) : u;
+      // 武器人记着持有者的单位 id（ownerId，app.js · spawnWeapon）就按 id 找：争斗（brawl.js）两队可以有同一个角色，按 kit 找会找到对面那一个
+      const hero = u.weaponOf ? (u.ownerId != null && all.byId.get(u.ownerId)) || all.byId.get(u.weaponOf) || all.byKit.get(u.weaponOf) : u;
       if (!hero || !isHero(hero)) return null;
       return { hero, operatorId: assignments[hero.id] || gmId, stableKey: u.weaponOf ? hero.id + ":weapon:" + u.kit : hero.id };
     }
