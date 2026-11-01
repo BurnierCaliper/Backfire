@@ -108,7 +108,7 @@
     // 彩池桌（#556）：每一轮单独一个池——第一轮押的注只和第一轮押中的人分，第二、三轮同理（越早押看到的越少，各轮的竞争各算各的）。
     // 每轮每格最低注、第一轮没押的后两轮不能押，照上面（防白看）。数值都是占位，待主人定
     pool: {
-      rake: 10,          // 每个池抽几成（百分比，向下取整）：只抽这一手新押进来的注（滚存进来的不再抽）；代替入场费
+      rake: 10,          // 每个池抽百分之几（向下取整）：只抽这一手新押进来的注（滚存进来的不再抽）；代替入场费
       stakeBack: true,   // 押中的人至少拿回本金：池里几乎只有押中那一格的钱时，抽成最多抽到押中的人刚好拿回本金为止
       carry: "next",     // 分不出去的（没人押中的整个池、按比例分剩的零头）："next" 滚存到下一手同一轮的池（累积彩池）；"house" 归赌场
       digits: 1          // 即时赔率板上「大约能分几倍」保留几位小数（向下取）
@@ -660,10 +660,12 @@
       (top.net > 0 ? `赢得最多的是${top.name}` : "没有人赢") + (low.net < 0 ? `，输得最多的是${low.name}。` : "。") });
   }
   /** 彩池桌第 round 轮（不写 = 现在这一轮）的即时赔率板（#556，公开）：
-   *  { round, live（还在押这一轮）, over, carryIn（上一手滚存进来的）, staked（这一轮押进来的）, pool, rake（现在押进来的这些抽多少）, rakePct,
-   *    cells: [{ result, k, open, staked（这一格一共押了多少）, bettors（几个人押）, odds（「现在押中，每枚大约分回几枚」连本带利，向下取到 digits 位）, empty }] }。
-   *  odds 不锁定：随着大家下注变，结算时按最终的池子算。还没人押的格子（empty）：还在押的时候按「押一注最低注独得」算，押完了是 null。
-   *  结算后另有 win（结果）、hit / net / paid / left / carryOut / house，odds 就是最后的倍数。赌场桌、还没开的那一轮 → null */
+   *  { round, live（还在押这一轮）, over, carryIn（上一手滚存进来的）, staked（这一轮押进来的）, pool, rake（现在押进来的这些名义上抽多少）, rakePct,
+   *    min（这一轮每格最低注）, cells: [{ result, k, open, staked（这一格一共押了多少）, bettors（几个人押）,
+   *    odds（「现在押中，每枚大约分回几枚」连本带利，向下取到 digits 位）, empty（开盘、还没人押）}] }。
+   *  odds 不锁定：随着大家下注变，结算时按最终的池子算。还没人押的格子：还在押的时候按「押一注最低注独得」算，押完了是 null。
+   *  结算后另有 win（结果；每格也有 win）、hit / net / paid / left / carryOut / house，rake 是实际抽的，odds 就是最后的倍数。
+   *  赌场桌、还没开的那一轮 → null */
   function poolBoard(h, round) {
     if (!h || !h.pool) return null;
     const r = round == null ? h.round : Math.floor(Number(round));
