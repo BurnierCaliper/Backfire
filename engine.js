@@ -1444,6 +1444,20 @@ function isDownProtected(u) {
   return !!(u && u.isPlayer && u.dying && !u.upOnShp && !u.dead);
 }
 
+/** 夕夏被动「背水一战」：起身（靠坚毅生命）继续战斗期间不会失去架势、不会失衡，不管来源（#546）。
+ *  攻击结算（applyResultToUnit 的击破、猛击反震）、不经过攻击的击破（app.js · dealBreak）、不稳（applyUnstable / maybeUnstableTrip /
+ *  高压场地 convertUnstableInHv）、直接打进失衡的技能 / 道具（击破预告失败、擒拿、流沙漩涡、牛协助格挡的反击、闪光震撼弹）都看这一处。
+ *  被动被图纸关掉（mods.js · passiveOn）时不生效 */
+function xiaBackwater(u) {
+  return !!(u && u.kit === "xia" && u.upOnShp && !u.dead && (typeof passiveOn !== "function" || passiveOn(u)));
+}
+/** 背水一战挡下一次「失去架势 / 失衡」：生效时写日志（what：挡下的是什么，写在括号里），返回 true，调用处跳过这一次 */
+function xiaBackwaterBlocks(u, notes, what) {
+  if (!xiaBackwater(u)) return false;
+  if (notes) notes.push(`背水一战：起身中不失去架势${what ? "（" + what + "）" : ""}。`);
+  return true;
+}
+
 function innermostIndex(layers) {
   const pref = ["flesh", "spirit", "sand"];
   for (let i = layers.length - 1; i >= 0; i--) {
@@ -1489,10 +1503,7 @@ function applyResultToUnit(target, result, attacker) {
     notes.push(`${target.name} 熔融：护盾累计受伤到上限${meltShieldShare(MELT_SHIELD.breakAt)}，立刻失效，没吸收完的伤害照常溢出到下一层；下回合以${meltShieldShare(MELT_SHIELD.restore)}恢复。`);
   }
   let spent = result.breakDealt;
-  if (target.kit === "xia" && target.upOnShp && (typeof passiveOn !== "function" || passiveOn(target))) {
-    spent = 0;
-    notes.push("背水一战：起身中不失去架势。");
-  }
+  if (xiaBackwaterBlocks(target, notes)) spent = 0;   // 背水一战：起身中不失去架势（和 app.js · dealBreak 同一个判断）
   if (target.trainingDummy) spent = 0;   // 训练假人架势无限：不扣架势、不失衡
   // 灵巧（兽人·猫）：一回合最多失去 2 架势。敌人的种族被动（enemies.js · raceBreakCap）和原来的 raceTrait 共用这一行
   const dexCap = target.raceTrait === "catFocus" ? 2 : (typeof raceBreakCap === "function" ? raceBreakCap(target) : null);
@@ -1542,9 +1553,10 @@ function applyResultToUnit(target, result, attacker) {
     target.stunned = false;
     target.def = 0;
     target.defMax = 0;
-  } else if (target.def <= 0) {
+  } else if (target.def <= 0 && !xiaBackwater(target)) {
     // 只有这一击把架势打到 0（之前还没失衡）才算「打进失衡」。
     // 打已经失衡的目标不会再挂一次冰冻加伤。
+    // 背水一战（夕夏起身中）不进这里：架势就算是 0（千钧在身时起身回不了架势）也不会被打进失衡
     const brokeIntoStun = defBeforeHit > 0 && !wasStunned;
     target.stunned = true;
     if (brokeIntoStun && isIceBreakResult(result, spent)) {
@@ -1561,15 +1573,18 @@ function applyResultToUnit(target, result, attacker) {
     : result.interfereZone !== undefined ? result.interfereZone : target.zone;
   target.damagedThisTurn = (target.damagedThisTurn || 0) + result.total;
   // 瑞比「算法改变」：被它标记的敌人这一回合每次受到伤害，瑞比 +5 纳米（这一回合按瑞比自己的一回合算：她在敌人回合行动时撑到她下一个回合开始，app.js · ownRound，#476）
-  const algoNow = () => typeof ownRound === "function" && typeof findKit === "function" ? ownRound(findKit("ruby", state.units)) : state.turnNo;
+  // 标记它的那个瑞比（algoBy；争斗两队都有瑞比时按 kit 会找错人）
+  const algoRuby = () => (target.algoBy != null ? (state.units || []).find(x => x.id === target.algoBy) : null) || (typeof findKit === "function" ? findKit("ruby", state.units) : null);
+  const algoNow = () => typeof ownRound === "function" && typeof findKit === "function" ? ownRound(algoRuby()) : state.turnNo;
   if (result.total > 0 && target.algoTurn != null && typeof state !== "undefined" && target.algoTurn === algoNow() && typeof addNano === "function") {
-    addNano(5);
+    const r = algoRuby();
+    if (typeof withKitScope === "function" && r) withKitScope(r, () => addNano(5)); else addNano(5);
     if (typeof appendLog === "function") appendLog(`算法改变：${target.name} 受到伤害，瑞比纳米 +5。`);
   }
   if (result.total > 0) target.gotHitThisTurn = true;
   if (result.selfBreak && attacker) {
-    if (attacker.kit === "xia" && attacker.upOnShp && (typeof passiveOn !== "function" || passiveOn(attacker))) {
-      notes.push("背水一战：起身中不失去架势（猛击反震无效）。");
+    if (xiaBackwaterBlocks(attacker, notes, "猛击反震无效")) {
+      // 背水一战：起身中不失去架势
     } else if (typeof dealBreak === "function") {
       // 反震和普通击破一样：屹立不倒 / 坚挺 / 决不后退照算，打进失衡时写失衡、敌人排协助攻击。
       // keepSelf：晕眩后的自我效果留到 dealTo 把这一击结算完再结束

@@ -201,7 +201,7 @@ kit: (u) => ({ zone, label, ready })   // 也可以返回数组表示多个区�
 | 高能脉冲 | 川川 Lv6 | 距离 1 以内，对一个敌人施加高能 |
 | 巨刃划空 | 川川 Lv11 | 同区，耗 3 电能，2atk 电击 +2 击破。对配置物伤害翻倍；击穿血量层或摧毁配置物返还 1 电能 |
 
-**抓取状态**（`app.js · crushingTarget` / `crushOnce`）：位置与目标绑定，每回合开始自动同区并再碾一次；不能主动移动，不能协助攻击与协助格挡，不获得行动点与附赠行动。目标失衡则松手。自动碾压击杀目标时返还 1 行动点与 1 附赠行动。
+**抓取状态**（`app.js · crushingTarget` / `crushOnce`）：位置与目标绑定，每回合开始自动同区并再碾一次；不能主动移动，不能协助攻击与协助格挡，不获得行动点与附赠行动。目标失衡则松手。自动碾压击杀目标时返还 1 行动点与 1 附赠行动。狂怒碾压是投技：第一下和每回合的自动碾压都不能被协助格挡（#548）。
 
 ## 队伍档案：跨战斗记录（ledger.js）
 
@@ -371,6 +371,64 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **合并 PvP 修复 #544 / #546 / #547 / #548 和争斗第 1 步 #543 时，两边都改了无界面战斗的回合循环，合在一起**（模拟工具，规则一条没动；主人 11/01 让合并这几个 PR。sim.js · `playerPhase`：保留 #547 的「每轮完一个人再看一遍场上，新进场的武器人当回合就轮到」和 #543 的「在轮到的这个人的结算上下文里想、做（`withKitScope`）」；`turnKey` 认武器人时先看持有者的 `ownerId`（#543 记的），没记的照旧看 `weaponOf`——争斗两队可以都是同一个角色，武器人只按 kit 认会认成同一个。决斗里两队在不同的阶段行动，这一条只是保险。测试 tests/brawl-summon-acts.test.js（新，1 条）：争斗两队都是夕夏、各自唤出柏妮尔，两只柏妮尔都在唤出的同一个阶段轮到、点火突进点着的是自己那一队夕夏的引擎；只有 #543 没有 #547 时这一条失败）
+- **联机新玩法「争斗」第 1 步：规则和布置（固定等级段的 PvP，开局选人数 / 角色 / 专长 / 属性 / 血量层改造，翻硬币开打；两队可以用同一个角色；AI 整队）**（#543，规则由主人 11/01 确认；只做规则层，界面、联机是第 2 步。新文件 brawl.js：配置表 `BRAWL_CFG`（`tiers` 等级段、`sizeMin` / `sizeMax`、`roundsDefault`、`ai.cfg`、模拟用的固定养成 `sim`）、`brawlRewards` / `brawlBuild` / `brawlCheck` / `brawlHeroUnit` / `brawlSetup` / `brawlPublic` / `brawlStash` / `brawlRestore` / `brawlKitKey` / `brawlAiUnit` / `brawlAiTeam` / `brawlPolicy` / `brawlSimEntry`；battle-commands.js 新指令 `battle.brawl`（校验走 `brawlCheck`）；enemies.js · `pvpDuelRestore`（争斗换回整份档案）/ `pvpDuelSetup` / `pvpDuelKnockOut` / `playerTauntDone`；app.js · `resetBattleRecords`（`state.brawl`，没打完就开新的一场时放回档案）。两队同一个角色：party.js · `findKit`（多一个参数 near）/ `withKitScope` / `kitScopeUnit` / `kitPick` / `kitSideOf` / `kitUnits` / `weaponOwnerUnit` / `isWeaponOfOwner` / `ownerOfWeapon` / `skillList` / `heldWeaponBlockBonus` / `heldWeaponBlockBonusRaw` / `baseEffectiveAtk`；ledger.js · `ledgerKitKey` / `restKeyOf` / `weaponOwner` / `weaponDurMax` / `weaponDurBase` / `weaponDur` / `weaponBroken` / `heldWeaponKit` / `spendDurability` / `markWeaponWorn` / `weaponUnusable` / `restoreDurability` / `disarmBrokenWeapon` / `ledgerOnBlock`；app.js · `spawnWeapon`（`ownerId`）/ `returnWeapon` / `hiakiTwinBlade` / `enterMecha` / `exitMecha` / `weaponSummonState` / `weaponSummonWhy` / `ownsWeaponUnit` / `assistWeaponReady` / `forceRecallWeapons` / `weaponFallenKey` / `onWeaponUnitDown` / `weaponHalved` / `fallenWeapons` / `retrieveWeapon` / `removeHeroUnit` / `setOwnedWeaponLevel` / `explodeHigh` / `applyPassivePlusAtStart` / `beginRound` / `lateRoundStart` / `startPlayerPhase` / `startEnemyPhase` / `playerTurnEnd` / `turnEnd` / `bondRoundEnd` / `releaseAcidCharges` / `randomizeNoraMood` / `ironWallChuan`（新）/ `breakIronWall` / `hitBarrier` / `applyCombat` / `shieldBearer` / `triggerMagnetShield` / `finalBlockChance` / `bondHealDice` / `endTorqueGuard` / `swapKoltBit` / `koltMeleeSwapTargets` / `queueKoltSwap` / `longgeOf` / `longgeRes` / `longgeGunNear` / `vitasOf` / `scopedOne`（新）/ `roleOnce` / `roleUsed` / `runSkill` / `skillFlowSteps` / `skillRequirementError` / `skillTargetError` / `performAssistBlock` / `finishAssist` / `standUp` / `dealTo` / 「算法改变」记 `algoBy`（`resetBattleFlags`）；engine.js · `applyResultToUnit`（算法改变的纳米加给标记的那个瑞比）；growth.js · `applyWeaponLevel` / `refreshOwnerWeaponAtk` / `heroOfUnit`；feats.js · `featOwnerKey`（新）/ `featShortUsed` / `featRestUsed` / `featSpend` / `featOnceLeft` / `featUseOnce` / `featCostAdjust`；sim.js · `playerPhase`；sim-search.js · `candidateActions` / `tokenOf` / `idOf`；battle-commands.js · `skill`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 battle-commands.js 前面加载 brawl.js；tools/pvp-balance.js `--brawl`（`forceToss` / `brawlTierOf` / `brawlSpec`、`heroTable` 带 brawl、`parseArgs` 的开关、报告的等级说明、json 的 `options.brawl` / `brawlCfg` / 每行 `b`）；docs/pvp.md 第 8 节「争斗」；测试 tests/brawl.test.js 新 13 条，tests/pvp-balance.test.js 新 2 条）
+  - **以前**：PvP 只有联机跑团里的两种（主持人分阵营、探索环节的决斗），都用玩家跑团存档里的角色，养成差别很大，也没法单独开一局来打。规则里很多地方按 kit 找「那个角色」（`findKit`、武器人按 `weaponOf` 找持有者、耐久 / 长休次数按 kit 记），场上同一个角色只能有一个：两队用同一个角色时会找错人（加纳米加给对面的瑞比、对面唤出了扭矩自己就唤不出来、两把年糕共用一份耐久……），回合开始 / 开战的「这个角色」的效果只结算第一个。
+  - **现在**：
+    - **争斗**（`brawlSetup(spec)` / 指令 `battle.brawl`）：spec 是 `{ tier, size, stand, rounds, teams: { "1队": [角色…], "2队": [...] }, ai: { "1队", "2队" }, seed }`，角色是 `{ kit, feats, attrs, featFull, cyberPlan }`。等级段二选一（`BRAWL_CFG.tiers`：Lv20 · 武器 10 级 / Lv10 · 武器 5 级，这个角色所有武器都是这一级）；每队 1–4 人，两队一样；同一队里角色不能重复，两队之间可以。每个角色：专长照这个等级段应得的项数（`ROGUE_LEVEL_REWARDS` 里 `key: "feat"` 的那几级：Lv10 一项、Lv20 四项），一级一项，合法性照 `featChoicesFor`（层级、不能重复、已会的职责技能、前提；探索专长只在跑团规则下提供，争斗不提供；拿了兼修再选一张升级 `featFull`）；属性照应得的点数（4 / 8 / 19 级，8 级那点不能重复）；血量层改造照诊所的规则（`cyberPlanError` / `cyberLayersFor`，可换的肉体上限按选完属性以后的改造率算，可以全换成星灵），不收钱；职责不用选，照角色自己的那一条（`roleChoicesAt`）；熟练项不选、不给（只有角色卡自带的）；不带义体、改装件 / 图纸、道具。哪一项不合法都拒绝并写原因（「1 队第 1 个角色：柯尔特 11 级不能选「硬骨头」：已经有了，不能重复」），不悄悄改。
+    - **开打**：造好两队的角色（满血满坚毅），布置成决斗（3 区制、1 队站 1 区 / 2 队站 3 区、两个互相敌对的玩家阵营），全部选完就**翻硬币**定先手（写进战斗记录；开战时不再抛），之后照常开战：后手补偿、不致死（再起不能）、每队单独计分、允许起身 / 回合上限都照决斗。返回的公开部分只有等级段、人数、哪一队是 AI、两队的角色（单位 id、kit）、谁先手，不带养成细节和坚毅。
+    - **和存档无关**：开局把队伍档案（LEDGER）、背包、奎支整份收起来，换成空的（耐久、长休次数都从满的算，背包没有道具）；打完（`battle.afterBattle` → `pvpDuelRestore`）或者没打完就开了新的一场（`resetBattleRecords`）时原样放回去。不读也不写玩家的跑团角色，不给经验、奎支、掉落，不记战场数据（照决斗）。
+    - **两队同一个角色**：按 kit 找单位时，场上这个 kit 不止一个就先看「现在是谁的事」——调用的地方给的 near，或者结算上下文（`withKitScope`：正在行动 / 格挡 / 协助攻击 / 起身 / 出手打人 / 列技能和分步 / 结算回合效果的那个单位），挑它自己、它的持有者 / 武器人、同一队的那一个；挨打那一边的（灯的圣盾、川川的磁场护盾、结人的牵挂）单独给了 near。武器人唤出时记下持有者的单位 id（`ownerId`），找持有者、「是不是我的武器人」都按 id；武器耐久、本场受损、长休 / 短休次数在争斗里按「kit@队伍」分开记（`ledgerKitKey`）。开战、回合开始 / 结束「这个角色」的效果每一个都结算（夕夏的背水一战燃油、结人的研磨机 / 思念+、拉斯缪尔的汲取、瑞比的无人机 / 机甲、开战的被动升级、诺拉开局的双相、高能自爆给每个瑞比纳米 / 每个拉斯缪尔光能）。场上每个 kit 只有一个时（争斗以外的所有情况）和以前完全一样。
+    - **AI 整队**：标成 AI 的那一队（`ai`，一队要么全是真人、要么全是 AI）轮到时用 `BattleSim.SKILL_POLICY` 自动行动（`brawlPolicy`，不带道具），格挡、协助攻击、全员倒地问起身也替它答；另一队交给真人（无界面时可以给一个代打的打法）。AI 搜索记动作的记号在同一个角色有两个时接上队伍（`@kit#1队`）。
+    - **平衡模拟**：`node tools/pvp-balance.js --brawl` 用争斗的布置跑（等级段的等级，每个角色照 `BRAWL_CFG.sim` 的固定一套：每一级的被动专长、主属性加点、一半可换的肉体换成装甲），以后的模拟能带改造；这一步没有重跑报告。
+    - **熟练项会影响的战斗检定**（这一步没补，列出来）：离开冻土的简单「运动」检定（`iceLeaveCheck`；结人「冷萃」能在争斗里造出冻土，角色卡自带的运动熟练照算，升级得的熟练项不给）；越过空隙（`VOID_CROSS`，运动）、改写炮台（`TURRET_HACK`，数据操作）、载具的检定（`VEHICLE_RULES`）在争斗里碰不到（战场没有间隔、配置物、载具；Helumica 扫描出来的配置物没有炮台）。
+- **夕夏「狂怒碾压」是投技，不能被协助格挡；目标身边有人能格挡时也抓得住了**（#548，主人 11/01 确认：想让夕夏松手只能把她打倒或打晕，不能靠挡。app.js · `crushOnce`（这一击带 `flags.blockResolved` / `block: "none"`）；skill-text.js（狂怒碾压的卡面）；rulebook.js（协助格挡 ·「谁能挡」）；测试 tests/issue-548.test.js（新，7 条：5 条在没改的代码上失败，另 2 条是守卫））
+  - **以前**：碾压那一下（手动的第一下、每回合开始的自动碾压）和普通攻击一样，目标同区有人能协助格挡就先排进格挡队列（`state.blockQueue`）；`crushOnce` 从 `hitOne2` 拿回的是「等待协助格挡」，当成没碾到——抓不住（已经抓着的松手），日志里「等待协助格挡」之后马上写「没能碾到」，之后格挡照常结算：挡住了目标免伤，没挡伤害、击破照样落下，夕夏都已经没抓住了。所以只要目标身边有一个手上有附赠、能协助格挡的人，狂怒碾压就永远抓不住。PvE 里敌人的自动协助格挡（警卫队队长·牛、巡逻车；赤牙给自己挡，`tryOxAutoBlock`）当场掷骰结算、不排队，不会被当成没碾到（夕夏照样抓住），但碾压会被它挡下：目标免伤、击破由队长牛承担，队长牛还反击夕夏 1 击破。
+  - **现在**：狂怒碾压的每一下都和首领机制这类「写明不能格挡」的攻击一样带不能格挡的标记：不进格挡队列、不问协助格挡（以身作盾、掩护的免费格挡也不问），敌人的自动协助格挡、赤牙给自己格挡也不出手，直接结算。打完以后目标没死、没失衡就抓住；死了或失衡就不抓（失衡可以接处决：自动碾压打出失衡 → 松手 → 这一回合照常补到行动点 → 处决）。屏障（废铁墙这些）、危墙、附赠不够打飞行目标这些「没碾到」的情况照旧；夕夏濒死（倒地没起身）、晕眩、死了就不自动碾压，也照旧，没有加「被格挡就松手」。卡面、规则页「协助格挡 · 谁能挡」写上狂怒碾压是投技、不能被协助格挡。
+- **无界面战斗（`BattleSim`）：同一个阶段里新唤出的武器人当回合就轮到行动**（模拟工具的改动，规则一条没动；issue #547，主人 11/01：「武器人一上场就可以立刻行动才合理」。sim.js · `playerPhase`、新的 `turnKey`；测试 tests/sim-summon-acts.test.js 新 5 条（在没改的代码上 4 条失败；剩下 1 条是守卫「轮到过的不再轮到」，没改的代码从不重排名单，本来就过））
+  - **以前**：`playerPhase` 一开始就把这一阶段要行动的单位编号定死，中途唤出的武器人不在名单里，要等下一个阶段才第一次行动（在敌人回合行动的玩家阵营，`enemyPhase` 里的 `playerPhase(…, "enemy")` 也一样）。例：4v4 柯尔特第 1 回合唤出扭矩（出场 AP1 / 附 1），扭矩第 2 回合才第一次行动；`SKILL_POLICY` 唤出武器人等于白花一回合，低估了靠武器人的角色（夕夏 + 柏妮尔、柯尔特 + 扭矩……）。游戏本身没有这个问题：唤出的武器人出场就带着 1 行动点、1 附赠（app.js · spawnWeapon 新建单位；绯秋后分出来的那把刀接着用场上那把剩下的），单机画面当回合就能操作（canControlUnit 只看所在阵营的回合），联机的行动顺序（hotseat.js · reconcile）把它插在本人旁边、立刻轮到它。
+  - **现在**：阶段开始时照旧按场上的顺序排好名单；每轮完一个人再看一遍场上，这一阶段新进场、还没轮到过、在这一阶段行动的玩家单位（唤出的武器人；解除机甲放出来的明特、下车的炮手这类同一个编号离场再进场的也算）接着轮到，按场上的顺序排在剩下的人前面，原来就在场的人顺序不变。同一个单位一个阶段最多轮到一次：
+    - 已经轮到过的不会因为重新看一遍场上又轮到。
+    - 武器人按「持有者 + 哪把武器」认（`turnKey`，和联机行动顺序的 stableKey 一样）：收回再唤出是新建一个单位、编号会变，还算同一个——这一阶段已经轮到过、被收回又唤出的不再轮到，新唤出的那一个出场带的行动点留着（下一个阶段照常补满）。别的单位按编号认。
+    - 还没轮到就离场的（被收回、坐进车里当炮手）不算轮到过：同一阶段再进场照样轮到一次（旧编号排到时已经不在场，跳过）。
+    - 没有人中途进场时，轮到谁、先后、每一步都和以前一样。`BASIC_POLICY` 不召唤武器人，普攻版的模拟结果逐字不变（核对过：改之前、改之后的 sim.js 跑同一批 396 场——遭遇战整场 60 场（连战斗记录的条数）、tools/pvp-balance.js 普攻版 336 场（默认 5 种情况 + 先手原地等，1v1–4v4，3 / 10 / 18 级，固定阵容，普攻版遭遇战）——一处都没变）。
+  - **受影响的已有报告**（这次只修模拟、不重跑，以后另开任务）：docs/balance/pvp-balance-skill-1031.md + json（`--policy skill` 的技能版决斗、`--h2h` 对打里技能版的那一队、`--pve` 的技能版遭遇战都会召唤武器人）。抽样看了一下（改之前、改之后的 sim.js 跑同一批种子）：技能版 30 场（10 级 1v1 / 2v2 决斗含固定阵容 F1–F3、2v2 对打、遭遇战 P3 / P5）里 27 场逐字一样，变了的 3 场都是唤出的武器人当回合就行动了——夕夏对瑞比（F2，夕夏先手）两场照样是夕夏赢，分别早 2 回合、1 回合打完；Helumica 对柯尔特（柯尔特唤出扭矩）胜负不变，早 1 回合打完；另有 6 场是绯秋分出刀，分出的刀当回合也问到了，但没有值得做的事，结果一样。不受影响：普攻版的 docs/balance/pvp-balance-1030.md、pvp-balance-1030-hold.md，敌人威胁 / 新敌人 / 要塞代币 / 5 枚代币预测（tools/enemy-threat.js、enemy-threat-mixed.js、enemy-balance.js、score-by-act.js，都是 `BASIC_POLICY`），docs/r1 的单场矩阵（`BASIC_POLICY`）和整局（tools/playtest.js 的 SMART 默认不召唤武器人，`SUMMON=1` 时才受影响）；tools/dpt.js 不走 `playerPhase`（自己的束搜索每一步都列出场上所有能行动的单位，唤出的武器人本来就当回合能动）。游戏本身（战斗画面、联机）只用 `BattleSim.setup` 布置战场，不走这段回合循环。
+- **夕夏「背水一战」：起身期间不管什么来源都不会失去架势、不会失衡（以前只挡攻击结算里的击破，破势、冻伤、激活、不稳……都能把她打进失衡）**（#546，主人 11/01 手操 PvP 发现；engine.js · `xiaBackwater` / `xiaBackwaterBlocks`（新，共用的判断）、`applyResultToUnit`（这一击的击破、猛击反震改用它，打进失衡那一处也看它）；app.js · `dealBreak`、`applyUnstable`、`maybeUnstableTrip`、`convertUnstableInHv`、`expireTurnFx`（击破预告失败）；items.js · `itemStun`；enemies.js · `kingExecutionGrab`、`runEnemyActionInner`（`en_king_kill` 擒拿、`en_giant_sand_vortex` 流沙漩涡、`en_ox_block` 牛协助格挡的反击）；测试 tests/issue-546.test.js（新））
+  - **以前**：卡面写「濒死后继续战斗时总是启动引擎，同时不会失去架势值」，保护却只写在攻击结算里（`applyResultToUnit`：这一击的击破不扣、猛击反震不扣）。不经过攻击的击破都走 `dealBreak`，它不看背水一战：
+    - 主人 11/01 的 2v2 决斗（种子 `brawl-2v2-1101`）：夕夏起身、架势 1，敌人回合绯秋用破势 →「夕夏 受到 1 击破（破势）：架势 1 → 0」，失衡、跳过回合，被诺拉接协助攻击。
+    - 一样能把她打进失衡的：冻伤回合结束的冰击破、「激活」冻伤 / 震荡、中和冻伤 / 震荡、惯性 + 震荡、磁场护盾、冻土、热能轰击蓝弹的冰击破、全力以赴的猛击反震（破势这类直接击破带猛击时）、乘势、殉爆、开场击破、主持人击破 / 环境击破……所有走 `dealBreak` 的。
+    - 不稳：只剩 1 架势时挂上不稳直接失衡、叠加两个不稳转晕眩、高压场地里的不稳直接转晕眩，都不看背水一战。
+    - 直接设失衡的：自己的击破预告失败（架势清零、失衡）、闪光震撼弹、亡命之王的擒拿（处死命令后、公开处刑落下后）、巨型流沙漩涡（打中的人失去行动）、牛协助格挡的反击 1 击破。
+  - **现在**：「背水一战生效」只有一个判断 `xiaBackwater`（夕夏、起身中、没死、被动没被图纸关掉），攻击结算和上面这些地方都看它：
+    - 不经过攻击的击破（`dealBreak`）：一律不扣架势、不失衡、不排协助攻击，日志写「背水一战：起身中不失去架势（破势的 1 击破无效）。」（括号里写挡下的是什么）。判在决不后退之前：挡下了就不再花附赠动作去 +2 架势；屹立不倒 / 再次霜结照旧先判。
+    - 不稳：照样挂上（下回合照扣 1 个附赠动作，扣完就没了），但只剩 1 架势也不失衡、叠加两个也不转晕眩（身上还是一个不稳）、高压场地里也不转晕眩；日志写「背水一战：起身中不失去架势（不稳：架势只剩 1 也不失衡）。」这类。
+    - 击破预告失败：架势不清零、不失衡（次数照旧用掉）；闪光震撼弹、擒拿、流沙漩涡：不失衡（道具照旧用掉，和对已经失衡的人用一样）；牛协助格挡的反击：不扣架势。都写「背水一战：起身中不失去架势（……）。」。
+    - 攻击结算：照旧（这一击的击破不扣，写「背水一战：起身中不失去架势。」；猛击反震不扣）。另外起身时架势是 0 的（千钧在身，起身回不了架势），挨攻击也不会再被打进失衡（以前会）。
+  - **没改的**：
+    - 没起身的夕夏、被动被图纸关掉时一切照旧；背水一战的引擎部分照旧。
+    - 主持人后台 / 跑团指令的「强制失衡」（`dmForceStun`）是直接改状态，不看背水一战（和它不看屹立不倒、坚挺一样）；主持人面板的「主持人击破 / 环境击破」走 `dealBreak`，照样挡下。
+    - **震荡（架势上限 −2）没动，等主人确认**：震荡直接改上限——上限 −2（加倍计量 −4），上限最少留 1；当前架势比新上限高就压到新上限，日志写「夕夏 震荡：架势上限 −2 → 3，架势 5 → 3。」；震荡解除 / 加倍计量结束时上限还回去，压掉的架势不还（5/5 → 震荡 3/3 → 解除后 3/5）。所以震荡不会让起身中的夕夏失衡（上限、架势都至少 1），但会压低她当前的架势。「激活震荡」「中和震荡」「惯性 + 震荡」的击破走 `dealBreak`，已经挡下。导体（架势上限 3）、力竭 2（开战时上限 −1）也是「降上限压架势」，一样没动。
+    - 牵挂：被牵挂的是起身中的夕夏时，结人照旧替她扛攻击的击破（她自己本来就不掉架势；攻击结算里原来就这样）。
+  - **测试**：tests/issue-546.test.js（新，10 条；7 条在没改的代码上失败，3 条是照旧的守卫）：
+    - 2v2 决斗现场：夕夏起身、架势 1，绯秋破势 → 架势还是 1、不失衡、诺拉没有协助攻击，日志写「背水一战：起身中不失去架势（破势的 1 击破无效）。」；
+    - 回合结束的冻伤击破、激活冻伤、激活震荡 → 架势不变，下一回合照常拿到行动点；
+    - 只剩 1 架势挨撼动 → 不稳挂上、不失衡；再挂一个不稳 → 不转晕眩；高压场地里 → 不转晕眩；不稳照旧扣下回合的 1 个附赠动作；
+    - 起身时架势是 0（千钧）：挨攻击、挨折戟都不失衡；
+    - 有决不后退、架势 1：被破势打挡下，附赠动作不花；
+    - 闪光震撼弹、自己的击破预告失败 → 不失衡、架势不变；
+    - 亡命之王的擒拿（两处）、巨型流沙漩涡、牛协助格挡的反击 → 夕夏不失衡、不掉架势，同场的柯尔特照旧被擒拿 / 困住；
+    - 守卫：没起身的夕夏被破势打照常失衡、诺拉能协助攻击；图纸关掉被动时起身中照常失衡；攻击结算原来的保护（2 击破的攻击不掉架势，写原来那句日志）。
+- **PvP：玩家角色被聚焦抹掉最内层照常倒地**（#544，主人 11/01 手操 PvP 测试发现；app.js · `stripFocusLayer`；测试 tests/pvp-focus-knockdown.test.js（新，6 条））
+  - **以前**：聚焦序列走完、抹掉的是最内层时，`stripFocusLayer` 只把这一层写成 0/0（封死），靠「内层归零」让单位倒下——敌人照旧走击杀结算死亡，玩家一方的单位却没有走倒地结算 `applyKnockdown`：血量 0、不濒死，照常拿行动点、照常行动（武器人、护送对象也一样 0 血不倒）；决斗按全倒判负，这一队可能永远判不输。玩家一方只会被敌对玩家阵营（PvP #445 / 决斗 #472）或开着友伤的队友（#428）聚焦，所以只有这几种情况碰得到。
+  - **现在**：
+    - 抹掉的是玩家一方单位的最内层：照「最内层生命归零」走 `applyKnockdown`，战斗记录写「X 聚焦抹层导致最内层归零，陷入濒死。」，之后全照倒地的原规则——起身之前不受伤害、只能起身；允许起身时照常起身（夕夏照常「背水一战」），之后受伤改扣坚毅生命；决斗不允许起身时倒在场上、起不来，一队全部倒地判负；力竭 3 被击倒立刻死亡（决斗里照「伤害不会致死」改成再起不能、移出战场）；还魂专长照常保住 1 点生命（被抹掉的这一层照旧封死，治不回来）；武器人倒下（扣 2 耐久，主人可以取回）。
+    - 和敌对玩家阵营 / 开着友伤的队友打倒的一样算友伤（#453）：照常倒地，不记战场数据的倒地次数。
+    - 抹掉的是外层：照旧只去掉那一层、2 击破，不倒地。敌人被抹掉内层照旧死亡。
+    - 坚毅生命的数值照旧不给玩家看：抹层只写被抹掉的那一层的血量，倒地、起身的说法不带坚毅的数字，联机照旧只发「濒死」「起身中」这些状态。
+  - **没改的 / 待主人确认**：
+    - **已经起身（靠坚毅生命战斗）的人被聚焦抹层怎么算**：规则、手册都没写（手册和技能说明里聚焦只说敌人）。现在的做法：起身中的人挨打不动血量层，最内层通常已经是 0，挂在上面的聚焦会被清掉、抹不到；还有血的外层（例如起身后加上的护盾）被抹掉时照旧只去掉那一层、2 击破；最内层被临时血量补上（缓冲选肉体、拆卸转移给他）又被抹掉时，这一层写成 0/0，不扣坚毅、不给 2 击破，人照常站着。等主人定。
+    - 聚焦对玩家角色要几步（`focusSeqLen`：玩家角色不是精英 / 首领，算 1 步，纯肉体的玩家被打中一下就倒地）是不是设计意图，主人还没定，这次不动。
+  - **测试**：tests/pvp-focus-knockdown.test.js 6 条——决斗里抹掉纯肉体的玩家角色立刻濒死、受保护、照常起身改扣坚毅；不允许起身的决斗里倒在场上、一队全倒判负，力竭 3 再起不能；武器人倒下扣耐久、开着友伤抹队友照常濒死不记倒地次数、还魂照常、夕夏起身照常背水一战；守卫：两层血量抹外层只少一层不倒地、敌人抹内层照旧死亡、游戏版里战斗记录 / 弹字 / 联机投影都没有坚毅的数字。第 1、2、5、6 条在没改的代码上失败（第 3、4 条是守卫）。
 - **模拟用的「看情况用技能」打法 `BattleSim.SKILL_POLICY`，并用它重跑 PvP 平衡模拟（#491 的对照）**（工具 / 报告，规则一条没动；issue #538，主人 10/31。新文件 sim-search.js：配置表 `BATTLE_SEARCH_CFG`、`SKILL_POLICY_CFG`（束宽、深度、平行世界数、打分权重），`BattleSearch` 的 `snap` / `load` / `candidateActions` / `tokenize` / `resolve` / `execute` / `trial` / `sandbox`（从 tools/dpt.js 抽出来的「列动作 + 沙盒试跑 + 平行世界」）和 `scorer` / `candidatesFor` / `plan`（技能版的打分、候选、束搜索）；sim.js · `skillPolicy` / `SKILL_POLICY`；tools/dpt.js 改用 `BattleSearch`（输出逐字不变，快了约一倍）；tools/pvp-balance.js · `--policy skill` / `--h2h` / `--pve` / `--compare`、`CONFIG.skillCfg` / `CONFIG.bigSample` / `PVE_SCENARIOS`、`duelPolicy` / `runH2h` / `runPve` / `instrument`（沙盒里试跑的事不记）/ `compareMarkdown` / `compareNotes` / `sampleText` / `pveSummary` / `h2hSummary` / `meleeStats` / `heroWins`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 sim.js 前面加载 sim-search.js；报告 docs/balance/pvp-balance-skill-1031.md + json；测试 tests/sim-skill.test.js 新 5 条（在没改的代码上全部失败），tests/pvp-balance.test.js 新 4 条）
   - **以前**：模拟里玩家一方只有 `BattleSim.BASIC_POLICY`（能打到就普攻血最少的，打不到就走一格；不用技能、道具，不召唤武器人）；#491 的 PvP 平衡模拟两队都用它，没法体现真实的打法。tools/dpt.js 自己写了一份列动作、试跑的代码。
   - **现在**：
