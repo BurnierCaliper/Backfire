@@ -371,6 +371,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **PvP：玩家角色被聚焦抹掉最内层照常倒地**（#544，主人 11/01 手操 PvP 测试发现；app.js · `stripFocusLayer`；测试 tests/pvp-focus-knockdown.test.js（新，6 条））
+  - **以前**：聚焦序列走完、抹掉的是最内层时，`stripFocusLayer` 只把这一层写成 0/0（封死），靠「内层归零」让单位倒下——敌人照旧走击杀结算死亡，玩家一方的单位却没有走倒地结算 `applyKnockdown`：血量 0、不濒死，照常拿行动点、照常行动（武器人、护送对象也一样 0 血不倒）；决斗按全倒判负，这一队可能永远判不输。玩家一方只会被敌对玩家阵营（PvP #445 / 决斗 #472）或开着友伤的队友（#428）聚焦，所以只有这几种情况碰得到。
+  - **现在**：
+    - 抹掉的是玩家一方单位的最内层：照「最内层生命归零」走 `applyKnockdown`，战斗记录写「X 聚焦抹层导致最内层归零，陷入濒死。」，之后全照倒地的原规则——起身之前不受伤害、只能起身；允许起身时照常起身（夕夏照常「背水一战」），之后受伤改扣坚毅生命；决斗不允许起身时倒在场上、起不来，一队全部倒地判负；力竭 3 被击倒立刻死亡（决斗里照「伤害不会致死」改成再起不能、移出战场）；还魂专长照常保住 1 点生命（被抹掉的这一层照旧封死，治不回来）；武器人倒下（扣 2 耐久，主人可以取回）。
+    - 和敌对玩家阵营 / 开着友伤的队友打倒的一样算友伤（#453）：照常倒地，不记战场数据的倒地次数。
+    - 抹掉的是外层：照旧只去掉那一层、2 击破，不倒地。敌人被抹掉内层照旧死亡。
+    - 坚毅生命的数值照旧不给玩家看：抹层只写被抹掉的那一层的血量，倒地、起身的说法不带坚毅的数字，联机照旧只发「濒死」「起身中」这些状态。
+  - **没改的 / 待主人确认**：
+    - **已经起身（靠坚毅生命战斗）的人被聚焦抹层怎么算**：规则、手册都没写（手册和技能说明里聚焦只说敌人）。现在的做法：起身中的人挨打不动血量层，最内层通常已经是 0，挂在上面的聚焦会被清掉、抹不到；还有血的外层（例如起身后加上的护盾）被抹掉时照旧只去掉那一层、2 击破；最内层被临时血量补上（缓冲选肉体、拆卸转移给他）又被抹掉时，这一层写成 0/0，不扣坚毅、不给 2 击破，人照常站着。等主人定。
+    - 聚焦对玩家角色要几步（`focusSeqLen`：玩家角色不是精英 / 首领，算 1 步，纯肉体的玩家被打中一下就倒地）是不是设计意图，主人还没定，这次不动。
+  - **测试**：tests/pvp-focus-knockdown.test.js 6 条——决斗里抹掉纯肉体的玩家角色立刻濒死、受保护、照常起身改扣坚毅；不允许起身的决斗里倒在场上、一队全倒判负，力竭 3 再起不能；武器人倒下扣耐久、开着友伤抹队友照常濒死不记倒地次数、还魂照常、夕夏起身照常背水一战；守卫：两层血量抹外层只少一层不倒地、敌人抹内层照旧死亡、游戏版里战斗记录 / 弹字 / 联机投影都没有坚毅的数字。第 1、2、5、6 条在没改的代码上失败（第 3、4 条是守卫）。
 - **模拟用的「看情况用技能」打法 `BattleSim.SKILL_POLICY`，并用它重跑 PvP 平衡模拟（#491 的对照）**（工具 / 报告，规则一条没动；issue #538，主人 10/31。新文件 sim-search.js：配置表 `BATTLE_SEARCH_CFG`、`SKILL_POLICY_CFG`（束宽、深度、平行世界数、打分权重），`BattleSearch` 的 `snap` / `load` / `candidateActions` / `tokenize` / `resolve` / `execute` / `trial` / `sandbox`（从 tools/dpt.js 抽出来的「列动作 + 沙盒试跑 + 平行世界」）和 `scorer` / `candidatesFor` / `plan`（技能版的打分、候选、束搜索）；sim.js · `skillPolicy` / `SKILL_POLICY`；tools/dpt.js 改用 `BattleSearch`（输出逐字不变，快了约一倍）；tools/pvp-balance.js · `--policy skill` / `--h2h` / `--pve` / `--compare`、`CONFIG.skillCfg` / `CONFIG.bigSample` / `PVE_SCENARIOS`、`duelPolicy` / `runH2h` / `runPve` / `instrument`（沙盒里试跑的事不记）/ `compareMarkdown` / `compareNotes` / `sampleText` / `pveSummary` / `h2hSummary` / `meleeStats` / `heroWins`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 sim.js 前面加载 sim-search.js；报告 docs/balance/pvp-balance-skill-1031.md + json；测试 tests/sim-skill.test.js 新 5 条（在没改的代码上全部失败），tests/pvp-balance.test.js 新 4 条）
   - **以前**：模拟里玩家一方只有 `BattleSim.BASIC_POLICY`（能打到就普攻血最少的，打不到就走一格；不用技能、道具，不召唤武器人）；#491 的 PvP 平衡模拟两队都用它，没法体现真实的打法。tools/dpt.js 自己写了一份列动作、试跑的代码。
   - **现在**：
