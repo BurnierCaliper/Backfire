@@ -371,6 +371,32 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **主菜单彩蛋：连续点柏妮尔 10 下，立绘换成「举着油桶猛灌汽油」的搞笑图，3 秒后换回**（#554，主人 11/01；接 #552 的看板娘，只改界面，规则不动。title-mascot.js（配置 `BURNIER_TAP`（新：`gulpAfter` 连点几下换图、`gap` 两下最多隔多久、`gulpMs` 搞笑图停多久、换图的 class），`countTap` / `endGulp` / `gulpReady` / `onTap`（新），`bind`（点一下改成先抖再记一下）/ `hide`（连搞笑图一起收掉），导出 `TitleMascot.TAP` / `gulping` / `tapCount`）；game.html（`#t-mascot` 里立绘后面加第二张图 `.t-mascot-gulp`）；game.css「标题界面 · 看板娘」后面加连点彩蛋的几条（两张图叠在同一个按钮里，`.t-mascot.gulp` 只换看得见的那张）；tools/desktop/build.sh（桌面版带上搞笑图）；素材 art/burnier/burnier-gulp-360.png、burnier-gulp.png（素材提交 8e82af0）；测试：tests/title-mascot-gulp.test.js 新 9 条（Node，假时钟），tests/title-mascot-gulp-ui.test.js 新 4 条（真浏览器，没装 Playwright 时用机器自带的 Chrome），在没改的代码上全部失败；截图 shots/title-mascot-gulp-desktop.png（1366×768）、shots/title-mascot-gulp-mobile.png（390×844））
+  - **以前**：点主菜单的柏妮尔只抖一下（#552），点多少下都一样。
+  - **现在**：
+    - **连续点**：立绘每被点一下（鼠标、手指、键盘 Enter / 空格，和抖一下是同一个触发）记一下；和上一下隔超过 `gap`（1.5 秒）就从头数（正好 1.5 秒还算连着）。
+    - **换图**：连续点到第 `gulpAfter` 下（10 下），立绘换成搞笑图，照常抖一下；`gulpMs`（3 秒）后自动换回立绘、计数归零。**搞笑图显示期间再点只抖：不数、不延长**（3 秒从换图那一下算起，点多少下都按时换回；换回来以后要重新连点满 10 下）。数值都在 `BURNIER_TAP`，改了下一下就按新的算。
+    - **版面不动**：搞笑图是按钮里叠在立绘上的第二张图，和立绘一样宽、贴着立绘的顶（头的位置接得上）；换图时只换看得见的那张，立绘照样占着地方——按钮大小、菜单、按钮都不动，搞笑图不超出立绘的框，宽屏（站在菜单右边）、窄屏 / 手机竖屏（在按钮下面）都不挡按钮和标题、没有横向滚动条。抖动、投影、焦点框、读屏读的名字（「柏妮尔」）两张一样。
+    - **减少动态效果**：照样换图，只是不抖（#552 的 CSS 换成只淡一下，两张图都一样）。
+    - **搞笑图读不出来**（读失败、还没读好）：不换图，立绘照常显示、照常抖。立绘自己读不出来时（#552：整个藏起来）点不到，也不数；搞笑图显示中立绘出错就一起收掉。
+    - 不加音效（按钮照旧带 `data-sfx-none`），不存档（刷新页面从头数）；只在主菜单首页（和立绘一起），不触发菜单功能。
+    - **没动的**：#552 的抖动、位置、只在主菜单首页显示、键盘操作、图片读不出来藏起来；其他画面；规则。
+  - **测试**：tests/title-mascot-gulp.test.js（Node，小 DOM 跑 game.html，假时钟）9 条：页面结构（第二张图、宽高、替代文字、默认配置、桌面版打包）；点 9 下不换、第 10 下换且照常抖、不触发菜单；隔超过 `gap` 从头数、正好 `gap` 不算断；过了 `gulpMs` 换回、计数归零，显示期间点了不数、不延长；改配置马上生效（`gulpAfter` 3 / `gap` 400 / `gulpMs` 1000、`gulpAfter` 1）；搞笑图读失败 / 还没读好不换、立绘藏起来不数、显示中立绘出错一起收掉；减少动态效果照样换；样式（visibility 换图、绝对定位、窄屏的定位基准）。tests/title-mascot-gulp-ui.test.js（真浏览器）4 条：宽屏 1366×768 / 1920×1080 / 1000×700（皮肤开着 / 关掉）鼠标连点、手机 390×844 / 360×640 手指连点——第 10 下换图，按钮和菜单的位置一点不动、搞笑图在立绘的框里、不挡按钮和标题、没有横向滚动条、菜单没动；键盘 Enter / 空格连按也算、默认 3 秒左右换回且计数归零、减少动态效果照样换且不位移；搞笑图读不出来点 12 下也不换、立绘照常。截图：`BURNIER_GULP_SHOTS=1 node --test tests/title-mascot-gulp-ui.test.js`。
+- **主菜单加上看板娘柏妮尔的立绘，点一下抖一下**（#552，主人 11/01；只改界面，规则不动。game.html（`#t-home` 最后加立绘按钮 `#t-mascot`，在 screens.js 后面加载 title-mascot.js）；title-mascot.js（新：配置 `TITLE_MASCOT`（抖动的 class、时长 `shakeMs`、兜底的 `spareMs`），`TitleMascot.bind` / `shake` / `stop` / `hide` / `shaking`）；game.css「标题界面 · 看板娘」（`.t-mascot`、`@keyframes tMascotShake` / `tMascotBlink`、宽屏 / 窄屏两种排法）；skin.css（皮肤下的投影、焦点框）；tools/desktop/build.sh（桌面版带上这张图）；素材 art/burnier/burnier-stand-720.png（素材提交 bcf0582，Q 版图这次没用）；测试：tests/title-mascot.test.js 新 5 条（Node），tests/title-mascot-ui.test.js 新 8 条（真浏览器，没装 Playwright 时用机器自带的 Chrome），在没改的代码上全部失败；截图 shots/title-mascot-desktop.png（1366×768）、shots/title-mascot-mobile.png（390×844））
+  - **以前**：主菜单只有标题和四个按钮（本地玩法 / 联机玩法 / 图鉴 / 规则说明）。
+  - **现在**：
+    - **摆在哪**：只在主菜单首页（`#t-home`）出现；进「本地玩法」「联机玩法」子菜单、进游戏后不显示，回到首页又出现（立绘是 `#t-home` 的最后一个子元素，跟着它一起藏起来；排在最后，前面几个按钮的 `:nth-child` 不变，皮肤歪的角度照旧）。
+      - 宽屏（≥ 1000px）：站在菜单右边，脚和最后一个按钮的底边对齐，菜单本身的位置一点不动。大小按菜单右边剩下的地方算，放不下就缩小（1920×1080 是原尺寸 499×720，1366×768 约 339×489，1000×700 约 156×225），最高不超过屏幕高的 88%。
+      - 窄屏（< 1000px：手机竖屏、平板竖屏、手机横屏）：放到按钮下面、居中；高的屏幕把按钮下面剩下的地方用上（180–360px 高：视口 390×844 时约 184px、一屏放得下，820×1180 时 360px）。首页比屏幕高时（矮的手机、浏览器的地址栏 / 工具栏占掉高度时）从顶上排（以前手机横屏的首页标题会被裁掉、滚不上去），往下滚看全身。
+      - 两套样式（game.css 的基础样式、skin.css 的街头废土皮肤）下都不挡按钮和标题、在屏幕里、不撑出横向滚动条，抖的时候也不。皮肤下像贴在墙上的贴纸，和铁皮按钮一样往右下落硬投影、焦点框是警示黄；基础样式是柔和的投影、金色焦点框。
+    - **点一下抖一下**：点一下（手机上手指点一下）以脚底为轴左右晃几下，0.45 秒（`TITLE_MASCOT.shakeMs`）。连点从头再播，不叠加、不卡住：动画播完就拿掉 `.shake`，没收到 animationend（被打断、页面在后台）时按 `shakeMs + spareMs` 兜底拿掉。动的只是图片，按钮本身不动，抖的时候点旁边的按钮也点不到立绘。开着「减少动态效果」时不晃，只淡一下。
+    - **无障碍**：立绘是一个按钮，Tab 走得到（在「规则说明」后面），Enter / 空格也抖一下；读屏读「柏妮尔」（图片的替代文字）。
+    - **不触发菜单、不响音效**：点它只抖一下，不进子菜单、不开图鉴、不换画面；按钮带 `data-sfx-none`，sfx.js 统一挂的点击声、悬停声跳过它。
+    - **图片读不出来**：整个立绘藏起来（不留空白大框、不占地方、Tab 不停在它上面），主菜单照常；脚本跑到之前就已经读失败的也一样。
+    - **桌面版**：tools/desktop/build.sh 只放玩家需要的文件，加上 art/burnier/burnier-stand-720.png（不然桌面版的主菜单没有立绘，会按读不出来藏起来）。
+    - **没动的**：主菜单原来的按钮、文字、功能、键盘操作（Esc 返回等）；子菜单的排法；规则。
+  - **测试**：tests/title-mascot.test.js（Node，小 DOM 跑 game.html）5 条：页面结构（`#t-home` 的最后一个、四个按钮和顺序不变、`type="button"`、不是 `.t-btn`、`data-sfx-none`、替代文字「柏妮尔」、标签上的宽高和图片文件一样、脚本先后、桌面版带上图片）；点一下加上 / 图片的 animationend 拿掉、连点每一下都先拿掉再加上、别的动画结束不算；假时钟下按时间兜底拿掉、连点按最后一下重算；图片读不出来（error、接上之前就失败）藏起来、点了不抖；样式（`[hidden]` 不占地方、减少动态效果时的动画不位移）。tests/title-mascot-ui.test.js（真浏览器）8 条：宽屏 1366×768 / 1920×1080 / 1000×700、手机 390×844 / 360×640、平板 820×1180，皮肤开着 / 关掉各量一遍（在菜单右边 / 按钮下面居中、不挡按钮和标题、在屏幕里、标题不被裁掉、滚到底看得到全身、宽屏菜单位置不变、抖的时候每一帧都没有横向溢出）；点一下真的晃、播完拿掉、连点 4 下动画从头播 4 次、菜单没动；键盘 Tab / Enter / 空格；减少动态效果只淡一下；子菜单 / 进游戏后不显示；点立绘、悬停没有音效（点普通按钮有，作对照）；图片读不出来藏起来、主菜单照常。截图：`TITLE_MASCOT_SHOTS=1 node --test tests/title-mascot-ui.test.js`。
+  - **另外看到的（没改）**：标题画面整块是 `align-items: center` 上下居中，内容比屏幕高时顶上那段会被裁掉、滚不上去——「本地玩法」子菜单在手机竖屏和 1366×768 上标题被裁掉，很矮的宽屏窗口（例如 1400×500）首页的标题也是。这次只给窄屏的首页改成放不下时从顶上排（加了立绘以后要用），子菜单和宽屏照旧，要改另开。
 - **模拟用的「看情况用技能」打法 `BattleSim.SKILL_POLICY`，并用它重跑 PvP 平衡模拟（#491 的对照）**（工具 / 报告，规则一条没动；issue #538，主人 10/31。新文件 sim-search.js：配置表 `BATTLE_SEARCH_CFG`、`SKILL_POLICY_CFG`（束宽、深度、平行世界数、打分权重），`BattleSearch` 的 `snap` / `load` / `candidateActions` / `tokenize` / `resolve` / `execute` / `trial` / `sandbox`（从 tools/dpt.js 抽出来的「列动作 + 沙盒试跑 + 平行世界」）和 `scorer` / `candidatesFor` / `plan`（技能版的打分、候选、束搜索）；sim.js · `skillPolicy` / `SKILL_POLICY`；tools/dpt.js 改用 `BattleSearch`（输出逐字不变，快了约一倍）；tools/pvp-balance.js · `--policy skill` / `--h2h` / `--pve` / `--compare`、`CONFIG.skillCfg` / `CONFIG.bigSample` / `PVE_SCENARIOS`、`duelPolicy` / `runH2h` / `runPve` / `instrument`（沙盒里试跑的事不记）/ `compareMarkdown` / `compareNotes` / `sampleText` / `pveSummary` / `h2hSummary` / `meleeStats` / `heroWins`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 sim.js 前面加载 sim-search.js；报告 docs/balance/pvp-balance-skill-1031.md + json；测试 tests/sim-skill.test.js 新 5 条（在没改的代码上全部失败），tests/pvp-balance.test.js 新 4 条）
   - **以前**：模拟里玩家一方只有 `BattleSim.BASIC_POLICY`（能打到就普攻血最少的，打不到就走一格；不用技能、道具，不召唤武器人）；#491 的 PvP 平衡模拟两队都用它，没法体现真实的打法。tools/dpt.js 自己写了一份列动作、试跑的代码。
   - **现在**：

@@ -174,6 +174,9 @@
   .t-name { font-size: 44px; }
   .t-btn b { font-size: 23px; }
 }
+/* 看板娘（#552，位置、大小、动画在 game.css）：像贴在墙上的贴纸，和铁皮按钮一样往右下落硬投影；焦点框用警示黄 */
+.t-mascot img { filter: drop-shadow(6px 7px 0 rgba(0, 0, 0, .5)); }
+.t-mascot:focus-visible { outline: 3px solid var(--sk-hazard); outline-offset: 4px; }
 
 /* ---------- 选队伍 ---------- */
 .scr-party .sp-head p { font-size: 14px; }

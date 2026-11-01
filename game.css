@@ -1371,6 +1371,61 @@ body.online-player #atk-fx { z-index: 91 !important; }
 .t-btn:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 @media (max-width: 480px) { .t-name { font-size: 40px; } }
 
+/* ---------- 标题界面 · 看板娘：柏妮尔的立绘（#552，点一下抖一下在 title-mascot.js） ----------
+ * 是 #t-home 的最后一个子元素：进子菜单跟着 #t-home 一起藏起来；前面几个按钮的 :nth-child 不变（skin.css 按它歪的角度照旧）。
+ * 宽屏（≥ 1000px）：站在菜单右边，脚和最后一个按钮的底边对齐，菜单本身的位置不动。宽度按菜单右边剩下的地方算（扣掉和菜单的空隙、
+ *   滚动条和抖动的余量），地方不够就缩小，最高不超过屏幕高的 88%：不挡按钮和标题，抖的时候也不撑出横向滚动条。
+ * 窄屏（手机竖屏、平板竖屏、手机横屏）：放到按钮下面、居中；高的屏幕把按钮下面剩下的地方用上（180–360px 高）。
+ *   首页比屏幕高时从顶上排（auto 外边距），标题不会被裁掉，往下滚看全身；子菜单的排法照旧。
+ * 点一下加 .shake 抖一下（时长 title-mascot.js · TITLE_MASCOT.shakeMs，写进 --t-mascot-shake）；「减少动态效果」时换成很轻的一下（不位移）。
+ * 动的只是图片（不接鼠标），按钮本身不动：抖的时候点旁边的按钮也不会点到立绘。 */
+.t-home { position: relative; }
+.t-mascot {
+  display: block; align-self: center; margin: 4px 0 0; padding: 0;
+  background: none; border: 0; border-radius: 0; color: inherit; font: inherit; line-height: 0; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; touch-action: manipulation;
+}
+.t-mascot[hidden] { display: none; }
+.t-mascot img {
+  display: block; width: auto;
+  height: clamp(180px, calc(100vh - 660px), 360px);
+  height: clamp(180px, calc(100svh - 660px), 360px);   /* 手机：地址栏露着时的高度（不认 svh 的浏览器用上一行） */
+  transform-origin: 50% 100%; pointer-events: none;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .45));
+}
+.t-mascot:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+.t-mascot.shake img { animation: tMascotShake var(--t-mascot-shake, 450ms) cubic-bezier(.36, .07, .19, .97); }
+/* 以脚底为轴左右晃几下、越来越小 */
+@keyframes tMascotShake {
+  0%, 100% { translate: 0 0; rotate: 0deg; }
+  12% { translate: -7px 0; rotate: -1.6deg; }
+  26% { translate: 6px 0; rotate: 1.3deg; }
+  40% { translate: -5px 0; rotate: -1deg; }
+  54% { translate: 4px 0; rotate: .7deg; }
+  68% { translate: -2px 0; rotate: -.4deg; }
+  84% { translate: 1px 0; rotate: .15deg; }
+}
+/* 减少动态效果：不位移，只淡一下 */
+@keyframes tMascotBlink { 0%, 100% { opacity: 1; } 35% { opacity: .7; } }
+@media (prefers-reduced-motion: reduce) { .t-mascot.shake img { animation-name: tMascotBlink; } }
+@media (max-width: 999px) {
+  .t-card:has(> .t-home:not([hidden])) { margin-block: auto; }
+}
+@media (min-width: 1000px) {
+  .t-mascot {
+    position: absolute; left: 100%; bottom: 0; margin: 0 0 0 28px;
+    width: min(499px, calc((100vw - 100%) / 2 - 84px), 61vh);   /* 100% = 菜单宽；61vh ≈ 88vh 高时的宽 */
+  }
+  .t-mascot img { width: 100%; height: auto; }
+}
+/* 连点彩蛋（#554，换图在 title-mascot.js · BURNIER_TAP）：按钮里第二张图是「灌汽油」的搞笑图，和立绘叠在一起。
+ * 搞笑图绝对定位、和立绘一样宽、贴着立绘的顶（头的位置接得上），不占地方；换图时只换看得见的那张（visibility），立绘照样占着地方：
+ * 按钮大小、菜单、按钮都不动，搞笑图也不会超出立绘的框（不挡按钮）。抖动、减少动态效果、投影、不接鼠标都跟着 .t-mascot img 走，两张一样 */
+@media (max-width: 999px) { .t-mascot { position: relative; } }   /* 窄屏：按钮是搞笑图的定位基准（宽屏本来就是 absolute） */
+.t-mascot .t-mascot-gulp { position: absolute; left: 0; top: 0; width: 100%; height: auto; visibility: hidden; }
+.t-mascot.gulp img:not(.t-mascot-gulp) { visibility: hidden; }
+.t-mascot.gulp .t-mascot-gulp { visibility: visible; }
+
 /* ---------- Roguelike 战斗：只留战斗相关的按钮 ---------- */
 #g-rogue-next { display: none; }
 body.rogue-battle #g-rogue-next { display: inline-block; }
