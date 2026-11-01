@@ -9357,7 +9357,7 @@ function dealToInner(attacker, target, opt) {
   // 友伤（enemies.js · friendlyFireHit，#428）：开着友伤的人打到队友——和打敌人完全一样结算（克制、减伤、格挡 / 协助格挡、失衡……），
   // 只是不计分数。记号 flags.friendlyFire 跟着这一击走（等协助格挡的那一击落下时开关已经改了也照样算友伤）
   if (!opt.flags.friendlyFire && typeof friendlyFireHit === "function" && friendlyFireHit(attacker, target)) opt.flags.friendlyFire = true;
-  // anyRange：不限距离的攻击（矿场警戒自动机打所有高能的敌人）
+  // anyRange：不限距离的攻击（矿场警戒自动机打所有高能的敌人；卡面写「任意距离」、按作者裁定不限距离的电光束、狂瀑，#561）
   if (attacker && target && opt.flags.action && !opt.flags.aoe && !isReaction && !opt.flags.conductorExtra && !opt.flags.propShot && !opt.flags.locked && !opt.flags.viaPierce && !opt.flags.anyRange && !opt.flags.skillRange) {
     const d = zoneDist(Number(attacker.zone), Number(target.zone), Number(state.zoneMode));
     const rg = opt.atkRange || (attacker.isPlayer ? "any" : (attacker.range || "any"));
@@ -14558,10 +14558,11 @@ function runSkillInner(id, optRun) {
       lines.push(w ? "哔哩哩&滋啦啦已进入战场。" : "武器已在场。");
     } else if (id === "bili_beam") {
       if (!needT()) return paintSkillLog(lines.join("\n"));
-      hitOne(a, t, { element: "electric", mult: 1, baseBreak: 0, atk });
-      t.statuses.shock = true;
-      popStatus(t, "shock");
-      lines.push(`${t.name} 被施加感电。`);
+      // 电光束：卡面「对一个任意距离的敌人」= 不限距离（作者裁定「任意距离照旧不限距离」；#561）——带 anyRange，
+      // 不再按没带标记的玩家攻击的「任意距离 0–1」拦下距离 2 以上的目标；危墙 / 关着的门、屏障照旧挡。
+      // 感电挂在这一击上（onConnect，和敌人「打中附带感电 / 腐蚀」的攻击一样）：真的打中了才挂——打不到、被屏障吃掉、落空、
+      // 目标倒地不受伤害、被协助格挡挡下（含空手格挡）都不挂；要等协助格挡的那一击跟着格挡结果走（以前不看打没打中，照挂）
+      hitOne(a, t, { element: "electric", mult: 1, baseBreak: 0, atk, flags: { action: true, anyRange: true }, onConnect: { status: "shock" } });
     } else if (id === "bili_magnet") {
       const fl = state.skillFlow;
       const tgt = (fl && fl.picks.target) ? (unitById(fl.picks.target) || propByRef(fl.picks.target)) : t;
@@ -15646,7 +15647,9 @@ function runSkillInner(id, optRun) {
       };
       for (let i = 0; i < steps && !t.dead; i++) {
         addRasEnergy(20, "狂瀑");
-        hitOne(a, t, { element: "energy", mult: 0.2, baseBreak: 0, atk, atkRange: "any", usePrep: i === 0 });
+        // 提示写「任意距离 · 选高能状态的敌人」（SKILL_RANGE 0–99）：带 anyRange 不限距离（#561，和电光束一样；
+        // 以前距离 2 的目标每一下都被「任意距离 0–1」拦下，自己的 10% 血量照掉）。危墙、屏障照旧挡
+        hitOne(a, t, { element: "energy", mult: 0.2, baseBreak: 0, atk, atkRange: "any", usePrep: i === 0, flags: { action: true, anyRange: true } });
         const lost = loseHp(a, Math.ceil(totalMaxHp(a) * 0.1));
         lines.push(`狂瀑：拉斯缪尔失去 ${lost} 血量。`);
       }
