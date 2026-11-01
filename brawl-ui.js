@@ -18,7 +18,7 @@
   const TEAMS = () => DUEL().teams.map(t => ({ id: t.id, name: t.name }));
   const teamName = id => (TEAMS().find(t => t.id === id) || { name: id }).name;
   const ATTRS = () => (typeof ATTR_NAMES !== "undefined" ? ATTR_NAMES : { str: "力量", con: "体质", dex: "敏捷", wil: "意志", int: "智力", sta: "耐力" });
-  const LAYERS = () => (typeof LAYER !== "undefined" ? LAYER : { flesh: "肉体", armor: "装甲", shield: "护盾", sand: "沙尘", spirit: "星灵" });
+  const LAYERS = () => (typeof LAYER !== "undefined" ? LAYER : {});   // 层名只有 engine.js · LAYER 一份（#510）
   const kits = () => (typeof brawlHeroKits === "function" ? brawlHeroKits() : []);
   const heroName = kit => { const c = typeof brawlCard === "function" ? brawlCard(kit) : null; return c ? c.name : kit || ""; };
   const featOf = id => (typeof featDef === "function" ? featDef(id) : null);

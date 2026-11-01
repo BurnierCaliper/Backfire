@@ -111,10 +111,10 @@
       cyberware: rogue() ? (OnlineRogue.cyberwareFor ? OnlineRogue.cyberwareFor(id) : null)
         : typeof trpgCyberwarePacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.clinicOpen ? trpgCyberwareFor(id, id === identity.id) : null,
       // 任务日志（跑团）：房主按收件人挑好（草稿、没指定给他的不给），online-view.js 再按白名单投影
-      quests: trpgMode() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
+      quests: !rogue() && typeof trpgQuestLog === "function" ? trpgQuestLog(id, id === identity.id, kitsOwnedBy(id)) : null,
       // 角色资料（跑团，lore.js）：只有已发布条目的索引，不带详细内容（玩家点开一条时才要，见 receive 的 loreEntry）；
       // 没变时 online-wire.js 只带 loreUnchanged，改了只发改了的条目
-      lore: trpgMode() && typeof lorePublicIndex === "function" ? lorePublicIndex() : null,
+      lore: !rogue() && typeof lorePublicIndex === "function" ? lorePublicIndex() : null,
       // 跑团私人钱包：自己操控的角色看得到余额，队友只给名字（转账用）；主持人看全部（online-view.js · projectPurse）
       purse: !rogue() && typeof trpgPurse === "function" && typeof TRPG !== "undefined" && TRPG.active ? purseFor(id, id === identity.id) : null,
       // 跑团商人：主持人开着的那家店（trpg-merchants.js · trpgMerchantView；online-view.js · projectShop 白名单）
@@ -127,15 +127,18 @@
       smith: !rogue() && typeof trpgSmithPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.smithOpen ? trpgPacketsFor(id, id === identity.id, trpgSmithPacket) : null,
       workshop: !rogue() && typeof trpgWorkshopPacket === "function" && typeof TRPG !== "undefined" && TRPG.active && TRPG.workshopOpen ? trpgPacketsFor(id, id === identity.id, trpgWorkshopPacket) : null,
       // 长休结算（跑团；单局的在 rogue.lastRest 里）和游戏时钟：online-view.js · projectRest / clock 白名单
-      rest: trpgMode() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
-      camp: trpgMode() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
+      rest: !rogue() && typeof TRPG !== "undefined" ? TRPG.lastRest || null : null,
+      camp: !rogue() && typeof TRPG !== "undefined" && TRPG.camp ? Object.assign({ force: TRPG.camp.force }, TRPG.camp.status) : null,
       // 跑团探索的队伍卡（party-cards.js · heroDto，gm:false：根本不带坚毅生命字段）；online-view.js · projectParty 再按白名单过一遍
       // 只在探索 / 结算时发：战斗里玩家画面不画队伍卡（online-ui.js · partyMarkup），每个结算包都整份带上会白占 50 KiB 预算
       party: liveScreen() !== "battle" && !rogue() && typeof TRPG !== "undefined" && TRPG.active && typeof trpgHeroes === "function" && root.PartyCards ? trpgHeroes().map(h => PartyCards.heroDto(h, { gm: false })) : null,
       // 游戏时钟 + 距上次长休的小时数（主持人顶栏同一句话，party-cards.js · clockHtml）；单局也用 LEDGER
       clock: typeof LEDGER !== "undefined" ? { day: LEDGER.day, clock: LEDGER.clock, hours: Number(LEDGER.hours) || 0 } : null };
   }
+  // 争斗（#560）的房间里没有跑团：跑团才有的任务日志、角色资料索引、长休结算、营地不发（房主本机可能还开着别的跑团存档）
+  const TRPG_ONLY = ["quests", "lore", "rest", "camp"];
   function sendProjected(id, packet) {
+    if (brawl() && packet && typeof packet === "object") TRPG_ONLY.forEach(k => { if (Object.prototype.hasOwnProperty.call(packet, k)) packet[k] = null; });
     const safe = OnlineView.projectPacket(packet, { recipientId: id, gmId: identity.id, itemCatalog: typeof ITEM_CATALOG !== "undefined" ? ITEM_CATALOG : {} });
     if (!recipientWires.has(id)) recipientWires.set(id, OnlineWire.create());
     return endpoint.send(recipientWires.get(id).pack(safe), id).catch(e => { if (status.connected) { notice = e.message; notify(); } });
@@ -477,7 +480,7 @@
   }
   /** 一条资料的详细内容：只给已发布的（草稿、没有这条都是 null，不告诉玩家有没有这条草稿） */
   function lorePacket(entryId) {
-    const entry = trpgMode() && typeof lorePublicEntry === "function" && typeof entryId === "string" ? lorePublicEntry(entryId) : null;
+    const entry = !rogue() && typeof lorePublicEntry === "function" && !brawl() && typeof entryId === "string" ? lorePublicEntry(entryId) : null;
     return { type: "loreEntry", protocol: PROTOCOL, build: BUILD, entry };
   }
   function messagePage(sender, request = {}) {
