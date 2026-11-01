@@ -344,12 +344,24 @@ const BattleSim = (function () {
 
   /* ---------- 回合 ---------- */
   const sig = (u) => u ? `${u.ap}|${u.bonus}|${u.zone}|${u.dying}|${u.upOnShp}` : "gone";
+  /** 一个阶段里「同一个单位」怎么认（#547）：武器人按「持有者 + 哪把武器」认——收回再唤出是新建一个单位、编号会变（app.js · spawnWeapon），
+   *  还算同一个（和联机行动顺序 hotseat.js 的 stableKey 一样）；别的单位按编号认（解除机甲放出来的明特、下车的炮手编号不变） */
+  const turnKey = (u) => (u.weaponOf ? "weapon:" + u.weaponOf + ":" + u.kit : "id:" + u.id);
 
-  /** phase：哪一个回合里行动的玩家角色（默认我方回合；在敌人回合行动的玩家阵营，#445，由 enemyPhase 先叫一次） */
+  /** phase：哪一个回合里行动的玩家角色（默认我方回合；在敌人回合行动的玩家阵营，#445，由 enemyPhase 先叫一次）。
+   *  阶段开始时按场上的顺序排好要行动的人；每轮完一个人再看一遍场上：这一阶段新进场、还没轮到过的（唤出的武器人、解除机甲放出来的明特……，#547）
+   *  接着轮到它们（排在剩下的人前面；原来就在场的人顺序不变）。同一个单位（turnKey）一个阶段最多轮到一次：
+   *  已经轮到过的不会因为重新看一遍场上又轮到；还没轮到就离场的（被收回、坐进车里当炮手）不算轮到过，同一阶段再进场照样轮到 */
   function playerPhase(policy, stats, phase) {
     const when = phase || "player";
-    const ids = state.units.filter(u => u.isPlayer && alive(u) && (typeof unitTurnPhase !== "function" || unitTurnPhase(u) === when)).map(u => u.id);
-    for (const id of ids) {
+    const acts = (u) => u.isPlayer && alive(u) && (typeof unitTurnPhase !== "function" || unitTurnPhase(u) === when);
+    const queue = state.units.filter(acts).map(u => u.id);
+    const taken = new Set();   // 这一阶段已经轮到过的（turnKey）
+    while (queue.length) {
+      const id = queue.shift();
+      const u0 = unitById(id);
+      if (!u0 || !acts(u0) || taken.has(turnKey(u0))) continue;
+      taken.add(turnKey(u0));
       for (let n = 0; n < 6; n++) {
         const u = unitById(id);
         if (!u || !alive(u) || outcome()) break;
@@ -362,6 +374,10 @@ const BattleSim = (function () {
         if (outcome()) return;
         if (sig(unitById(id)) === before) break;   // 没花掉任何东西 → 别卡死
       }
+      // 这个人轮完了：这一阶段新进场、还没轮到过的（唤出的武器人……，#547）接着轮到，按场上的顺序排在剩下的人前面。
+      // 以前阶段开始就把名单定死，中途唤出的武器人要等下一个阶段才动（游戏里唤出来就带着行动点、附赠，当回合就能动）
+      const fresh = state.units.filter(u => acts(u) && !taken.has(turnKey(u)) && !queue.includes(u.id)).map(u => u.id);
+      queue.unshift(...fresh);
     }
   }
 
