@@ -217,6 +217,8 @@ function kingExecutionGrab(king, m, notes) {
   const boss = (state.units || []).find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead && !(u.resources && u.resources.mutinied));
   if (!t || t.dead || !boss) return;
   if (Math.random() < KING_CFG.exec.grab) {
+    // 背水一战（夕夏起身中）：擒拿是让人失衡（失去下回合行动），起身中的夕夏不会失衡（engine.js · xiaBackwater，#546）
+    if (typeof xiaBackwaterBlocks === "function" && xiaBackwaterBlocks(t, notes, `${boss.name} 擒拿无效`)) return;
     t.stunned = true;
     notes.push(`${boss.name} 擒拿 ${t.name} 成功：失去下回合行动。`);
     if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, notes);
@@ -3060,6 +3062,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     lines.push(`牛协助格挡 ${ok ? "成功" : "失败"}（40%）。`);
     if (ok && t) {
       a.def = Math.max(1, (a.def || 0) - 1);
+      // 背水一战（夕夏起身中）：反击的 1 击破不扣架势（engine.js · xiaBackwater，#546）
+      if (typeof xiaBackwaterBlocks === "function" && xiaBackwaterBlocks(t, lines, "牛协助格挡反击的 1 击破无效")) return true;
       t.def = Math.max(0, (t.def || 0) - 1);
       if (t.def <= 0) {
         t.stunned = true;
@@ -3162,6 +3166,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     standingPlayersIn(z).forEach(u => {
       const out = aa(u, { element: "physical", mult: 1, baseBreak: 2, flags: { action: true, aoe: true } });
       if (!enemyHitLanded(out) || u.dead || u.dying) return;
+      // 背水一战（夕夏起身中）：被流沙困住是失衡（失去行动），起身中的夕夏不会失衡（engine.js · xiaBackwater，#546）
+      if (typeof xiaBackwaterBlocks === "function" && xiaBackwaterBlocks(u, lines, "流沙漩涡困不住")) return;
       u.stunned = true;
       lines.push(`${u.name} 被流沙困住，无法行动。`);
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(u, lines);
@@ -3259,6 +3265,8 @@ function runEnemyActionInner(id, a, t, hitOne, lines, needT) {
     aa(t, { element: "acid", mult: 1, diceN: 1, diceS: leveledSides(a.level, 6), baseBreak: 1 });
     const boss = state.units.find(u => u.kit === "bandit_boss" && !u.hidden && !u.dead);
     if (boss && Math.random() < 0.5) {
+      // 背水一战（夕夏起身中）：擒拿是让人失衡（失去下回合行动），起身中的夕夏不会失衡（engine.js · xiaBackwater，#546）
+      if (typeof xiaBackwaterBlocks === "function" && xiaBackwaterBlocks(t, lines, "强盗头子擒拿无效")) return true;
       t.stunned = true;
       lines.push("强盗头子擒拿成功，目标失去下回合行动。");
       if (typeof endRallyIfCasterDown === "function") endRallyIfCasterDown(t, lines);

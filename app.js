@@ -2397,7 +2397,8 @@ function expireTurnFx(u, key, notes, late) {
         notes.push(`${u.name} 已被击破，击破预告返还次数。`);
       } else {
         const caster = unitById(u.instant.omenFrom);
-        if (caster && !caster.noPosture) {
+        // 背水一战（夕夏起身中）：预告失败也不失去架势、不失衡
+        if (caster && !caster.noPosture && !xiaBackwaterBlocks(caster, notes, "击破预告失败也不被击破")) {
           caster.def = 0;
           caster.stunned = true;
           notes.push(`击破预告失败：${caster.name} 架势被击破。`);
@@ -3956,6 +3957,8 @@ function convertUnstableInHv(u, notes) {
   if (fieldExempt(u)) return;   // 保释：豁免场地
   const f = state.fields[u.zone] || {};
   if (!f.electric) return;
+  // 背水一战（夕夏起身中）：高压场地里不稳也不转晕眩，不稳留着（下回合照扣附赠）
+  if (!u.stunned && xiaBackwaterBlocks(u, notes, "高压场地：不稳也不转晕眩")) return;
   u.statuses.unstable = false;
   if (!u.stunned) {
     u.stunned = true;
@@ -12023,6 +12026,9 @@ function dealBreak(unit, amount, element, notes, reason, opt) {
     notes.push(`${sink.name} 屹立不倒：免受击破${reason && reason !== "击破" ? "（" + reason + "）" : ""}。`);
     return;
   }
+  // 背水一战（夕夏起身中）：任何来源的击破都不扣架势、不失衡（和攻击结算 engine.js · applyResultToUnit 同一个判断 xiaBackwater，#546）。
+  // 在决不后退之前：挡下了就不用再花附赠动作
+  if (xiaBackwaterBlocks(sink, notes, `${reason && reason !== "击破" ? reason + "的 " : ""}${amount} 击破无效`)) return;
   // 决不后退（feats.js）：这下击破要把架势打空时，有附赠动作就先 +2 架势（坚挺另算，在下面）
   if (!((sink.statuses && sink.statuses.sturdy) || (sink.resources && sink.resources.divertGuard)) && typeof featUnbowedAuto === "function") featUnbowedAuto(sink, amount, notes);
   const before = Number(sink.def) || 0;
@@ -12097,6 +12103,8 @@ function applyUnstable(u, notes) {
   if (u.trainingDummy) return false;   // 训练假人：不会不稳 / 晕眩
   u.statuses = u.statuses || {};
   if (u.statuses.unstable) {
+    // 背水一战（夕夏起身中）：两个不稳也不转晕眩，身上照旧是一个不稳（下回合照扣附赠）
+    if (!u.stunned && !u.noPosture && xiaBackwaterBlocks(u, notes, "叠加两个不稳也不转晕眩")) return true;
     u.statuses.unstable = false;
     if (!u.stunned && !u.noPosture) {
       u.stunned = true;
@@ -12118,6 +12126,8 @@ function maybeUnstableTrip(u, notes, by) {
   if (u.resources && u.resources.divertGuard) return;   // 扭矩自保模式：和不稳面对坚挺一样（主人确认）
   if (!u.statuses || !u.statuses.unstable) return;
   if ((Number(u.def) || 0) > 1) return;
+  // 背水一战（夕夏起身中）：剩 1 架势也站得住，不稳留着（下回合照扣附赠）
+  if (xiaBackwaterBlocks(u, notes, `不稳：架势只剩 ${Number(u.def) || 0} 也不失衡`)) return;
   u.stunned = true;
   u.statuses.unstable = false;
   notes = notes || [];
