@@ -201,7 +201,7 @@ kit: (u) => ({ zone, label, ready })   // 也可以返回数组表示多个区�
 | 高能脉冲 | 川川 Lv6 | 距离 1 以内，对一个敌人施加高能 |
 | 巨刃划空 | 川川 Lv11 | 同区，耗 3 电能，2atk 电击 +2 击破。对配置物伤害翻倍；击穿血量层或摧毁配置物返还 1 电能 |
 
-**抓取状态**（`app.js · crushingTarget` / `crushOnce`）：位置与目标绑定，每回合开始自动同区并再碾一次；不能主动移动，不能协助攻击与协助格挡，不获得行动点与附赠行动。目标失衡则松手。自动碾压击杀目标时返还 1 行动点与 1 附赠行动。
+**抓取状态**（`app.js · crushingTarget` / `crushOnce`）：位置与目标绑定，每回合开始自动同区并再碾一次；不能主动移动，不能协助攻击与协助格挡，不获得行动点与附赠行动。目标失衡则松手。自动碾压击杀目标时返还 1 行动点与 1 附赠行动。狂怒碾压是投技：第一下和每回合的自动碾压都不能被协助格挡（#548）。
 
 ## 队伍档案：跨战斗记录（ledger.js）
 
@@ -371,6 +371,9 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **夕夏「狂怒碾压」是投技，不能被协助格挡；目标身边有人能格挡时也抓得住了**（#548，主人 11/01 确认：想让夕夏松手只能把她打倒或打晕，不能靠挡。app.js · `crushOnce`（这一击带 `flags.blockResolved` / `block: "none"`）；skill-text.js（狂怒碾压的卡面）；rulebook.js（协助格挡 ·「谁能挡」）；测试 tests/issue-548.test.js（新，7 条：5 条在没改的代码上失败，另 2 条是守卫））
+  - **以前**：碾压那一下（手动的第一下、每回合开始的自动碾压）和普通攻击一样，目标同区有人能协助格挡就先排进格挡队列（`state.blockQueue`）；`crushOnce` 从 `hitOne2` 拿回的是「等待协助格挡」，当成没碾到——抓不住（已经抓着的松手），日志里「等待协助格挡」之后马上写「没能碾到」，之后格挡照常结算：挡住了目标免伤，没挡伤害、击破照样落下，夕夏都已经没抓住了。所以只要目标身边有一个手上有附赠、能协助格挡的人，狂怒碾压就永远抓不住。PvE 里敌人的自动协助格挡（警卫队队长·牛、巡逻车；赤牙给自己挡，`tryOxAutoBlock`）当场掷骰结算、不排队，不会被当成没碾到（夕夏照样抓住），但碾压会被它挡下：目标免伤、击破由队长牛承担，队长牛还反击夕夏 1 击破。
+  - **现在**：狂怒碾压的每一下都和首领机制这类「写明不能格挡」的攻击一样带不能格挡的标记：不进格挡队列、不问协助格挡（以身作盾、掩护的免费格挡也不问），敌人的自动协助格挡、赤牙给自己格挡也不出手，直接结算。打完以后目标没死、没失衡就抓住；死了或失衡就不抓（失衡可以接处决：自动碾压打出失衡 → 松手 → 这一回合照常补到行动点 → 处决）。屏障（废铁墙这些）、危墙、附赠不够打飞行目标这些「没碾到」的情况照旧；夕夏濒死（倒地没起身）、晕眩、死了就不自动碾压，也照旧，没有加「被格挡就松手」。卡面、规则页「协助格挡 · 谁能挡」写上狂怒碾压是投技、不能被协助格挡。
 - **模拟用的「看情况用技能」打法 `BattleSim.SKILL_POLICY`，并用它重跑 PvP 平衡模拟（#491 的对照）**（工具 / 报告，规则一条没动；issue #538，主人 10/31。新文件 sim-search.js：配置表 `BATTLE_SEARCH_CFG`、`SKILL_POLICY_CFG`（束宽、深度、平行世界数、打分权重），`BattleSearch` 的 `snap` / `load` / `candidateActions` / `tokenize` / `resolve` / `execute` / `trial` / `sandbox`（从 tools/dpt.js 抽出来的「列动作 + 沙盒试跑 + 平行世界」）和 `scorer` / `candidatesFor` / `plan`（技能版的打分、候选、束搜索）；sim.js · `skillPolicy` / `SKILL_POLICY`；tools/dpt.js 改用 `BattleSearch`（输出逐字不变，快了约一倍）；tools/pvp-balance.js · `--policy skill` / `--h2h` / `--pve` / `--compare`、`CONFIG.skillCfg` / `CONFIG.bigSample` / `PVE_SCENARIOS`、`duelPolicy` / `runH2h` / `runPve` / `instrument`（沙盒里试跑的事不记）/ `compareMarkdown` / `compareNotes` / `sampleText` / `pveSummary` / `h2hSummary` / `meleeStats` / `heroWins`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 sim.js 前面加载 sim-search.js；报告 docs/balance/pvp-balance-skill-1031.md + json；测试 tests/sim-skill.test.js 新 5 条（在没改的代码上全部失败），tests/pvp-balance.test.js 新 4 条）
   - **以前**：模拟里玩家一方只有 `BattleSim.BASIC_POLICY`（能打到就普攻血最少的，打不到就走一格；不用技能、道具，不召唤武器人）；#491 的 PvP 平衡模拟两队都用它，没法体现真实的打法。tools/dpt.js 自己写了一份列动作、试跑的代码。
   - **现在**：

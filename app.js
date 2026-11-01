@@ -12249,6 +12249,7 @@ function noraFrost(source, target, lines, atk) {
  * 打完若敌人没死也没失衡，夕夏就抓在它身上：位置绑定同区，
  * 不能主动移动，不能协助攻击 / 格挡，不获得行动点与附赠，
  * 每回合开始自动再碾一次。自动碾死目标时返还 1 行动点 1 附赠。
+ * 碾压是投技：手动的第一下、每回合的自动碾压都不能被协助格挡（#548）。
  * ============================================================ */
 function crushingTarget(u) {
   if (!u || !u.resources || !u.resources.crushId) return null;
@@ -12294,9 +12295,12 @@ function crushOnce(a, t, auto) {
   // 已经抓在目标身上（每回合自动再碾）：人就挂在它身上，打飞行目标不用再付「近程打飞行」的附赠行动。
   // 以前照收，可抓住期间夕夏拿不到附赠行动 → 每回合 0 伤害、目标不死不失衡、永远松不开手
   // 第一轮 0.75×atk + 2 击破；抓住后每回合自动再碾改为 1.5×atk + 1d8 + 3 击破
+  // 狂怒碾压是投技，不能被协助格挡（主人 11/01，#548）：手动的第一下、每回合开始的自动碾压都和首领机制这类写明不能格挡的一样带 blockResolved——
+  // 不进我方的格挡队列（不问协助格挡、以身作盾），敌人的自动协助格挡（队长牛、巡逻车、赤牙给自己挡）也不出手，直接结算。
+  // 以前照普通攻击排进格挡队列，hitOne2 拿回「等待协助格挡」就当成没碾到：目标身边只要有人能挡，就永远抓不住
   const opt = auto
-    ? { element: "physical", mult: 1.5, dice: [1, 8], baseBreak: 3, atk, flags: { action: true, flyFree: true } }
-    : { element: "physical", mult: 0.75, baseBreak: 2, atk, flags: { action: true } };
+    ? { element: "physical", mult: 1.5, dice: [1, 8], baseBreak: 3, atk, flags: { action: true, flyFree: true, blockResolved: true, block: "none" } }
+    : { element: "physical", mult: 0.75, baseBreak: 2, atk, flags: { action: true, blockResolved: true, block: "none" } };
   const out = hitOne2(a, t, opt, lines);
   if (!out || !out.res || out.res.ok === false) {
     // 没碾到（附赠行动不够打飞行目标、目标打不到……）：抓不住，已经抓着的也松手，免得卡死
