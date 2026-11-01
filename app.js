@@ -6948,7 +6948,7 @@ function stripFocusLayer(target, layerType, lines) {
   layer.max = 0;
   layer.sealed = true;
   target.focuses = (target.focuses || []).filter(f => f.layerType !== layerType);
-  // 抹去的是内层：留着这层（0/0）让单位按内层归零死亡，不能让外层顶替成内层
+  // 抹去的是内层：留着这层（0/0）让单位按内层归零倒下（敌人死亡，玩家一方走下面的倒地结算），不能让外层顶替成内层
   if (!wasInner) target.layers = (target.layers || []).filter(l => l !== layer);
   koltScrapAdd(layerType, layerMax);   // 被抹去的层也算被摧毁：累积成柯尔特的废料
   noteSideDamage(lost, "聚焦抹层", target);
@@ -6957,7 +6957,16 @@ function stripFocusLayer(target, layerType, lines) {
   else appendLog(msg);
   if (typeof spawnFloater === "function") spawnFloater(target, lost, "harmonic");
   if (typeof spawnPopup === "function") spawnPopup(target, { kind: "status", text: "聚焦抹层", element: "harmonic" });
-  if (wasInner) { creditPlayerHit(target, actingPlayerId()); settleEnemyKill(target, lines || []); }
+  if (wasInner && target.isPlayer) {
+    // 玩家一方的单位（#544）：和「最内层生命归零」一样走倒地结算 applyKnockdown——濒死（之后照常起身改打坚毅）、力竭 3 即死、
+    // 决斗里的再起不能（enemies.js · pvpDuelKnockOut）、还魂、武器人倒下……照原规则。以前只把这一层写成 0/0，敌人按内层归零死亡，
+    // 玩家角色却卡在 0 血不倒、还能一直行动。玩家一方只会被开着友伤的队友（#428）或敌对玩家阵营（#445 / #472）聚焦
+    // （applyFocus 只放行这两种），所以和这两种人打倒的一样算友伤：照常倒地，不记战场数据的倒地次数。
+    // 已经起身（靠坚毅生命战斗）的人：不传 shpLoss，抹层不扣坚毅（applyKnockdown 起身中的那一支什么都不做）——规则没写，待主人确认（#544）
+    const notes = [];
+    applyKnockdown(target, notes, { cause: "聚焦抹层", friendlyFire: true });
+    notes.forEach(n => { if (lines) lines.push(n); else appendLog(n); });
+  } else if (wasInner) { creditPlayerHit(target, actingPlayerId()); settleEnemyKill(target, lines || []); }
   // 抹层同时露出结构弱点：2 击破（内层被抹、敌人已倒下就不用了）
   else if (!target.dead) {
     const notes = [];
