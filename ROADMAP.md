@@ -17,7 +17,7 @@
 ### 代码地图
 
 ```
-界面      game.html · screens.js（界面切换）· game.js（战斗演出）· game.css · skin.css（美术皮肤）
+界面      game.html · screens.js（界面切换）· title-mascot.js（主菜单的看板娘：点一下抖一下）· game.js（战斗演出）· game.css · skin.css（美术皮肤）
           routemap.js（任务路线图）· world-map.js / world-data.js（角鳞星地图）· bestiary.js / bestiary-ui.js（敌人图鉴）· rulebook.js（规则说明：图鉴的「规则」一本）· icons.js（属性 / 天气图标）· hud-patch.js（技能栏 / 队伍栏按需更新：同一个按钮留着，只改变了的）· sheet-ui.js（角色资料）· armory-ui.js（武器工坊）· fonts/（打包的字体）
 联机      commands.js / *-commands.js（统一指令）· hotseat.js（热座）· online-*.js（在线跑团）· relay/（转发服务）
 单局      rogue.js（流程规则）· rogue-ui.js（界面）· rogue-data.js（所有数值）· run.js（种子、遭遇）· save.js（存档）
@@ -27,7 +27,7 @@
           ledger.js（跨战斗档案、补给、休息）· app.js（结算核心）· effects.js（状态效果）· mods.js（武器图纸）· escort.js（护送对象）
           boss-mechanics.js（可复用的首领机制：死刑、分担、远离、踩塔……）
 小游戏    counter-cards.js（High Flux：规则、数值 CC_CONFIG、得分克制表 chart、手牌的得分预览 cardChart、赌场接口）· counter-cards-ai.js（AI 三档难度）· counter-cards-ui.js / counter-cards.css（牌桌界面；克制表借用 matchup-ui.js 的浮层；手里元素牌的悬停 / 长按预览）
-美术      art/style-guide.html（定稿的美术风格，改界面前先看）
+美术      art/style-guide.html（定稿的美术风格，改界面前先看）· art/burnier/（看板娘柏妮尔的立绘、Q 版图；网页用缩小的那一份）
 测试      tests/*.test.js（规则回归 + 整场自动对打 + 画面）· tools/（实战测试、经济 / 评分验算）
 ```
 
