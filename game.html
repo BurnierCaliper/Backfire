@@ -56,6 +56,10 @@
       <button class="t-btn t-big" id="t-online" data-view="online"><b>联机玩法</b><small>跑团：主持人开房，朋友用房间码加入</small></button>
       <button class="t-btn t-big" id="t-codex"><b>图鉴</b><small>角色的技能、被动和升级效果，敌人、配置物和所有效果</small></button>
       <button class="t-btn" id="t-rules"><b>规则说明</b><small>回合、行动点、检定、伤害、武器 ATK、义体改造率……随时可查</small></button>
+      <!-- 看板娘：柏妮尔的立绘（#552）。放在最后（前面几个按钮的 :nth-child 不变），进子菜单跟着 #t-home 一起藏起来；
+           宽屏站在菜单右边，窄屏放到按钮下面（game.css「标题界面 · 看板娘」）。点一下 / Enter / 空格抖一下，不触发菜单、不响音效（data-sfx-none）；
+           图片读不出来整个藏起来（title-mascot.js） -->
+      <button type="button" class="t-mascot" id="t-mascot" data-sfx-none><img src="art/burnier/burnier-stand-720.png" alt="柏妮尔" width="499" height="720" draggable="false" /></button>
     </div>
     <div class="t-panel" id="t-panel-local" data-view="local" hidden>
       <div class="t-panel-head"><button class="t-back" data-back="local" title="返回（Esc）">← 返回</button><h2>本地玩法</h2></div>
@@ -1022,6 +1026,8 @@ window.GAME_MODE = true;
 <script src="weather-fx.js"></script>
 <script src="game.js"></script>
 <script src="screens.js"></script>
+<!-- 主菜单的看板娘（#552）：点一下抖一下、图片读不出来藏起来 -->
+<script src="title-mascot.js"></script>
 <!-- 暂停页面（#298）：克制表、主持人工具、消息与成员、大厅等由各自的模块登记进来，所以放在它们前面 -->
 <script src="pause-menu.js"></script>
 <script src="training.js"></script>
