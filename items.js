@@ -633,6 +633,8 @@ function itemApplyStatus(actor, u, key, notes) {
 function itemStun(u, notes) {
   if (u.stunned) { notes.push(`${u.name} 已经在失衡中。`); return; }
   if (u.noPosture || u.trainingDummy) { notes.push(`${u.name} 没有架势，不会失衡。`); return; }
+  // 背水一战（夕夏起身中）：不会失衡（engine.js · xiaBackwater，#546）
+  if (typeof xiaBackwaterBlocks === "function" && xiaBackwaterBlocks(u, notes, "闪光震撼弹无效")) return;
   u.stunned = true;
   notes.push(typeof imbalanceLine === "function" ? imbalanceLine(u) : `${u.name} 失衡。`);
   if (typeof endSelfOnStun === "function") endSelfOnStun(u, notes);
