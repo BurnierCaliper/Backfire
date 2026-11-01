@@ -359,7 +359,7 @@ function refreshOwnerWeaponAtk(owner, kit) {
   const lv = Number((owner.weaponLevels || {})[kit]) || 1;
   const atk = computeWeaponAtk(kit, owner.attrs, lv, weaponPartsOf(owner, kit));
   const units = (typeof state !== "undefined" && state.units) || [];
-  const wu = units.find(u => u.kit === kit && u.weaponOf === owner.kit);
+  const wu = units.find(u => u.kit === kit && u.weaponOf === owner.kit && (u.ownerId == null || u.ownerId === owner.id));
   if (wu) { wu.personalAtk = atk; wu.atk = atk; refreshWeaponUnitHp(wu, owner); }   // 生命件：武器人的装甲跟着变
   if (owner.kit === "hiaki") { if (typeof refreshHiakiAtk === "function") refreshHiakiAtk(owner); return; }
   if ((owner.linkedKits || [])[0] !== kit) return;
@@ -426,7 +426,9 @@ function applyWeaponLevel(u) {
   const lv = Math.max(1, Number(u.level) || 1);
   let owner = null;
   if (typeof state !== "undefined" && u.weaponOf) {
-    owner = (typeof findKit === "function") ? findKit(u.weaponOf, state.units) : null;
+    // 唤出时记了持有者就按 id 找（争斗两队同一个角色，party.js · weaponOwnerUnit）
+    owner = (u.ownerId != null && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null) ||
+      ((typeof findKit === "function") ? findKit(u.weaponOf, state.units) : null);
   }
   // 血量层：等级 + 生命件（找不到某层就改第一层，和以前一样）
   const hp = weaponUnitHp(u.kit, lv, owner ? weaponPartsOf(owner, u.kit) : []);
@@ -743,7 +745,10 @@ function roleSkillsBase(u) {
 const PASSIVE_PLUS_LEVEL = { 1: 5, 2: 10 };
 function heroOfUnit(u) {
   if (!u) return null;
-  if (u.weaponOf && typeof findKit === "function" && typeof state !== "undefined") return findKit(u.weaponOf, state.units) || null;
+  if (u.weaponOf && typeof findKit === "function" && typeof state !== "undefined") {
+    if (u.ownerId != null && typeof weaponOwnerUnit === "function") { const o = weaponOwnerUnit(u); if (o) return o; }   // 按持有者的 id（争斗两队同一个角色）
+    return findKit(u.weaponOf, state.units, u) || null;
+  }
   return u;
 }
 function heroWeaponLevel(hero) {

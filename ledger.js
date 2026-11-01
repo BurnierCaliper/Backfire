@@ -197,6 +197,16 @@ function careerRecordBattle(outcome, grade, extra) {
   return c;
 }
 
+/* ===== 按 kit 记的次数 / 耐久：争斗两队同一个角色时分开记 =====
+ * 长休次数（restOnce）、短休次数（shortOnce）、武器耐久（dur）、本场受损（state.weaponFallen）都按角色 / 武器的 kit 记。
+ * 争斗（brawl.js）两队可以用同一个角色：这时 kit 后面接上队伍（「xia@1队」），两个人各记各的（争斗用的是一份临时档案，打完换回去，
+ * brawl.js · brawlRestore）。不是争斗时就是 kit 本身，和以前一样。who：是谁的（角色或武器人单位；不给就看 findKit 的结算上下文） */
+function ledgerKitKey(kit, who) {
+  return typeof brawlKitKey === "function" ? brawlKitKey(kit, who) : kit;
+}
+/** 角色 u 的长休 / 短休次数记在哪一格 */
+function restKeyOf(u) { return u && u.kit ? ledgerKitKey(u.kit, u) : u; }
+
 /* ===== 「长休一次」的技能 ===== */
 const REST_ONCE_KEYS = ["rally"];
 /** 「每次短休 N 次」：用掉一次（用完了返回 false）；shortOnceUsed 看用了几次 */
@@ -234,21 +244,25 @@ function partyHeroes() {
   return (state.units || []).filter(u => u.isPlayer && !isWeaponUnit(u) && !u._removed);
 }
 function heroByKit(kit) { return partyHeroes().find(u => u.kit === kit) || null; }
-function weaponOwner(kit) {
-  return partyHeroes().find(h => (h.linkedKits || []).indexOf(kit) >= 0) || null;
+/** 这把武器（kit）的持有者。争斗两队同一个角色时有两个：near（角色或武器人单位）或者结算上下文那一边的（party.js · kitPick） */
+function weaponOwner(kit, near) {
+  const list = partyHeroes().filter(h => (h.linkedKits || []).indexOf(kit) >= 0);
+  if (list.length <= 1) return list[0] || null;
+  const ref = near || (typeof kitScopeUnit === "function" ? kitScopeUnit() : null);
+  return (typeof kitPick === "function" && kitPick(list, ref)) || list[0];
 }
 function weaponName(kit) {
   const c = typeof livePartyCards === "function" ? livePartyCards().find(x => x.kit === kit) : null;
   return c ? c.name : kit;
 }
-/** 耐久上限：基础耐久 + 武器等级 / 2（与 growth.js 一致） */
-function weaponDurMax(kit) {
-  const base = weaponDurBase(kit);
+/** 耐久上限：基础耐久 + 武器等级 / 2（与 growth.js 一致）。who：谁的这把（争斗两队同一个角色，见 weaponOwner） */
+function weaponDurMax(kit, who) {
+  const base = weaponDurBase(kit, who);
   return typeof bpDurMax === "function" ? bpDurMax(base, weaponMod(kit)) : base;
 }
 /** 没装图纸时的耐久上限 */
-function weaponDurBase(kit) {
-  const owner = weaponOwner(kit);
+function weaponDurBase(kit, who) {
+  const owner = weaponOwner(kit, who);
   const lv = owner && owner.weaponLevels && owner.weaponLevels[kit] ? Number(owner.weaponLevels[kit]) : 1;
   if (typeof weaponBaseDur === "function") return weaponBaseDur(kit, lv);
   const g = (typeof WEAPON_GROWTH !== "undefined" && WEAPON_GROWTH[kit]) || {};
@@ -266,11 +280,13 @@ function unitWeaponMod(u) {
   if (state.weaponMods[u.kit]) return weaponMod(u.kit);
   return weaponMod(heldWeaponKit(u));
 }
-function weaponDur(kit) {
-  if (LEDGER.dur[kit] == null) LEDGER.dur[kit] = weaponDurMax(kit);
-  return Math.max(0, Number(LEDGER.dur[kit]) || 0);
+/** 现在的耐久。who：谁的这把（不给就按 kit 找；争斗两队同一个角色时各记各的，ledgerKitKey） */
+function weaponDur(kit, who) {
+  const key = ledgerKitKey(kit, who);
+  if (LEDGER.dur[key] == null) LEDGER.dur[key] = weaponDurMax(kit, who);
+  return Math.max(0, Number(LEDGER.dur[key]) || 0);
 }
-function weaponBroken(kit) { return weaponDur(kit) <= 0; }
+function weaponBroken(kit, who) { return weaponDur(kit, who) <= 0; }
 
 /** 角色此刻拿在手里的那把武器（分出去的不算） */
 function heldWeaponKit(hero) {
@@ -283,24 +299,25 @@ function heldWeaponKit(hero) {
     return null;
   }
   const kits = hero.linkedKits || [];
-  return kits.find(k => !(state.units || []).some(u => u.kit === k && !u.hidden && !u.fused)) || null;
+  // 分出去的只看自己的武器人（争斗两队同一个角色：对面唤出了同一把，不算我的分出去了）
+  return kits.find(k => !(state.units || []).some(u => u.kit === k && !u.hidden && !u.fused && (u.ownerId == null || u.ownerId === hero.id))) || null;
 }
 
-/** 扣耐久。归零时手里的武器就不能再用了。 */
-function spendDurability(kit, n, reason, notes) {
+/** 扣耐久。归零时手里的武器就不能再用了。who：谁的这把（角色或武器人；不给就按 kit 找，见 weaponOwner） */
+function spendDurability(kit, n, reason, notes, who) {
   if (!kit || !n) return;
-  const before = weaponDur(kit);
+  const owner = weaponOwner(kit, who);
+  const before = weaponDur(kit, who || owner);
   const after = Math.max(0, before - n);
-  LEDGER.dur[kit] = after;
-  const unit = (state.units || []).find(u => u.kit === kit && !u._removed);
+  LEDGER.dur[ledgerKitKey(kit, who || owner)] = after;
+  const unit = (state.units || []).find(u => u.kit === kit && !u._removed && (!owner || u.ownerId == null || u.ownerId === owner.id));
   if (unit && unit.resources) unit.resources.durability = after;
   if (notes && after !== before) notes.push(`${weaponName(kit)} 耐久 ${before} → ${after}（${reason}）`);
   if (after <= 0 && before > 0) {
-    const owner = weaponOwner(kit);
     if (owner && typeof spawnPopup === "function") spawnPopup(owner, { kind: "status", text: "武器损坏", element: "physical" });
     if (inBattleNow()) {
       // 战斗中才坏掉：这一场还能用（技能照常），只是 atk / 格挡加成减半、不能再唤出武器人；下一场开战前还没修好就完全用不了
-      markWeaponWorn(kit);
+      markWeaponWorn(kit, null, who || owner);
       if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零：这一场 atk 和格挡加成减半、不能再唤出武器人；修好之前，下一场就只能空手（维修工具包或长休）。`);
     } else {
       if (notes) notes.push(`⚠ ${weaponName(kit)} 耐久归零，无法使用（修好之前都只能空手：维修工具包或长休）。`);
@@ -312,22 +329,25 @@ function spendDurability(kit, n, reason, notes) {
 function inBattleNow() {
   return typeof state !== "undefined" && !!state.combatStarted;
 }
-/** 这把武器本场受损了（武器人倒下 / 耐久归零 / 战斗中修理）：atk、格挡加成减半，不能再唤出武器人 */
-function markWeaponWorn(kit, why) {
+/** 这把武器本场受损了（武器人倒下 / 耐久归零 / 战斗中修理）：atk、格挡加成减半，不能再唤出武器人。who：谁的这把（见 weaponDur） */
+function markWeaponWorn(kit, why, who) {
   if (!kit || typeof state === "undefined") return;
   state.weaponFallen = state.weaponFallen || {};
-  if (!state.weaponFallen[kit]) state.weaponFallen[kit] = why || "worn";
+  const key = ledgerKitKey(kit, who);
+  if (!state.weaponFallen[key]) state.weaponFallen[key] = why || "worn";
 }
 /** 完全用不了的武器：耐久为 0，而且不是这一场打仗时才坏的（开战前就坏了） */
-function weaponUnusable(kit) {
-  if (!weaponBroken(kit)) return false;
-  return !(inBattleNow() && state.weaponFallen && state.weaponFallen[kit]);
+function weaponUnusable(kit, who) {
+  if (!weaponBroken(kit, who)) return false;
+  return !(inBattleNow() && state.weaponFallen && state.weaponFallen[ledgerKitKey(kit, who)]);
 }
-function restoreDurability(kit, n) {
-  const max = weaponDurMax(kit);
-  LEDGER.dur[kit] = n == null ? max : Math.min(max, weaponDur(kit) + n);
-  const unit = (state.units || []).find(u => u.kit === kit && !u._removed);
-  if (unit && unit.resources) unit.resources.durability = LEDGER.dur[kit];
+function restoreDurability(kit, n, who) {
+  const max = weaponDurMax(kit, who);
+  const key = ledgerKitKey(kit, who);
+  LEDGER.dur[key] = n == null ? max : Math.min(max, weaponDur(kit, who) + n);
+  const owner = weaponOwner(kit, who);
+  const unit = (state.units || []).find(u => u.kit === kit && !u._removed && (!owner || u.ownerId == null || u.ownerId === owner.id));
+  if (unit && unit.resources) unit.resources.durability = LEDGER.dur[key];
 }
 
 /** 手里的武器坏了：绯秋换另一把刀，其余角色变空手 */
@@ -337,7 +357,7 @@ function disarmBrokenWeapon(hero, notes) {
     const r = hero.resources || {};
     const other = r.blade === "niu" ? "naruto" : "niu";
     const otherOut = other === "niu" ? r.niuOut : r.narutoOut;
-    if (!weaponUnusable(other) && !otherOut) {
+    if (!weaponUnusable(other, hero) && !otherOut) {
       r.blade = other;
       if (notes) notes.push(`绯秋 改持${weaponName(other)}。`);
       return;
@@ -353,7 +373,7 @@ function ledgerOnBlock(helper, notes) {
   if (!helper || !helper.isPlayer) return;
   const kit = isWeaponUnit(helper) ? helper.kit : heldWeaponKit(helper);
   if (!kit) return;
-  spendDurability(kit, 1, "发动格挡", notes);
+  spendDurability(kit, 1, "发动格挡", notes, helper);
 }
 
 /* ===== 开战与结算 ===== */

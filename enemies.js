@@ -1889,7 +1889,7 @@ function playerTauntDone(u, t) {
   if (!u || !t) return;
   const holder = u.weaponOf && typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
   const owner = holder || u;
-  const weapons = (state.units || []).filter(x => x && x !== u && x.weaponOf && owner.kit && x.weaponOf === owner.kit && x.isPlayer);
+  const weapons = (state.units || []).filter(x => x && x !== u && owner.kit && isWeaponOfOwner(x, owner) && x.isPlayer);   // 只看自己的武器人（争斗两队同一个角色）
   [u, holder].concat(weapons).forEach(x => { if (x && x.tauntTo === t.id) x.tauntTo = null; });
 }
 /** 指令 battle.playerFaction（字段已经在 battle-commands.js 校验过）：
@@ -2053,7 +2053,7 @@ function pvpDuelSetup(cmd) {
     teams[t.id].forEach(id => {
       setPlayerFaction({ faction: t.id, unit: id });
       const u = unitById(id);
-      (state.units || []).forEach(x => { if (x === u || (x.weaponOf && x.weaponOf === u.kit)) x.zone = t.zone; });
+      (state.units || []).forEach(x => { if (x === u || isWeaponOfOwner(x, u)) x.zone = t.zone; });   // 自己的武器人（争斗两队同一个角色，party.js · isWeaponOfOwner）
     });
   });
   state.pvpDuel = { teams, stand: cmd.stand == null ? !!C.standDefault : !!cmd.stand,
@@ -2147,7 +2147,7 @@ function pvpDuelKnockOut(u, notes) {
   u._removed = true;
   d.out = (d.out || []).filter(id => id !== u.id).concat([u.id]);
   const gone = new Set([u.id]);
-  (state.units || []).forEach(x => { if (x !== u && x.weaponOf && x.weaponOf === u.kit && !x._removed) { x._removed = true; x.dead = true; gone.add(x.id); } });
+  (state.units || []).forEach(x => { if (x !== u && isWeaponOfOwner(x, u) && !x._removed) { x._removed = true; x.dead = true; gone.add(x.id); } });   // 只带走自己的武器人（争斗两队同一个角色）
   (state.units || []).forEach(x => {
     if (gone.has(x.tauntTo)) x.tauntTo = null;
     if (gone.has(x.coverBy)) x.coverBy = null;
@@ -2230,6 +2230,13 @@ function pvpDuelRestore(notes) {
   const d = pvpDuelState();
   if (!d) return false;
   if (d.restored) return true;
+  // 争斗（brawl.js，#543）：打的时候用的是一份空的队伍档案 / 背包，打完把开局收起来的整份放回去（不读也不写玩家的存档）
+  if (d.brawl && typeof brawlRestore === "function") {
+    brawlRestore();
+    d.restored = true;
+    if (notes) notes.push("争斗结束：队伍档案、背包换回争斗前的样子（争斗不读也不写存档）。");
+    return true;
+  }
   const r = d.restore || { heroes: {}, dur: {} };
   if (typeof LEDGER !== "undefined" && LEDGER) {
     LEDGER.heroes = LEDGER.heroes || {};

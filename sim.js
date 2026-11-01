@@ -346,7 +346,7 @@ const BattleSim = (function () {
   const sig = (u) => u ? `${u.ap}|${u.bonus}|${u.zone}|${u.dying}|${u.upOnShp}` : "gone";
   /** 一个阶段里「同一个单位」怎么认（#547）：武器人按「持有者 + 哪把武器」认——收回再唤出是新建一个单位、编号会变（app.js · spawnWeapon），
    *  还算同一个（和联机行动顺序 hotseat.js 的 stableKey 一样）；别的单位按编号认（解除机甲放出来的明特、下车的炮手编号不变） */
-  const turnKey = (u) => (u.weaponOf ? "weapon:" + u.weaponOf + ":" + u.kit : "id:" + u.id);
+  const turnKey = (u) => (u.weaponOf ? "weapon:" + (u.ownerId != null ? u.ownerId : u.weaponOf) + ":" + u.kit : "id:" + u.id);   // 争斗两队同一个角色时按 ownerId 分开（#543）
 
   /** phase：哪一个回合里行动的玩家角色（默认我方回合；在敌人回合行动的玩家阵营，#445，由 enemyPhase 先叫一次）。
    *  阶段开始时按场上的顺序排好要行动的人；每轮完一个人再看一遍场上：这一阶段新进场、还没轮到过的（唤出的武器人、解除机甲放出来的明特……，#547）
@@ -362,13 +362,15 @@ const BattleSim = (function () {
       const u0 = unitById(id);
       if (!u0 || !acts(u0) || taken.has(turnKey(u0))) continue;
       taken.add(turnKey(u0));
+    // 在轮到的这个人的结算上下文里想、做（争斗两队同一个角色：按 kit 找到的是他自己，party.js · withKitScope，#543）
+    const scoped = (u, fn) => (typeof withKitScope === "function" ? withKitScope(u, fn) : fn());
       for (let n = 0; n < 6; n++) {
         const u = unitById(id);
         if (!u || !alive(u) || outcome()) break;
-        const thunk = policy.act(u);
+        const thunk = scoped(u, () => policy.act(u));
         if (!thunk) break;
         const before = sig(u);
-        thunk();
+        scoped(u, thunk);
         stats.actions++;
         resolveQueues(policy);
         if (outcome()) return;

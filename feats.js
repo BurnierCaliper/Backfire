@@ -489,14 +489,16 @@ function featSkillCost(skillId) {
   return Object.assign({}, f.skill.cost || { ap: 1 });
 }
 function featRestKey(f) { return "feat:" + f.id; }
+/** 这个人的长休 / 短休次数记在档案的哪一格：平时是 kit；争斗两队同一个角色时各记各的（ledger.js · restKeyOf） */
+function featOwnerKey(u) { return typeof restKeyOf === "function" ? restKeyOf(u) : u.kit; }
 /** 「每次短休 N 次」用了几次（ledger.js · LEDGER.shortOnce，这个人短休 / 长休时刷新） */
 function featShortUsed(u, f) {
   if (typeof shortOnceUsed !== "function" || !u) return 0;
-  return shortOnceUsed(u.kit, featRestKey(f));
+  return shortOnceUsed(featOwnerKey(u), featRestKey(f));
 }
 function featRestUsed(u, f) {
   if (typeof LEDGER === "undefined" || !u) return 0;
-  return Number(((LEDGER.restOnce || {})[u.kit] || {})[featRestKey(f)]) || 0;
+  return Number(((LEDGER.restOnce || {})[featOwnerKey(u)] || {})[featRestKey(f)]) || 0;
 }
 /** 还能用几次（Infinity = 不限）。兼修完整版交给原技能自己的次数 */
 function featUsesLeft(u, f) {
@@ -589,8 +591,8 @@ function featSpend(a, f) {
     a.resources.featUsed = Object.assign({}, a.resources.featUsed || {});
     a.resources.featUsed[f.id] = (Number(a.resources.featUsed[f.id]) || 0) + 1;
   }
-  if (f.skill.short && typeof useShortOnce === "function") useShortOnce(a.kit, featRestKey(f), f.skill.short * Math.max(1, featCount(a, f.id)));
-  if (f.skill.rest && typeof useRestOnce === "function") useRestOnce(a.kit, featRestKey(f), f.skill.rest * Math.max(1, featCount(a, f.id)));
+  if (f.skill.short && typeof useShortOnce === "function") useShortOnce(featOwnerKey(a), featRestKey(f), f.skill.short * Math.max(1, featCount(a, f.id)));
+  if (f.skill.rest && typeof useRestOnce === "function") useRestOnce(featOwnerKey(a), featRestKey(f), f.skill.rest * Math.max(1, featCount(a, f.id)));
 }
 /** app.js · runSkillInner：这次是调用原技能的涉猎专长吗？是就记次数、打上削弱标记，返回原技能 id */
 function featBeginDelegate(a, skillId) {
@@ -637,14 +639,14 @@ function featOnceLeft(u, id) {
   const f = FEATS[id];
   const k = featCount(u, id);
   if (f.short) return featShortUsed(u, f) < f.short * k;
-  if (f.rest) return !(typeof LEDGER !== "undefined" && (Number(((LEDGER.restOnce || {})[u.kit] || {})[featRestKey(f)]) || 0) >= f.rest * k);
+  if (f.rest) return !(typeof LEDGER !== "undefined" && (Number(((LEDGER.restOnce || {})[featOwnerKey(u)] || {})[featRestKey(f)]) || 0) >= f.rest * k);
   return !(((u.resources || {}).featUsed || {})[id] >= k);
 }
 function featUseOnce(u, id) {
   const f = FEATS[id];
   const k = Math.max(1, featCount(u, id));
-  if (f && f.short && typeof useShortOnce === "function") { useShortOnce(u.kit, featRestKey(f), f.short * k); return; }
-  if (f && f.rest && typeof useRestOnce === "function") { useRestOnce(u.kit, featRestKey(f), f.rest * k); return; }
+  if (f && f.short && typeof useShortOnce === "function") { useShortOnce(featOwnerKey(u), featRestKey(f), f.short * k); return; }
+  if (f && f.rest && typeof useRestOnce === "function") { useRestOnce(featOwnerKey(u), featRestKey(f), f.rest * k); return; }
   u.resources = u.resources || {};
   u.resources.featUsed = Object.assign({}, u.resources.featUsed || {});
   u.resources.featUsed[id] = (Number(u.resources.featUsed[id]) || 0) + 1;
@@ -794,7 +796,7 @@ function featCostAdjust(id) {
   const sid = String(id || "");
   if (/_summon$/.test(sid) && featOnceLeft(a, "onemind")) return { bonus: 1 };
   if (/_return$/.test(sid) && a.weaponOf) {
-    const owner = (state.units || []).find(u => u.kit === a.weaponOf);
+    const owner = typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(a) : (state.units || []).find(u => u.kit === a.weaponOf);   // 按持有者的 id（争斗两队同一个角色）
     if (owner && featHas(owner, "onemind") && ((owner.resources || {}).featUsed || {}).onemind) return {};
   }
   return null;

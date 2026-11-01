@@ -688,21 +688,20 @@ function explodeHigh(unit, total, opt) {
   downNotes.forEach(s => appendLog(s));
   unit.highEnergy = 0;
   if (unit.statuses) unit.statuses.high = false;
-  // 纳米科技：场上任何高能自爆都给瑞比 40 纳米能源
-  if (findKit("ruby", state.units) && (typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) {
+  // 纳米科技：场上任何高能自爆都给瑞比 40 纳米能源（争斗两队都有瑞比：每个瑞比都拿，kitUnits）
+  kitUnits("ruby").forEach(ruby => withKitScope(ruby, () => {
+    if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return;
     addNano(40);
-    const ruby = findKit("ruby", state.units);
     appendLog(`纳米科技：场上高能自爆，纳米 +40 → ${ruby && ruby.resources ? ruby.resources.nano : "?"}`);
-  }
-  // 能量流向：场上发生任何高能值导致的爆炸，拉斯缪尔都回收等量光能（不再要求是自己施加的高能）
-  {
-    const ras = findKit("ras", state.units);
+  }));
+  // 能量流向：场上发生任何高能值导致的爆炸，拉斯缪尔都回收等量光能（不再要求是自己施加的高能；争斗两队都有拉斯缪尔时各自回收）
+  kitUnits("ras").forEach(ras => withKitScope(ras, () => {
     if (ras && !ras.dead && he > 0 && (typeof passiveOnKit !== "function" || passiveOnKit("ras"))) {   // 放弃被动「能量流向」时不回收
       ras.resources = ras.resources || {};
       ras.resources.light = (Number(ras.resources.light) || 0) + he;
       appendLog(`能量流向：回收光能 +${he} → ${ras.resources.light}`);
     }
-  }
+  }));
   unit.highTags = [];
   if (state.fields[unit.zone]) state.fields[unit.zone].energyVal = 0;
   markAoeZone(unit.zone);
@@ -1570,42 +1569,45 @@ function markInnateEnvironment() {
 function applyPassivePlusAtStart() {
   if (typeof passivePlus !== "function") return;
   const notes = [];
-  const hero = (kit) => { const u = findKit(kit, state.units); return u && u.isPlayer && !u.dead && !u.hidden ? u : null; };
+  // 争斗两队可以有同一个角色（brawl.js）：每一个都结算自己的（以前按 kit 只找第一个）；只有一个时和以前一样
+  const heroes = (kit) => kitUnits(kit).filter(u => u.isPlayer && !u.dead && !u.hidden);
+  const each = (kit, fn) => heroes(kit).forEach(u => withKitScope(u, () => fn(u)));
   // by 开着友伤（enemies.js · friendlyFirePick，#432；开战前在菜单里打开的）：自动挑的名单里也有 by 以外的队友；
   // 玩家阵营（enemies.js · autoFoe，#445）：敌对玩家阵营的角色也在，by 的阵营单独设成友好的敌人阵营不在
   const foes = (by) => state.units.filter(u => (typeof autoFoe === "function" ? autoFoe(by, u) : !u.isPlayer) && !u.dead && !u.hidden && !u.fused && (u.layers || []).some(l => l.current > 0));
-  const helu = hero("helu");
-  if (helu && passivePlus(helu, 1)) {   // 频谱分析+：随机一个敌人的外层血量聚焦
-    const pool = foes(helu);
-    const t = pool[Math.floor(Math.random() * pool.length)];
-    if (t) { notes.push("频谱分析+：开局自动聚焦。"); applyFocus(t, ((t.layers || []).find(l => l.current > 0) || {}).type, notes, { by: helu }); }
-  }
-  if (helu && passivePlus(helu, 2)) {   // 环境监测+：随机一个区域扫描出配置物（不触发）
-    const z = 1 + Math.floor(Math.random() * (Number(state.zoneMode) || 2));
-    notes.push("环境监测+：开局自动环境扫描。");
-    heluScanAct(helu, { dest: z, act: "spawn" }, notes);
-  }
-  const ras = hero("ras");
-  if (ras && passivePlus(ras, 1)) {     // 能量流向+：开局光能 = 等级 + 1d6
+  each("helu", helu => {
+    if (passivePlus(helu, 1)) {   // 频谱分析+：随机一个敌人的外层血量聚焦
+      const pool = foes(helu);
+      const t = pool[Math.floor(Math.random() * pool.length)];
+      if (t) { notes.push("频谱分析+：开局自动聚焦。"); applyFocus(t, ((t.layers || []).find(l => l.current > 0) || {}).type, notes, { by: helu }); }
+    }
+    if (passivePlus(helu, 2)) {   // 环境监测+：随机一个区域扫描出配置物（不触发）
+      const z = 1 + Math.floor(Math.random() * (Number(state.zoneMode) || 2));
+      notes.push("环境监测+：开局自动环境扫描。");
+      heluScanAct(helu, { dest: z, act: "spawn" }, notes);
+    }
+  });
+  each("ras", ras => {
+    if (!passivePlus(ras, 1)) return;     // 能量流向+：开局光能 = 等级 + 1d6
     const r = takeDice(1, 6, ras.level || 1);
     ras.resources.light = Math.max(Number(ras.resources.light) || 0, r.total);
     notes.push(`能量流向+：开局光能 ${r.text} → ${ras.resources.light}。`);
-  }
-  const ruby = hero("ruby");
-  if (ruby && passivePlus(ruby, 1)) {   // 纳米科技+：初始纳米 60
+  });
+  each("ruby", ruby => {
+    if (!passivePlus(ruby, 1)) return;   // 纳米科技+：初始纳米 60
     ruby.resources.nano = Math.max(Number(ruby.resources.nano) || 0, 60);
     notes.push(`纳米科技+：初始纳米能源 ${ruby.resources.nano}。`);
-  }
-  const chuan = hero("chuan");
-  if (chuan && passivePlus(chuan, 1)) { // 发电站+：开局 1 电能
+  });
+  each("chuan", chuan => {
+    if (!passivePlus(chuan, 1)) return; // 发电站+：开局 1 电能
     chuan.resources.charge = Math.max(Number(chuan.resources.charge) || 0, 1);
     notes.push(`发电站+：开局电能 ${chuan.resources.charge}。`);
-  }
-  const tou = hero("tou");
-  if (tou && passivePlus(tou, 2)) {     // 圣盾荣耀+：开局额外 1 圣盾点
+  });
+  each("tou", tou => {
+    if (!passivePlus(tou, 2)) return;     // 圣盾荣耀+：开局额外 1 圣盾点
     tou.resources.shield = Math.min(3, (Number(tou.resources.shield) || 0) + 1);
     notes.push(`圣盾荣耀+：开局额外获得 1 圣盾点 → ${tou.resources.shield}。`);
-  }
+  });
   if (notes.length) appendLog(notes.join("\n"));
 }
 /** 开战时站在深渊里的地面单位（主持人把整区设成深渊、布阵落在里面）挪到最近的非深渊区，不算坠落。
@@ -1783,14 +1785,9 @@ function beginRound(notes, opt) {
   if (typeof Chain !== "undefined") Chain.roundStart([]).forEach(t => appendLog(t));
   // 下面「每回合开始」的效果：在敌人回合行动的玩家阵营（lateTurn）的人跳过，到自己那一队的回合开始再结算（startEnemyPhase · lateRoundStart，#476）；
   // 它们放的双重奏的 atk（u.lateFx 记了的）也一样。敌人回合里施加的即时效果（不管是谁施加的，#482）也记了，普通 PvE 也在敌人回合开始才失效
-  {
-    const xia = findKit("xia", state.units);
-    if (xia && !lateTurn(xia)) xiaBackwaterFuel(xia, notes);
-  }
-  {
-    const yu = findKit("yuito", state.units);
-    if (yu && !lateTurn(yu)) yuitoGrinder(yu, notes);
-  }
+  // 争斗两队可以有同一个角色（brawl.js）：每一个都结算自己的（以前按 kit 只找第一个）
+  kitUnits("xia").forEach(xia => { if (!lateTurn(xia)) withKitScope(xia, () => xiaBackwaterFuel(xia, notes)); });
+  kitUnits("yuito").forEach(yu => { if (!lateTurn(yu)) withKitScope(yu, () => yuitoGrinder(yu, notes)); });
   state.units.forEach(u => { if (!lateTurn(u)) torqueDivertEnd(u, notes); });
   state.units.forEach(u => { if (!lateTurn(u)) ecmoProbeScan(u, notes); });
   // 双重奏的 atk、粉落汤气都只到这个回合开始
@@ -2091,7 +2088,7 @@ function releaseAcidCharges(notes, late) {
       u.resources.acidCharge = null;
       notes.push(`扭矩酸液炮蓄力在 ${z} 区爆发。`);
       const atk = effectiveAtk(u, state.units);
-      const kolt = findKit("kolt", state.units);
+      const kolt = weaponOwnerUnit(u) || findKit("kolt", state.units, u);   // 这把扭矩的柯尔特（争斗两队都有柯尔特）
       visibleEnemies(z, u).forEach(t => {   // 扭矩开着友伤（#428）：那一区的队友也挨这一炮
         // 酸液炮蓄力是抛射：越过危墙 / 关着的门
         const out = dealTo(u, t, { element: "acid", mult: 1, baseBreak: 1, atk, flags: { action: true, aoe: true, lob: true } });
@@ -2198,7 +2195,7 @@ function startPlayerPhase() {
     if (!u.isPlayer || u.hidden || u.dead) return;
     // 在敌人回合行动的玩家阵营（enemies.js · unitTurnPhase，#445）：行动点 / 附赠到敌人回合开始时再补（startEnemyPhase）
     if (typeof unitTurnPhase === "function" && unitTurnPhase(u) !== "player") return;
-    playerTurnStart(u, notes);
+    withKitScope(u, () => playerTurnStart(u, notes));   // 结算上下文：争斗两队同一个角色时按 kit 找到的是他自己（party.js · findKit）
   });
   // 首领机制：落在我方回合开始的死刑等（我方已经回满行动点 / 附赠，可以用来协助格挡）
   if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("player", notes);
@@ -2239,14 +2236,13 @@ function playerTurnEnd(phase) {
   // 我方回合结束：除了在敌人回合行动的玩家阵营，都在这时结算（和以前一样）；敌人回合结束：只结算在敌人回合行动的玩家阵营
   const turnOf = u => (typeof unitTurnPhase === "function" ? unitTurnPhase(u) : "player");
   const atEnd = u => !!u && (phase === "player" ? !(u.isPlayer && turnOf(u) !== "player") : !!u.isPlayer && turnOf(u) === "enemy");
-  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能
-  {
-    const ras = findKit("ras", state.units);
+  // 汲取：拉斯缪尔每回合结束自动把 20% 累积能量转为光能（争斗两队都有拉斯缪尔：各算各的）
+  kitUnits("ras").forEach(ras => {
     if (atEnd(ras) && !ras.dead && ras.resources && ras.resources.siphon && (Number(ras.resources.energyPct) || 0) > 0) {
       appendLog("汲取：拉斯缪尔回合结束，20% 累积能量转为光能。");
-      convertRasLight(20);
+      withKitScope(ras, () => convertRasLight(20));
     }
-  }
+  });
   state.units.forEach(u => {
     if (u.resources && u.resources.preparedActive && atEnd(u)) {
       u.resources.preparedActive = false;
@@ -2257,7 +2253,7 @@ function playerTurnEnd(phase) {
   // 瑞比「收发代理」无人机、明特机甲（#476）：在敌人回合行动的阵营里的瑞比在自己的回合结束时结算；别的瑞比照旧在整轮结束（turnEnd）
   if (phase === "enemy") {
     const notes = [];
-    state.units.forEach(u => { if (u.kit === "ruby" && lateTurn(u) && !offField(u)) rubyRoundEnd(u, notes); });
+    state.units.forEach(u => { if (u.kit === "ruby" && lateTurn(u) && !offField(u)) withKitScope(u, () => rubyRoundEnd(u, notes)); });
     if (notes.length) appendLog(notes.join("\n"));
   }
 }
@@ -2473,11 +2469,9 @@ function lateRoundEnd(notes) {
  *  普通 PvE 只有 C：敌人回合里施加的即时效果在这里到点（作者 10/29 追加），A、D 没有人 */
 function lateRoundStart(notes) {
   const late = (state.units || []).filter(u => lateTurn(u));
-  // A：和 beginRound 同一个先后
-  const xia = late.find(u => u.kit === "xia");
-  if (xia) xiaBackwaterFuel(xia, notes);
-  const yu = late.find(u => u.kit === "yuito");
-  if (yu) yuitoGrinder(yu, notes);
+  // A：和 beginRound 同一个先后（争斗两队可以有同一个角色：每一个都结算）
+  late.filter(u => u.kit === "xia").forEach(xia => withKitScope(xia, () => xiaBackwaterFuel(xia, notes)));
+  late.filter(u => u.kit === "yuito").forEach(yu => withKitScope(yu, () => yuitoGrinder(yu, notes)));
   late.forEach(u => torqueDivertEnd(u, notes));
   late.forEach(u => ecmoProbeScan(u, notes));
   (state.units || []).forEach(u => {
@@ -2524,7 +2518,7 @@ function startEnemyPhase() {
   // 在敌人回合行动的玩家阵营（#445）：这时补行动点 / 附赠（和我方回合开始一样结算），玩家角色比非玩家单位先动
   state.units.forEach(u => {
     if (!u.isPlayer || u.hidden || u.dead || typeof unitTurnPhase !== "function" || unitTurnPhase(u) !== "enemy") return;
-    playerTurnStart(u, notes);
+    withKitScope(u, () => playerTurnStart(u, notes));   // 结算上下文（争斗两队同一个角色）
   });
   // 首领机制（boss-mechanics.js）：落在敌人回合开始的死刑等。要在失衡恢复之前判（首领失衡 → 推迟一回合）
   if (typeof bossMechPhaseStart === "function") bossMechPhaseStart("enemy", notes);
@@ -2653,7 +2647,7 @@ function turnEnd() {
       u.resources.fuse -= 1;
     }
     // 瑞比在敌人回合行动的阵营里：无人机、机甲在她自己的回合结束时结算（playerTurnEnd，#476）
-    if (u.kit === "ruby" && !lateTurn(u)) rubyRoundEnd(u, notes);
+    if (u.kit === "ruby" && !lateTurn(u)) withKitScope(u, () => rubyRoundEnd(u, notes));   // 结算上下文：纳米加给她自己（争斗两队都有瑞比）
     TURN_FX_TAIL.forEach(k => { if (!lateFx(u, k)) expireTurnFx(u, k, notes); });
     // 黄金时间（instant.goldHold）在回合开始清除即时效果时认（beginRound · goldHeldInstants），这里不动
   });
@@ -2710,15 +2704,17 @@ function stanceCarryOver(u, notes) {
 /** 思念+：被牵挂的队友这一回合（它自己的一回合，ownRound）没受过伤 → 恢复 1 架势且 atk +10（可叠加）。
  *  late：只看在敌人回合行动的队友（lateRoundEnd）；false 只看别的（turnEnd） */
 function bondRoundEnd(notes, late) {
-  const yu = findKit("yuito", state.units);
-  const ally = yu && yu.resources && yu.resources.bondId ? unitById(yu.resources.bondId) : null;
-  if (!ally || lateTurn(ally) !== !!late) return;
-  if (late && !(Number(state.lateRound) > 0)) return;   // 第一个敌人回合开始：它自己还没有过一整回合（我方的整轮结束也是从第 1 回合结束才开始判）
-  if (!ally.dead && !yu.dead && typeof passivePlus === "function" && passivePlus(yu, 2) && ally._hurtRound !== ownRound(ally)) {
-    ally.def = Math.min(Number(ally.defMax) || 0, (Number(ally.def) || 0) + 1);
-    ally.bondAtk = (Number(ally.bondAtk) || 0) + 10;
-    notes.push(`思念+：${ally.name} 这一回合没有受伤，恢复 1 架势，atk +10（累计 +${ally.bondAtk}）。`);
-  }
+  // 争斗两队都有结人：各看各牵挂的人（以前按 kit 只找第一个）
+  kitUnits("yuito").forEach(yu => {
+    const ally = yu && yu.resources && yu.resources.bondId ? unitById(yu.resources.bondId) : null;
+    if (!ally || lateTurn(ally) !== !!late) return;
+    if (late && !(Number(state.lateRound) > 0)) return;   // 第一个敌人回合开始：它自己还没有过一整回合（我方的整轮结束也是从第 1 回合结束才开始判）
+    if (!ally.dead && !yu.dead && typeof passivePlus === "function" && passivePlus(yu, 2) && ally._hurtRound !== ownRound(ally)) {
+      ally.def = Math.min(Number(ally.defMax) || 0, (Number(ally.def) || 0) + 1);
+      ally.bondAtk = (Number(ally.bondAtk) || 0) + 10;
+      notes.push(`思念+：${ally.name} 这一回合没有受伤，恢复 1 架势，atk +10（累计 +${ally.bondAtk}）。`);
+    }
+  });
 }
 /** 瑞比每回合结束：收发代理的无人机（平时提取纳米；机甲里改为对高能敌人发射激光）、明特机甲扣纳米。
  *  整轮结束（turnEnd）；在敌人回合行动的阵营里的瑞比在她自己的回合结束（playerTurnEnd("enemy")，#476） */
@@ -3496,6 +3492,9 @@ function resetBattleRecords() {
   state.friendlyFire = {};        // 友伤开关（enemies.js · FRIENDLY_FIRE，#428）：每场开战回到默认的关
   state.playerFactions = null;    // 玩家阵营（enemies.js · PVP_CFG，#445）：每场回到默认（全部在「我方」）
   state.pvpDuel = null;           // 决斗（enemies.js · PVP_DUEL_CFG，#472）：每场开战前由指令 battle.duel 布置
+  // 争斗（brawl.js，#543）：每场开战前由指令 battle.brawl 布置；上一场争斗没打完就开了新的一场，把收起来的队伍档案 / 背包放回去
+  if (typeof brawlRestore === "function") brawlRestore();
+  state.brawl = null;
   state.pvpScore = {};            // 每队单独计分（PVP_TEAM_SCORE，#472）：{ 阵营 id: { total, parts } }
   state.pvpHurt = {};             // 敌对玩家阵营的人打掉、还没治回来的血（notePvpHurt，#472）
 }
@@ -3770,6 +3769,12 @@ function barrierOwner(p) {
   }
   return { isPlayer: false, kit: (p && p.ownerKit) || null };
 }
+/** 展开这面铁壁的川川（记了 ownerId 就按 id 找：争斗两队都有川川时按 kit 会找错人；没记的照旧按 kit 找） */
+function ironWallChuan(p) {
+  const by = p && p.ownerId != null && typeof unitById === "function" ? unitById(p.ownerId) : null;
+  if (by && by.kit === "chuan") return by;
+  return findKit("chuan", state.units, by || undefined);
+}
 /** 屏障 p 护不护着单位 u：铁壁 / 防护罩护同区的我方单位（敌对玩家阵营的角色不护，#445）；废铁墙护和筑墙的人一伙的敌人
  *  （不护和它敌对的阵营、中立生物、立场和它不一样的友军） */
 function barrierGuards(p, u) {
@@ -3823,7 +3828,7 @@ function breakIronWall(p, notes) {
     notes.push(`${p.name}被打破，移出战场。`);
     return notes;
   }
-  const c = findKit("chuan", state.units);
+  const c = ironWallChuan(p);
   if (c) {
     dealBreak(c, 3, "physical", notes, "铁壁被击破");
   }
@@ -3874,7 +3879,7 @@ function hitBarrier(p, attacker, opt) {
   }
   // 川川卡面：铁壁也受过载和雷鸣的反伤增益（只反敌人的攻击；配置物爆炸这类假攻击者不反）
   if (p.kind === "ironwall" && attacker && !attacker.isPlayer && !attacker.dead && (state.units || []).includes(attacker)) {
-    const c = findKit("chuan", state.units);
+    const c = ironWallChuan(p);
     const wallOwner = c;   // 铁壁是川川的配置物
     // 过载：装甲受到近距离攻击时，反伤 50% 这次受到的伤害（闪电）。先打在外层护盾上的不算
     if (c && c.instant && c.instant.overload && shieldNow <= 0 && dmg > 0 && Number(attacker.zone) === Number(p.zone)) {
@@ -5620,7 +5625,7 @@ function touShieldHeal(u) {
 
 function shieldBearer(target) {
   if (!target) return null;
-  const tou = findKit("tou", state.units);
+  const tou = findKit("tou", state.units, target);   // 被打的那个灯 / 年糕的灯（争斗两队都有灯）
   if (!tou || !tou.resources || !(tou.resources.shield > 0)) return null;
   // 圣盾荣耀：「对年糕也生效」——年糕在场时灯必然空手，所以年糕不看灯有没有持械（以前先判空手就返回，年糕永远用不上）
   if (target.kit === "mochi") return tou;
@@ -5736,7 +5741,7 @@ function applyCombat(target, result, attacker) {
   if (shieldBefore > 0 && shieldAfter <= 0) notes.push(...triggerMagnetShield(target));
   if (target.kit === "ironwall" && totalHp(target) <= 0 && !target._brokeWall) {
     target._brokeWall = true;
-    const c = findKit("chuan", state.units);
+    const c = ironWallChuan(target);
     if (c) {
       c.def = Math.max(0, (c.def || 0) - 3);
       notes.push(`铁壁被击破，川川受到 3 击破 → 架势 ${c.def}`);
@@ -5775,7 +5780,7 @@ function applyCombat(target, result, attacker) {
   if (target.def <= 0 && result.broke && !target.noPosture && target.kit !== "ufo_leg") notes.push(imbalanceLine(target));
   // 圣盾：真的受到伤害才扣（免疫、被挡下、伤害为 0 时不扣）
   if (result.flags && result.flags.holyShield && ((Number(result.total) || 0) > 0 || (Number(result.shpDealt) || 0) > 0)) {
-    const tou = shieldBearer(target) || findKit("tou", state.units);
+    const tou = shieldBearer(target) || findKit("tou", state.units, target);   // 护着被打的人的那个灯（争斗两队都有灯）
     if (tou && tou.resources && tou.resources.shield > 0) {
       tou.resources.shield -= 1; touShieldHeal(tou);
       notes.push(`圣盾 −1 → ${tou.resources.shield}`);
@@ -6415,8 +6420,8 @@ function finalBlockChance(helper, attacker, protectedUnit, atkRange) {
     // 佩刀+：丹生谷提供的、以及刀的武器人自己的协助格挡率 +10%
     if (helper.kit === "hiaki" && !isUnarmed(helper) && ((helper.resources || {}).blade || "niu") === "niu" && !(helper.resources || {}).niuOut && passivePlus(helper, 1)) c += 10;
     if ((helper.kit === "niu" || helper.kit === "naruto") && passivePlus(helper, 1)) c += 10;
-    // 思念+：被牵挂的队友受到协助格挡保护时 +10%
-    const yu = findKit("yuito", state.units);
+    // 思念+：被牵挂的队友受到协助格挡保护时 +10%（争斗两队都有结人：看牵挂着他的那一个）
+    const yu = protectedUnit ? kitUnits("yuito").find(y => y.resources && y.resources.bondId === protectedUnit.id) : null;
     if (yu && protectedUnit && yu.resources && yu.resources.bondId === protectedUnit.id && passivePlus(yu, 2)) c += 10;
   }
   return Math.max(5, Math.min(typeof BLOCK_CHANCE_CAP !== "undefined" ? BLOCK_CHANCE_CAP : 100, c));
@@ -6513,8 +6518,12 @@ function standRoll(u, dest, notes) {
   notes.push(`${u.name} 翻滚：${from} 区 → ${u.zone} 区（免费，不触发反应，不受场地影响）。`);
 }
 
-/** dest：起身时顺便免费翻滚到的相邻区（#470；不给 = 原地起身）。翻不过去时这次起身不做（界面只给能翻的区） */
+/** dest：起身时顺便免费翻滚到的相邻区（#470；不给 = 原地起身）。翻不过去时这次起身不做（界面只给能翻的区）。
+ *  在起身的人的结算上下文里做（争斗两队同一个角色，party.js · withKitScope） */
 function standUp(u, dest) {
+  return withKitScope(u, () => standUpInner(u, dest));
+}
+function standUpInner(u, dest) {
   if (!u || !u.isPlayer || isWeaponUnit(u) || u.dead) return;
   const blocked = standUpBlocked(u);
   if (blocked) {
@@ -7133,7 +7142,7 @@ function endTorqueGuard(w, notes) {
   const armorNow = (w.layers || []).filter(l => l.type === "armor").reduce((s, l) => s + (Number(l.current) || 0), 0);
   const lost = Math.max(0, Math.floor((Number(r.divertArmor0) || 0) - armorNow));
   r.divertArmor0 = 0;
-  const k = findKit("kolt", state.units);
+  const k = weaponOwnerUnit(w) || findKit("kolt", state.units, w);   // 这把扭矩的柯尔特（争斗两队都有柯尔特）
   if (k && lost > 0) {
     k.resources = k.resources || {};
     k.resources.divertArmor = (Number(k.resources.divertArmor) || 0) + lost;
@@ -7165,7 +7174,7 @@ function ecmoProbeTrigger(a, notes) {
 }
 
 function swapKoltBit(actor, lines) {
-  const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
+  const k = findKit("kolt", state.units, actor || undefined) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k) return "drill";
   k.resources = k.resources || {};
   if (typeof passiveOn === "function" && !passiveOn(k)) {   // 放弃被动「更换刀头」
@@ -7179,14 +7188,14 @@ function swapKoltBit(actor, lines) {
 }
 
 function koltMeleeSwapTargets(actor) {
-  const k = findKit("kolt", state.units) || actor;
+  const k = findKit("kolt", state.units, actor || undefined) || actor;
   if (!k) return [];
   // 切刀追击不是谐波攻击：下潜中的不能被选为目标（effects.js · 下潜，#360）；柯尔特开着友伤（#428）时同区的队友也能选
   return fieldUnits().filter(u => (typeof attackFoe === "function" ? attackFoe(k, u) : !u.isPlayer) && !u.dead && !u.hidden && !u.fused && Number(u.zone) === Number(k.zone) && submergedPickOk(u, false));
 }
 
 function queueKoltSwap(actor) {
-  const k = findKit("kolt", state.units) || (actor && actor.kit === "kolt" ? actor : null);
+  const k = findKit("kolt", state.units, actor || undefined) || (actor && actor.kit === "kolt" ? actor : null);
   if (!k || k.dead || k.hidden) return;
   if (typeof passiveOn === "function" && !passiveOn(k)) return;   // 放弃被动「更换刀头」
   state.koltSwapQueue = state.koltSwapQueue || [];
@@ -7293,7 +7302,7 @@ function assistSkillId(helper) {
  * 每一发看没看过记在 seen（和 ammo 一一对应）；known = 从队首数连续看过的枚数（旧存档 / 后台用）。
  * 预演（伤害预览）里下一发还没窥探到时，按最小 / 最大两次分别当蓝弹 / 红弹算，不提前泄露颜色。 */
 const LONGGE_AMMO = { red: { name: "红弹", short: "红", element: "fire" }, blue: { name: "蓝弹", short: "蓝", element: "ice" } };
-function longgeOf() { return (state.units || []).find(u => u.kit === "longge" && !u.weaponOf) || null; }
+function longgeOf() { return scopedOne((state.units || []).filter(u => u.kit === "longge" && !u.weaponOf)); }   // 争斗两队都有龙哥：挑结算上下文那一边的
 function longgeAmmoFresh() {
   const a = ["red", "red", "red", "blue", "blue", "blue"];
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
@@ -7301,7 +7310,7 @@ function longgeAmmoFresh() {
 }
 /** 龙哥的弹药资源（小朋友出手时也找龙哥） */
 function longgeRes(u) {
-  const lg = u && u.kit === "longge" ? u : longgeOf();
+  const lg = u && u.kit === "longge" ? u : (u && u.weaponOf === "longge" && weaponOwnerUnit(u)) || longgeOf();   // 小朋友找自己的龙哥（争斗两队都有龙哥）
   if (!lg) return null;
   const r = lg.resources = lg.resources || {};
   if (!Array.isArray(r.ammo)) r.ammo = [];
@@ -7389,7 +7398,7 @@ function longgeBulletHeal(color, target, lines) {
 }
 /** 枪管手杖+：霰弹枪普攻也能打近距离 */
 function longgeGunNear(a) {
-  const lg = a && a.kit === "longge" ? a : longgeOf();
+  const lg = a && a.kit === "longge" ? a : (a && a.weaponOf === "longge" && weaponOwnerUnit(a)) || longgeOf();
   return !!(lg && typeof passivePlus === "function" && passivePlus(lg, 1));
 }
 /** 爆发治疗能不能用：要 3 发子弹。不用先窥探；只有已经看到的颜色就对不上时才拦下（明知会白扣行动点） */
@@ -7672,17 +7681,22 @@ function playerAssisters(breaker, broken, pvp) {
   );
 }
 
+/** w 是不是 owner 自己的武器人（kit 对得上；唤出时记了持有者的还要是这个人：争斗两队同一个角色时，对面那把不算） */
+function ownsWeaponUnit(owner, w) {
+  if (!owner || !w || !isWeaponUnit(w)) return false;
+  if (!(w.weaponOf === owner.kit || (owner.linkedKits || []).indexOf(w.kit) >= 0)) return false;
+  return w.ownerId == null || w.ownerId === owner.id;
+}
 /** 协助攻击要拿着武器（手册：未持武器时先召回武器再发动）：手里有武器，或者场上有活着、耐久没归零的武器人可以召回 */
 function assistWeaponReady(u) {
   if (!isUnarmed(u)) return true;
-  return fieldUnits().some(w => isWeaponUnit(w) && (w.weaponOf === u.kit || (u.linkedKits || []).indexOf(w.kit) >= 0) &&
-    !(typeof weaponUnusable === "function" && weaponUnusable(w.kit)));
+  return fieldUnits().some(w => ownsWeaponUnit(u, w) && !(typeof weaponUnusable === "function" && weaponUnusable(w.kit, w)));
 }
 
 function forceRecallWeapons(owner) {
   const notes = [];
   if (!owner) return notes;
-  fieldUnits().filter(w => isWeaponUnit(w) && (w.weaponOf === owner.kit || (owner.linkedKits || []).indexOf(w.kit) >= 0)).forEach(w => {
+  fieldUnits().filter(w => ownsWeaponUnit(owner, w)).forEach(w => {
     if (owner.kit === "hiaki") {
       if (w.kit === "niu") owner.resources.niuOut = false;
       if (w.kit === "naruto") owner.resources.narutoOut = false;
@@ -7694,7 +7708,7 @@ function forceRecallWeapons(owner) {
     w.hidden = true;
     notes.push(`${w.name} 因协助攻击被立刻收回为武器。`);
     // 开战前就坏了的武器收回来也不能用：照常空手（绯秋换另一把刀）；战斗中才坏的照常能用（减半）
-    if (typeof weaponUnusable === "function" && weaponUnusable(w.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
+    if (typeof weaponUnusable === "function" && weaponUnusable(w.kit, owner) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === w.kit) {
       disarmBrokenWeapon(owner, notes);
     }
   });
@@ -7780,33 +7794,35 @@ function applyKnockdown(unit, notes, opt) {
  * 倒下的那一刻扣 2 点耐久（以前在战斗结束时扣），这把武器本场记为「倒下过」。
  * 主人走到它倒下的区，花 1 行动点「取回武器」：拿回手里，本场不能再唤出，武器提供的 atk 和格挡加成减半
  * （战斗中修好耐久也一样减半）。这一场里耐久扣到 0 的照样能取回、能用（减半）；只有开战前就坏了的武器才完全用不了。 */
+/** 本场受损记在哪一格：武器的 kit；争斗两队同一个角色时各记各的（ledger.js · ledgerKitKey）。who：持有者或武器人 */
+function weaponFallenKey(kit, who) { return typeof ledgerKitKey === "function" ? ledgerKitKey(kit, who) : kit; }
 function onWeaponUnitDown(u, notes) {
   state.weaponFallen = state.weaponFallen || {};
-  if (!state.weaponFallen[u.kit]) state.weaponFallen[u.kit] = "down";
+  const key = weaponFallenKey(u.kit, u);
+  if (!state.weaponFallen[key]) state.weaponFallen[key] = "down";
   if (!u._durCounted && typeof spendDurability === "function") {
     u._durCounted = true;
-    spendDurability(u.kit, 2, "武器人被击败", notes);
+    spendDurability(u.kit, 2, "武器人被击败", notes, u);
   }
   const owner = typeof weaponOwnerUnit === "function" ? weaponOwnerUnit(u) : null;
   if (owner && !owner.dead) notes.push(`${owner.name} 可以走到 ${u.zone} 区花 1 行动点取回 ${u.name}（本场不能再唤出，武器 atk 和格挡加成减半）。`);
 }
-/** 这把武器本场倒下过：主人拿着它时武器 atk、格挡加成减半 */
-function weaponHalved(kit) {
-  return !!(kit && state.weaponFallen && state.weaponFallen[kit]);
+/** 这把武器本场倒下过：主人拿着它时武器 atk、格挡加成减半。who：持有者或武器人（不给就按 kit 找，争斗两队同一个角色时看结算上下文） */
+function weaponHalved(kit, who) {
+  return !!(kit && state.weaponFallen && state.weaponFallen[weaponFallenKey(kit, who)]);
 }
 /** 这个角色倒在场上、还没取回的武器人 */
 function fallenWeapons(owner) {
   if (!owner || !owner.isPlayer || owner.weaponOf || owner.dead) return [];
-  const kits = [owner.kit].concat(owner.linkedKits || []);
   return (state.units || []).filter(u => u && u.isPlayer && u.dead && !u.hidden && !u._removed && !u.escort &&
-    typeof isWeaponUnit === "function" && isWeaponUnit(u) && (u.weaponOf === owner.kit || kits.includes(u.kit)));
+    typeof isWeaponUnit === "function" && ownsWeaponUnit(owner, u));
 }
 function retrieveWeapon(owner, w, lines) {
   w.hidden = true;            // 收回手里：不再留在场上（仍记为倒下，本场不能再唤出）
   w._retrieved = true;
   state.weaponFallen = state.weaponFallen || {};
-  state.weaponFallen[w.kit] = "back";
-  const broken = typeof weaponUnusable === "function" && weaponUnusable(w.kit);
+  state.weaponFallen[weaponFallenKey(w.kit, owner)] = "back";
+  const broken = typeof weaponUnusable === "function" && weaponUnusable(w.kit, owner);
   if (owner.kit === "hiaki") {
     owner.resources = owner.resources || {};
     if (w.kit === "niu") owner.resources.niuOut = false;
@@ -7896,7 +7912,11 @@ function presentAssistModal() {
   modal.classList.remove("hidden");
 }
 
+/** 协助攻击：在协助者的结算上下文里做（争斗两队同一个角色，party.js · withKitScope） */
 function finishAssist(helperId, extra) {
+  return withKitScope(helperId ? unitById(helperId) : null, () => finishAssistInner(helperId, extra));
+}
+function finishAssistInner(helperId, extra) {
   const job = (state.assistQueue || []).shift();
   const modal = uiEl("assistModal");
   if (modal) modal.classList.add("hidden");
@@ -8054,8 +8074,11 @@ function eligibleBlockers(target, job) {
   );
 }
 
-/** atkRange：这一击的射程（高地修正用，可不传） */
+/** atkRange：这一击的射程（高地修正用，可不传）。在格挡者的结算上下文里做（争斗两队同一个角色：按 kit 找到的是格挡者这边的，party.js · withKitScope） */
 function performAssistBlock(helper, target, attacker, forced, atkRange) {
+  return withKitScope(helper, () => performAssistBlockInner(helper, target, attacker, forced, atkRange));
+}
+function performAssistBlockInner(helper, target, attacker, forced, atkRange) {
   const notes = [];
   forced = forced || {};
   // 死亡的单位不能格挡（以前倒下的武器人、坚毅耗尽的角色剩着附赠行动照样能挡，还扣耐久、触发被动）
@@ -8509,6 +8532,7 @@ function resetBattleFlags(u) {
   u.duetAtk = 0;
   u.barrageBy = null;
   u.algoTurn = null;
+  u.algoBy = null;
   u._hurtRound = null;
   stripTempLayers(u);
   (u.layers || []).forEach(l => { l.current = l.max; });
@@ -8552,7 +8576,7 @@ function roleOnce(a, key, limit) {
   if (!a) return false;
   // 「长休一次」的技能记在队伍档案里，跨战斗保留，长休才刷新（守夜的人不刷新）
   if (typeof REST_ONCE_KEYS !== "undefined" && REST_ONCE_KEYS.indexOf(key) >= 0 && typeof useRestOnce === "function") {
-    return useRestOnce(a.kit, key, limit);
+    return useRestOnce(typeof restKeyOf === "function" ? restKeyOf(a) : a.kit, key, limit);   // 争斗两队同一个角色各记各的（ledger.js · restKeyOf）
   }
   a.resources = a.resources || {};
   a.resources.roleOnce = a.resources.roleOnce || {};
@@ -8593,7 +8617,7 @@ const ROLE_USE_CAP = {
 function roleUsed(a, key) {
   if (!a) return 0;
   if (typeof REST_ONCE_KEYS !== "undefined" && REST_ONCE_KEYS.indexOf(key) >= 0 && typeof LEDGER !== "undefined") {
-    return Number(((LEDGER.restOnce || {})[a.kit] || {})[key]) || 0;
+    return Number(((LEDGER.restOnce || {})[typeof restKeyOf === "function" ? restKeyOf(a) : a.kit] || {})[key]) || 0;
   }
   return Number(((a.resources || {}).roleOnce || {})[key]) || 0;
 }
@@ -9263,8 +9287,12 @@ function applyAtkFxAfter(attacker, target, res, flags, extra, opt) {
   return extra;
 }
 
-/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush） */
+/** 一次 dealTo（含它自己结算的高压场地、共振、反弹等连带伤害）是「一击」：易怒蛮牛等这一击全部结算完再判（enemies.js · raceRageFlush）。
+ *  在出手的人的结算上下文里做（争斗两队同一个角色：按 kit 找到的是出手的这边的，party.js · withKitScope；挨打那边的地方单独给了 near） */
 function dealTo(attacker, target, opt) {
+  return withKitScope(attacker && attacker.id != null && !attacker.envSrc ? attacker : null, () => dealToScoped(attacker, target, opt));
+}
+function dealToScoped(attacker, target, opt) {
   if (typeof raceRageFlush !== "function") return dealToInner(attacker, target, opt);
   RAGE_HOLD.depth++;
   let out, ok = false;
@@ -9766,7 +9794,7 @@ function dealToInner(attacker, target, opt) {
   rasUnstableHit(target, res, extra);
   if (attacker && (attacker.kit === "kolt" || attacker.kit === "torque") && target && (!target.isPlayer || flags.friendlyFire) && flags.action && !flags.aoe &&
       (typeof passiveOn !== "function" || passiveOn(attacker))) {
-    target.tauntTo = (findKit("kolt", state.units) || attacker).id;
+    target.tauntTo = (findKit("kolt", state.units, attacker) || attacker).id;   // 出手的那个柯尔特 / 扭矩的柯尔特（争斗两队都有柯尔特）
     extra.push(`过度自信：${target.name} 被嘲讽，下次攻击必须打柯尔特。`);
   }
   applyAtkFxAfter(attacker, target, res, flags, extra, opt);
@@ -9923,7 +9951,7 @@ function triggerMagnetShield(broken) {
   // 川川 / 哔哩哩给的护盾没了：不管这次有没有推人，标记都清掉（以前川川不在同区时标记留着，
   // 之后别人给的护盾被打破也会推人 + 击破）
   dropMagnetShield(broken);
-  const c = findKit("chuan", state.units);
+  const c = findKit("chuan", state.units, broken);   // 给护盾的是自己人那边的川川（争斗两队都有川川）
   if (!c || Number(c.zone) !== Number(broken.zone)) return notes;
   if (typeof passiveOn === "function" && !passiveOn(c)) return notes;   // 放弃被动「磁场护盾」
   const dest = magnetPushDest(c.zone);
@@ -10116,7 +10144,7 @@ function setHiakiStance(u, stance) {
 
 /** 牵挂（#44）：结人、拿铁给被牵挂的人治疗时，所有治疗骰取最大值。返回 { total, text, maxed } */
 function bondHealDice(healer, target, n, sides, bonus) {
-  const y = findKit("yuito", state.units);
+  const y = findKit("yuito", state.units, healer || undefined);   // 治疗的那个结人 / 拿铁的结人（争斗两队都有结人）
   const mine = healer && (healer.kit === "yuito" || healer.kit === "latte");
   const maxed = !!(mine && y && y.resources && target && y.resources.bondId === target.id);
   if (!maxed) return Object.assign(takeDice(n, sides, bonus || 0), { maxed: false });
@@ -10145,18 +10173,21 @@ function inheritLayers(u, src) {
 function spawnWeapon(owner, kit) {
   const card = livePartyCards().find(c => c.kit === kit);
   if (!card) return null;
-  if (state.units.some(u => u.kit === kit && !u.hidden && !u.fused)) return null;
+  // 只看自己的这把（争斗两队同一个角色：对面唤出了同一把武器，不挡我唤出自己的）
+  const mine = u => u.ownerId == null || u.ownerId === owner.id;
+  if (state.units.some(u => u.kit === kit && !u.hidden && !u.fused && mine(u))) return null;
   // 耐久为 0 的武器唤不出来（weaponSummonWhy 写了原因；以前在场时耐久被打光，收回后还能再唤出）
-  if (typeof weaponBroken === "function" && weaponBroken(kit)) return null;
-  if (typeof weaponHalved === "function" && weaponHalved(kit)) return null;   // 本场受损过（倒下 / 耐久归零 / 战斗中修理）：不能再唤出
+  if (typeof weaponBroken === "function" && weaponBroken(kit, owner)) return null;
+  if (typeof weaponHalved === "function" && weaponHalved(kit, owner)) return null;   // 本场受损过（倒下 / 耐久归零 / 战斗中修理）：不能再唤出
   // 同场战斗内血量继承：收回时只是隐藏，再唤出沿用上次的血量层，并移除旧的隐藏单位
-  const prev = state.units.find(x => x.kit === kit && x.hidden && !x.fused);
+  const prev = state.units.find(x => x.kit === kit && x.hidden && !x.fused && mine(x));
   if (prev && (prev.layers || []).reduce((s, l) => s + Math.max(0, Number(l.current) || 0), 0) <= 0) return null;
   const u = spawnLiveCard(card, owner.zone);
+  u.ownerId = owner.id;   // 持有者（weaponOwnerUnit / ownerOfWeapon 按它找：争斗两队同一个角色时按 kit 会找错人）
   u.level = (owner.weaponLevels && owner.weaponLevels[kit]) || card.level || 1;
   if (typeof applyWeaponLevel === "function") applyWeaponLevel(u);
   // 队伍档案：武器人显示档案里的耐久
-  if (typeof weaponDur === "function" && u.resources) u.resources.durability = weaponDur(kit);
+  if (typeof weaponDur === "function" && u.resources) u.resources.durability = weaponDur(kit, owner);
   // 单局状态：武器人跨战斗保留耐久（血量每场回满）
   if (typeof RUN !== "undefined" && RUN.active && RUN.carry && RUN.carry[kit]) {
     const c = RUN.carry[kit];
@@ -10218,7 +10249,7 @@ function returnWeapon(weapon) {
   if (weapon.kit === "xiaoxiao") longgeUnlock(owner, notes, "小朋友变回武器");
   notes.push(`${weapon.name} 已收回为武器。`);
   // 在场时耐久被扣到 0（格挡）：这一场才坏的，收回来照常能用（atk / 格挡减半），本场唤不出来；开战前就坏了的才只能空手
-  if (typeof weaponUnusable === "function" && weaponUnusable(weapon.kit) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
+  if (typeof weaponUnusable === "function" && weaponUnusable(weapon.kit, owner) && typeof heldWeaponKit === "function" && heldWeaponKit(owner) === weapon.kit) {
     disarmBrokenWeapon(owner, notes);
   }
   return notes;
@@ -10237,7 +10268,8 @@ function weaponReturnWhy(weapon) {
 function hiakiTwinBlade(u) {
   if (!u || (u.kit !== "niu" && u.kit !== "naruto")) return null;
   const other = u.kit === "niu" ? "naruto" : "niu";
-  return (state.units || []).find(x => x.kit === other && !x.hidden && !x.fused && !x.dead) || null;
+  // 同一个绯秋的另一把（争斗两队都有绯秋：对面的刀不算）
+  return (state.units || []).find(x => x.kit === other && !x.hidden && !x.fused && !x.dead && (u.ownerId == null || x.ownerId == null || x.ownerId === u.ownerId)) || null;
 }
 /** 一把刀花了行动点 / 附赠动作，另一把跟着同步（两把刀共用一份，以前各有 1 + 1） */
 function syncBladeTwin(u) {
@@ -10299,7 +10331,7 @@ function refreshHiakiAtk(h) {
 
 function enterMecha() {
   const ruby = findKit("ruby", state.units);
-  const mint = findKit("mint", state.units);
+  const mint = findKit("mint", state.units, ruby);   // 这个瑞比自己的明特（争斗两队都有瑞比）
   const notes = [];
   if (!ruby) return ["场上没有瑞比。"];
   if (!(typeof passiveOnKit !== "function" || passiveOnKit("ruby"))) return ["瑞比放弃了被动「银翼」，无法进入机甲。"];
@@ -10308,7 +10340,7 @@ function enterMecha() {
     const spawned = spawnWeapon(ruby, "mint");
     if (!spawned) return ["需要明特在场且与瑞比同区。先唤出明特。"];
   }
-  const m = findKit("mint", state.units);
+  const m = findKit("mint", state.units, ruby);
   if (Number(m.zone) !== Number(ruby.zone)) return ["机甲模式需要与瑞比同区。"];
   ruby.resources.mecha = true;
   ruby.resources.preMecha = {
@@ -10338,7 +10370,7 @@ function enterMecha() {
 function exitMecha(ruby, reason) {
   const notes = [reason || "解除机甲"];
   if (!ruby || !ruby.resources || !ruby.resources.mecha) return notes;
-  const mint = state.units.find(u => u.kit === "mint");
+  const mint = state.units.find(u => u.kit === "mint" && (u.ownerId == null || u.ownerId === ruby.id));   // 自己的明特（争斗两队都有瑞比）
   const pre = ruby.resources.preMecha;
   const layersNow = clone(ruby.layers);
   // 机甲的架势用的是明特的：解除时还给明特，瑞比换回自己的
@@ -10537,7 +10569,7 @@ function spawnHeroCard(kit, zone, memory, faction) {
 function removeHeroUnit(u) {
   if (!u) return [];
   if (typeof pvpOn === "function" && pvpOn() && pvpOwn(state.playerFactions.members, u.id)) setPlayerFaction({ faction: PVP_CFG.defaultFaction, unit: u.id });
-  const gone = new Set((state.units || []).filter(x => x === u || (x.weaponOf && x.weaponOf === u.kit)).map(x => x.id));
+  const gone = new Set((state.units || []).filter(x => x === u || (typeof isWeaponOfOwner === "function" ? isWeaponOfOwner(x, u) : x.weaponOf && x.weaponOf === u.kit)).map(x => x.id));
   state.units = state.units.filter(x => !gone.has(x.id));
   state.units.forEach(x => {
     if (gone.has(x.tauntTo)) x.tauntTo = null;
@@ -10880,7 +10912,8 @@ function skillFlowSteps(id, actor, picks) {
   // 自己人（#478）：攻击那几步也拿掉（开着友伤才列进来的队友、SKILL_ATTACKS_ANY 的技能选的，tauntStepOk）；给友方的、选任意单位的那几步一个不拿掉
   const taunt = tauntForSkill(actor, id);
   const ok = taunt ? tauntStepOk(actor, id, picks, taunt) : null;
-  return (skillFlowStepsAll(id, actor, picks) || []).map(st => {
+  // 在这个人的结算上下文里列分步（争斗两队同一个角色：柯尔特的刀头、川川的电能……按 kit 找到的是他自己，party.js · withKitScope）
+  return (withKitScope(actor, () => skillFlowStepsAll(id, actor, picks)) || []).map(st => {
     if (!st || st.type !== "unit" || !Array.isArray(st.units)) return st;
     if (ok) {
       const kept = st.units.filter(u => !u || ok(st, u));
@@ -12157,8 +12190,13 @@ function popBreak(unit, amount, element) {
  * 冷气注射：对已有冻伤的目标再施加冻伤时，改为额外一次 1d4+诺拉等级 的冰伤。
  * ============================================================== */
 function noraOf() { return typeof findKit === "function" ? findKit("nora", state.units) : null; }
-/** 维塔斯本体（分出来之后的单位） */
-function vitasOf() { return (state.units || []).find(u => u && u.kit === "vitas" && !u.hidden && !u.dead) || null; }
+/** 维塔斯本体（分出来之后的单位）。争斗两队都有诺拉时挑结算上下文那一边的（party.js · kitPick） */
+function vitasOf() { return scopedOne((state.units || []).filter(u => u && u.kit === "vitas" && !u.hidden && !u.dead)); }
+/** 同名的几个单位里挑结算上下文那一边的（只有一个就是它；争斗两队同一个角色时才会有两个，party.js · kitPick） */
+function scopedOne(list) {
+  if (list.length <= 1) return list[0] || null;
+  return (typeof kitPick === "function" && kitPick(list, kitScopeUnit())) || list[0];
+}
 /** 双相状态属于维塔斯这套武器系统：诺拉持着它时记在诺拉身上，分出来之后两边同步，
  *  即使场上只有其中一个也能正确读写。 */
 function moodHolders() {
@@ -13006,8 +13044,9 @@ function koltShortZones(actor) {
 /** 武器人现在能不能唤出：ok / out（已在场）/ dead（本场已倒下，不能再唤出）/
  *  broken（耐久为 0：spawnWeapon 不让唤出，绯秋分刀的可选列表也不列）。武器人每场开战都回满，不看上一场 */
 function weaponSummonState(owner, kit) {
-  const broken = typeof weaponBroken === "function" && weaponBroken(kit);
-  const list = (state.units || []).filter(x => x.kit === kit && (!x.weaponOf || !owner || x.weaponOf === owner.kit));
+  const broken = typeof weaponBroken === "function" && weaponBroken(kit, owner);
+  // 只看自己的这把（争斗两队同一个角色：对面的同一把武器不算）
+  const list = (state.units || []).filter(x => x.kit === kit && (!x.weaponOf || !owner || (x.weaponOf === owner.kit && (x.ownerId == null || x.ownerId === owner.id))));
   if (!list.length) {
     return broken ? "broken" : "ok";
   }
@@ -13018,8 +13057,8 @@ function weaponSummonState(owner, kit) {
   return hp <= 0 ? "dead" : broken ? "broken" : "ok";
 }
 function weaponSummonWhy(owner, kit) {
-  if (typeof weaponBroken === "function" && weaponBroken(kit)) return `${weaponCardName(kit)} 耐久为 0，无法唤出`;
-  if (typeof weaponHalved === "function" && weaponHalved(kit) && weaponSummonState(owner, kit) !== "out") return `${weaponCardName(kit)} 本场受损过，不能再唤出`;
+  if (typeof weaponBroken === "function" && weaponBroken(kit, owner)) return `${weaponCardName(kit)} 耐久为 0，无法唤出`;
+  if (typeof weaponHalved === "function" && weaponHalved(kit, owner) && weaponSummonState(owner, kit) !== "out") return `${weaponCardName(kit)} 本场受损过，不能再唤出`;
   const st = weaponSummonState(owner, kit);
   const nm = typeof weaponCardName === "function" ? weaponCardName(kit) : kit;
   if (st === "out") return `${nm} 已经在场上`;
@@ -13035,8 +13074,11 @@ function summonableBlades(h) {
   });
 }
 
-/** 不满足前提时返回原因字符串，满足返回 null */
+/** 不满足前提时返回原因字符串，满足返回 null。在这个人的结算上下文里判（争斗两队同一个角色，party.js · withKitScope） */
 function skillRequirementError(actor, id) {
+  return withKitScope(actor, () => skillRequirementErrorScoped(actor, id));
+}
+function skillRequirementErrorScoped(actor, id) {
   if (actor && /^veh_/.test(String(id)) && typeof vehicleSkillWhy === "function") return vehicleSkillWhy(actor, id);   // 载具招式（vehicle.js）
   if (actor && typeof featOfSkill === "function" && featOfSkill(id)) return featSkillWhy(actor, id);
   if (actor && typeof cyberwareOfSkill === "function" && cyberwareOfSkill(id)) return cyberwareSkillWhy(actor, id);   // 义体（cyberware.js）：没装 / 短休前用过了
@@ -13201,8 +13243,11 @@ function tauntForSkill(actor, id) {
   return f && !tauntReaction(actor, id) ? f : null;
 }
 
-/** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以 */
+/** 扣行动点之前先查目标：选不到合法目标的技能不白白花掉行动点。返回原因，null 表示可以。在出手的人的结算上下文里判（争斗两队同一个角色） */
 function skillTargetError(a, id, t) {
+  return withKitScope(a, () => skillTargetErrorScoped(a, id, t));
+}
+function skillTargetErrorScoped(a, id, t) {
   // 嘲讽对玩家（#464）：被敌对的人嘲讽时，敌对的单位只能选嘲讽者（专长、义体也一样，所以放在最前面）。只有一个玩家阵营时一个都不拦
   if (a && a.isPlayer) { const why = playerTauntWhy(a, id, t); if (why) return why; }
   if (typeof featOfSkill === "function" && featOfSkill(id)) {
@@ -13396,8 +13441,11 @@ function skillTargetError(a, id, t) {
   return null;
 }
 
-/** 执行技能，并把这次行动的日志整理成一块（见 withLogSink） */
+/** 执行技能，并把这次行动的日志整理成一块（见 withLogSink）。在出手的人的结算上下文里做（争斗两队同一个角色，party.js · withKitScope） */
 function runSkill(id, optRun) {
+  return withKitScope(unitById(state.attackerId), () => runSkillScoped(id, optRun));
+}
+function runSkillScoped(id, optRun) {
   const a0 = unitById(state.attackerId);
   const title = a0 ? `【${a0.name}】${skillDisplayName(a0, id)}` : "";
   const prevActor = LOG_ACTOR_ID;
@@ -14724,6 +14772,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       applyInstantEffect(t, "spread", lines, a);
       t.algoTurn = ownRound(a);   // 这一回合：瑞比在敌人回合行动时按她自己的一回合算（engine.js · applyResultToUnit，#476）
+      t.algoBy = a.id;            // 是哪个瑞比标记的（争斗两队都有瑞比时纳米加给她）
       lines.push(`算法改变：${t.name} 被施加扩散；这一回合它每次受到伤害，瑞比纳米 +5。`);
     } else if (id === "ruby_relay" || id === "wing_relay") {
       // 收发代理：放出小型无人机，不限时间。平时每回合 +10 纳米；瑞比在机甲里时改为每回合结束发射激光（turnEnd）
@@ -15881,7 +15930,7 @@ function runSkillInner(id, optRun) {
       if (!needT()) return paintSkillLog(lines.join("\n"));
       // 硬骨头（feats.js）：空手攻击 +1 击破；自己的武器人在场时 1.5×atk
       const tough = typeof featHas === "function" && featHas(a, "tough");
-      const wpnOut = tough && fieldUnits().some(u => u.isPlayer && u.weaponOf === a.kit && !u.dead && !u.hidden);
+      const wpnOut = tough && fieldUnits().some(u => u.isPlayer && isWeaponOfOwner(u, a) && !u.dead && !u.hidden);   // 自己的武器人（争斗两队同一个角色）
       hitOne(a, t, { element: "physical", mult: wpnOut ? 1.5 : 1, baseBreak: 0, atk, _bare: true });
       lines.push(`空手攻击：${wpnOut ? "1.5" : "1"}×atk 物理${tough ? "（硬骨头 +1 击破）" : ""}。`);
     } else if (id === "assist_block") {
@@ -16124,13 +16173,14 @@ if (HAS_DOM) init();
    移到顶层后游戏页面也能复用同一份渲染逻辑。 */
 /** 开战时双相状态随机 */
 function randomizeNoraMood() {
-  const n = noraOf();
-  if (!n) return;
-  n.resources = n.resources || {};
-  n.resources.mood = Math.random() < 0.5 ? "gentle" : "cruel";
-  n.resources.piercedId = null;
-  n.resources.piercedIds = [];
-  n.resources.forceCruelNext = false;
+  // 争斗两队都有诺拉（brawl.js）：每个诺拉各抛一次（以前按 kit 只找第一个）；只有一个时和以前一样
+  kitUnits("nora").forEach(n => {
+    n.resources = n.resources || {};
+    n.resources.mood = Math.random() < 0.5 ? "gentle" : "cruel";
+    n.resources.piercedId = null;
+    n.resources.piercedIds = [];
+    n.resources.forceCruelNext = false;
+  });
 }
 
 /** 全力以赴每场可用次数：手册为 1 级 1 次、5 级 2 次、10 级 3 次 */
@@ -16151,7 +16201,7 @@ function setOwnedWeaponLevel(owner, kit, lv) {
   owner.weaponLevels = owner.weaponLevels || {};
   owner.weaponLevels[kit] = lv;
   if (typeof ejectExtraWeaponParts === "function") ejectExtraWeaponParts(owner, kit);   // 等级降了，多出来的改装件退回背包
-  const existing = (state.units || []).find(u => u.kit === kit && u.weaponOf === owner.kit);
+  const existing = (state.units || []).find(u => u.kit === kit && u.weaponOf === owner.kit && (u.ownerId == null || u.ownerId === owner.id));
   if (existing) {
     existing.level = lv;
     if (typeof applyWeaponLevel === "function") applyWeaponLevel(existing);

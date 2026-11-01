@@ -12,6 +12,9 @@
 //                                                              两队都用看情况用技能的打法（#538，BattleSim.SKILL_POLICY）→ docs/balance/pvp-balance-skill-1031，
 //                                                              和普攻版（--compare，默认 docs/balance/pvp-balance-1030）同一批阵容、种子并排对比；--h2h N 技能版 vs 普攻版对打，
 //                                                              --pve N 另跑几场遭遇战对照（这是 10/31 的小样本，4 个线程约 10 分钟；大样本只改 --pairs / --h2h / --pve）
+//   node tools/pvp-balance.js --brawl --pairs 5 --fixed 0     用争斗的布置跑（#543，brawl.js）：等级段 Lv20·武器 10 级 / Lv10·武器 5 级（--levels 只收这两个），
+//                                                              每个角色照 BRAWL_CFG.sim 的固定一套养成（专长、属性、一半可换的肉体换成装甲）→ docs/balance/pvp-balance-brawl；
+//                                                              可以和 --policy skill 一起用。阵容照旧（两队角色不重复，和以前的报告同一批）
 //
 // 每一对阵容打两场：先手、后手对调（镜像），其余完全一样（同一个战斗种子），阵容强弱在先后手之间抵消；
 // 阵容：两队互不重复的角色（同一个角色不能同时在两队），从 11 名角色里按种子随机抽，另有几组固定阵容。
@@ -47,6 +50,7 @@ const CONFIG = {
   skillOut: "docs/balance/pvp-balance-skill-1031",   // --policy skill 默认写到这里
   compare: "docs/balance/pvp-balance-1030",          // --policy skill 的报告和这份普攻版并排比（同一批阵容、种子）
   skillCfg: { items: false },                        // SKILL_POLICY 在决斗里的设置（盖在 SKILL_POLICY_CFG 上）：满状态 PvP 不带道具
+  brawlOut: "docs/balance/pvp-balance-brawl",        // --brawl（争斗的布置，#543）默认写到这里
   pveLimit: 30,                                      // 遭遇战对照的回合上限
   bigSample: { pairs: 10, h2h: 3, pve: 6 }           // 技能版报告里估算「加大样本要多久」举的例子（同一条命令只改这几个数）
 };
@@ -101,7 +105,8 @@ function plan(opt = {}) {
   const prefix = opt.seed || CONFIG.seedPrefix, sizes = opt.sizes || CONFIG.sizes, levels = opt.levels || CONFIG.levels;
   const pairs = opt.pairs || CONFIG.pairs, fixedPairs = opt.fixedPairs != null ? opt.fixedPairs : CONFIG.fixedPairs;
   const variants = opt.variants || DEFAULT_VARIANTS, jobs = [], policy = opt.policy || CONFIG.policy;
-  const pair = (base, i) => ["a", "b"].forEach(first => jobs.push(Object.assign({}, base, { first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1] }, policy !== "basic" ? { policy } : {})));
+  const brawl = opt.brawl ? { brawl: true } : {};   // 争斗的布置（#543）：prepare 走 battle.brawl
+  const pair = (base, i) => ["a", "b"].forEach(first => jobs.push(Object.assign({}, base, { first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1] }, policy !== "basic" ? { policy } : {}, brawl)));
   for (const variant of variants) for (const size of sizes) for (const level of levels) for (let i = 0; i < pairs; i++) {
     const { a, b } = lineup(prefix, size, i);
     pair({ kind: "random", variant, size, level, index: i, a, b, seed: `${prefix}:${size}:${level}:${i}` }, i);
@@ -116,7 +121,7 @@ function plan(opt = {}) {
   for (const size of opt.h2h ? sizes : []) for (const level of levels) for (let i = 0; i < opt.h2h; i++) {
     const { a, b } = lineup(prefix, size, i);
     for (const first of ["a", "b"]) for (const swap of [0, 1]) {
-      jobs.push({ kind: "h2h", variant: "base", size, level, index: i, a, b, seed: `${prefix}:h2h:${size}:${level}:${i}`, first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1], swap });
+      jobs.push(Object.assign({ kind: "h2h", variant: "base", size, level, index: i, a, b, seed: `${prefix}:h2h:${size}:${level}:${i}`, first, aTeam: i % 2 === 0 ? TEAMS[0] : TEAMS[1], swap }, brawl));
     }
   }
   // 遭遇战对照：每一项 pve 个种子，两种打法各打一场（同一个种子）
@@ -258,6 +263,28 @@ function duelPolicy(c, V, firstTeam, policy) {
     standAsk(u, zones) { return { stand: true, dest: dest(u, zones) }; }
   });
 }
+/** 抛硬币由工具定（镜像对局）：包住规则里的 pvpDuelToss，让它抛出 firstTeam，其余照游戏 */
+function forceToss(c, firstTeam) {
+  const toss = c.pvpDuelToss;
+  c.pvpDuelToss = () => { const keep = c.Math.random; c.Math.random = () => (firstTeam === TEAMS[0] ? 0.1 : 0.9); try { return toss(); } finally { c.Math.random = keep; } };
+}
+/** 争斗的等级段里哪一个是这个等级（--brawl 的等级只收等级段里的） */
+function brawlTierOf(c, level) {
+  const tiers = vm.runInContext("BRAWL_CFG.tiers", c);
+  const i = tiers.findIndex(t => t.level === level);
+  if (i < 0) throw new Error("brawl levels must be " + tiers.map(t => t.level).join(" / "));
+  return i;
+}
+/** --brawl：照争斗布置（brawl.js · battle.brawl）——等级段的等级、所有武器同一级，每个角色照 BRAWL_CFG.sim 的固定一套养成
+ *  （专长、属性、一半可换的肉体换成装甲）；争斗布置完就翻硬币，所以先包住抛硬币再布置 */
+function brawlSpec(c, job, V) {
+  const tier = brawlTierOf(c, job.level), aTeam = job.aTeam, bTeam = other(aTeam);
+  const spec = { type: "battle.brawl", tier, size: job.a.length, seed: job.seed + ":battle",
+    teams: { [aTeam]: job.a.map(k => c.brawlSimEntry(k, tier)), [bTeam]: job.b.map(k => c.brawlSimEntry(k, tier)) } };
+  if (!V.stand) spec.stand = false;
+  if (V.rounds) spec.rounds = CONFIG.roundsLimit;
+  return spec;
+}
 /** 布置一场（开战前）：返回规则环境、记录、先手的队 */
 function prepare(job) {
   const V = VARIANTS[job.variant];
@@ -266,6 +293,12 @@ function prepare(job) {
   // 临时关掉后手补偿：只改这一场自己的规则环境里的配置表（游戏文件不动）
   if (!V.late) vm.runInContext("PVP_DUEL_CFG.lateBonus = 0", c);
   const rec = instrument(c);
+  if (job.brawl) {
+    const firstTeam = job.first === "a" ? job.aTeam : other(job.aTeam);
+    forceToss(c, firstTeam);
+    c.Commands.dispatch(brawlSpec(c, job, V));
+    return { c, S: c.S.state, V, rec, firstTeam };
+  }
   c.S.RNG.install(job.seed + ":setup");
   const kits = job.a.concat(job.b);
   const runs = leveledRuns(c, kits, job.level, job.seed);
@@ -279,8 +312,7 @@ function prepare(job) {
   c.Commands.dispatch(cmd);
   // 抛硬币：由工具定先手（镜像对局），其余照游戏
   const firstTeam = job.first === "a" ? aTeam : bTeam;
-  const toss = c.pvpDuelToss;
-  c.pvpDuelToss = () => { const keep = c.Math.random; c.Math.random = () => (firstTeam === TEAMS[0] ? 0.1 : 0.9); try { return toss(); } finally { c.Math.random = keep; } };
+  forceToss(c, firstTeam);
   return { c, S, V, rec, firstTeam };
 }
 const sideOf = (team, firstTeam) => (team === firstTeam ? "F" : "S");
@@ -295,6 +327,7 @@ function policyStats(row, pol) {
 /** 技能版 vs 普攻版对打（镜像）：A 队（swap 时 B 队）用技能版、另一队用普攻版，起身 / 翻滚两边一样。w：X 技能版赢 / Y 普攻版赢 / D 平局 */
 function runH2h(job) {
   const row = { k: "h2h", s: job.size, L: job.level, i: job.index, f: job.first, x: job.swap, w: "E" };
+  if (job.brawl) row.b = 1;
   try {
     const { c, V, firstTeam } = prepare(job);
     const X = duelPolicy(c, V, firstTeam, "skill"), Y = duelPolicy(c, V, firstTeam, "basic");
@@ -325,6 +358,7 @@ function runJob(job) {
   if (job.kind === "h2h") return runH2h(job);
   const row = { v: job.variant, k: job.kind, s: job.size, L: job.level, i: job.index, f: job.first, w: "E" };
   if (job.policy && job.policy !== "basic") row.p = job.policy;
+  if (job.brawl) row.b = 1;   // 争斗的布置（#543）
   try {
     const { c, S, V, rec, firstTeam } = prepare(job);
     const pol = duelPolicy(c, V, firstTeam, job.policy);
@@ -514,7 +548,9 @@ function markdown(report) {
   l.push(`- **决斗规则照游戏**（#472 / PR #480）：3 区制，1 队站 1 区、2 队站 3 区；先手在我方回合、后手在敌人回合行动；后手开局每人 ${report.ruleSnapshot.lateBonus} 个附赠（先手的第一回合里就能协助格挡，没用掉的留着）；伤害不会致死（坚毅生命打到 ${report.ruleSnapshot.outShp} 再起不能、移出战场）；一队全部倒地另一队赢；全员倒地但还能起身时回合结束前先问（#470）；起身可以免费翻滚到相邻区（#477）。`);
   l.push(`- **镜像对局**：每对阵容打两场，只对调先后手（抛硬币由工具定），同一个战斗种子；所以「先手胜率」里阵容强弱正好抵消。偶数序号的阵容 A 站 1 队、奇数站 2 队，站位也抵消。`);
   l.push(`- **阵容**：随机阵容从 ${B.HEROES.length} 名角色（${B.HEROES.join("、")}）里按种子抽，两队角色不重复（同一个角色不能同时在两队）；每格 ${o.pairs} 对 = ${o.pairs * 2} 场。同一个序号的阵容、种子对每种情况、每个等级都一样。另有 ${FIXED.length} 组固定阵容，每组每个等级 ${o.fixedPairs} 对。`);
-  l.push(`- **等级**：${levels.join(" / ")} 级，照 R1 单场矩阵：升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6（最高 10），满状态、没有义体、不用道具。`);
+  l.push(o.brawl
+    ? `- **等级**：${levels.join(" / ")} 级，照争斗的布置（#543，brawl.js · battle.brawl）：等级段的等级、所有武器同一级（${(report.brawlCfg ? report.brawlCfg.tiers : []).map(t => t.name).join("、")}），每个角色照 \`BRAWL_CFG.sim\` 的固定一套养成（专长、主属性加点、一半可换的肉体换成装甲），满状态、不带义体 / 改装件 / 道具。`
+    : `- **等级**：${levels.join(" / ")} 级，照 R1 单场矩阵：升级选主属性 / 第一个合法选项，武器等级 = 等级 × 0.6（最高 10），满状态、没有义体、不用道具。`);
   l.push(`- **打法**（两队一样）：\`BattleSim.BASIC_POLICY\`——能打到就普攻血量最少的对手，打不到就用附赠走一格；能协助格挡就挡（挑成功率最高的人），能协助攻击就打（挑攻击力最高的人）；倒地能起身就起身；起身翻滚开着时按站位翻（远程躲开同区的对手、近战翻到有对手的区）。不用技能、道具、召唤武器人。`);
   l.push(`- **胜率**：先手胜率 = 先手赢的场数 ÷ 分出胜负的场数（平局、超时不算进分母，另列）；区间是 Wilson 95%。差值的区间按两组独立算（实际两组用同一批阵容和种子，偏保守）。不限回合时打到 ${o.maxRounds} 回合还没分出胜负记「超时」。`);
   l.push(`- **情况**：${o.variants.map(v => `${VARIANTS[v].name}（\`${v}\`：${VARIANTS[v].note}）`).join("；")}。`);
@@ -1087,10 +1123,23 @@ function compareNotes(report, X) {
 }
 
 /* ---------- 角色参考表 ---------- */
-function heroTable(levels) {
+/** brawl：照争斗的布置造（BRAWL_CFG.sim 的固定养成，带改造） */
+function heroTable(levels, brawl) {
   const out = {};
   for (const L of levels) {
     const c = H.load();
+    if (brawl) {
+      const tier = brawlTierOf(c, L), info = vm.runInContext("BRAWL_CFG.tiers", c)[tier];
+      c.BattleSim.setup({ party: [B.HEROES[0]], enemies: [], seed: `hero-table:brawl:${L}`, before: () => { c.S.state.units = []; } });
+      B.HEROES.forEach(k => {
+        const u = c.brawlHeroUnit(c.brawlBuild(c.brawlSimEntry(k, tier), info), 1);
+        c.S.state.units.push(u);
+        const r = aaRange(c, u);
+        const h = out[u.kit] || (out[u.kit] = { name: u.name, range: r.max >= 1 ? `远程（${r.min}–${r.max}）` : "近战（同区）", byLevel: {} });
+        h.byLevel[L] = { hp: c.totalMaxHp(u), def: Number(u.defMax) || 0 };
+      });
+      continue;
+    }
     c.S.RNG.install(`hero-table:${L}`);
     const kits = B.HEROES.slice();
     const runs = leveledRuns(c, kits, L, `hero-table:${L}`);
@@ -1118,17 +1167,23 @@ function provenance(argv) {
 }
 function parseArgs(argv) {
   const out = {}, allowed = ["sizes", "levels", "pairs", "fixed", "variants", "seed", "workers", "out", "rebuild", "max-rounds", "policy", "pve", "compare", "h2h"];
+  const flags = ["brawl"];   // 不带值的开关：--brawl 用争斗的布置（#543）
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i];
+    if (key.startsWith("--") && flags.includes(key.slice(2))) { out[key.slice(2)] = true; continue; }
     if (!key.startsWith("--") || !allowed.includes(key.slice(2))) throw new Error("Unknown argument: " + key);
     const v = argv[++i];
     if (v == null || v.startsWith("--")) throw new Error("Missing value for " + key);
     out[key.slice(2)] = v;
   }
   const list = (v, f) => String(v).split(",").map(x => x.trim()).filter(Boolean).map(f);
+  const brawl = !!out.brawl;
+  // 争斗的等级段（BRAWL_CFG.tiers）：--brawl 的等级只收这几个，不给就全跑
+  const tierLevels = brawl ? vm.runInContext("BRAWL_CFG.tiers", H.load()).map(t => t.level) : null;
   const opt = {
+    brawl,
     sizes: out.sizes ? list(out.sizes, Number) : CONFIG.sizes.slice(),
-    levels: out.levels ? list(out.levels, Number) : CONFIG.levels.slice(),
+    levels: out.levels ? list(out.levels, Number) : brawl ? tierLevels.slice() : CONFIG.levels.slice(),
     pairs: out.pairs ? B.positiveInt(out.pairs, "pairs") : CONFIG.pairs,
     fixedPairs: out.fixed != null ? Number(out.fixed) : CONFIG.fixedPairs,
     variants: out.variants ? list(out.variants, String) : DEFAULT_VARIANTS.slice(),
@@ -1141,7 +1196,8 @@ function parseArgs(argv) {
     compare: out.compare || CONFIG.compare,
     rebuild: out.rebuild || null
   };
-  opt.out = out.out || (opt.policy === "skill" ? CONFIG.skillOut : CONFIG.out);
+  opt.out = out.out || (brawl ? CONFIG.brawlOut + (opt.policy === "skill" ? "-skill" : "") : opt.policy === "skill" ? CONFIG.skillOut : CONFIG.out);
+  if (brawl && opt.levels.some(L => !tierLevels.includes(L))) throw new Error("brawl levels must be " + tierLevels.join(" / "));
   if (!POLICIES[opt.policy]) throw new Error("policy: " + Object.keys(POLICIES).join(", "));
   if (!Number.isInteger(opt.pve) || opt.pve < 0) throw new Error("pve must be a nonnegative integer");
   if (!Number.isInteger(opt.h2h) || opt.h2h < 0) throw new Error("h2h must be a nonnegative integer");
@@ -1154,7 +1210,7 @@ function parseArgs(argv) {
 // json 里每场一行写成数组（字段顺序见 rowKeys），比对象小一半多；读的时候两种都认
 // （后面接的几项是 #538 加的：打法、技能版做了什么、遭遇战对照；以前的 json 照样读得回来）
 const ROW_KEYS = ["v", "k", "s", "L", "i", "f", "w", "why", "r", "act", "st", "stR", "dn", "dnR", "out", "outR", "stF", "stS", "dnF", "dnS", "outF", "outS", "blk1", "blkF", "blkS", "asks", "wipes", "pct", "bugs", "err",
-  "p", "use", "sm", "mv", "it", "dec", "tr", "id", "hp", "hd", "x"];
+  "p", "use", "sm", "mv", "it", "dec", "tr", "id", "hp", "hd", "x", "b"];   // b：争斗的布置（#543，--brawl）
 function packRow(r) { const a = ROW_KEYS.map(k => (r[k] === undefined ? null : r[k])); while (a.length && a[a.length - 1] === null) a.pop(); return a; }
 function unpackRow(a) { return Array.isArray(a) ? Object.fromEntries(ROW_KEYS.map((k, i) => [k, a[i]]).filter(([, v]) => v != null)) : a; }
 /** 同名前缀的单独报告（例 pvp-balance-1030-hold.json）：只取设置和汇总，主报告里列一节 */
@@ -1193,7 +1249,7 @@ function loadReport(outBase) {
   return r;
 }
 async function main(argv = process.argv.slice(2)) {
-  if (argv.includes("--help")) { console.log(fs.readFileSync(__filename, "utf8").split("\n").slice(0, 12).join("\n")); return 0; }
+  if (argv.includes("--help")) { console.log(fs.readFileSync(__filename, "utf8").split("\n").slice(0, 17).join("\n")); return 0; }
   const opt = parseArgs(argv);
   if (opt.rebuild) {
     const file = path.resolve(H.ROOT, opt.rebuild);
@@ -1224,13 +1280,14 @@ async function main(argv = process.argv.slice(2)) {
     schema: "backfire-pvp-balance-v1", version: CONFIG.version, generatedAt: new Date().toISOString(), seconds: Math.round((Date.now() - t0) / 1000),
     provenance: provenance(argv),
     options: { sizes: opt.sizes, levels: opt.levels, pairs: opt.pairs, fixedPairs: opt.fixedPairs, variants: opt.variants, seed: opt.seed, maxRounds: opt.maxRounds, roundsLimit: CONFIG.roundsLimit, out: opt.out,
-      policy: opt.policy, workers: opt.workers, pve: opt.pve, h2h: opt.h2h, compare: opt.policy === "skill" ? opt.compare : undefined },
+      policy: opt.policy, workers: opt.workers, pve: opt.pve, h2h: opt.h2h, compare: opt.policy === "skill" ? opt.compare : undefined, brawl: opt.brawl || undefined },
+    brawlCfg: opt.brawl ? JSON.parse(JSON.stringify(vm.runInContext("BRAWL_CFG", c))) : undefined,
     timing: Object.fromEntries(Object.entries(timing).map(([k, t]) => [k, { n: t.n, meanMs: Math.round(t.ms / t.n), maxMs: t.max }])),
     skillCfg: opt.policy === "skill" ? Object.assign(JSON.parse(JSON.stringify(vm.runInContext("SKILL_POLICY_CFG", c))), CONFIG.skillCfg) : undefined,
     skillNames: opt.policy === "skill" ? skillNames : undefined,
     pveScenarios: opt.pve ? PVE_SCENARIOS : undefined,
     variants: VARIANTS, fixed: FIXED, ruleSnapshot: JSON.parse(JSON.stringify(vm.runInContext("PVP_DUEL_CFG", c))),
-    heroes: heroTable(opt.levels),
+    heroes: heroTable(opt.levels, opt.brawl),
     lineups: Object.fromEntries(opt.sizes.flatMap(s => Array.from({ length: opt.pairs }, (_, i) => [`${s}:${i}`, lineup(opt.seed, s, i)]))),
     columns: { v: "情况", k: "random = 随机阵容 / 固定阵容 id", s: "每队人数", L: "等级", i: "阵容序号（随机阵容见 lineups）", f: "谁先手（a / b = 阵容 A / B）",
       w: "结果：F 先手赢 / S 后手赢 / D 平局 / T 超时 / E 异常", why: "wipe 全倒 / rounds 回合上限 / timeout", r: "回合", act: "行动次数",
@@ -1251,4 +1308,5 @@ async function main(argv = process.argv.slice(2)) {
 }
 if (isMainThread && require.main === module) main().then(code => { process.exitCode = code; }).catch(e => { console.error(e.stack || String(e)); process.exitCode = 1; });
 module.exports = { CONFIG, VARIANTS, DEFAULT_VARIANTS, FIXED, POLICIES, PVE_SCENARIOS, lineup, plan, prepare, duelPolicy, runJob, runPve, runH2h, runJobs, rollPick, summarize, summarizeAll, diff, packRow, unpackRow,
+  parseArgs, brawlSpec, heroTable,
   markdown, notesFor, compareMarkdown, sampleText, pveSummary, h2hSummary, meleeStats, heroWins, loadReport, main };

@@ -160,7 +160,10 @@ const BattleSearch = (function () {
   function candidateActions(opt) {
     opt = opt || {};
     const out = [];
-    (opt.actors || actors()).forEach(a => {
+    // 在这个单位的结算上下文里列（争斗两队同一个角色：按 kit 找到的是他自己，party.js · withKitScope）
+    (opt.actors || actors()).forEach(a => (typeof withKitScope === "function" ? withKitScope(a, () => listFor(a)) : listFor(a)));
+    return out;
+    function listFor(a) {
       let list = [];
       try { list = skillList(a) || []; } catch (e) { list = []; }
       list.forEach(sk => {
@@ -186,24 +189,29 @@ const BattleSearch = (function () {
       if (opt.canMove ? opt.canMove(a) : ((a.bonus || 0) > 0 || (a.ap || 0) > 0)) {
         (zoneNeighbors(a.zone) || []).forEach(z => out.push({ type: "move", actor: a.id, dest: Number(z), label: `${a.name}·移动到${z}区` }));
       }
-    });
-    return out;
+    }
   }
 
   /* ---------- 记录 / 重放用的编号 ---------- */
-  // 玩家单位换成「@kit」（同一个角色、武器人在一场里只有一个）；alias(u) 给了别的记法就用它（tools/dpt.js 的训练假人是 @dummy）
+  // 玩家单位换成「@kit」（同一个角色、武器人在一场里只有一个）；alias(u) 给了别的记法就用它（tools/dpt.js 的训练假人是 @dummy）。
+  // 争斗（brawl.js）两队可以有同一个角色：场上同一个 kit 的玩家单位不止一个时接上队伍「@kit#1队」（武器人跟着持有者那一队）
+  const teamOf = (u) => (typeof pvpDuelTeamOf === "function" ? pvpDuelTeamOf(u) : null);
   function tokenOf(id, alias) {
     const u = state.units.find(x => x.id === id);
     if (!u) return id;
     const a = alias && alias.token ? alias.token(u) : null;
     if (a) return a;
-    return u.isPlayer ? "@" + u.kit : id;
+    if (!u.isPlayer) return id;
+    const team = state.units.some(x => x !== u && x.isPlayer && x.kit === u.kit && !x._removed) ? teamOf(u) : null;
+    return "@" + u.kit + (team ? "#" + team : "");
   }
   function idOf(tok, alias) {
     if (typeof tok !== "string" || tok[0] !== "@") return tok;
     const live = state.units.filter(u => !u._removed);
     const hit = alias && alias.find ? alias.find(tok, live) : undefined;
-    const u = hit !== undefined ? hit : (live.find(x => x.kit === tok.slice(1) && !x.hidden) || live.find(x => x.kit === tok.slice(1)));
+    const cut = tok.indexOf("#"), kit = cut > 0 ? tok.slice(1, cut) : tok.slice(1), team = cut > 0 ? tok.slice(cut + 1) : null;
+    const pool = team ? live.filter(x => x.kit === kit && teamOf(x) === team) : live.filter(x => x.kit === kit);
+    const u = hit !== undefined ? hit : (pool.find(x => !x.hidden) || pool[0]);
     return u ? u.id : tok;
   }
   function tokenize(cmd, alias) {

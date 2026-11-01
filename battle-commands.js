@@ -2,7 +2,7 @@
 (function (root) {
   "use strict";
   let local = {};
-  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "standAnswer", "battle.standCheck", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction", "battle.duel"];
+  const types = ["skill", "move", "standUp", "useItem", "startCombat", "endTurn", "openingChoice", "blockAnswer", "assistAnswer", "koltSwapAnswer", "heluScanAnswer", "longgeSafetyAnswer", "standAnswer", "battle.standCheck", "retreat", "battle.endPlayerTurn", "battle.endEnemyTurn", "battle.enemyAction", "battle.finish", "battle.afterBattle", "battle.checkSolo", "battle.supportInfo", "battle.rememberCampaign", "battle.loadCampaign", "battle.cleanQueues", "battle.setup", "battle.setupRogue", "battle.panel", "battle.undo", "battle.continue", "battle.chain", "battle.friendlyFire", "battle.playerFaction", "battle.duel", "battle.brawl"];
   const panelActions = ["bagAdd", "currency", "water", "healItem", "repair", "advance", "shortRest", "longRest", "restore", "cheat", "saveSlot", "loadSlot", "clearSlot", "addParty", "removeParty", "addEnemy", "removeEnemy", "setField", "ruinHp", "setGap", "gapHp", "rollWall", "toggleDoor", "addProp", "removeProp", "setZones", "setPartySize", "setWeather", "setRegion", "setScene", "setLight", "rollEncounter", "rollBossEncounter", "selectEncounter", "normalizeBag", "normalizeGaps", "normalizeField", "setHighland", "setExecution", "setShare", "setSpread", "setTower", "setDrops"];
   function configure(adapter) { local = Object.assign({}, local, adapter || {}); }
   function environment(context) { return Object.assign({}, local, context || {}); }
@@ -149,6 +149,8 @@
     }
     if (cmd.type === "battle.playerFaction") playerFactionCheck(cmd);
     if (cmd.type === "battle.duel") duelCheck(cmd);
+    // 争斗（#543，brawl.js · brawlCheck）：等级段、人数、队伍、每个角色的养成都查，不合法就拒绝并写原因
+    if (cmd.type === "battle.brawl") brawlCheck(cmd);
     if (cmd.type === "heluScanAnswer" && cmd.picks != null && (typeof cmd.picks !== "object" || Array.isArray(cmd.picks))) throw new Error("picks must be an object");
     if (cmd.type === "battle.panel") {
       if (cmd.action === "setField") oneOf(cmd.kind, ["", "fireOn", "ice", "acid", "electric", "energy", "harmonic", "heal", "abyss", "highland", "collapseOn", "ruinOn", "isolate"], "field kind");
@@ -210,8 +212,12 @@
       if (["bagAdd", "healItem"].includes(cmd.action) && !Object.prototype.hasOwnProperty.call(ITEM_CATALOG, cmd.item)) throw new Error("Unknown item: " + cmd.item);
     }
   }
+  /** 行动指令在行动的人的结算上下文里做（争斗两队同一个角色：按 kit 找到的是他自己，party.js · withKitScope） */
   function skill(cmd) {
     const a = actor(cmd.actor);
+    return typeof withKitScope === "function" ? withKitScope(a, () => skillAct(cmd, a)) : skillAct(cmd, a);
+  }
+  function skillAct(cmd, a) {
     state.attackerId = cmd.actor;
     state.selectedId = cmd.actor;
     state.targetId = cmd.target || null;
@@ -501,6 +507,8 @@
       case "battle.playerFaction": return { factions: setPlayerFaction(cmd) };
       // 决斗（PvP 第三步，enemies.js · pvpDuelSetup，#472）：布好战场之后、开战之前，把选好的两队摆成两个互相敌对的玩家阵营
       case "battle.duel": return { duel: pvpDuelSetup(cmd) };
+      // 争斗（#543，brawl.js · brawlSetup）：照 spec 造两队的角色（等级段、专长、属性、改造），布置成决斗，翻硬币定先手；之后照常开战
+      case "battle.brawl": return brawlSetup(cmd);
     }
   }
   root.BattleCommands = { execute, configure, battleSpecData, types: types.slice(), panelActions: panelActions.slice() };

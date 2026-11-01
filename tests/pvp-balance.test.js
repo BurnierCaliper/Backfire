@@ -168,3 +168,51 @@ test("汇总：先手胜率只算分出胜负的场次，平局、超时、异�
   const d = P.diff({ F: 60, S: 40, firstRate: 0.6 }, { F: 50, S: 50, firstRate: 0.5 });
   assert.ok(Math.abs(d.d - 0.1) < 1e-12 && d.ci[0] < 0.1 && d.ci[1] > 0.1);
 });
+
+test("--brawl：用争斗的布置跑（#543，brawl.js）——等级段的等级、所有武器同一级、BRAWL_CFG.sim 的固定养成（带改造），抛硬币照样由工具定；不给 --brawl 和以前一样", () => {
+  const plain = v => JSON.parse(JSON.stringify(v));
+  const opt = P.parseArgs(["--brawl", "--sizes", "1", "--pairs", "1", "--fixed", "0"]);
+  assert.deepEqual([opt.brawl, plain(opt.levels), opt.out], [true, [20, 10], "docs/balance/pvp-balance-brawl"]);
+  assert.equal(P.parseArgs(["--brawl", "--policy", "skill"]).out, "docs/balance/pvp-balance-brawl-skill");
+  assert.throws(() => P.parseArgs(["--brawl", "--levels", "18"]), /brawl levels must be 20 \/ 10/);
+  const off = P.parseArgs([]);
+  assert.deepEqual([off.brawl, off.levels, off.out], [false, P.CONFIG.levels, P.CONFIG.out], "不给 --brawl：和以前一样");
+  assert.ok(!P.plan({ sizes: [1], levels: [3], pairs: 1, fixedPairs: 0 }).some(j => j.brawl));
+  const jobs = P.plan(opt);
+  assert.ok(jobs.length && jobs.every(j => j.brawl && [20, 10].includes(j.level)), "每一场都带 brawl、只在等级段的等级");
+  const job = { kind: "random", variant: "noStand", size: 2, level: 20, index: 0, a: ["kolt", "ruby"], b: ["hiaki", "tou"], seed: "T543-BRAWL", first: "b", aTeam: "1队", brawl: true };
+  const { c, S, firstTeam } = P.prepare(job);
+  assert.deepEqual([firstTeam, S.pvpDuel.first, S.pvpDuel.brawl, S.pvpDuel.stand], ["2队", "2队", true, false], "布置完就翻了硬币，照样由工具定先手；情况照旧（不允许起身）");
+  const heroes = S.units.filter(u => u.isPlayer && !c.isWeaponUnit(u));
+  assert.deepEqual(plain(heroes.map(u => u.kit).sort()), ["hiaki", "kolt", "ruby", "tou"]);
+  heroes.forEach(u => {
+    const want = plain(c.brawlSimEntry(u.kit, 0));
+    assert.equal(u.level, 20, u.kit);
+    u.linkedKits.forEach(k => assert.equal(u.weaponLevels[k], 10, u.kit + " " + k));
+    assert.deepEqual(plain(u.feats), want.feats, u.kit + " 的专长");
+    assert.equal(u.cyberPlan && u.cyberPlan.armor, want.cyberPlan.armor, u.kit + " 带改造（一半可换的肉体换成装甲）");
+    assert.equal(u.layers[0].type, "armor");
+  });
+  // 打一场（普攻版，1v1 Lv10）：照常出结果、自检通过；json 一行照样存取
+  const row = P.runJob({ kind: "random", variant: "base", size: 1, level: 10, index: 0, a: ["kolt"], b: ["ruby"], seed: "T543-BRAWL-RUN", first: "a", aTeam: "1队", brawl: true });
+  assert.ok(["F", "S", "D"].includes(row.w) && !row.err && !row.bugs, JSON.stringify(row));
+  assert.equal(row.b, 1);
+  assert.deepEqual(P.unpackRow(P.packRow(row)), row);
+  const table = P.heroTable([10], true);
+  assert.ok(table.kolt.byLevel[10].hp > 0 && table.ruby.byLevel[10].hp > 0, "角色参考表照争斗的布置造");
+});
+
+test("--brawl 整条命令跑得通：报告写明是争斗的布置，json 里记着 BRAWL_CFG（这一步不重跑正式报告，只在临时目录跑一个最小样本）", async () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pvp-brawl-"));
+  try {
+    const out = path.join(dir, "brawl");
+    const code = await P.main(["--brawl", "--sizes", "1", "--levels", "10", "--pairs", "1", "--fixed", "0", "--variants", "base", "--workers", "1", "--out", out]);
+    assert.equal(code, 0, "没有异常场次");
+    const md = fs.readFileSync(out + ".md", "utf8"), json = JSON.parse(fs.readFileSync(out + ".json", "utf8"));
+    assert.match(md, /照争斗的布置（#543，brawl\.js · battle\.brawl）/);
+    assert.equal(json.options.brawl, true);
+    assert.deepEqual(json.brawlCfg.tiers.map(t => t.level), [20, 10]);
+    assert.equal(json.rows.length, 2, "1 对阵容先后手各一场");
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
