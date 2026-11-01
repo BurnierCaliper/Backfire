@@ -14,8 +14,9 @@ const path = require("node:path");
 const { execSync } = require("node:child_process");
 
 const ROOT = path.resolve(__dirname, "..");
-// 坚毅生命的字段 / 字样（upOnShp 是公开的「起身中」，不算）；AI 的想法 / 搜索（sim-search.js · BattleSearch 的统计、试跑的种子）
-const LEAK = /"shp"|"shpMax"|shpBase|shpBonus|坚毅/;
+// 坚毅生命的字段 / 数字（upOnShp 是公开的「起身中」，战场日志里不带数字的「坚毅受创」也是公开的，都不算）；
+// AI 的想法 / 搜索（sim-search.js · BattleSearch 的统计、试跑的种子）
+const LEAK = /"shp"\s*:|"shpMax"\s*:|shpBase|shpBonus|坚毅[^"，。；\]]{0,8}\d/;
 const AI_LEAK = /"decisions"|"tried"|skill:[^"]*:@|BattleSearch|"stats":\{"decisions/;
 
 function playwright() {
@@ -180,7 +181,7 @@ test("手机竖屏（390×844）：「玩法」选「争斗」开房 → 房主�
   await page.waitForFunction(() => /养成选好了/.test(document.querySelector('#online-brawl [data-brawl-slot="1队:0"]').textContent), null, { timeout: 10000 });
   wide = await noOverflow(page);
   assert.ok(wide.page && wide.room, "选养成时没有横向溢出：" + wide.wide.join("、"));
-  assert.doesNotMatch(await page.textContent("#online-brawl"), /坚毅/, "房间画面不写坚毅");
+  assert.doesNotMatch(JSON.stringify(await page.evaluate(() => OnlineGame.getView().packet.brawl)), /shp|坚毅/i, "房间的数据里没有坚毅");
   await page.tap('#online-brawl [data-brawl="ready"]');
   await page.waitForFunction(() => OnlineBrawl.viewFor("gm-1").start.ok === true);
   await page.waitForFunction(() => !document.querySelector('#online-brawl [data-brawl="start"]').disabled);
@@ -204,8 +205,9 @@ test("手机竖屏（390×844）：「玩法」选「争斗」开房 → 房主�
   assert.deepEqual(errors, []);
 });
 
-test("一个人开房、对面整队 AI：AI 自己排顺序、出手、回答询问（节奏照敌人 AI），打完一整场 → 结算写谁赢 →「回到房间」再来一局（设定、位置、养成留着），队伍档案换回开打前的样子", { timeout: 300000 }, async t => {
-  const o = await hostPage(t); if (!o) return; const { page, errors } = o;
+test("一个人开房、对面整队 AI：AI 自己排顺序、出手、回答询问（节奏照敌人 AI），打完一整场 → 结算写谁赢 →「回到房间」再来一局（设定、位置、养成留着），队伍档案换回开打前的样子；在旁边看的玩家收到的包里没有坚毅、没有 AI 的想法", { timeout: 300000 }, async t => {
+  // 甲只在房间里看（不选位置）：整场的包都发给他，拿来查白名单
+  const o = await hostPage(t, { mates: [{ id: "p-1", name: "甲" }] }); if (!o) return; const { page, errors } = o;
   const before = await page.evaluate(async () => {
     GAME.skip = true; GAME.instant = true;
     BRAWL_ROOM_CFG.aiStepMs = 60; BRAWL_ROOM_CFG.tossMs = 600;   // 测试里放快一点（照样一步一步来）
@@ -241,6 +243,12 @@ test("一个人开房、对面整队 AI：AI 自己排顺序、出手、回答�
   assert.equal(end.stashed, false, "打完把开局收起来的队伍档案放回去");
   assert.equal(end.ledger, before.ledger, "队伍档案和开打前一样（争斗不读也不写存档）");
   assert.equal(end.camp, true, "队伍记忆没被争斗的角色盖掉");
+  const watched = await page.evaluate(() => __all("p-1"));
+  assert.match(watched, /"mode":"brawl"/, "甲一直收到争斗的包");
+  assert.doesNotMatch(watched, LEAK, "整场发给甲的包里没有坚毅数字");
+  assert.doesNotMatch(watched, AI_LEAK, "也没有 AI 的想法 / 搜索");
+  const res = await page.evaluate(() => (__last("p-1") || {}).result);
+  assert.ok(res && res.duel && (res.duel.winner || res.duel.draw), "结算（谁赢 / 平局）发给甲");
   assert.match(end.panel, /争斗没有掉落、经验、奎支/);
   assert.notEqual(end.back, "none", "结算面板有「回到房间（再来一局）」");
   assert.equal(end.explore, "none");

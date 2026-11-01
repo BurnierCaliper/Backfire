@@ -194,7 +194,8 @@
     // 争斗：角色归谁按开打时房间里的位置记（online-brawl.js · assignments：按单位 id，两队可以有同一个角色；AI 那一队归 AI 操作者）
     const next = assignments || (rogue() ? OnlineRogue.assignmentsFor(state.units.filter(u => u.isPlayer && !u.weaponOf))
       : brawl() ? OnlineBrawl.assignments(ids) : Object.fromEntries(old.filter(u => ids.includes(u.owner)).map(u => [u.id, u.owner])));
-    const ack = HotseatGame.enableOnline({ mode: "trpg", players: operators(), assignments: next });
+    // 争斗：房主也是一名玩家，排行动顺序时不能直接挪别人的单位（hotseat.js · strict）
+    const ack = HotseatGame.enableOnline(Object.assign({ mode: "trpg", players: operators(), assignments: next }, brawl() ? { strict: true } : {}));
     if (!ack.ok) error(ack.error);
   }
   function mountOrder() {

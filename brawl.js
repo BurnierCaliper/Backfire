@@ -1,5 +1,5 @@
 /* =========================================================
- * 争斗（联机新玩法，#543 第 1 步：规则和布置；界面、联机是第 2 步）
+ * 争斗（联机新玩法，#543 第 1 步：规则和布置；第 2 步接联机见 online-brawl.js / brawl-ui.js，issue #560）
  * ---------------------------------------------------------
  * 单独开一局的 PvP：两队人数一样（1v1 ~ 4v4），固定等级段（Lv20 · 武器 10 级 / Lv10 · 武器 5 级），
  * 每个角色的专长、属性加点、血量层改造开局自己选，翻硬币定先手，然后照决斗的规则打（enemies.js · PVP_DUEL_CFG、docs/pvp.md 第 1.2、2–6 节）：
@@ -29,7 +29,8 @@
  * 或者开新的一场（app.js · resetBattleRecords）时原样放回去（brawlRestore）。不读也不写玩家的跑团角色，打完不给经验、奎支、掉落，不记战场数据（照决斗）。
  * 两队可以用同一个角色：按 kit 找单位的地方改成按单位 id / 结算上下文找（party.js · findKit / withKitScope / weaponOwnerUnit），
  * 武器耐久、长休次数这些按 kit 记的两个人分开记（ledger.js · ledgerKitKey → brawlKitKey）。
- * AI 整队：标成 AI 的那一队用 BattleSim.SKILL_POLICY 自动行动（brawlPolicy）。行动顺序沿用联机现在那一套（hotseat.js），第 2 步接。
+ * AI 整队：标成 AI 的那一队用 BattleSim.SKILL_POLICY 自动行动（brawlPolicy）。行动顺序沿用联机现在那一套（hotseat.js）；
+ * 联机时 AI 是会话里的一个操作者，轮到它由房主替它出手（online-brawl.js · tick / decide）。
  * ========================================================= */
 const BRAWL_CFG = {
   // 等级段：等级、这个角色所有武器的等级

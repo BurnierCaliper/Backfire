@@ -80,6 +80,8 @@
     const operatorMap = new Map(operators.map(p => [p.id, p]));
     if (!operators.length || operatorMap.size !== operators.length || operators.some(p => typeof p.id !== "string" || !p.id)) throw new TypeError("Hotseat requires unique operators");
     const gmId = options.gmId || operators[0].id, mode = options.mode || "trpg";
+    // strict：争斗（#543 / #560）里房主也是一名玩家——排行动顺序时没有主持人的特权：不能直接挪别人的单位，换位置照样要对方同意
+    const strict = !!options.strict;
     if (!operatorMap.has(gmId)) throw new TypeError("Unknown host operator");
     if (!["trpg", "coop"].includes(mode)) throw new TypeError("Unknown hotseat mode");
     const now = options.now || (() => Date.now());
@@ -547,7 +549,7 @@
       operator(id);
       const row = rowFor(unitId);
       if (!row) fail("unavailable_unit", "该单位不在可操作队伍中");
-      if (row.operatorId !== id && !(override && id === gmId && mode === "trpg")) fail("not_owner", "不是你的角色或武器人");
+      if (row.operatorId !== id && !(override && id === gmId && mode === "trpg" && !strict)) fail("not_owner", "不是你的角色或武器人");
       return row;
     }
     function place(id, unitId, index) {
@@ -593,7 +595,7 @@
       if (target) {
         movable(target);
         if (phase === "acting" && from <= lastLocked()) fail("locked_boundary", "互换双方都必须在固定格子之后");
-        if (target.operatorId !== row.operatorId && !(id === gmId && mode === "trpg")) {
+        if (target.operatorId !== row.operatorId && !(id === gmId && mode === "trpg" && !strict)) {
           const request = { id: "swap-" + (++sequence), actor: unitId, target: target.unitId, from, to, requester: id, responder: target.operatorId };
           swaps = swaps.filter(s => ![s.actor, s.target].some(u => u === unitId || u === target.unitId)); swaps.push(request);
           return { status: "pending", requestId: request.id, snapshot: emit("swapRequested") };

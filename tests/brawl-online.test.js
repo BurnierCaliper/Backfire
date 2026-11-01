@@ -241,7 +241,7 @@ function bridge() {
   const [ax, ar] = team("1队"), [bx, bk] = team("2队");
   const players = [{ id: "host", name: "房主", gm: true }, { id: "p1", name: "甲" }, { id: "brawl-ai", name: "AI", ai: true }];
   const assignments = { [ax.id]: "p1", [ar.id]: "p1", [bx.id]: "brawl-ai", [bk.id]: "brawl-ai" };
-  const ack = c.HotseatGame.enableOnline({ mode: "trpg", players, assignments });
+  const ack = c.HotseatGame.enableOnline({ mode: "trpg", players, assignments, strict: true });   // 同 online-game.js · setupOperators（争斗）
   assert.equal(ack.ok, true, ack.error);
   const send = (who, cmd) => c.HotseatGame.receiveFrom(who, plain(cmd));
   return { c, S, ax, ar, bx, bk, send, view: who => plain(c.HotseatGame.getViewFor(who)) };
@@ -258,7 +258,7 @@ test("两队同一个角色：会话按单位记归属（1 队的夕夏归甲、
   assert.doesNotMatch(JSON.stringify(pv), LEAK);
 });
 
-test("行动顺序照会话：这一轮开始两队一起排（甲排自己的，AI 排自己的），没动过的单位随时可以换位置，动过的格子固定；后手那一队照排好的顺序在敌人回合轮到", () => {
+test("行动顺序照会话：这一轮开始两队一起排（甲排自己的，AI 排自己的），没动过的单位随时可以换位置，动过的格子固定；房主也是一名玩家，不能直接挪别人的单位；后手那一队照排好的顺序在敌人回合轮到", () => {
   const { c, S, ax, ar, bx, bk, send, view } = bridge();
   assert.equal(c.HotseatGame.startCombat().ok !== false, true);
   c.HotseatGame.beginRound();
@@ -270,6 +270,15 @@ test("行动顺序照会话：这一轮开始两队一起排（甲排自己的�
   assert.equal(send("p1", { type: "orderPick", actor: bx.id, index: 2 }).ok, false, "不能替 AI 排");
   assert.equal(send("brawl-ai", { type: "orderPick", actor: bx.id, index: 2 }).ok, true);
   assert.equal(send("brawl-ai", { type: "orderPick", actor: bk.id, index: 3 }).ok, true);
+  // 房主也是一名玩家：不能直接挪别人的单位（跑团里主持人可以）；甲想和 AI 的单位换位置要 AI 同意（发出的是请求）
+  assert.equal(send("host", { type: "orderMove", actor: bx.id, index: 3 }).ok, false, "房主不能挪 AI 的单位");
+  assert.match(send("host", { type: "orderMove", actor: ax.id, index: 1 }).error, /不是你的角色/, "也不能挪甲的");
+  const ask = send("p1", { type: "orderMove", actor: ar.id, index: 2 });
+  assert.equal(ask.ok, true);
+  assert.equal(ask.result.status, "pending", "和别人的单位换位置是请求");
+  assert.equal(view("brawl-ai").swap.recipient, "brawl-ai");
+  assert.equal(send("brawl-ai", { type: "orderSwapAccept", requestId: view("brawl-ai").swap.requestId, accept: false }).ok, true, "AI 不换");
+  assert.deepEqual(view("p1").order.map(r => r && r.actor), [ax.id, ar.id, bx.id, bk.id]);
   assert.equal(send("p1", { type: "orderConfirm" }).ok, true);
   assert.equal(send("brawl-ai", { type: "orderConfirm" }).ok, true);
   v = view("p1");

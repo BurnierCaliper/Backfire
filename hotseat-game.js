@@ -70,7 +70,8 @@
     for (const u of heroes()) if (ownerByKit[okey(u)] && config.players.some(p => p.id === ownerByKit[okey(u)])) assignments[u.id] = ownerByKit[okey(u)];
     const keepChat = session ? session.snapshot().chat || [] : [];   // 重建会话时带上小队聊天记录
     const keepTable = session ? session.snapshot().table || null : null;   // 检定、属性点申请也带上
-    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, assignments, chat: keepChat, table: keepTable,
+    // strict：争斗（#560）里房主也是一名玩家，排行动顺序时没有主持人的特权（hotseat.js）
+    session = Hotseat.create({ operators: config.players, gmId: gm(), mode: config.mode, strict: !!config.strict, assignments, chat: keepChat, table: keepTable,
       getUnits: () => state.units, canStand: u => !standUpBlocked(u),
       // 玩家阵营定在哪个回合行动（enemies.js · unitTurnPhase，PvP #445）：这一轮开始时所有人一起排行动顺序（#478），我方回合里只轮到在我方回合行动的，
       // 敌人回合开始时先动的那一段（#464，beginRound("enemy")）照排好的顺序轮到在敌人回合行动的；没配置阵营时都在我方回合
