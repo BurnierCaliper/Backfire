@@ -261,20 +261,20 @@ test("两队用同一个角色能正常开打：伤害、协助格挡、倒地 /
 });
 
 test("两队用同一个角色：资源、回合效果各是各的（夕夏的引擎 / 燃油、瑞比的纳米、诺拉的双相各抛一次），技能指令按出手的人结算", () => {
-  const { c, S, one: [x1, r1, n1], two: [x2, r2, n2] } = brawl(["xia", "ruby", "nora"], ["xia", "ruby", "nora"], { first: "1队", tier: 0 });
+  const { c, S, one: [x1, r1, n1], two: [x2, r2, n2] } = brawl(["xia", "ruby", "nora"], ["xia", "ruby", "nora"], { first: "2队", tier: 0 });
   // 诺拉的双相：两个诺拉都抛过（以前只抛第一个）
   assert.ok(["gentle", "cruel"].includes(n1.resources.mood) && ["gentle", "cruel"].includes(n2.resources.mood));
   c.startCombat();
-  // 拉响引擎：只点着出手的那个夕夏
-  x1.ap = 2; x1.bonus = 2;
-  c.Commands.dispatch({ type: "skill", actor: x1.id, skill: "xia_engine", target: null });
-  assert.equal(!!x1.resources.engine, true, "1 队的夕夏引擎启动");
-  assert.equal(!!x2.resources.engine, false, "2 队的没动");
-  // 燃油（启动引擎+）：加在出手的那个夕夏身上
-  const fuel2 = Number(x2.resources.fuel) || 0;
-  c.withKitScope(x1, () => c.addFuel(2, "测试", []));
-  assert.equal(Number(x2.resources.fuel) || 0, fuel2, "2 队夕夏的燃油没变");
-  assert.ok((Number(x1.resources.fuel) || 0) >= 2, "1 队的夕夏拿到燃油");
+  // 拉响引擎：只点着出手的那个夕夏（2 队的那个；以前按 kit 找到的是 1 队那个）
+  x2.ap = 2; x2.bonus = 2;
+  c.Commands.dispatch({ type: "skill", actor: x2.id, skill: "xia_engine", target: null });
+  assert.equal(!!x2.resources.engine, true, "2 队的夕夏引擎启动");
+  assert.equal(!!x1.resources.engine, false, "1 队的没动");
+  // 燃油（启动引擎+）：加在结算上下文那个夕夏身上
+  const fuel1 = Number(x1.resources.fuel) || 0;
+  c.withKitScope(x2, () => c.addFuel(2, "测试", []));
+  assert.equal(Number(x1.resources.fuel) || 0, fuel1, "1 队夕夏的燃油没变");
+  assert.ok((Number(x2.resources.fuel) || 0) >= 2, "2 队的夕夏拿到燃油");
   // 纳米：瑞比被高能自爆以外的规则加纳米时，加给结算上下文那一边的瑞比
   const nano1 = r1.resources.nano, nano2 = r2.resources.nano;
   c.withKitScope(r2, () => c.addNano(10));
