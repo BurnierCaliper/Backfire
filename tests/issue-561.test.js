@@ -3,8 +3,9 @@
 //   当成「任意距离 = 距离 0–1」，距离 2 的目标打不到（「哔哩哩&滋啦啦 是任意距离攻击，打不到距离 2 的 夕夏。」）；
 //   感电又不看这一击打没打中，照样挂上。
 //   现在：电光束带不限距离的标记（flags.anyRange，现成的机制），距离 2 以上照常打；危墙 / 关着的门、屏障照旧挡。
-//   感电挂在这一击上（onConnect：打中了才挂）——被屏障吃掉、隔着危墙都不挂；被协助格挡挡下也不挂
-//   （和其他用 onConnect 写的「打中附带状态」一样：敌人的感电 / 腐蚀 / 高能攻击、Mint 驱逐……），等协助格挡的那一击跟着格挡结果走。
+//   感电挂在这一击上（onConnect：打中了才挂）——被屏障吃掉、隔着危墙、目标倒地不受伤害都不挂；被协助格挡挡下也不挂
+//   （和其他用 onConnect 写的「打中附带状态」一样：敌人的感电 / 腐蚀 / 高能攻击、Mint 驱逐……），等协助格挡的那一击跟着格挡结果走；
+//   有人替目标挨这一击（亡命之王身边的狂徒……）时挂在真正挨打的人身上。
 //   顺带查过卡面写「任意距离」、会造成伤害的技能：拉斯缪尔「狂瀑」（按钮提示写任意距离、SKILL_RANGE 0–99）同样打不到距离 2，
 //   一起带上 anyRange；Helumica 的协助攻击是反应，本来就不判射程（守卫）。选目标的名单、AI 的候选本来就列得出距离 2 的目标（守卫）。
 "use strict";
@@ -121,6 +122,38 @@ test("打不出去不挂感电：隔着危墙（距离 2、距离 1 都一样）
     assert.notEqual(xia.statuses.shock, true, `距离 ${dist(f, zone)}：不挂感电`);
     assert.doesNotMatch(log, /夕夏 被施加感电/);
   }
+});
+
+test("打不出去不挂感电：夕夏倒地没起身（起身之前不受任何伤害）", () => {
+  const f = duel();
+  const { c, xia } = f;
+  xia.layers.forEach(l => { l.current = 0; });
+  xia.dying = true; xia.upOnShp = false;
+  assert.ok(c.isDownProtected(xia), "前提：倒地没起身");
+  const log = beam(f, 1);
+  assert.match(log, /夕夏 濒死倒地，起身之前不受任何伤害/);
+  assert.notEqual(xia.statuses.shock, true, "没打中：不挂感电");
+  assert.doesNotMatch(log, /夕夏 被施加感电/);
+});
+
+test("有人替目标挨这一击（亡命之王身边的狂徒）：感电挂在真正挨打的狂徒身上，没挨打的亡命之王不挂", () => {
+  const c = H.load();
+  c.BattleSim.setup({ party: ["chuan", "kolt"], enemies: [{ id: "outlaw_king", lv: 3, zone: 3 }, { id: "thug_knife", lv: 3, zone: 3 }], zoneMode: 3, seed: "guard-561" });
+  c.startCombat();
+  const S = c.S.state;
+  const bili = c.spawnWeapon(c.findKit("chuan", S.units), "bili");
+  const king = S.units.find(u => u.kit === "outlaw_king");
+  S.units.filter(u => !u.isPlayer).forEach(u => { u.zone = 3; });
+  const guard = c.kingGuardFor(king);
+  assert.ok(guard, "前提：同区有狂徒替亡命之王挨打");
+  bili.zone = 2; bili.ap = 1;   // 距离 1：只看代挡，不牵扯射程
+  const kingHp = c.totalHp(king), guardHp = c.totalHp(guard);
+  S.attackerId = bili.id; S.targetId = king.id;
+  c.runSkill("bili_beam");
+  assert.equal(c.totalHp(king), kingHp, "亡命之王没挨打");
+  assert.ok(c.totalHp(guard) < guardHp, "狂徒替他挨了这一下");
+  assert.equal(guard.statuses.shock, true, "感电挂在挨打的狂徒身上");
+  assert.notEqual(king.statuses.shock, true, "没挨打的亡命之王不挂（以前挂在选中的目标身上）");
 });
 
 test("协助格挡：结果出来之前不挂；挡下了不挂感电（和其他打中附带状态的一样）；没挡住照常受伤、挂感电", () => {
