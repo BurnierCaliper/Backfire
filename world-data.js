@@ -43,7 +43,8 @@ function worldPlaceOf(regionOrId) {
     WORLD_PLACES.find(p => p.name === regionOrId) || null;
 }
 
-/* ===== 战斗所在的区域、场景、光影（只是画面用的标签：HD-2D 战场默认地台的地面、远景、灯、天空；不改任何结算） =====
+/* ===== 战斗所在的区域、场景、光影（主要是画面用的标签：HD-2D 战场默认地台的地面、远景、灯、天空；
+ * 结算只有一处看区域：下水道的谐波攻击有回声，app.js · SEWER_ECHO） =====
  * BATTLE_REGIONS：战斗状态的 state.region 只认这里的区域名，联机白名单（online-view.js · projectState）也只放行这些。
  *   区域名用游戏里现成的：单局各幕 / 幕间改走的采矿场（rogue-data.js 的 regions / altRegions）、遭遇的 region。
  *   地图地点 id（跑团 LEDGER.place：mine_1、outer_city……）、地点名（天网塔）按上面的 WORLD_REGION_PLACE / WORLD_PLACES 对到区域；

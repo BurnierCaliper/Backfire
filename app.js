@@ -49,6 +49,7 @@ const state = {
   ffHurt: {},         // 友伤打掉、还没补回来的血：{ 单位 id: 血量 }（ffHurtOf，#428）
   playerFactions: null,   // 玩家阵营（PvP 第一步，enemies.js · PVP_CFG，#445）：null = 全部在「我方」，一切照旧
   pvpDuel: null,          // 决斗（PvP 第三步，enemies.js · PVP_DUEL_CFG，#472）：null = 不是决斗
+  sewerEchoes: [],        // 下水道回声：等着在回合结束时再放一次的谐波技能（SEWER_ECHO / sewerEchoClose）
   fields: {
     1: emptyField(),
     2: emptyField(),
@@ -1642,6 +1643,7 @@ function startCombat() {
   const prePage = state.logPages[state.logPages.length - 1];
   if (prePage && prePage.lines.length) prePage.turn = 0;
   state.turnNo = 1;
+  state.sewerEchoes = [];   // 下水道回声（sewerEchoClose）：新的一场从空开始
   state.lateRound = 0;   // 在敌人回合行动的玩家阵营自己的回合数（#476，startEnemyPhase 记）：开战时还没轮到它们
   state.goneFoes = [];   // 新的一场：移出场的敌人名单从空开始
   // 整场战斗的天气开关从这一场开始算：末日（天气与场地翻倍）、相位计数器（开战就是相位天气的从现在开始走，否则第一次进入相位才走）
@@ -2585,6 +2587,79 @@ function endEnemyTurn() {
   turnEnd();
 }
 
+/* ===== 下水道回声（作者 11/01）=====
+ * 在下水道（这场战斗的区域 state.region 是 SEWER_ECHO.region）打出的谐波攻击有回声：打出它的那个技能，
+ * 在下一个整回合结束时（turnEnd，第 3 回合打的 → 第 4 回合结束）对同一个目标自动、免费地整个再放一次。敌我都算。
+ *   - 「谐波攻击」：技能里有一击是谐波属性的攻击（dealTo 的 flags.action 不是 false、也不是环境伤害）；
+ *     灼烧这类持续伤害、场地伤害、共振分享这类派生伤害不算。打配置物 / 危墙的不算（回声只对单位）。
+ *   - 回声：不花行动点 / 附赠行动，不受技能的使用条件、射程限制；回声里的每一击都不能格挡、不触发协助格挡。
+ *     技能自己的资源（圣盾、燃油……）照常消耗、照技能本身的规则处理。不算招式疲劳。
+ *   - 到时候目标（出手时选的单位）已经不在场（死了 / 离场）：回声落空。出手的人死了、离场：照样打出。
+ *   - 回声本身不再产生回声。
+ * state.sewerEchoes：等着回声的 [{ due: 第几回合结束时回声, skill, attackerId, targetId, flow: 出手时的分步选择 }]，跟着存档走，开战清空。 */
+const SEWER_ECHO = {
+  region: "下水道",     // 只在这个区域生效（world-data.js · BATTLE_REGIONS 里的名字）
+  element: "harmonic",  // 有回声的攻击属性
+  delayRounds: 1        // 隔几个整回合：1 = 下一个整回合结束时
+};
+/** 正在结算的技能（runSkill 一层套一层，协助攻击、防守反击会嵌在别的技能里）：dealTo 打出谐波攻击时记在最里层 */
+const SEWER_ECHO_STACK = [];
+function sewerEchoOn() { return !!state.combatStarted && state.region === SEWER_ECHO.region; }
+/** 正在放回声（回声里的技能免费、不能格挡，也不再产生回声） */
+function sewerEchoReplaying() { return (Number(state._echoReplay) || 0) > 0; }
+/** runSkill 开始：记下这次出手是谁、打谁、分步选了什么 */
+function sewerEchoOpen(id, a0) {
+  const f = {
+    id, attackerId: a0 ? a0.id : null, targetId: state.targetId || null, hit: false,
+    flow: state.skillFlow && state.skillFlow.id === id ? JSON.parse(JSON.stringify(state.skillFlow)) : null
+  };
+  SEWER_ECHO_STACK.push(f);
+  return f;
+}
+/** dealTo：这一击是谐波攻击就给最里层的技能记上 */
+function sewerEchoMark(opt) {
+  if (!SEWER_ECHO_STACK.length || sewerEchoReplaying()) return;
+  const fl = (opt && opt.flags) || {};
+  if (opt.element !== SEWER_ECHO.element || fl.action === false || fl.environment) return;
+  SEWER_ECHO_STACK[SEWER_ECHO_STACK.length - 1].hit = true;
+}
+/** runSkill 结束：打出过谐波攻击、又在下水道，就排一次回声 */
+function sewerEchoClose(f) {
+  const i = SEWER_ECHO_STACK.lastIndexOf(f);
+  if (i >= 0) SEWER_ECHO_STACK.splice(i, 1);
+  if (!f.hit || !f.attackerId || sewerEchoReplaying() || !sewerEchoOn()) return;
+  if (!Array.isArray(state.sewerEchoes)) state.sewerEchoes = [];
+  state.sewerEchoes.push({ due: (Number(state.turnNo) || 0) + SEWER_ECHO.delayRounds, skill: f.id, attackerId: f.attackerId, targetId: f.targetId, flow: f.flow });
+}
+/** 回合结束：到点的回声一个一个放（出手的先后顺序） */
+function sewerEchoTurnEnd() {
+  const list = Array.isArray(state.sewerEchoes) ? state.sewerEchoes : [];
+  const now = Number(state.turnNo) || 0;
+  const due = list.filter(e => e.due <= now);
+  if (!due.length) return;
+  state.sewerEchoes = list.filter(e => e.due > now);
+  due.forEach(e => {
+    const a = (state.units || []).find(u => u.id === e.attackerId);
+    const label = a ? `${a.name} 的「${skillDisplayName(a, e.skill)}」` : `「${e.skill}」`;
+    const t = e.targetId ? (state.units || []).find(u => u.id === e.targetId) : null;
+    if (!a || (t && offField(t))) {
+      appendLog(`下水道回声：${label}落空（${a ? "目标已经不在场" : "出手的人已经不在了"}）。`);
+      return;
+    }
+    appendLog(`下水道回声：${label}在管道里回荡，再生效一次。`);
+    const prev = { a: state.attackerId, t: state.targetId, f: state.skillFlow };
+    state.attackerId = a.id;
+    state.targetId = e.targetId;
+    state.skillFlow = e.flow ? JSON.parse(JSON.stringify(e.flow)) : null;
+    state._echoReplay = (Number(state._echoReplay) || 0) + 1;
+    try { runSkill(e.skill, { ignorePhase: true, echo: true }); }
+    finally {
+      state._echoReplay = Math.max(0, (Number(state._echoReplay) || 0) - 1);
+      state.attackerId = prev.a; state.targetId = prev.t; state.skillFlow = prev.f;
+    }
+  });
+}
+
 function turnEnd() {
   snapshot();
   const notes = ["—— 回合结束 ——"];
@@ -2687,6 +2762,7 @@ function turnEnd() {
   settleBossStuns(notes);
   if (typeof ratfolkRoundEnd === "function") ratfolkRoundEnd(notes);   // 狂暴的潜藏者回合结束进入躲藏（enemies.js）
   appendLog(notes.join("\n"));
+  sewerEchoTurnEnd();   // 下水道回声：上一回合打出的谐波攻击，这一回合结束时整个技能再放一次
   // 决斗的回合上限（enemies.js · pvpDuelRoundLimit，#472）：打满限定的回合还没分出胜负，按剩余血量百分比判，不再开下一回合
   if (typeof pvpDuelRoundLimit === "function" && pvpDuelRoundLimit()) return;
   beginRound([]);
@@ -6332,6 +6408,7 @@ function costBlockReason(u, cost) {
 function spendAp(u, n, reason) {
   n = n || 1;
   if (!u) return true;
+  if (sewerEchoReplaying()) return true;   // 下水道回声：免费
   if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${!reason || /^[a-z_:]+$/.test(reason) ? "行动" : reason}。`); return false; }
   if ((u.ap || 0) < n) {
     appendLog(`${u.name} 行动点不足（${u.ap || 0}/${u.apMax || 0}），无法${reason || "行动"}。`);
@@ -6350,6 +6427,7 @@ function spendAp(u, n, reason) {
 function spendBonus(u, n, reason) {
   n = n || 1;
   if (!u) return true;
+  if (sewerEchoReplaying()) return true;   // 下水道回声：免费
   if (sinkLocked(u)) { appendLog(`${u.name} 陷在流沙里没顶，无法${!reason || /^[a-z_:]+$/.test(reason) ? "行动" : reason}。`); return false; }
   if ((u.bonus || 0) < n) {
     appendLog(`${u.name} 附赠行动不足（${u.bonus || 0}/${u.bonusMax || 0}），无法${reason || "行动"}。`);
@@ -9290,6 +9368,12 @@ function dealToInner(attacker, target, opt) {
   if (attacker && target && attacker.isPlayer && !target.isPlayer && (state.units || []).includes(attacker)) target._lastHitBy = attacker.id;
   else if (attacker && attacker.envSrc && target && !target.isPlayer) creditPlayerHit(target, (envOwnerUnit(attacker) || {}).id);   // 配置物打死的：击杀算触发者
   if (!opt.flags.atkFx) armAtkFx(attacker, opt.flags);
+  // 下水道回声（sewerEchoTurnEnd）：回声里的每一击都不能格挡、不触发协助格挡，也不受射程限制
+  if (sewerEchoReplaying()) {
+    opt.flags.blockResolved = true;
+    opt.flags.block = "none";
+    opt.flags.anyRange = true;
+  }
   if (opt.flags.diffract) {
     opt.flags.blockResolved = true;
     opt.flags.block = "none";
@@ -9488,6 +9572,9 @@ function dealToInner(attacker, target, opt) {
       opt.flags.blockResolved = true;
     }
   }
+  // 下水道回声：这一击是谐波攻击就给正在结算的技能记上（sewerEchoClose 排回声）。记在屏障、格挡队列之前：
+  // 被屏障吃掉的、排进格挡队列等回答（技能结束以后才落下）的也算打出过
+  sewerEchoMark(opt);
   // 屏障（铁壁 / 防护罩 / 废铁墙）：同区被它护着的单位挨敌方的攻击行动、或者范围攻击（算不算行动都一样）时，屏障替它吃一下（同一次行动只吃一下）。
   // 谁护着谁、谁算敌方按阵营判断（barrierGuards / barrierFoe）：多阵营混战里敌人打敌对阵营的敌人、我方或友军自己的范围攻击，屏障都不管。
   // wallZone：借机攻击在离开的那一区结算——走的人已经站到隔壁，替他挡的是他离开的那一区的屏障
@@ -13403,8 +13490,11 @@ function runSkill(id, optRun) {
       const waveOwn = waveLedgerOpen();
       // 休眠的敌人：同样记一份，技能里直接换区走进它那一区的也叫醒它（enemies.js · dormantLedgerOpen）
       const sleepOwn = typeof dormantLedgerOpen === "function" && dormantLedgerOpen(a0);
+      // 下水道回声：这次出手打出了谐波攻击就排一次回声（回声本身不排，见 sewerEchoClose）
+      const echoFrame = sewerEchoOpen(id, a0);
       try { trackHealBy(a0, () => runSkillInner(id, optRun)); }
       finally {
+        sewerEchoClose(echoFrame);
         state._highDefer = Math.max(0, (Number(state._highDefer) || 0) - 1);
         if (apShare) { state._apShare = null; if ((Number(a0.ap) || 0) < apBefore) consumeApGifts(a0, apShare.used); }
         waveLedgerClose(waveOwn);
@@ -13421,7 +13511,7 @@ function runSkill(id, optRun) {
       }
       if (fuelGain && (Number(state.actionSeq) || 0) !== seqBefore) addFuel(1, "引擎运转");   // 真的出手了（开始了新的行动）才算
       const bossNotes = []; settleBossStuns(bossNotes); if (bossNotes.length) appendLog(bossNotes.join("\n"));
-      applyFatigue(a0, id, scoreBefore);   // 招式疲劳：连续几个回合用同一招，这次行动的总得分打折
+      if (!(optRun && optRun.echo)) applyFatigue(a0, id, scoreBefore);   // 招式疲劳（下水道回声不算）：连续几个回合用同一招，这次行动的总得分打折
       flushAoePulse();                // 波及到的按钮 / 拉杆各触发一次（提前 return 的分支也算）
       state.actionAcc = null;         // 行动结束：之后的持续伤害不再算到这个人头上
     } finally { dropPendingFor(sink); } });
@@ -13440,7 +13530,9 @@ function runSkillInner(id, optRun) {
   state._structProxy = null;
   let t = skillTargetAny();
   if (!a) { paintSkillLog("先选攻击者。"); return; }
-  if (a.dead) { paintSkillLog(`${a.name} 已死亡，无法行动。`); return; }
+  // 下水道回声（sewerEchoTurnEnd）：出手的人死了 / 濒死也照样打出；不看使用条件、行动点、技能射程
+  const echo = !!optRun.echo;
+  if (a.dead && !echo) { paintSkillLog(`${a.name} 已死亡，无法行动。`); return; }
   if (!optRun.ignorePhase && !canControlUnit(a) && id !== "assist_block") {
     paintSkillLog(!state.combatStarted
       ? "战斗尚未开始。先点「开始战斗」。"
@@ -13449,7 +13541,7 @@ function runSkillInner(id, optRun) {
   }
   // 通用前置检查（配置物、角色 / 职责技能各分支之前）：
   // 濒死没起身的人只能起身（或「起身并协助格挡」），不能扳拉杆、操控机炮、改写炮台……（以前这几条排在濒死检查前面，只靠界面拦）
-  if (a.dying && id !== "assist_block") { paintSkillLog(`${a.name} 濒死中。先点「起身」。`); return; }
+  if (a.dying && id !== "assist_block" && !echo) { paintSkillLog(`${a.name} 濒死中。先点「起身」。`); return; }
   // 武器人主动收回为武器要和持有者同区；技能自带的强制收回不走这里
   if (/_return$/.test(String(id)) && isWeaponUnit(a)) {
     const why = weaponReturnWhy(a);
@@ -13495,7 +13587,7 @@ function runSkillInner(id, optRun) {
   const reaction = /_opp$|_block$|assist/.test(id) || id === "ufo_assist" || id === "en_ox_block" || id === "en_wolf_opp" || id === "en_thug_opp" ||
     (!!state._assistBy && a && state._assistBy === a.id);
   // 敌人技能默认花 1 行动点；赤牙的霰弹枪 / 掩体 2 行动点、追猎 1 附赠（enemies.js · enemySkillCost）
-  const enemyCost = !a.isPlayer && !reaction ? (typeof enemySkillCost === "function" ? enemySkillCost(a, id) : { ap: 1, bonus: 0 }) : null;
+  const enemyCost = !a.isPlayer && !reaction && !echo ? (typeof enemySkillCost === "function" ? enemySkillCost(a, id) : { ap: 1, bonus: 0 }) : null;
   if (enemyCost) {
     if (sinkLocked(a) || (a.ap || 0) < enemyCost.ap || (a.bonus || 0) < enemyCost.bonus) {
       paintSkillLog(`${a.name} ${(a.ap || 0) < enemyCost.ap ? "行动点" : "附赠行动"}不足，无法使用该技能。`);
@@ -13528,13 +13620,13 @@ function runSkillInner(id, optRun) {
       }
     }
   }
-  if (a.isPlayer && id !== "assist_block") {
+  if (a.isPlayer && id !== "assist_block" && !echo) {
     const why = skillRequirementError(a, id);
     if (why) { paintSkillLog(`${a.name} 现在不能使用该技能：${why}。`); return; }
     const bad = skillTargetError(a, id, t);
     if (bad) { paintSkillLog(`${a.name} 现在不能这样用：${bad}。`); return; }
   }
-  if (a.isPlayer && id !== "assist_block") {
+  if (a.isPlayer && id !== "assist_block" && !echo) {
     const cost = skillCost(id);
     if ((cost.ap || 0) > (a.ap || 0)) {
       paintSkillLog(`${a.name} 行动点不足（${a.ap || 0}），无法使用该技能。`);
@@ -13545,7 +13637,7 @@ function runSkillInner(id, optRun) {
       return;
     }
   }
-  if (t && t.id && typeof inSkillRange === "function") {
+  if (t && t.id && typeof inSkillRange === "function" && !echo) {
     const ov = skillRangeFor(a, id);
     let inRange;
     let hint = "";
@@ -13653,7 +13745,7 @@ function runSkillInner(id, optRun) {
     }
   }
   // 付不起消耗（流沙没顶 / 点数不够）：这次行动不结算，要在 snapshot / beginActionAcc 之前挡住，免得留下半截状态
-  {
+  if (!echo) {   // 下水道回声：免费
     const payCost = a.isPlayer && id !== "assist_block" ? skillCost(id) : enemyCost;
     const why = costBlockReason(a, payCost);
     if (why) {

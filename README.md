@@ -371,6 +371,15 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **下水道的谐波攻击有回声：下一个整回合结束时，打出它的那个技能对同一个目标自动、免费地再放一次**（作者 11/01。app.js · `SEWER_ECHO`（新，配置：区域、属性、隔几个整回合）/ `SEWER_ECHO_STACK`（新）/ `sewerEchoOn`（新）/ `sewerEchoReplaying`（新）/ `sewerEchoOpen`（新）/ `sewerEchoMark`（新）/ `sewerEchoClose`（新）/ `sewerEchoTurnEnd`（新）/ `state.sewerEchoes`（新）/ `turnEnd`（回合结束时放到点的回声）/ `startCombat`（开战清空）/ `runSkill`（记下这次出手、回声不算招式疲劳）/ `runSkillInner`（回声跳过死亡 / 濒死、使用条件、行动点、技能射程、敌人技能消耗的检查）/ `dealToInner`（谐波攻击记一笔；回声里的每一击不能格挡、不受射程限制）/ `spendAp` / `spendBonus`（回声免费）；world-data.js 区域那一段的说明；测试 tests/sewer-echo.test.js 新 7 条）
+  - **以前**：战斗所在的区域只是画面用的标签，下水道和别的区域结算一样。
+  - **现在**：这场战斗的区域是「下水道」时（`state.region`，跟着地图 / 遭遇，主持人在战场配置里改了也算），敌我双方打出的谐波攻击都有回声：
+    - 技能里有一击是谐波属性的攻击（不是持续伤害、场地伤害、共振分享这类派生伤害；打配置物 / 危墙的不算），这次出手就排一次回声。被屏障吃掉、排进格挡队列的也算打出过。
+    - 回声在**下一个整回合结束时**（第 3 回合打的 → 第 4 回合结束）结算：同一个出手的人、同一个目标、同样的分步选择，**整个技能再放一次**。不花行动点 / 附赠行动，不看使用条件和技能射程；回声里的每一击都不能格挡、不触发协助格挡。技能自己的资源（圣盾、燃油……）照常消耗。不算招式疲劳。
+    - 目标到时候已经不在场（死了 / 离场）：回声落空，日志写「落空」。出手的人死了、离场：照样打出。
+    - 回声本身不再产生回声。
+    - 等着的回声记在 `state.sewerEchoes`，跟着存档走；开新的一场清空。
+
 - **模拟用的「看情况用技能」打法 `BattleSim.SKILL_POLICY`，并用它重跑 PvP 平衡模拟（#491 的对照）**（工具 / 报告，规则一条没动；issue #538，主人 10/31。新文件 sim-search.js：配置表 `BATTLE_SEARCH_CFG`、`SKILL_POLICY_CFG`（束宽、深度、平行世界数、打分权重），`BattleSearch` 的 `snap` / `load` / `candidateActions` / `tokenize` / `resolve` / `execute` / `trial` / `sandbox`（从 tools/dpt.js 抽出来的「列动作 + 沙盒试跑 + 平行世界」）和 `scorer` / `candidatesFor` / `plan`（技能版的打分、候选、束搜索）；sim.js · `skillPolicy` / `SKILL_POLICY`；tools/dpt.js 改用 `BattleSearch`（输出逐字不变，快了约一倍）；tools/pvp-balance.js · `--policy skill` / `--h2h` / `--pve` / `--compare`、`CONFIG.skillCfg` / `CONFIG.bigSample` / `PVE_SCENARIOS`、`duelPolicy` / `runH2h` / `runPve` / `instrument`（沙盒里试跑的事不记）/ `compareMarkdown` / `compareNotes` / `sampleText` / `pveSummary` / `h2hSummary` / `meleeStats` / `heroWins`；tests/headless.js、game.html、prototypes/hd2d/index.html 在 sim.js 前面加载 sim-search.js；报告 docs/balance/pvp-balance-skill-1031.md + json；测试 tests/sim-skill.test.js 新 5 条（在没改的代码上全部失败），tests/pvp-balance.test.js 新 4 条）
   - **以前**：模拟里玩家一方只有 `BattleSim.BASIC_POLICY`（能打到就普攻血最少的，打不到就走一格；不用技能、道具，不召唤武器人）；#491 的 PvP 平衡模拟两队都用它，没法体现真实的打法。tools/dpt.js 自己写了一份列动作、试跑的代码。
   - **现在**：
@@ -378,6 +387,7 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
     - **`node tools/pvp-balance.js --policy skill`**：两队都用技能版（决斗满状态不带道具），情况照 #491（现在的规则、关掉后手补偿、不允许起身、回合上限 10、关掉起身翻滚），报告和 #491 的普攻版同一批阵容、种子逐项并排（先后手胜率按人数 / 等级、后手补偿的作用、第一次失衡 / 打倒和胜负、近战多 / 远程多、平均回合、各角色出场胜率、建议）。`--h2h N` 一队技能版、一队普攻版对打（每对阵容 4 场：先后手 × 哪一队用技能版都对调），`--pve N` 6 种遭遇战两种打法同一个种子各打一场。报告开头写样本多少、跑了多久，并按这次每场的平均用时估算加大样本（同一条命令只改 `--pairs` / `--h2h` / `--pve`）要多久。不给 `--policy` 时和以前完全一样。
     - **这一版的结果**（docs/balance/pvp-balance-skill-1031.md；命令 `node tools/pvp-balance.js --policy skill --pairs 5 --fixed 0 --h2h 2 --pve 4`：每格 5 对 = 每种情况 120 场，对打 96 场，遭遇战 48 场，一共 744 场，4 个线程 24.9 分钟；合计的区间约 ±9 个百分点，只看方向。先推过一版每格 2 对的小样本 `--pairs 2 --h2h 1 --pve 2`，312 场 9.8 分钟，方向一样）：现在的规则下技能版先手胜率 44.5%（35.9–53.5%，看不出先后手差别；普攻版 #491 47.9%）；后手补偿把先手胜率拉低 12.6 个百分点（−25.2 ~ −0.0；普攻版 −7.0）；不允许起身时后手明显占优（先手 33.9%）；先打出第一次失衡的一方赢 68.2%（普攻版 76.2%），先打倒第一个人的一方赢 67.2%（普攻版 67.1%）；近战多的一方赢 73.7%（普攻版 86.1%，会用技能、走位以后远程没那么吃亏）；平均 6.3 回合（普攻版 6.8）。技能版确实更强：决斗里对普攻版赢 69.8%（60.0–78.1%），遭遇战胜率 70.8% vs 54.2%、剩下的血量 28.1% vs 14.3%；每场两队合计普攻 12.0 次、普攻以外的技能 10.8 次、召唤武器人 0.23 次，遭遇战里也用道具。744 场没有异常。建议只写在报告里，规则不动。
     - **速度**：一场平均 1v1 2.0 秒、2v2 4.7 秒、3v3 10.6 秒、4v4 17.3 秒（4 个线程同时跑时单场的用时），遭遇战技能版 11.4 秒（普攻版 0.3 秒）；报告开头按这次的用时估算加大样本要多久（`--pairs` 每加 1 约多 4.3 分钟，例如 `--pairs 10 --h2h 3 --pve 6` 约 48 分钟）。
+
 - **High Flux 庄家叫牌接上界面和联机，默认打开**（#503 第 2 步，主人 10/31：规则层、AI 已在 #535 合进来，这一步补界面、联机白名单并默认打开。counter-cards.js · `CC_CONFIG.dealerCall.enabled`（false → true）/ `resultText`（叫牌那一轮写「庄家叫〔X〕叫对了 / 叫错了」）/ 文件开头的规则说明；counter-cards-ui.js · `actionsHtml`（`dealerCall` 这一步）/ `callTag`（新）/ `callText`（新）/ `outcomeOf` / `bannerHtml` / `settleStart`（叫牌那一轮没有「判定中」）/ `rulesHtml` / `onClick`（`noCall`、`callElement`）；counter-cards.css `.cc-calltag`；online-view.js · `projectFluxHigh`（`dealerCall`、`dealerCallUsed`、结算里的 `call`）/ `projectCasinoLog`（`element`）；测试 tests/counter-cards-dealer-call-ui.test.js 新 8 条，tests/counter-cards-dealer-call.test.js 改 1 条（默认关 → 默认开），按旧流程写的 tests/counter-cards*.test.js、tests/casino*.test.js 开局关掉叫牌，tests/casino-online-table.test.js 主持人补一步「不叫」）
   - **以前**：叫牌只在规则层，默认关（`newGame({ dealerCall: true })` 才打开），界面、联机都没有叫牌这一步，游戏里玩不到。
   - **现在**：新开的对局默认能叫牌（`newGame({ dealerCall: false })` 单独关掉）。
