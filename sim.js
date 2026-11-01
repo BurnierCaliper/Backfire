@@ -349,14 +349,16 @@ const BattleSim = (function () {
   function playerPhase(policy, stats, phase) {
     const when = phase || "player";
     const ids = state.units.filter(u => u.isPlayer && alive(u) && (typeof unitTurnPhase !== "function" || unitTurnPhase(u) === when)).map(u => u.id);
+    // 在轮到的这个人的结算上下文里想、做（争斗两队同一个角色：按 kit 找到的是他自己，party.js · withKitScope）
+    const scoped = (u, fn) => (typeof withKitScope === "function" ? withKitScope(u, fn) : fn());
     for (const id of ids) {
       for (let n = 0; n < 6; n++) {
         const u = unitById(id);
         if (!u || !alive(u) || outcome()) break;
-        const thunk = policy.act(u);
+        const thunk = scoped(u, () => policy.act(u));
         if (!thunk) break;
         const before = sig(u);
-        thunk();
+        scoped(u, thunk);
         stats.actions++;
         resolveQueues(policy);
         if (outcome()) return;

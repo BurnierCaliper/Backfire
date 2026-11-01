@@ -744,11 +744,21 @@ function weaponBlockBonusOf(kit, owner) {
   const parts = owner && typeof weaponPartsOf === "function" ? weaponPartsOf(owner, kit) : [];
   return Math.min(WEAPON_BLOCK_CAP, base + (typeof partsBlock === "function" ? partsBlock(parts) : 0));
 }
-/** 武器人的持有者（角色单位） */
+/** 武器人的持有者（角色单位）。唤出时记了持有者的单位 id（ownerId，app.js · spawnWeapon）就按 id 找：
+ *  争斗（brawl.js）两队可以有同一个角色，按 kit 找会找到对面那一个 */
 function weaponOwnerUnit(u) {
   if (!u || !u.weaponOf) return null;
   const units = (typeof state !== "undefined" && state && state.units) || [];
+  if (u.ownerId != null) {
+    const o = units.find(x => x.id === u.ownerId && !x.weaponOf);
+    if (o) return o;
+  }
   return units.find(x => x.kit === u.weaponOf && !x.weaponOf) || null;
+}
+/** x 是不是 owner 的武器人：kit 对得上，唤出时记了持有者的还要是这个人（争斗两队同一个角色时，对面那把不算） */
+function isWeaponOfOwner(x, owner) {
+  if (!x || !owner || !x.weaponOf || x.weaponOf !== owner.kit) return false;
+  return x.ownerId == null || x.ownerId === owner.id;
 }
 /** 手里那把武器的格挡加成；空手、武器人已分出去 → 0 */
 function heldWeaponBlockBonus(unit) {
@@ -756,7 +766,7 @@ function heldWeaponBlockBonus(unit) {
   if (!v || !unit || unit.weaponOf || typeof weaponHalved !== "function") return v;
   // 倒下过一次（取回后）的武器：格挡加成减半
   const kit = unit.kit === "hiaki" ? ((unit.resources || {}).blade || "niu") : (unit.linkedKits || [])[0];
-  return kit && weaponHalved(kit) ? Math.floor(v / 2) : v;
+  return kit && weaponHalved(kit, unit) ? Math.floor(v / 2) : v;
 }
 function heldWeaponBlockBonusRaw(unit) {
   if (!unit || !unit.kit) return 0;
@@ -774,7 +784,7 @@ function heldWeaponBlockBonusRaw(unit) {
   kits.forEach(k => {
     if (WEAPON_BLOCK_BONUS[k] == null) return;
     const units = (typeof state !== "undefined" && state && state.units) || [];
-    const out = units.some(u => u.kit === k && !u.hidden && !u.fused && !u.dead);
+    const out = units.some(u => u.kit === k && !u.hidden && !u.fused && !u.dead && (u.ownerId == null || u.ownerId === unit.id));   // 只看自己的武器人（争斗两队同一个角色）
     if (out) return;
     best = Math.max(best, weaponBlockBonusOf(k, unit));
   });
@@ -807,7 +817,11 @@ function blockBreakdown(unit) {
   return { bare: bareBlockChance(unit), weapon: heldWeaponBlockBonus(unit), extra: blockStatusBonus(unit), total, dex: unitDex(unit) };
 }
 
+/** 这个单位的技能列表。在它的结算上下文里列（争斗两队同一个角色：柯尔特的刀头这些按 kit 找到的是他自己，withKitScope） */
 function skillList(unit) {
+  return withKitScope(unit, () => skillListScoped(unit));
+}
+function skillListScoped(unit) {
   if (!unit || !unit.kit) return [];
   // 坐在车上的人只能用车的武器（vehicle.js）
   if (unit.vehId && typeof vehicleSkillList === "function") return vehicleSkillList(unit);
@@ -1132,11 +1146,69 @@ function weaponIsOut(owner) {
 
 function ownerOfWeapon(weapon, units) {
   if (!weapon || !weapon.weaponOf) return null;
+  if (weapon.ownerId != null) {   // 唤出时记了持有者（争斗两队同一个角色，app.js · spawnWeapon）
+    const o = (units || []).find(u => u.id === weapon.ownerId && !u.hidden);
+    if (o) return o;
+  }
   return units.find(u => u.kit === weapon.weaponOf && !u.hidden);
 }
 
-function findKit(kit, units) {
-  return units.find(u => u.kit === kit && !u.hidden);
+/* ---------- 两队有同一个角色（争斗，brawl.js）：按 kit 找单位 ----------
+ * 规则里很多地方按 kit 找「那个角色」（findKit("xia", state.units) 找夕夏的燃油、findKit("ruby") 加纳米……）。
+ * 争斗两队可以用同一个角色，场上同一个 kit 有两个：这时先看「现在是谁的事」——near（调用的地方给了）或者结算上下文
+ * （withKitScope：正在行动 / 格挡 / 协助 / 结算回合效果的那个单位），挑它自己、它的持有者 / 武器人、同一队的那一个。
+ * 场上这个 kit 只有一个时（争斗以外的所有情况）和以前完全一样。上下文只记单位 id、不放进 state（沙盒试跑照样认得） */
+const KIT_SCOPE = [];
+/** 在 u 的上下文里做 fn（u 给 null 就照旧）：fn 里按 kit 找到的同名角色先挑 u 这一边的 */
+function withKitScope(u, fn) {
+  if (!u || u.id == null) return fn();
+  KIT_SCOPE.push(u.id);
+  try { return fn(); } finally { KIT_SCOPE.pop(); }
+}
+/** 现在的结算上下文（最里面那一层；单位不在场上了就往外找） */
+function kitScopeUnit() {
+  const units = (typeof state !== "undefined" && state && state.units) || [];
+  for (let i = KIT_SCOPE.length - 1; i >= 0; i--) {
+    const u = units.find(x => x && x.id === KIT_SCOPE[i]);
+    if (u) return u;
+  }
+  return null;
+}
+/** 哪一边（同名角色挑同一边的）：决斗 / 争斗的队伍，其次玩家阵营，再其次玩家 / 敌人 */
+function kitSideOf(u) {
+  if (!u) return null;
+  const t = typeof pvpDuelTeamOf === "function" ? pvpDuelTeamOf(u) : null;
+  if (t) return "duel:" + t;
+  if (typeof pvpOn === "function" && pvpOn() && typeof playerFactionOf === "function" && u.isPlayer) return "pvp:" + playerFactionOf(u);
+  return u.isPlayer ? "player" : "enemy";
+}
+/** 同名的几个单位里挑 ref（单位）这一边的：ref 自己 → ref 的持有者 → ref（或它的持有者）的武器人 → 同一边的第一个；挑不出来返回 null */
+function kitPick(list, ref) {
+  if (!ref || !list.length) return null;
+  if (list.includes(ref)) return ref;
+  const hero = ref.weaponOf ? weaponOwnerUnit(ref) : ref;
+  if (hero && list.includes(hero)) return hero;
+  const mine = hero && list.find(x => x.weaponOf && weaponOwnerUnit(x) === hero);
+  if (mine) return mine;
+  const side = kitSideOf(hero || ref);
+  return list.find(x => kitSideOf(x) === side) || null;
+}
+/** 按 kit 找场上的单位（没藏起来的）。near：「是谁那一边的」（单位；不给就看结算上下文 withKitScope），只在同一个 kit 有两个以上时才用 */
+function findKit(kit, units, near) {
+  if (!units) return undefined;
+  let first, dup = false;
+  for (const u of units) {
+    if (!u || u.kit !== kit || u.hidden) continue;
+    if (first === undefined) first = u;
+    else { dup = true; break; }
+  }
+  if (!dup) return first;
+  const list = units.filter(u => u && u.kit === kit && !u.hidden);
+  return kitPick(list, near || kitScopeUnit()) || first;
+}
+/** 场上这个 kit 的所有单位（没藏起来的）：每回合 / 开战结算「这个角色」的效果时，两队同一个角色要各结算各的 */
+function kitUnits(kit, units) {
+  return (units || (typeof state !== "undefined" && state ? state.units : []) || []).filter(u => u && u.kit === kit && !u.hidden);
 }
 
 /** 实际 atk = 基础 atk − 力竭惩罚（力竭 2 起 atk −3，只对角色本人） */
@@ -1166,9 +1238,9 @@ function effectiveAtk(unit, units) {
 function baseEffectiveAtk(unit, units) {
   if (!unit) return 0;
   // 倒下过一次（取回后）的武器：武器提供的 atk 减半（本场有效）
-  const half = (kit, v) => (typeof weaponHalved === "function" && weaponHalved(kit)) ? Math.floor((Number(v) || 0) / 2) : (Number(v) || 0);
+  const half = (kit, v) => (typeof weaponHalved === "function" && weaponHalved(kit, unit)) ? Math.floor((Number(v) || 0) / 2) : (Number(v) || 0);
   if (unit.resources && unit.resources.mecha) {
-    const mint = units.find(u => u.kit === "mint");
+    const mint = units.find(u => u.kit === "mint" && (u.ownerId == null || u.ownerId === unit.id));   // 自己的明特（争斗两队都有瑞比）
     return (unit.personalAtk || 0) + half("mint", (mint && mint.personalAtk) || unit.weaponAtk || 8);
   }
   if (unit.kit === "hiaki") {
