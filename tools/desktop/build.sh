@@ -14,6 +14,9 @@ cp game.html index.html "$STAGE/game/"
 for f in *.js *.css; do cp "$f" "$STAGE/game/"; done
 cp -r fonts "$STAGE/game/"
 cp art/world-map.webp "$STAGE/game/art/"
+# 主菜单的看板娘（#552）：柏妮尔的立绘，网页用的那一张
+mkdir -p "$STAGE/game/art/burnier"
+cp art/burnier/burnier-stand-720.png "$STAGE/game/art/burnier/"
 # 打包（用 @electron/packager，不需要 wine；图标暂用 Electron 默认）
 cd "$OUT"
 npx --yes @electron/packager@20.3.0 "$STAGE" Backfire --platform=win32 --arch=x64 --electron-version=42.11.12 --out "$OUT" --overwrite --asar --app-version="$VER" >/dev/null
