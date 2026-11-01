@@ -1418,6 +1418,13 @@ body.online-player #atk-fx { z-index: 91 !important; }
   }
   .t-mascot img { width: 100%; height: auto; }
 }
+/* 连点彩蛋（#554，换图在 title-mascot.js · BURNIER_TAP）：按钮里第二张图是「灌汽油」的搞笑图，和立绘叠在一起。
+ * 搞笑图绝对定位、和立绘一样宽、贴着立绘的顶（头的位置接得上），不占地方；换图时只换看得见的那张（visibility），立绘照样占着地方：
+ * 按钮大小、菜单、按钮都不动，搞笑图也不会超出立绘的框（不挡按钮）。抖动、减少动态效果、投影、不接鼠标都跟着 .t-mascot img 走，两张一样 */
+@media (max-width: 999px) { .t-mascot { position: relative; } }   /* 窄屏：按钮是搞笑图的定位基准（宽屏本来就是 absolute） */
+.t-mascot .t-mascot-gulp { position: absolute; left: 0; top: 0; width: 100%; height: auto; visibility: hidden; }
+.t-mascot.gulp img:not(.t-mascot-gulp) { visibility: hidden; }
+.t-mascot.gulp .t-mascot-gulp { visibility: visible; }
 
 /* ---------- Roguelike 战斗：只留战斗相关的按钮 ---------- */
 #g-rogue-next { display: none; }

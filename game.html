@@ -58,8 +58,9 @@
       <button class="t-btn" id="t-rules"><b>规则说明</b><small>回合、行动点、检定、伤害、武器 ATK、义体改造率……随时可查</small></button>
       <!-- 看板娘：柏妮尔的立绘（#552）。放在最后（前面几个按钮的 :nth-child 不变），进子菜单跟着 #t-home 一起藏起来；
            宽屏站在菜单右边，窄屏放到按钮下面（game.css「标题界面 · 看板娘」）。点一下 / Enter / 空格抖一下，不触发菜单、不响音效（data-sfx-none）；
-           图片读不出来整个藏起来（title-mascot.js） -->
-      <button type="button" class="t-mascot" id="t-mascot" data-sfx-none><img src="art/burnier/burnier-stand-720.png" alt="柏妮尔" width="499" height="720" draggable="false" /></button>
+           图片读不出来整个藏起来（title-mascot.js）。
+           第二张是连点彩蛋（#554）的搞笑图：平时看不见，连续点满 BURNIER_TAP.gulpAfter 下才换上，过一会儿换回（title-mascot.js、game.css） -->
+      <button type="button" class="t-mascot" id="t-mascot" data-sfx-none><img src="art/burnier/burnier-stand-720.png" alt="柏妮尔" width="499" height="720" draggable="false" /><img class="t-mascot-gulp" src="art/burnier/burnier-gulp-360.png" alt="柏妮尔" width="360" height="360" draggable="false" /></button>
     </div>
     <div class="t-panel" id="t-panel-local" data-view="local" hidden>
       <div class="t-panel-head"><button class="t-back" data-back="local" title="返回（Esc）">← 返回</button><h2>本地玩法</h2></div>

@@ -371,6 +371,17 @@ rollBossEncounter("outlaw_king", { region: "外城区" })  // BOSS 不占代币�
 
 ## 规则改动记录
 
+- **主菜单彩蛋：连续点柏妮尔 10 下，立绘换成「举着油桶猛灌汽油」的搞笑图，3 秒后换回**（#554，主人 11/01；接 #552 的看板娘，只改界面，规则不动。title-mascot.js（配置 `BURNIER_TAP`（新：`gulpAfter` 连点几下换图、`gap` 两下最多隔多久、`gulpMs` 搞笑图停多久、换图的 class），`countTap` / `endGulp` / `gulpReady` / `onTap`（新），`bind`（点一下改成先抖再记一下）/ `hide`（连搞笑图一起收掉），导出 `TitleMascot.TAP` / `gulping` / `tapCount`）；game.html（`#t-mascot` 里立绘后面加第二张图 `.t-mascot-gulp`）；game.css「标题界面 · 看板娘」后面加连点彩蛋的几条（两张图叠在同一个按钮里，`.t-mascot.gulp` 只换看得见的那张）；tools/desktop/build.sh（桌面版带上搞笑图）；素材 art/burnier/burnier-gulp-360.png、burnier-gulp.png（素材提交 8e82af0）；测试：tests/title-mascot-gulp.test.js 新 9 条（Node，假时钟），tests/title-mascot-gulp-ui.test.js 新 4 条（真浏览器，没装 Playwright 时用机器自带的 Chrome），在没改的代码上全部失败；截图 shots/title-mascot-gulp-desktop.png（1366×768）、shots/title-mascot-gulp-mobile.png（390×844））
+  - **以前**：点主菜单的柏妮尔只抖一下（#552），点多少下都一样。
+  - **现在**：
+    - **连续点**：立绘每被点一下（鼠标、手指、键盘 Enter / 空格，和抖一下是同一个触发）记一下；和上一下隔超过 `gap`（1.5 秒）就从头数（正好 1.5 秒还算连着）。
+    - **换图**：连续点到第 `gulpAfter` 下（10 下），立绘换成搞笑图，照常抖一下；`gulpMs`（3 秒）后自动换回立绘、计数归零。**搞笑图显示期间再点只抖：不数、不延长**（3 秒从换图那一下算起，点多少下都按时换回；换回来以后要重新连点满 10 下）。数值都在 `BURNIER_TAP`，改了下一下就按新的算。
+    - **版面不动**：搞笑图是按钮里叠在立绘上的第二张图，和立绘一样宽、贴着立绘的顶（头的位置接得上）；换图时只换看得见的那张，立绘照样占着地方——按钮大小、菜单、按钮都不动，搞笑图不超出立绘的框，宽屏（站在菜单右边）、窄屏 / 手机竖屏（在按钮下面）都不挡按钮和标题、没有横向滚动条。抖动、投影、焦点框、读屏读的名字（「柏妮尔」）两张一样。
+    - **减少动态效果**：照样换图，只是不抖（#552 的 CSS 换成只淡一下，两张图都一样）。
+    - **搞笑图读不出来**（读失败、还没读好）：不换图，立绘照常显示、照常抖。立绘自己读不出来时（#552：整个藏起来）点不到，也不数；搞笑图显示中立绘出错就一起收掉。
+    - 不加音效（按钮照旧带 `data-sfx-none`），不存档（刷新页面从头数）；只在主菜单首页（和立绘一起），不触发菜单功能。
+    - **没动的**：#552 的抖动、位置、只在主菜单首页显示、键盘操作、图片读不出来藏起来；其他画面；规则。
+  - **测试**：tests/title-mascot-gulp.test.js（Node，小 DOM 跑 game.html，假时钟）9 条：页面结构（第二张图、宽高、替代文字、默认配置、桌面版打包）；点 9 下不换、第 10 下换且照常抖、不触发菜单；隔超过 `gap` 从头数、正好 `gap` 不算断；过了 `gulpMs` 换回、计数归零，显示期间点了不数、不延长；改配置马上生效（`gulpAfter` 3 / `gap` 400 / `gulpMs` 1000、`gulpAfter` 1）；搞笑图读失败 / 还没读好不换、立绘藏起来不数、显示中立绘出错一起收掉；减少动态效果照样换；样式（visibility 换图、绝对定位、窄屏的定位基准）。tests/title-mascot-gulp-ui.test.js（真浏览器）4 条：宽屏 1366×768 / 1920×1080 / 1000×700（皮肤开着 / 关掉）鼠标连点、手机 390×844 / 360×640 手指连点——第 10 下换图，按钮和菜单的位置一点不动、搞笑图在立绘的框里、不挡按钮和标题、没有横向滚动条、菜单没动；键盘 Enter / 空格连按也算、默认 3 秒左右换回且计数归零、减少动态效果照样换且不位移；搞笑图读不出来点 12 下也不换、立绘照常。截图：`BURNIER_GULP_SHOTS=1 node --test tests/title-mascot-gulp-ui.test.js`。
 - **主菜单加上看板娘柏妮尔的立绘，点一下抖一下**（#552，主人 11/01；只改界面，规则不动。game.html（`#t-home` 最后加立绘按钮 `#t-mascot`，在 screens.js 后面加载 title-mascot.js）；title-mascot.js（新：配置 `TITLE_MASCOT`（抖动的 class、时长 `shakeMs`、兜底的 `spareMs`），`TitleMascot.bind` / `shake` / `stop` / `hide` / `shaking`）；game.css「标题界面 · 看板娘」（`.t-mascot`、`@keyframes tMascotShake` / `tMascotBlink`、宽屏 / 窄屏两种排法）；skin.css（皮肤下的投影、焦点框）；tools/desktop/build.sh（桌面版带上这张图）；素材 art/burnier/burnier-stand-720.png（素材提交 bcf0582，Q 版图这次没用）；测试：tests/title-mascot.test.js 新 5 条（Node），tests/title-mascot-ui.test.js 新 8 条（真浏览器，没装 Playwright 时用机器自带的 Chrome），在没改的代码上全部失败；截图 shots/title-mascot-desktop.png（1366×768）、shots/title-mascot-mobile.png（390×844））
   - **以前**：主菜单只有标题和四个按钮（本地玩法 / 联机玩法 / 图鉴 / 规则说明）。
   - **现在**：
